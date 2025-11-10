@@ -17,7 +17,7 @@ const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>
 );
 // Slicing now redirects to NewSliceJobPage for better UX with 3D preview
 // const SlicerConfigModal = lazyWithPreload<{...}>(...)
-// import { slicerService } from '@/services/slicerService';
+import { slicerService } from '@/services/slicerService';
 import type { SlicedModelSummary } from '@/services/slicerService';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 

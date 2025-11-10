@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
@@ -8,7 +8,15 @@ import { slicerRegistry } from '@/services/slicerRegistry';
 import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import * as signalR from '@microsoft/signalr';
-import { getHubUrl } from '@/utils/apiUrlHelpers';
+import { getHubUrl, getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { lazyWithPreload } from '@/utils/lazyWithPreload';
+import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
+import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
+
+// Lazy load the 3D model viewer for better performance
+const ModelViewer3D = React.lazy(() => 
+  import('@/components/3d/ModelViewer3D').then(mod => ({ default: mod.ModelViewer }))
+);
 
 // Lightweight model DTO interface for picker (subset of Model3DDto)
 interface ModelListItem {
@@ -34,7 +42,7 @@ export const NewSliceJobPage: React.FC = () => {
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const modelIdFromUrl = searchParams.get('modelId') || '';
-  
+
   const [modelFileUrl, setModelFileUrl] = useState('');
   const [modelFileName, setModelFileName] = useState('');
   const [useModelPicker, setUseModelPicker] = useState(true);
@@ -300,246 +308,316 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation.mutate(request);
   };
 
+  // Determine file type for 3D viewer
+  const getFileType = (): 'stl' | '3mf' | 'obj' | 'ply' => {
+    if (modelFileName) {
+      const ext = modelFileName.split('.').pop()?.toLowerCase();
+      if (ext === '3mf') return '3mf';
+      if (ext === 'obj') return 'obj';
+      if (ext === 'ply') return 'ply';
+    }
+    return 'stl';
+  };
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [expandedSection, setExpandedSection] = useState<string | null>('model');
+
+  const toggleSection = (section: string) => {
+    setExpandedSection(expandedSection === section ? null : section);
+  };
+
   return (
     <PageTemplate
       title="New Slice Job"
-      subtitle="Submit a distributed slicing job using a stored profile or custom JSON"
+      subtitle="Submit a distributed slicing job with 3D preview"
       icon={Layers}
-      maxWidth="max-w-4xl"
+      maxWidth="max-w-7xl"
     >
-      <form onSubmit={onSubmit} className="space-y-6 bg-pf-panel border border-pf-border rounded shadow p-4">
-        <div className="space-y-4">
-          <fieldset className="border border-pf-border rounded p-3">
-            <legend className="text-sm font-semibold px-1">Model Source</legend>
-            <FormField
-              label="Use Model Picker"
-              helper={useModelPicker ? 'Select an uploaded model; URL & name auto-fill.' : 'Disable picker to manually enter file URL/name.'}
-              inline
+      <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
+        {/* LEFT SIDEBAR: Form Controls */}
+        <div className="w-full lg:w-80 space-y-4 flex-shrink-0">
+          {/* Basic/Advanced Toggle */}
+          <div className="sticky top-0 z-10 bg-pf-background pb-2 border-b border-pf-border">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="text-sm font-medium text-pf-accent hover:text-pf-accent-hover transition-colors"
             >
-              <input
-                id="useModelPicker"
-                type="checkbox"
-                checked={useModelPicker}
-                onChange={() => {
-                  setUseModelPicker(v => !v);
-                  if (useModelPicker) {
-                    setSelectedModelId('');
-                    setModelFileUrl('');
-                    setModelFileName('');
-                  }
-                }}
-                aria-label="Toggle model picker"
-                title="Toggle model picker"
-              />
-            </FormField>
-          </fieldset>
-          {useModelPicker ? (
-            <div className="flex flex-col gap-3">
-              <FormField
-                label="Model"
-                helper={loadingModels ? 'Loading models…' : modelsError ? undefined : (models && models.length === 0 ? 'No models available. Upload one first.' : 'Selecting a model auto-fills URL & name.')}
-                error={modelsError ? modelsError.message : undefined}
-              >
-                {models && models.length > 0 ? (
-                  <Select
-                    value={selectedModelId}
-                    onChange={e => setSelectedModelId(e.target.value)}
-                    aria-label="Model picker"
-                  >
-                    <option value="">-- Select model --</option>
-                    {models.map(m => (
-                      <option key={m.id} value={m.id}>{m.fileName} ({m.originalFileName})</option>
-                    ))}
-                  </Select>
+              {showAdvanced ? '← Basic' : 'Advanced →'}
+            </button>
+          </div>
+
+          {/* Model Selection Section */}
+          <div className="card bg-pf-panel border border-pf-border">
+            <button
+              type="button"
+              onClick={() => toggleSection('model')}
+              className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
+            >
+              <span className="font-semibold text-pf-text">Model</span>
+              <span className="text-pf-text-muted">{expandedSection === 'model' ? '−' : '+'}</span>
+            </button>
+            {expandedSection === 'model' && (
+              <div className="card-body space-y-3">
+                <FormField
+                  label="Use Model Picker"
+                  helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
+                  inline
+                >
+                  <input
+                    id="useModelPicker"
+                    type="checkbox"
+                    checked={useModelPicker}
+                    onChange={() => {
+                      setUseModelPicker(v => !v);
+                      if (useModelPicker) {
+                        setSelectedModelId('');
+                        setModelFileUrl('');
+                        setModelFileName('');
+                      }
+                    }}
+                  />
+                </FormField>
+
+                {useModelPicker ? (
+                  <>
+                    <FormField
+                      label="Model"
+                      error={modelsError ? modelsError.message : undefined}
+                    >
+                      {models && models.length > 0 ? (
+                        <Select
+                          value={selectedModelId}
+                          onChange={e => setSelectedModelId(e.target.value)}
+                        >
+                          <option value="">-- Select model --</option>
+                          {models.map(m => (
+                            <option key={m.id} value={m.id}>{m.fileName}</option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <select disabled className="border rounded p-2 text-sm bg-pf-disabled w-full">
+                          <option>-- No models --</option>
+                        </select>
+                      )}
+                    </FormField>
+                  </>
                 ) : (
-                  <select disabled className="border rounded p-2 text-sm bg-pf-disabled" aria-label="Model picker disabled" title="Model picker disabled">
-                    <option>-- No models --</option>
-                  </select>
+                  <>
+                    <FormField label="File URL" required>
+                      <Input
+                        type="text"
+                        value={modelFileUrl}
+                        onChange={e => setModelFileUrl(e.target.value)}
+                        placeholder="https://... or /storage/..."
+                      />
+                    </FormField>
+                    <FormField label="File Name" required>
+                      <Input
+                        type="text"
+                        value={modelFileName}
+                        onChange={e => setModelFileName(e.target.value)}
+                        placeholder="model.stl"
+                      />
+                    </FormField>
+                  </>
                 )}
-              </FormField>
-              <div className="grid md:grid-cols-2 gap-4 pt-2">
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium">Model File URL</label>
-                  <input
-                    type="text"
-                    value={modelFileUrl}
-                    disabled
-                    className="border rounded p-2 text-sm bg-pf-disabled"
-                    aria-disabled="true"
-                    aria-label="Selected model file URL"
-                    title="Selected model file URL"
-                    placeholder="Model file URL"
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium">Model File Name</label>
-                  <input
-                    type="text"
-                    value={modelFileName}
-                    disabled
-                    className="border rounded p-2 text-sm bg-pf-disabled"
-                    aria-disabled="true"
-                    aria-label="Selected model file name"
-                    title="Selected model file name"
-                    placeholder="Model file name"
-                  />
-                </div>
               </div>
-            </div>
-          ) : (
-            <div className="grid md:grid-cols-2 gap-4">
-              <FormField label="Model File URL" required={!useModelPicker} helper={!useModelPicker ? 'Provide a direct path or remote URL.' : undefined}>
-                <Input
-                  type="text"
-                  value={modelFileUrl}
-                  onChange={e => setModelFileUrl(e.target.value)}
-                  placeholder="e.g. /storage/models/cube.stl or https://..."
-                  disabled={useModelPicker}
-                />
-              </FormField>
-              <FormField label="Model File Name" required={!useModelPicker} helper={!useModelPicker ? 'Used for job identification.' : undefined}>
-                <Input
-                  type="text"
-                  value={modelFileName}
-                  onChange={e => setModelFileName(e.target.value)}
-                  placeholder="cube.stl"
-                  disabled={useModelPicker}
-                />
-              </FormField>
-            </div>
-          )}
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium">Engine (fallback)</label>
-            <Select
-              value={slicerEngine}
-              onChange={e => setSlicerEngine(Number(e.target.value))}
-              aria-label="Slicer engine"
-            >
-              {engineOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </Select>
-            <div className="text-xs text-pf-text-muted">Actual engine overridden if a profile is selected.</div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium">Priority</label>
-            <Select
-              value={priority}
-              onChange={e => setPriority(Number(e.target.value))}
-              aria-label="Job priority"
-            >
-              <option value={0}>Low</option>
-              <option value={1}>Normal</option>
-              <option value={2}>High</option>
-              <option value={3}>Critical</option>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium">Mode</label>
-            <div className="flex gap-4 items-center mt-1">
-              <label className="inline-flex items-center gap-1 text-sm">
-                <input type="radio" name="mode" checked={useProfile} onChange={() => setUseProfile(true)} />
-                <span>Use Profile</span>
-              </label>
-              <label className="inline-flex items-center gap-1 text-sm">
-                <input type="radio" name="mode" checked={!useProfile} onChange={() => setUseProfile(false)} />
-                <span>Raw JSON</span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        {useProfile ? (
-          <FormField
-            label="Slicer Profile"
-            helper={loadingProfiles ? 'Loading profiles…' : (profiles && profiles.length === 0 ? 'No profiles available. Import one first.' : 'Overrides engine; snapshot stored with job.')}
-          >
-            {profiles && profiles.length > 0 ? (
-              <Select
-                value={selectedProfileId}
-                onChange={e => setSelectedProfileId(e.target.value)}
-                aria-label="Slicer profile"
-                title="Slicer profile"
-              >
-                <option value="">-- Select profile --</option>
-                {profiles.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} • {p.slicerType} • {p.layerHeight.toFixed(2)}mm • {p.infillPercentage}%
-                  </option>
-                ))}
-              </Select>
-            ) : (
-              <Select disabled className="bg-pf-disabled" aria-label="No profiles" title="No profiles">
-                <option>-- No profiles --</option>
-              </Select>
             )}
-          </FormField>
-        ) : (
-          <FormField label="Raw Profile JSON" helper="Paste sanitized slicer config JSON; consider importing for reuse." required>
-            <textarea
-              value={rawProfileJson}
-              onChange={e => setRawProfileJson(e.target.value)}
-              rows={8}
-              className="border rounded p-2 font-mono text-xs"
-              placeholder={'{\n  "layer_height": 0.2, ...\n}'}
-            />
-          </FormField>
-        )}
+          </div>
 
-        <FormField
-          label="Required Capabilities (JSON array)"
-          helper={capabilitiesError ? undefined : 'Workers must match all listed capabilities.'}
-          error={capabilitiesError || undefined}
-        >
-          <textarea
-            value={requiredCapabilitiesJson}
-            onChange={e => setRequiredCapabilitiesJson(e.target.value)}
-            rows={3}
-            className="border rounded p-2 font-mono text-xs"
-            placeholder='["orcaslicer","multi-material"]'
-          />
-          {!capabilitiesError && parsedCapabilities.length > 0 && (
-            <div className="text-xs text-pf-success">Parsed {parsedCapabilities.length} capability{parsedCapabilities.length === 1 ? '' : 'ies'}.</div>
+          {/* Slicer Configuration Section */}
+          <div className="card bg-pf-panel border border-pf-border">
+            <button
+              type="button"
+              onClick={() => toggleSection('slicer')}
+              className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
+            >
+              <span className="font-semibold text-pf-text">Slicer Config</span>
+              <span className="text-pf-text-muted">{expandedSection === 'slicer' ? '−' : '+'}</span>
+            </button>
+            {expandedSection === 'slicer' && (
+              <div className="card-body space-y-3">
+                <div className="space-y-3">
+                  <FormField label="Engine (fallback)">
+                    <Select
+                      value={slicerEngine}
+                      onChange={e => setSlicerEngine(Number(e.target.value))}
+                    >
+                      {engineOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </Select>
+                    <div className="text-xs text-pf-text-muted mt-1">Overridden by profile if selected.</div>
+                  </FormField>
+
+                  <div className="flex gap-3">
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input type="radio" name="mode" checked={useProfile} onChange={() => setUseProfile(true)} />
+                      <span>Profile</span>
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input type="radio" name="mode" checked={!useProfile} onChange={() => setUseProfile(false)} />
+                      <span>JSON</span>
+                    </label>
+                  </div>
+                </div>
+
+                {useProfile ? (
+                  <FormField label="Profile">
+                    {profiles && profiles.length > 0 ? (
+                      <Select
+                        value={selectedProfileId}
+                        onChange={e => setSelectedProfileId(e.target.value)}
+                      >
+                        <option value="">-- Select --</option>
+                        {profiles.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.slicerType})
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Select disabled className="bg-pf-disabled">
+                        <option>-- No profiles --</option>
+                      </Select>
+                    )}
+                  </FormField>
+                ) : (
+                  <FormField label="Raw JSON">
+                    <textarea
+                      value={rawProfileJson}
+                      onChange={e => setRawProfileJson(e.target.value)}
+                      rows={4}
+                      className="border rounded p-2 font-mono text-xs w-full"
+                      placeholder='{"layer_height": 0.2}'
+                    />
+                  </FormField>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Worker Selection Section */}
+          <div className="card bg-pf-panel border border-pf-border">
+            <button
+              type="button"
+              onClick={() => toggleSection('worker')}
+              className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
+            >
+              <span className="font-semibold text-pf-text">Worker</span>
+              <span className="text-pf-text-muted">{expandedSection === 'worker' ? '−' : '+'}</span>
+            </button>
+            {expandedSection === 'worker' && (
+              <div className="card-body space-y-3">
+                <WorkerSelector
+                  workers={filteredWorkers}
+                  selectedWorkerId={selectedWorkerId}
+                  onWorkerSelect={setSelectedWorkerId}
+                  loading={loadingWorkers}
+                  showCapabilities={true}
+                  highlightAvailable={true}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Advanced Section */}
+          {showAdvanced && (
+            <div className="card bg-pf-panel border border-pf-border">
+              <button
+                type="button"
+                onClick={() => toggleSection('advanced')}
+                className="w-full card-header flex items-center justify-between hover:bg-pf-hover transition-colors cursor-pointer"
+              >
+                <span className="font-semibold text-pf-text">Advanced</span>
+                <span className="text-pf-text-muted">{expandedSection === 'advanced' ? '−' : '+'}</span>
+              </button>
+              {expandedSection === 'advanced' && (
+                <div className="card-body space-y-3">
+                  <FormField label="Priority">
+                    <Select
+                      value={priority}
+                      onChange={e => setPriority(Number(e.target.value))}
+                    >
+                      <option value={0}>Low</option>
+                      <option value={1}>Normal</option>
+                      <option value={2}>High</option>
+                      <option value={3}>Critical</option>
+                    </Select>
+                  </FormField>
+
+                  <FormField
+                    label="Capabilities"
+                    error={capabilitiesError || undefined}
+                  >
+                    <textarea
+                      value={requiredCapabilitiesJson}
+                      onChange={e => setRequiredCapabilitiesJson(e.target.value)}
+                      rows={3}
+                      className="border rounded p-2 font-mono text-xs w-full"
+                      placeholder='["orcaslicer"]'
+                    />
+                  </FormField>
+                </div>
+              )}
+            </div>
           )}
-        </FormField>
 
-        <FormField
-          label="Available Workers"
-          helper={
-            parsedCapabilities.length > 0
-              ? `${filteredWorkers.length} of ${availableWorkers.length} workers match your capabilities`
-              : 'All available workers shown. Add capabilities above to filter.'
-          }
-        >
-          <WorkerSelector
-            workers={filteredWorkers}
-            selectedWorkerId={selectedWorkerId}
-            onWorkerSelect={setSelectedWorkerId}
-            loading={loadingWorkers}
-            showCapabilities={true}
-            highlightAvailable={true}
-          />
-        </FormField>
+          {/* Status Messages */}
+          {error && <Alert type="error">{error}</Alert>}
+          {message && <Alert type="success">{message}</Alert>}
 
-        {error && <Alert type="error">{error}</Alert>}
-        {message && <Alert type="success">{message}</Alert>}
-
-        <div className="flex gap-3">
-          <Button type="submit" loading={submitMutation.isPending} variant="primary">Submit Slice Job</Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              if (!useModelPicker) {
+          {/* Action Buttons */}
+          <div className="flex flex-col gap-2 sticky bottom-0 bg-pf-background pt-2 border-t border-pf-border">
+            <Button type="submit" loading={submitMutation.isPending} variant="primary" className="w-full">
+              Submit Job
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
                 setModelFileUrl('');
                 setModelFileName('');
-              }
-              setRawProfileJson('');
-              setSelectedProfileId('');
-              setError(null); setMessage(null);
-            }}
-          >Reset</Button>
+                setRawProfileJson('');
+                setSelectedProfileId('');
+                setError(null);
+                setMessage(null);
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
+
+        {/* RIGHT SIDE: 3D Model Preview */}
+        <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-96">
+          <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden">
+            <div className="card-header">
+              <h3 className="font-semibold text-pf-text">
+                {modelFileName ? `Preview: ${modelFileName}` : 'Model Preview'}
+              </h3>
+            </div>
+            <div className="card-body p-0 flex-1">
+              {modelFileUrl ? (
+                <Suspense fallback={<ViewerSkeleton variant="model" className="h-full w-full" />}>
+                  <ModelViewer3D
+                    modelUrl={modelFileUrl}
+                    fileType={getFileType()}
+                    showGrid={true}
+                    showAxes={true}
+                    autoRotate={false}
+                    className="h-full w-full"
+                  />
+                </Suspense>
+              ) : (
+                <div className="h-full w-full flex items-center justify-center text-pf-text-muted">
+                  <div className="text-center">
+                    <p className="text-sm">Select a model to view 3D preview</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </form>
     </PageTemplate>
