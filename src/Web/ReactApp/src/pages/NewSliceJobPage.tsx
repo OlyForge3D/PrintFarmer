@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
 import slicerProfilesService, { SlicerProfileListItem } from '@/services/slicerProfilesService';
 import workersService from '@/services/workersService';
+import { slicerRegistry } from '@/services/slicerRegistry';
 import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import * as signalR from '@microsoft/signalr';
@@ -26,12 +27,6 @@ import { Select } from '@/components/ui/Select';
 import { WorkerSelector } from '@/components/WorkerSelector';
 import { Layers } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthHooks';
-
-// Simple engine options (server will override when profileId provided)
-const ENGINE_OPTIONS = [
-  { label: 'PrusaSlicer', value: 1 },
-  { label: 'OrcaSlicer', value: 0 }
-];
 
 export const NewSliceJobPage: React.FC = () => {
   const { user } = useAuth();
@@ -59,6 +54,22 @@ export const NewSliceJobPage: React.FC = () => {
     staleTime: 10_000,
     refetchInterval: 15_000, // Auto-refresh every 15 seconds
   });
+
+  // Fetch available slicer services
+  const { data: availableSlicers = [] } = useQuery({
+    queryKey: ['slicers-available'],
+    queryFn: () => slicerRegistry.getSlicers(),
+    staleTime: 10_000,
+    refetchInterval: 15_000, // Auto-refresh every 15 seconds
+  });
+
+  // Build engine options from available slicers
+  const engineOptions = React.useMemo(() => {
+    return availableSlicers.map(slicer => ({
+      label: slicer.name || slicer.slicerType || 'Unknown',
+      value: slicer.slicerType === 'PrusaSlicer' ? 1 : 0
+    }));
+  }, [availableSlicers]);
 
   // Filter workers by required capabilities
   const filteredWorkers = React.useMemo(() => {
@@ -403,7 +414,7 @@ export const NewSliceJobPage: React.FC = () => {
               onChange={e => setSlicerEngine(Number(e.target.value))}
               aria-label="Slicer engine"
             >
-              {ENGINE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              {engineOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
             </Select>
             <div className="text-xs text-pf-text-muted">Actual engine overridden if a profile is selected.</div>
           </div>

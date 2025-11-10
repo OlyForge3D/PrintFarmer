@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Settings } from 'lucide-react';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { slicerRegistry } from '@/services/slicerRegistry';
 
 // Lightweight mapping to match server DTOs
 type PerEngineSetting = { path?: string | null; argsTemplate?: string | null };
@@ -20,6 +21,22 @@ export const SlicerSettingsPage: React.FC = () => {
       return res.json();
     }
   });
+
+  // Fetch available slicers
+  const { data: availableSlicers = [] } = useQuery({
+    queryKey: ['slicers-available'],
+    queryFn: () => slicerRegistry.getSlicers(),
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+
+  // Extract unique slicer types
+  const slicerTypes = useMemo(() => {
+    return availableSlicers
+      .map(s => s.slicerType || s.name || '')
+      .filter((v, i, arr) => v && arr.indexOf(v) === i)
+      .sort();
+  }, [availableSlicers]);
 
   const [validationError, setValidationError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -101,7 +118,7 @@ export const SlicerSettingsPage: React.FC = () => {
       <div className="card">
         <h3 className="font-medium mb-3">Per-engine executables</h3>
         <div className="gap-md flex-col">
-          {(['PrusaSlicer', 'OrcaSlicer', 'SuperSlicer', 'Cura'] as string[]).map(engine => (
+          {slicerTypes.map(engine => (
             <div key={engine} className="grid grid-cols-3 gap-3 items-center">
               <div className="font-medium">{engine}</div>
               <div>

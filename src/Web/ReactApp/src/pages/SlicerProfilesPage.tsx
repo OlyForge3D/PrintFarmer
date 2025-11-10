@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import slicerProfilesService, { SlicerProfileListItem, ImportSlicerProfileRequest, SlicerProfileExtended, SlicerProfileExportDto } from '@/services/slicerProfilesService';
 import { orcaProfilesService } from '@/services/orcaProfilesService';
+import { slicerRegistry } from '@/services/slicerRegistry';
 import { Settings, Download, Upload, Search, Filter } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
@@ -19,7 +20,7 @@ export const SlicerProfilesPage: React.FC = () => {
   const [rawJson, setRawJson] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [slicerType, setSlicerType] = useState('PrusaSlicer');
+  const [slicerType, setSlicerType] = useState('');
   const [allowSystemOverride, setAllowSystemOverride] = useState(false);
   const [setDefault, setSetDefault] = useState(false);
   const [isPublic, setIsPublic] = useState(true);
@@ -36,6 +37,29 @@ export const SlicerProfilesPage: React.FC = () => {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingBundle, setExportingBundle] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Fetch available slicers
+  const { data: availableSlicers = [] } = useQuery({
+    queryKey: ['slicers-available'],
+    queryFn: () => slicerRegistry.getSlicers(),
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+
+  // Extract slicer names for the dropdown
+  const slicerNames = useMemo(() => {
+    return availableSlicers
+      .map(s => s.slicerType || s.name || '')
+      .filter((v, i, arr) => v && arr.indexOf(v) === i)
+      .sort();
+  }, [availableSlicers]);
+
+  // Set initial slicer type to first available
+  React.useEffect(() => {
+    if (!slicerType && slicerNames.length > 0) {
+      setSlicerType(slicerNames[0]);
+    }
+  }, [slicerNames, slicerType]);
 
   const { data: profiles, isLoading, error } = useQuery<SlicerProfileListItem[], Error>({
     queryKey: ['slicerProfilesExtended'],
@@ -172,7 +196,7 @@ export const SlicerProfilesPage: React.FC = () => {
   return (
     <PageTemplate
       title="Slicer Profiles"
-      subtitle="Manage imported slicer profiles (PrusaSlicer / OrcaSlicer / others)"
+      subtitle="Manage imported slicer profiles (OrcaSlicer / PrusaSlicer)"
       icon={Settings}
       maxWidth="max-w-6xl"
     >
@@ -241,7 +265,7 @@ export const SlicerProfilesPage: React.FC = () => {
                 value={slicerType}
                 onChange={e => setSlicerType(e.target.value)}
               >
-                {['PrusaSlicer','OrcaSlicer','Cura','SuperSlicer'].map(s => <option key={s}>{s}</option>)}
+                {slicerNames.map(s => <option key={s}>{s}</option>)}
               </Select>
             </FormField>
             <div className="flex flex-col gap-2 text-sm">
@@ -300,10 +324,7 @@ export const SlicerProfilesPage: React.FC = () => {
                       aria-label="Filter by engine"
                     >
                       <option value="all">All Engines</option>
-                      <option value="PrusaSlicer">PrusaSlicer</option>
-                      <option value="OrcaSlicer">OrcaSlicer</option>
-                      <option value="SuperSlicer">SuperSlicer</option>
-                      <option value="Cura">Cura</option>
+                      {slicerNames.map(s => <option key={s} value={s}>{s}</option>)}
                     </Select>
                   </div>
                   <div>

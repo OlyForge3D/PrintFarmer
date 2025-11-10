@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { PageTemplate } from '@/components/PageTemplate';
 import { TestTube } from 'lucide-react';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { slicerRegistry } from '@/services/slicerRegistry';
 
 interface DryRunResult {
   rendered: string;
@@ -13,10 +15,33 @@ interface DryRunResult {
 
 export const SlicerDryRunPage: React.FC = () => {
     const [template, setTemplate] = useState<string>('');
-    const [engine, setEngine] = useState<string>('OrcaSlicer');
+    const [engine, setEngine] = useState<string>('');
     const [result, setResult] = useState<DryRunResult | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Fetch available slicers
+    const { data: availableSlicers = [] } = useQuery({
+      queryKey: ['slicers-available'],
+      queryFn: () => slicerRegistry.getSlicers(),
+      staleTime: 10_000,
+      refetchInterval: 15_000,
+    });
+
+    // Extract slicer types
+    const slicerTypes = useMemo(() => {
+      return availableSlicers
+        .map(s => s.slicerType || s.name || '')
+        .filter((v, i, arr) => v && arr.indexOf(v) === i)
+        .sort();
+    }, [availableSlicers]);
+
+    // Set initial engine
+    React.useEffect(() => {
+      if (!engine && slicerTypes.length > 0) {
+        setEngine(slicerTypes[0]);
+      }
+    }, [slicerTypes, engine]);
 
     const doDryRun = async () => {
         setError(null);
@@ -51,8 +76,7 @@ export const SlicerDryRunPage: React.FC = () => {
                 <div className="form-group">
                   <label className="form-label">Engine</label>
                   <select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="input-base">
-                    <option>OrcaSlicer</option>
-                    <option>PrusaSlicer</option>
+                    {slicerTypes.map(s => <option key={s}>{s}</option>)}
                   </select>
                 </div>
 
