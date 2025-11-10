@@ -821,6 +821,28 @@ NETWORK MODES:
     1. Bridge          - Standard Docker networking (default)
     2. Host            - Direct host network access (for printer discovery)
 
+DATA PERSISTENCE (P0 Requirement):
+    During interactive deployment, you'll be prompted to configure external storage
+    for critical data that must survive container recreation:
+    
+    • 3D Model Uploads   - Maps to host directory (default: /var/lib/printfarmer/models)
+    • Generated G-code   - Maps to host directory (default: /var/lib/printfarmer/gcode)
+    • Slicer Profiles    - Maps to host directory (default: /var/lib/printfarmer/slicer-profiles)
+    
+    With external storage enabled:
+    ✅ Data persists across container recreation (docker-compose down/up)
+    ✅ Data survives image rebuild
+    ✅ Data only deleted when explicitly removing the host directory
+    ✅ Database deletion does NOT affect these directories
+    ✅ Can easily backup/restore files from host filesystem
+    
+    To enable external storage in non-interactive mode, set:
+        export USE_EXTERNAL_STORAGE=yes
+        export EXTERNAL_MODELS_PATH=/path/to/models
+        export EXTERNAL_GCODE_PATH=/path/to/gcode
+        export EXTERNAL_PROFILES_PATH=/path/to/profiles
+        ./scripts/deploy-docker.sh --non-interactive
+
 PRINTER DISCOVERY (MICROSERVICES ONLY):
     The network printer discovery service automatically scans your local network 
     to find compatible 3D printers (Moonraker, PrusaLink, OctoPrint, SDCP).
@@ -1039,6 +1061,18 @@ EOF
     else
         echo -e "\n# Spoolman Integration\nENABLE_SPOOLMAN=no" >> "$CONFIG_FILE"
     fi
+
+    # Save external storage configuration (P0 Data Persistence)
+    cat >> "$CONFIG_FILE" << EOF
+
+# External Storage Configuration (P0 - Critical Data Persistence)
+# Ensures 3D models and G-code files persist independently from container lifecycle
+# Data only deleted when explicitly removing these directories
+USE_EXTERNAL_STORAGE=${USE_EXTERNAL_STORAGE:-no}
+EXTERNAL_MODELS_PATH=${EXTERNAL_MODELS_PATH:-}
+EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
+EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
+EOF
 
     cat >> "$CONFIG_FILE" << EOF
 
@@ -2030,6 +2064,91 @@ DOCKEREOF
 }
 
 # Configure additional settings
+configure_external_storage() {
+    print_header "💾 External Storage Configuration (P0 Data Persistence)"
+    
+    echo -e "${BLUE}Model Uploads & G-Code Files Storage${NC}"
+    echo "These critical data files should persist independently from container lifecycles."
+    echo "They will only be deleted when database files are removed explicitly."
+    echo
+    
+    # Check if external storage was already configured
+    if [ -z "${USE_EXTERNAL_STORAGE:-}" ]; then
+        prompt_yes_no "Use external host directories for model uploads and G-code? (Recommended: YES for production)" "yes" "USE_EXTERNAL_STORAGE"
+    else
+        if [ "${USE_EXTERNAL_STORAGE}" = "true" ] || [ "${USE_EXTERNAL_STORAGE}" = "yes" ]; then
+            USE_EXTERNAL_STORAGE="yes"
+        else
+            USE_EXTERNAL_STORAGE="no"
+        fi
+    fi
+    
+    if [ "$USE_EXTERNAL_STORAGE" = "yes" ]; then
+        print_success "External storage enabled - data will persist on host filesystem"
+        echo
+        
+        # Model uploads directory
+        local default_models_path="${EXTERNAL_MODELS_PATH:-/var/lib/printfarmer/models}"
+        prompt_with_default "Host directory for 3D model uploads:" "$default_models_path" "EXTERNAL_MODELS_PATH"
+        
+        # Create directory if it doesn't exist
+        if [ ! -d "$EXTERNAL_MODELS_PATH" ]; then
+            print_info "Creating models directory: $EXTERNAL_MODELS_PATH"
+            mkdir -p "$EXTERNAL_MODELS_PATH" || {
+                print_error "Failed to create models directory. Ensure you have write permissions."
+                return 1
+            }
+            chmod 755 "$EXTERNAL_MODELS_PATH"
+        fi
+        
+        # G-code storage directory
+        local default_gcode_path="${EXTERNAL_GCODE_PATH:-/var/lib/printfarmer/gcode}"
+        prompt_with_default "Host directory for generated G-code:" "$default_gcode_path" "EXTERNAL_GCODE_PATH"
+        
+        # Create directory if it doesn't exist
+        if [ ! -d "$EXTERNAL_GCODE_PATH" ]; then
+            print_info "Creating G-code directory: $EXTERNAL_GCODE_PATH"
+            mkdir -p "$EXTERNAL_GCODE_PATH" || {
+                print_error "Failed to create G-code directory. Ensure you have write permissions."
+                return 1
+            }
+            chmod 755 "$EXTERNAL_GCODE_PATH"
+        fi
+        
+        # Slicer profiles directory (optional but recommended)
+        local default_profiles_path="${EXTERNAL_PROFILES_PATH:-/var/lib/printfarmer/slicer-profiles}"
+        prompt_with_default "Host directory for slicer profiles (optional):" "$default_profiles_path" "EXTERNAL_PROFILES_PATH"
+        
+        if [ ! -d "$EXTERNAL_PROFILES_PATH" ]; then
+            print_info "Creating slicer profiles directory: $EXTERNAL_PROFILES_PATH"
+            mkdir -p "$EXTERNAL_PROFILES_PATH" || {
+                print_error "Failed to create profiles directory. Ensure you have write permissions."
+                return 1
+            }
+            chmod 755 "$EXTERNAL_PROFILES_PATH"
+        fi
+        
+        print_success "External storage directories configured:"
+        echo "  • Models:  $EXTERNAL_MODELS_PATH"
+        echo "  • G-code:  $EXTERNAL_GCODE_PATH"
+        echo "  • Profiles: $EXTERNAL_PROFILES_PATH"
+        echo
+        print_info "⚠️  Data Persistence Guarantee:"
+        echo "  • Data survives container recreation (docker-compose down/up)"
+        echo "  • Data survives image rebuild"
+        echo "  • Data only deleted if you explicitly remove: $EXTERNAL_MODELS_PATH or $EXTERNAL_GCODE_PATH"
+        echo "  • Database deletion does NOT affect these directories"
+        
+    else
+        print_warning "Docker-managed volumes will be used - data may be lost if volumes are removed"
+        print_info "Recommended: Use --tear-down flag to back up data before major updates"
+        USE_EXTERNAL_STORAGE="no"
+        EXTERNAL_MODELS_PATH=""
+        EXTERNAL_GCODE_PATH=""
+        EXTERNAL_PROFILES_PATH=""
+    fi
+}
+
 configure_additional() {
     print_header "⚙️  Additional Configuration"
     
@@ -2587,6 +2706,14 @@ HTTP_PORT=$HTTP_PORT
 # API_URL for health checks (used by ComprehensiveHealthCheck to probe internal endpoints)
 # This must be a valid loopback address that can be reached from within the container
 API_URL=http://localhost:5245
+
+# External Storage Configuration (P0 - Critical Data Persistence)
+# Maps 3D models and G-code to persistent host directories
+# Data persists across container recreation, only deleted when explicitly removing these paths
+USE_EXTERNAL_STORAGE=${USE_EXTERNAL_STORAGE:-no}
+EXTERNAL_MODELS_PATH=${EXTERNAL_MODELS_PATH:-}
+EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
+EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
 EOF
 
     # Small summary for generated environment file: show which sensitive values were included
@@ -4427,6 +4554,7 @@ main() {
     configure_database
     configure_networking
     adjust_connection_strings_for_network_mode
+    configure_external_storage
     configure_additional
     validate_configuration
     save_deployment_config

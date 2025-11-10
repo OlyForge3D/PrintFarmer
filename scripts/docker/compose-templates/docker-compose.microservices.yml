@@ -69,9 +69,9 @@ services:
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
     volumes:
       - printfarmer-app-data:/data
-      - printfarmer-model-uploads:/app/uploads
-      - printfarmer-gcode-storage:/app/gcode
-      - printfarmer-slicer-profiles:/app/profiles
+      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-uploads}:/app/uploads
+      - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
+      - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
     depends_on:
       database:
         condition: service_healthy
