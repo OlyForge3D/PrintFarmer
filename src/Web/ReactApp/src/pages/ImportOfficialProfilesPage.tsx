@@ -12,9 +12,20 @@ import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 interface PrinterListItem {
     id: string;
     name: string;
-    backend: string;
+    backend: number; // 0=Moonraker, 1=PrusaLink, 2=SDCP, 3=OctoPrint
     modelId?: string;
     modelName?: string;
+}
+
+function getBackendName(backend: number | string): string {
+    if (typeof backend === 'string') return backend;
+    switch (backend) {
+        case 0: return 'Moonraker';
+        case 1: return 'PrusaLink';
+        case 2: return 'SDCP';
+        case 3: return 'OctoPrint';
+        default: return `Unknown (${backend})`;
+    }
 }
 
 interface AvailableProfile {
@@ -52,11 +63,11 @@ export const ImportOfficialProfilesPage: React.FC = () => {
 
             const json = await res.json() as unknown[];
             return json.map(p => {
-                const printer = p as { id?: string; name?: string; backend?: string; modelId?: string; modelName?: string };
+                const printer = p as { id?: string; name?: string; backend?: number; modelId?: string; modelName?: string };
                 return {
                     id: printer.id || '',
                     name: printer.name || 'Unknown',
-                    backend: printer.backend || 'Unknown',
+                    backend: printer.backend ?? 0,
                     modelId: printer.modelId,
                     modelName: printer.modelName
                 } as PrinterListItem;
@@ -65,43 +76,32 @@ export const ImportOfficialProfilesPage: React.FC = () => {
         staleTime: 30_000
     });
 
-    // Fetch available profiles for selected printer
-    const { data: availableProfiles = [], isLoading: loadingProfiles } = useQuery({
-        queryKey: ['available-official-profiles', selectedPrinterId],
-        queryFn: async () => {
-            if (!selectedPrinterId) return [];
-            const profiles = await officialProfilesService.getAvailableProfilesForPrinter(selectedPrinterId);
-            return (profiles as unknown[]).map(p => {
-                const profile = p as {
-                    id?: string; name?: string; material?: string; quality?: string;
-                    layerHeight?: number; infillPercentage?: number; isSystem?: boolean; slicerType?: string;
-                };
-                return {
-                    id: profile.id || '',
-                    name: profile.name || '',
-                    material: profile.material || 'Unknown',
-                    quality: profile.quality || 'Standard',
-                    layerHeight: profile.layerHeight || 0,
-                    infillPercentage: profile.infillPercentage || 0,
-                    isSystem: profile.isSystem || false,
-                    slicerType: profile.slicerType || 'OrcaSlicer'
-                } as AvailableProfile;
-            });
-        },
-        enabled: !!selectedPrinterId,
-        staleTime: 30_000
-    });
+  // Fetch available profiles from OrcaSlicer worker
+  // These are the actual profiles from the OrcaSlicer installation,
+  // not previously imported/system profiles
+  const { data: officialProfiles = [], isLoading: profilesLoading } = useQuery({
+    queryKey: ["official-profiles-from-worker"],
+    queryFn: async () => {
+      try {
+        const profiles = await officialProfilesService.getAvailableProfilesFromWorker();
+        return profiles;
+      } catch (error) {
+        console.error("Failed to fetch profiles from worker:", error);
+        throw error;
+      }
+    },
+  });
 
-    // Group profiles by material and quality
-    const groupedProfiles = useMemo(() => {
-        const groups: { [key: string]: AvailableProfile[] } = {};
-        availableProfiles.forEach(profile => {
-            const key = `${profile.material} • ${profile.quality}`;
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(profile);
-        });
-        return Object.entries(groups).sort();
-    }, [availableProfiles]);
+  // Group profiles by material and quality
+  const groupedProfiles = useMemo(() => {
+    const groups: { [key: string]: AvailableProfile[] } = {};
+    officialProfiles.forEach((profile: AvailableProfile) => {
+      const key = `${profile.material} • ${profile.quality}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(profile);
+    });
+    return Object.entries(groups).sort();
+  }, [officialProfiles]);
 
     // Import mutation
     const importMutation = useMutation({
@@ -146,7 +146,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
     };
 
     const selectAllProfiles = () => {
-        setSelectedProfileIds(new Set(availableProfiles.map(p => p.id)));
+        setSelectedProfileIds(new Set(officialProfiles.map((p: AvailableProfile) => p.id)));
     };
 
     const clearSelection = () => {
@@ -181,7 +181,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                                 <option value="">-- Choose Printer --</option>
                                 {printers.map(p => (
                                     <option key={p.id} value={p.id}>
-                                        {p.name} ({p.backend})
+                                        {p.name} ({getBackendName(p.backend)})
                                     </option>
                                 ))}
                             </Select>
@@ -207,7 +207,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                                             size="sm"
                                             className="w-full"
                                             onClick={selectAllProfiles}
-                                            disabled={availableProfiles.length === 0}
+                                            disabled={officialProfiles.length === 0}
                                         >
                                             Select All
                                         </Button>
@@ -257,11 +257,11 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                             <AlertCircle className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
                             <p className="text-pf-text-muted">Select a printer to see available profiles</p>
                         </div>
-                    ) : loadingProfiles ? (
+                    ) : profilesLoading ? (
                         <div className="card bg-pf-panel border border-pf-border rounded shadow p-8 text-center">
                             <p className="text-pf-text-muted">Loading profiles...</p>
                         </div>
-                    ) : availableProfiles.length === 0 ? (
+                    ) : officialProfiles.length === 0 ? (
                         <div className="card bg-pf-panel border border-pf-border rounded shadow p-8 text-center">
                             <AlertCircle className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
                             <p className="text-pf-text-muted">No official profiles available</p>

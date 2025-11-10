@@ -39,7 +39,19 @@ function getAuthHeaders(): HeadersInit {
 
 export const officialProfilesService = {
   /**
+   * Get available OrcaSlicer profiles from the worker service
+   * These are the actual profiles from OrcaSlicer's local installation
+   */
+  async getAvailableProfilesFromWorker(): Promise<SlicerProfileListItem[]> {
+    const res = await fetch(`${base}/available-from-worker`, {
+      headers: getAuthHeaders(),
+    });
+    return handle<SlicerProfileListItem[]>(res);
+  },
+
+  /**
    * Get system profiles available for a specific registered printer
+   * These are profiles previously imported into the database
    */
   async getAvailableProfilesForPrinter(
     printerId: string

@@ -33,6 +33,7 @@ public static class Program
         _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
         _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
+        _ = builder.Services.AddSingleton<IOrcaProfilesService, OrcaProfilesService>(); // profiles discovery
 
 
         // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
@@ -110,6 +111,14 @@ public static class Program
             realBinary = detector.IsRealBinaryPresent(),
             capabilities = WorkerConstants.Capabilities
         }));
+
+        _ = app.MapGet("/profiles", async (IOrcaProfilesService profileService, CancellationToken ct) =>
+        {
+            var profiles = await profileService.ListAvailableProfilesAsync(ct);
+            return Results.Ok(profiles);
+        });
+        // Endpoint: GET /profiles
+        // Returns: List of available OrcaSlicer profiles from local installation
 
         IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
         if (!orcaDetector.IsRealBinaryPresent())

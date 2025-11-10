@@ -523,6 +523,52 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     }
 
     /// <summary>
+    /// Fetch available OrcaSlicer profiles from the OrcaSlicer worker service.
+    /// Queries the running OrcaSlicer worker for profiles available in its local installation.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of available OrcaSlicer profiles from worker</returns>
+    /// <response code="200">Returns list of profiles from OrcaSlicer worker</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpGet("available-from-worker")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile import
+    [ProducesResponseType(typeof(IEnumerable<SlicerProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetAvailableProfilesFromWorkerAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Call the OrcaSlicer worker /profiles endpoint
+            // Worker is available at http://orcaslicer-worker:8080 (in Docker) or http://localhost:8080 (locally)
+            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+            var response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode}: {await response.Content.ReadAsStringAsync(ct)}");
+                return StatusCode((int)response.StatusCode, "OrcaSlicer worker unavailable or returned an error");
+            }
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            var profiles = JsonSerializer.Deserialize<List<SlicerProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            return Ok(profiles ?? new List<SlicerProfileDto>());
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError($"Failed to connect to OrcaSlicer worker: {ex.Message}");
+            return StatusCode(503, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error fetching profiles from OrcaSlicer worker: {ex.Message}");
+            return StatusCode(500, "Error fetching profiles from worker");
+        }
+    }
+
+    /// <summary>
     /// Get system profiles available for import for a specific registered printer.
     /// Filters profiles by matching printer model compatibility.
     /// </summary>
