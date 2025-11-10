@@ -2120,6 +2120,8 @@ configure_additional() {
         prompt_yes_no "Enable monitoring stack (Prometheus, Grafana)?" "no" "INCLUDE_MONITORING_CHOICE"
         if [ "$INCLUDE_MONITORING_CHOICE" = "yes" ]; then
             INCLUDE_MONITORING="true"
+        else
+            INCLUDE_MONITORING="false"
         fi
     else
         print_info "Monitoring stack enabled via CLI flag"
