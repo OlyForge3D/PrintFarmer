@@ -7,10 +7,10 @@ import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { slicerRegistry } from '@/services/slicerRegistry';
 
 interface DryRunResult {
-  rendered: string;
-  issues?: string[];
-  warnings?: string[];
-  samplePlaceholders?: Record<string, unknown>;
+    rendered: string;
+    issues?: string[];
+    warnings?: string[];
+    samplePlaceholders?: Record<string, unknown>;
 }
 
 export const SlicerDryRunPage: React.FC = () => {
@@ -22,25 +22,25 @@ export const SlicerDryRunPage: React.FC = () => {
 
     // Fetch available slicers
     const { data: availableSlicers = [] } = useQuery({
-      queryKey: ['slicers-available'],
-      queryFn: () => slicerRegistry.getSlicers(),
-      staleTime: 10_000,
-      refetchInterval: 15_000,
+        queryKey: ['slicers-available'],
+        queryFn: () => slicerRegistry.getSlicers(),
+        staleTime: 10_000,
+        refetchInterval: 15_000,
     });
 
     // Extract slicer types
     const slicerTypes = useMemo(() => {
-      return availableSlicers
-        .map(s => s.slicerType || s.name || '')
-        .filter((v, i, arr) => v && arr.indexOf(v) === i)
-        .sort();
+        return availableSlicers
+            .map(s => s.slicerType || s.name || '')
+            .filter((v, i, arr) => v && arr.indexOf(v) === i)
+            .sort();
     }, [availableSlicers]);
 
     // Set initial engine
     React.useEffect(() => {
-      if (!engine && slicerTypes.length > 0) {
-        setEngine(slicerTypes[0]);
-      }
+        if (!engine && slicerTypes.length > 0) {
+            setEngine(slicerTypes[0]);
+        }
     }, [slicerTypes, engine]);
 
     const doDryRun = async () => {
@@ -74,15 +74,15 @@ export const SlicerDryRunPage: React.FC = () => {
 
             <div className="card">
                 <div className="form-group">
-                  <label className="form-label">Engine</label>
-                  <select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="input-base">
-                    {slicerTypes.map(s => <option key={s}>{s}</option>)}
-                  </select>
+                    <label className="form-label">Engine</label>
+                    <select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="input-base">
+                        {slicerTypes.map(s => <option key={s}>{s}</option>)}
+                    </select>
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Args Template</label>
-                  <textarea value={template} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplate(e.target.value)} rows={6} className="input-base w-full" placeholder={'e.g. --config "{config}" --output "{output}" {input}'} />
+                    <label className="form-label">Args Template</label>
+                    <textarea value={template} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplate(e.target.value)} rows={6} className="input-base w-full" placeholder={'e.g. --config "{config}" --output "{output}" {input}'} />
                 </div>
 
                 <div className="gap-md flex-row">
@@ -111,12 +111,12 @@ export const SlicerDryRunPage: React.FC = () => {
                             </ul>
                         </div>
 
-                                                <div className="mt-3">
-                                                        <div className="font-medium text-pf-text-primary">Sample placeholders</div>
-                                                        <div className="text-sm mt-2 bg-pf-bg-0 p-2 border border-pf-border rounded text-pf-text-primary">
-                                                            {renderUnknown(result.samplePlaceholders)}
-                                                        </div>
-                                                </div>
+                        <div className="mt-3">
+                            <div className="font-medium text-pf-text-primary">Sample placeholders</div>
+                            <div className="text-sm mt-2 bg-pf-bg-0 p-2 border border-pf-border rounded text-pf-text-primary">
+                                {renderUnknown(result.samplePlaceholders)}
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>

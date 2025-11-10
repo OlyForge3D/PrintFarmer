@@ -44,13 +44,13 @@ export const SlicerSettingsPage: React.FC = () => {
   // Enhance save mutation to surface server messages
   const saveMutation = useMutation<void, Error, SlicerSettingsDto>({
     mutationFn: async (payload: SlicerSettingsDto) => {
-      const res = await fetch(`${getApiBaseUrl()}/slicer/settings`, { 
-        method: 'POST', 
-        headers: { 
+      const res = await fetch(`${getApiBaseUrl()}/slicer/settings`, {
+        method: 'POST',
+        headers: {
           'Content-Type': 'application/json',
           ...getAuthHeaders()
-        }, 
-        body: JSON.stringify(payload) 
+        },
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         const text = await res.text();

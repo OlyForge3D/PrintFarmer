@@ -169,7 +169,7 @@ export const NewSliceJobPage: React.FC = () => {
       const token = localStorage.getItem('auth-token');
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      
+
       const res = await fetch(`${apiBase}/3d-models`, { headers });
       if (!res.ok) throw new Error(await res.text() || 'Failed to load models');
       const json = await res.json();
@@ -231,7 +231,7 @@ export const NewSliceJobPage: React.FC = () => {
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
     onSuccess: (res) => {
-      setMessage(`Job queued (id ${res.jobId.substring(0,8)}) position ${res.queuePosition}`);
+      setMessage(`Job queued (id ${res.jobId.substring(0, 8)}) position ${res.queuePosition}`);
       setError(null);
       // Reset basic fields but keep capabilities / engine for convenience
       setModelFileUrl('');
@@ -446,42 +446,42 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
         </div>
 
-         {useProfile ? (
-           <FormField
-             label="Slicer Profile"
-             helper={loadingProfiles ? 'Loading profiles…' : (profiles && profiles.length === 0 ? 'No profiles available. Import one first.' : 'Overrides engine; snapshot stored with job.')}
-           >
-             {profiles && profiles.length > 0 ? (
-               <Select
-                 value={selectedProfileId}
-                 onChange={e => setSelectedProfileId(e.target.value)}
-                 aria-label="Slicer profile"
-                 title="Slicer profile"
-               >
-                 <option value="">-- Select profile --</option>
-                 {profiles.map(p => (
-                   <option key={p.id} value={p.id}>
-                     {p.name} • {p.slicerType} • {p.layerHeight.toFixed(2)}mm • {p.infillPercentage}%
-                   </option>
-                 ))}
-               </Select>
-             ) : (
-               <Select disabled className="bg-pf-disabled" aria-label="No profiles" title="No profiles">
-                 <option>-- No profiles --</option>
-               </Select>
-             )}
-           </FormField>
-         ) : (
-           <FormField label="Raw Profile JSON" helper="Paste sanitized slicer config JSON; consider importing for reuse." required>
-             <textarea
-               value={rawProfileJson}
-               onChange={e => setRawProfileJson(e.target.value)}
-               rows={8}
-               className="border rounded p-2 font-mono text-xs"
-               placeholder={'{\n  "layer_height": 0.2, ...\n}'}
-             />
-           </FormField>
-         )}
+        {useProfile ? (
+          <FormField
+            label="Slicer Profile"
+            helper={loadingProfiles ? 'Loading profiles…' : (profiles && profiles.length === 0 ? 'No profiles available. Import one first.' : 'Overrides engine; snapshot stored with job.')}
+          >
+            {profiles && profiles.length > 0 ? (
+              <Select
+                value={selectedProfileId}
+                onChange={e => setSelectedProfileId(e.target.value)}
+                aria-label="Slicer profile"
+                title="Slicer profile"
+              >
+                <option value="">-- Select profile --</option>
+                {profiles.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} • {p.slicerType} • {p.layerHeight.toFixed(2)}mm • {p.infillPercentage}%
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Select disabled className="bg-pf-disabled" aria-label="No profiles" title="No profiles">
+                <option>-- No profiles --</option>
+              </Select>
+            )}
+          </FormField>
+        ) : (
+          <FormField label="Raw Profile JSON" helper="Paste sanitized slicer config JSON; consider importing for reuse." required>
+            <textarea
+              value={rawProfileJson}
+              onChange={e => setRawProfileJson(e.target.value)}
+              rows={8}
+              className="border rounded p-2 font-mono text-xs"
+              placeholder={'{\n  "layer_height": 0.2, ...\n}'}
+            />
+          </FormField>
+        )}
 
         <FormField
           label="Required Capabilities (JSON array)"
