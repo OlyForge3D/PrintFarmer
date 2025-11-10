@@ -222,8 +222,25 @@ COPY --from=frontend-build /app/dist .
 # Copy nginx configuration
 COPY scripts/docker/nginx.conf /etc/nginx/nginx.conf
 
-# Install curl for health checks (required in alpine image)
-RUN apk add --no-cache curl
+# Install curl for health checks and pre-create nginx directories with proper permissions
+RUN apk add --no-cache curl && \
+    # Create nginx cache and temp directories
+    mkdir -p /var/cache/nginx/client_temp \
+             /var/cache/nginx/proxy_temp \
+             /var/cache/nginx/fastcgi_temp \
+             /var/cache/nginx/uwsgi_temp \
+             /var/cache/nginx/scgi_temp && \
+    # Set proper ownership and permissions for cache directories
+    chown -R nginx:nginx /var/cache/nginx && \
+    chmod -R 755 /var/cache/nginx && \
+    # Also ensure /run directory exists and has proper permissions for pid file
+    mkdir -p /run/nginx && \
+    chown nginx:nginx /run/nginx && \
+    chmod 755 /run/nginx && \
+    # Ensure /var/log/nginx has proper permissions
+    mkdir -p /var/log/nginx && \
+    chown nginx:nginx /var/log/nginx && \
+    chmod 755 /var/log/nginx
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
@@ -231,6 +248,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 
 EXPOSE 80
 
+# Override the default nginx entrypoint to just run nginx directly
+ENTRYPOINT []
 CMD ["nginx", "-g", "daemon off;"]
 
 ############################################################

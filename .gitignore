@@ -36,6 +36,7 @@ node_modules/
 
 # Docker generated files (created by deployment script)
 /docker-compose*.yml
+/otel-collector-config.yaml
 .env.microservices
 # Keep template sources tracked
 !scripts/docker/compose-templates/

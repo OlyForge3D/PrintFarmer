@@ -2565,7 +2565,16 @@ EOF
     esac
     echo "ConnectionStrings__Default=\"$CONNECTION_STRING_TO_WRITE\"" >> "$ENV_FILE"
     
+    # Generate monitoring service credentials
+    GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-$(generate_random_password)}
+    VAULT_DEV_ROOT_TOKEN=${VAULT_DEV_ROOT_TOKEN:-$(generate_random_password)}
+    
     cat >> "$ENV_FILE" << EOF
+
+# Monitoring & Observability Credentials
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=$GRAFANA_ADMIN_PASSWORD
+VAULT_DEV_ROOT_TOKEN=$VAULT_DEV_ROOT_TOKEN
 
 # Network Configuration
 ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
@@ -2648,9 +2657,14 @@ EOF
             print_info "Using SQLite - no DB credentials included."
             ;;
     esac
+    
+    print_info "Monitoring & Observability credentials generated (masked):"
+    echo "  GRAFANA_ADMIN_USER=admin"
+    echo "  GRAFANA_ADMIN_PASSWORD=$(mask_secret "$GRAFANA_ADMIN_PASSWORD")"
+    echo "  VAULT_DEV_ROOT_TOKEN=$(mask_secret "$VAULT_DEV_ROOT_TOKEN")"
 
     print_warning "Generated passwords are sensitive. Store .env files securely and restrict access (chmod 600)."
-    print_info "To view the full credentials, run: grep 'POSTGRES_PASSWORD\|MSSQL_SA_PASSWORD\|MYSQL_PASSWORD' $ENV_FILE || true"
+    print_info "To view all credentials, run: grep 'PASSWORD\|TOKEN' $ENV_FILE || true"
     
     if [ "$ARCHITECTURE" = "microservices" ]; then
         cat >> "$ENV_FILE" << EOF
