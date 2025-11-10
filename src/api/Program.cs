@@ -751,23 +751,6 @@ app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 // Final log just before entering host run loop (diagnostic)
 app.Logger.LogInformation("[Startup] Reached app.Run() - binding to configured URLs");
 
-// Phase 6: Seed default Orca profiles (development only, idempotent)
-using (var scope = app.Services.CreateScope())
-{
-    try
-    {
-        var seeder = scope.ServiceProvider.GetService<Farm.Web.Api.Services.Slicing.IOrcaDefaultProfileSeeder>();
-        if (seeder != null)
-        {
-            await seeder.SeedAsync();
-        }
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogWarning(ex, "[Startup] Orca default profile seeding failed - continuing startup.");
-    }
-}
-
 // Database info endpoint (dev or DEBUG_DB_INFO=true) with migration status integration.
 app.MapGet("/api/debug/db-info", async (AppDbContext db,
     IWebHostEnvironment env,
