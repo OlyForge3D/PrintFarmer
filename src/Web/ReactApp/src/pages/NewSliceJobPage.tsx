@@ -156,7 +156,7 @@ export const NewSliceJobPage: React.FC = () => {
     queryKey: ['printers'],
     queryFn: async () => {
       const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/printers`, { headers: getAuthHeaders() });
+      const res = await fetch(`${baseUrl}/printers`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error('Failed to load printers');
       return res.json() as Promise<Array<{ id: string; name: string; model?: string }>>;
     },
@@ -482,8 +482,8 @@ export const NewSliceJobPage: React.FC = () => {
                   type="button"
                   onClick={() => applyQualityPreset(preset)}
                   className={`flex-1 px-2 py-1 text-xs font-medium rounded transition-colors ${selectedQualityPreset === preset
-                      ? 'bg-pf-accent text-pf-accent-text'
-                      : 'bg-pf-border text-pf-text hover:bg-pf-hover'
+                    ? 'bg-pf-accent text-pf-accent-text'
+                    : 'bg-pf-border text-pf-text hover:bg-pf-hover'
                     }`}
                 >
                   {preset}
@@ -511,8 +511,8 @@ export const NewSliceJobPage: React.FC = () => {
                   type="button"
                   onClick={() => setActiveSettingsTab(tab)}
                   className={`pb-2 px-2 transition-colors capitalize ${activeSettingsTab === tab
-                      ? 'border-b-2 border-pf-accent text-pf-accent font-medium'
-                      : 'text-pf-text-muted hover:text-pf-text'
+                    ? 'border-b-2 border-pf-accent text-pf-accent font-medium'
+                    : 'text-pf-text-muted hover:text-pf-text'
                     }`}
                 >
                   {tab}
