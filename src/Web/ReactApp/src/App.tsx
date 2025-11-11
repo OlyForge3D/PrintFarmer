@@ -7,6 +7,7 @@ import { SetupWizard } from '@/components/SetupWizard';
 import { FileHealthDashboard } from '@/components/admin/file-health/FileHealthDashboard';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
 import { useUnifiedLogging } from '@/hooks/useUnifiedLogging';
 import { CatalogPage } from '@/pages/CatalogPage';
 import { FilesPage } from '@/pages/FilesPage';
@@ -314,8 +315,10 @@ function App() {
         <ThemeProvider>
           <AuthProvider>
             <QueryClientProvider client={queryClient}>
-              <SetupWizard onComplete={handleSetupComplete} />
-              <Toaster position="top-right" richColors />
+              <SlicerUIProvider>
+                <SetupWizard onComplete={handleSetupComplete} />
+                <Toaster position="top-right" richColors />
+              </SlicerUIProvider>
             </QueryClientProvider>
           </AuthProvider>
         </ThemeProvider>
@@ -328,29 +331,31 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
-            {/*
-              Enable react-router future flags to opt into upcoming behavior and silence
-              development warnings about future flags. These are safe opt-ins for our
-              current router version and recommended by react-router maintainers.
-            */}
-            <Router
-              // Future flags documented by react-router to opt into v7 behaviors. See
-              // https://reactrouter.com/en/main/upgrading/v6
-              future={{
-                // prevents double-slash when basename and paths are combined
-                v7_preventBasepathDoubleSlash: true,
-                // use route ids in path generation where applicable
-                v7_useIdInRoutePaths: true,
-                // wrap state updates in React.startTransition (opt-in for upcoming v7)
-                v7_startTransition: true,
-                // change relative path resolution in splat routes to v7 behavior
-                v7_relativeSplatPath: true,
-              }}
-            >
-              <AuthenticatedAppRoutes />
-            </Router>
-            <ReactQueryDevtools initialIsOpen={false} />
-            <Toaster position="top-right" richColors />
+            <SlicerUIProvider>
+              {/*
+                Enable react-router future flags to opt into upcoming behavior and silence
+                development warnings about future flags. These are safe opt-ins for our
+                current router version and recommended by react-router maintainers.
+              */}
+              <Router
+                // Future flags documented by react-router to opt into v7 behaviors. See
+                // https://reactrouter.com/en/main/upgrading/v6
+                future={{
+                  // prevents double-slash when basename and paths are combined
+                  v7_preventBasepathDoubleSlash: true,
+                  // use route ids in path generation where applicable
+                  v7_useIdInRoutePaths: true,
+                  // wrap state updates in React.startTransition (opt-in for upcoming v7)
+                  v7_startTransition: true,
+                  // change relative path resolution in splat routes to v7 behavior
+                  v7_relativeSplatPath: true,
+                }}
+              >
+                <AuthenticatedAppRoutes />
+              </Router>
+              <ReactQueryDevtools initialIsOpen={false} />
+              <Toaster position="top-right" richColors />
+            </SlicerUIProvider>
           </QueryClientProvider>
         </AuthProvider>
       </ThemeProvider>

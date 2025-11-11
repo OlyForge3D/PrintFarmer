@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "description": "OrcaSlicer v2.3.1 Official Profiles",
+  "profiles": [
+    {
+      "id": "default",
+      "name": "Default Profile",
+      "description": "Default OrcaSlicer profile",
+      "settings": {}
+    }
+  ]
+}

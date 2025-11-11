@@ -11,6 +11,8 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.DiscoveryProbes;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Services.Slicing.Abstractions;
+using Farm.Web.Shared.Contracts.Slicing.Libraries;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Infrastructure;
@@ -128,6 +130,16 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.PrinterCapabilities.IPrinterCapabilitiesRepository, Farm.Infrastructure.Repositories.PrinterCapabilities.EfPrinterCapabilitiesRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Harvest.IHarvestRepository, Farm.Infrastructure.Repositories.Harvest.EfHarvestRepository>();
+
+        // Slicer Library Registration
+        // Dynamically discover and register slicer library plugins using SlicerPluginAttribute.
+        // Each slicer library project declares itself via assembly attribute, eliminating
+        // the need to manually register each slicer version in this file.
+        // This enables a plugin architecture where new slicer versions can be added
+        // simply by adding a project reference and declaring the attribute.
+        _ = services
+            .DiscoverAndRegisterSlicerPlugins()
+            .AddSlicerRegistry();
 
         // Business Services
         _ = services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();

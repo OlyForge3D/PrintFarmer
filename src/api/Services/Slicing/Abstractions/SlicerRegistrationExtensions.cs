@@ -4,64 +4,21 @@ using Farm.Web.Shared.Contracts.Slicing.Libraries;
 namespace Farm.Web.Api.Services.Slicing.Abstractions;
 
 /// <summary>
-/// Extension methods for registering slicer libraries in dependency injection.
+/// DEPRECATED: This file is replaced by SlicerPluginDiscovery which uses assembly attributes.
+/// 
+/// Slicer library registration now uses a plugin discovery approach via SlicerPluginAttribute.
+/// Each slicer library declares itself in AssemblyInfo.cs with:
+/// 
+/// [assembly: SlicerPlugin(typeof(MySlicerLibrary), typeof(MySlicerUIProvider))]
+/// 
+/// Then during application startup, call:
+/// services.DiscoverAndRegisterSlicerPlugins().AddSlicerRegistry();
+/// 
+/// See SlicerPluginDiscovery for implementation details.
+/// This file is kept for reference but is no longer used.
 /// </summary>
+[Obsolete("Use SlicerPluginDiscovery with assembly attributes instead")]
 public static class SlicerRegistrationExtensions
 {
-    private static readonly List<ISlicerLibrary> RegisteredLibraries = [];
-    private static readonly List<ISlicerUIProvider> RegisteredUIProviders = [];
-
-    /// <summary>
-    /// Registers a slicer library in the DI container and slicing registry.
-    /// </summary>
-    public static IServiceCollection AddSlicerLibrary<TLibrary>(this IServiceCollection services)
-        where TLibrary : class, ISlicerLibrary, new()
-    {
-        var library = new TLibrary();
-        RegisteredLibraries.Add(library);
-        return services;
-    }
-
-    /// <summary>
-    /// Registers a slicer UI provider in the DI container.
-    /// </summary>
-    public static IServiceCollection AddSlicerUIProvider<TUIProvider>(this IServiceCollection services)
-        where TUIProvider : class, ISlicerUIProvider, new()
-    {
-        var provider = new TUIProvider();
-        RegisteredUIProviders.Add(provider);
-        return services;
-    }
-
-    /// <summary>
-    /// Registers the slicer registry with all previously registered libraries and UI providers.
-    /// Call this after adding all individual slicer libraries.
-    /// </summary>
-    public static IServiceCollection AddSlicerRegistry(this IServiceCollection services)
-    {
-        // Register all collected libraries and UI providers
-        foreach (var library in RegisteredLibraries)
-        {
-            services.AddSingleton(library);
-        }
-
-        foreach (var provider in RegisteredUIProviders)
-        {
-            services.AddSingleton(provider);
-        }
-
-        // Register the registry itself
-        services.AddSingleton<ISlicerRegistry>(sp =>
-        {
-            var libraries = sp.GetRequiredService<IEnumerable<ISlicerLibrary>>();
-            var uiProviders = sp.GetRequiredService<IEnumerable<ISlicerUIProvider>>();
-            return new SlicerRegistry(libraries, uiProviders);
-        });
-
-        // Clear for potential re-registration in tests
-        RegisteredLibraries.Clear();
-        RegisteredUIProviders.Clear();
-
-        return services;
-    }
+    // Deprecated - do not use
 }
