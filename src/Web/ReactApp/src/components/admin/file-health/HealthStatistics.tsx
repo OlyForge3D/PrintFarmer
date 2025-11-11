@@ -1,61 +1,65 @@
 import React from 'react';
 
 interface HealthStatisticsProps {
-  totalFiles: number;
-  healthyFiles: number;
-  missingFiles: number;
-  corruptedFiles: number;
-  inaccessibleFiles: number;
+  totalModel3DFiles: number;
+  model3DHealthy: number;
+  model3DMissing: number;
+  model3DCorrupted: number;
+  totalGcodeFiles: number;
+  gcodeHealthy: number;
+  gcodeMissing: number;
+  gcodeCorrupted: number;
 }
 
 export function HealthStatistics({
-  totalFiles,
-  healthyFiles,
-  missingFiles,
-  corruptedFiles,
-  inaccessibleFiles,
+  totalModel3DFiles,
+  model3DHealthy,
+  model3DMissing,
+  model3DCorrupted,
+  totalGcodeFiles,
+  gcodeHealthy,
+  gcodeMissing,
+  gcodeCorrupted,
 }: HealthStatisticsProps) {
+  const totalFiles = totalModel3DFiles + totalGcodeFiles;
+  const totalHealthy = model3DHealthy + gcodeHealthy;
+  const totalMissing = model3DMissing + gcodeMissing;
+  const totalCorrupted = model3DCorrupted + gcodeCorrupted;
+
   const stats = [
     {
       label: 'Total Files',
       value: totalFiles,
-      bgColor: 'bg-blue-50 dark:bg-blue-900/20',
-      textColor: 'text-blue-700 dark:text-blue-200',
-      borderColor: 'border-blue-200 dark:border-blue-800',
+      bgColor: 'bg-pf-bg-2',
+      textColor: 'text-pf-text-primary',
+      borderColor: 'border-pf-border',
     },
     {
       label: 'Healthy',
-      value: healthyFiles,
-      bgColor: 'bg-green-50 dark:bg-green-900/20',
-      textColor: 'text-green-700 dark:text-green-200',
-      borderColor: 'border-green-200 dark:border-green-800',
+      value: totalHealthy,
+      bgColor: 'bg-pf-bg-2',
+      textColor: 'text-pf-success',
+      borderColor: 'border-pf-border',
     },
     {
       label: 'Missing',
-      value: missingFiles,
-      bgColor: 'bg-red-50 dark:bg-red-900/20',
-      textColor: 'text-red-700 dark:text-red-200',
-      borderColor: 'border-red-200 dark:border-red-800',
+      value: totalMissing,
+      bgColor: 'bg-pf-bg-2',
+      textColor: 'text-pf-error-text',
+      borderColor: 'border-pf-border',
     },
     {
       label: 'Corrupted',
-      value: corruptedFiles,
-      bgColor: 'bg-orange-50 dark:bg-orange-900/20',
-      textColor: 'text-orange-700 dark:text-orange-200',
-      borderColor: 'border-orange-200 dark:border-orange-800',
-    },
-    {
-      label: 'Inaccessible',
-      value: inaccessibleFiles,
-      bgColor: 'bg-purple-50 dark:bg-purple-900/20',
-      textColor: 'text-purple-700 dark:text-purple-200',
-      borderColor: 'border-purple-200 dark:border-purple-800',
+      value: totalCorrupted,
+      bgColor: 'bg-pf-bg-2',
+      textColor: 'text-pf-warning-text',
+      borderColor: 'border-pf-border',
     },
   ];
 
   return (
-    <div className="bg-pf-surface rounded-lg border border-pf-border p-6">
-      <h3 className="text-lg font-semibold text-pf-text mb-4">File Statistics</h3>
+    <div className="bg-pf-panel rounded-lg border border-pf-border p-6">
+      <h3 className="text-lg font-semibold text-pf-text-primary mb-4">File Statistics</h3>
       <div className="space-y-3">
         {stats.map((stat) => (
           <div
@@ -66,6 +70,16 @@ export function HealthStatistics({
             <span className={`${stat.textColor} text-lg font-bold`}>{stat.value}</span>
           </div>
         ))}
+      </div>
+      <div className="mt-6 pt-6 border-t border-pf-border space-y-2 text-xs text-pf-text-secondary">
+        <div className="flex justify-between">
+          <span>Model3D Files:</span>
+          <span>{model3DHealthy}/{totalModel3DFiles} healthy</span>
+        </div>
+        <div className="flex justify-between">
+          <span>G-code Files:</span>
+          <span>{gcodeHealthy}/{totalGcodeFiles} healthy</span>
+        </div>
       </div>
     </div>
   );

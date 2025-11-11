@@ -52,7 +52,7 @@ export enum HarvestFileStatus {
   Complete = 2,
   Failed = 3,
   Cancelled = 4,
-  Skipped = 5
+  Skipped = 5,
 }
 // PrintJobStatusDto for Moonraker print job status
 export interface PrintJobStatusDto {
@@ -124,19 +124,23 @@ export enum PrinterBackend {
   Moonraker = 0,
   PrusaLink = 1,
   SDCP = 2,
-  OctoPrint = 3
+  OctoPrint = 3,
 }
 
 export enum MotionType {
   Cartesian = 0,
   CoreXY = 1,
   Delta = 2,
-  Unknown = 99
+  Unknown = 99,
 }
 
 // String enum types for API responses (enums are serialized as strings)
-export type PrinterBackendString = 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
-export type MotionTypeString = 'Cartesian' | 'CoreXY' | 'Delta' | 'Unknown';
+export type PrinterBackendString =
+  | "Moonraker"
+  | "PrusaLink"
+  | "SDCP"
+  | "OctoPrint";
+export type MotionTypeString = "Cartesian" | "CoreXY" | "Delta" | "Unknown";
 
 export interface PrinterSpoolInfo {
   id?: number;
@@ -261,7 +265,7 @@ export interface CreatePrinterDto {
 export interface BulkImportResultItem {
   index: number;
   name: string;
-  status: 'Pending' | 'Imported' | 'Skipped' | 'Failed';
+  status: "Pending" | "Imported" | "Skipped" | "Failed";
   id?: string;
   reason?: string;
 }
@@ -321,7 +325,7 @@ export interface PrinterModelDto {
   maxZ?: number;
   defaultBackend?: PrinterBackend;
   supportedFilamentTypes?: string[];
-  
+
   // Capability properties
   defaultNozzleDiameter?: number;
   hasHeatedBed?: boolean;
@@ -427,7 +431,7 @@ export interface FilamentType {
 // Health status response shapes (discriminated)
 // Basic health (/healthz, /api/healthz)
 export interface BasicHealthStatus {
-  kind: 'basic';
+  kind: "basic";
   status: string; // "ok"
 }
 
@@ -453,10 +457,10 @@ export interface StartupStatus {
 }
 
 export interface DetailedHealthStatus {
-  kind: 'detailed';
-  status: string;                 // Overall status
-  totalChecksDuration: string;    // Overall duration
-  startup?: StartupStatus;        // Startup initialization status
+  kind: "detailed";
+  status: string; // Overall status
+  totalChecksDuration: string; // Overall duration
+  startup?: StartupStatus; // Startup initialization status
   results: Record<string, DetailedHealthStatusEntry>;
 }
 
@@ -464,14 +468,18 @@ export interface DetailedHealthStatus {
 export type HealthStatus = BasicHealthStatus | DetailedHealthStatus;
 
 // Runtime type guard helpers
-export function isDetailedHealthStatus(h: HealthStatus | undefined | null): h is DetailedHealthStatus {
-  if (!h || h.kind !== 'detailed') return false;
+export function isDetailedHealthStatus(
+  h: HealthStatus | undefined | null
+): h is DetailedHealthStatus {
+  if (!h || h.kind !== "detailed") return false;
   const candidate: unknown = (h as unknown as { results?: unknown }).results;
-  return typeof candidate === 'object' && candidate !== null;
+  return typeof candidate === "object" && candidate !== null;
 }
 
-export function isBasicHealthStatus(h: HealthStatus | undefined | null): h is BasicHealthStatus {
-  return !!h && h.kind === 'basic';
+export function isBasicHealthStatus(
+  h: HealthStatus | undefined | null
+): h is BasicHealthStatus {
+  return !!h && h.kind === "basic";
 }
 
 export interface FilamentTypeDto {
@@ -513,7 +521,7 @@ export interface UpdateModelRequest {
   maxZ?: number;
   defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
-  
+
   // Capability properties
   defaultNozzleDiameter?: number;
   hasHeatedBed?: boolean;
@@ -537,7 +545,7 @@ export interface CreateModelRequest {
   maxZ?: number;
   defaultBackend?: PrinterBackend;
   supportedFilamentTypeIds?: string[];
-  
+
   // Capability properties
   defaultNozzleDiameter?: number;
   hasHeatedBed?: boolean;
@@ -567,7 +575,7 @@ export interface ResolveHostnameResponse {
 // G-code file DTOs
 export enum GcodeSource {
   Upload = 0,
-  Harvest = 1
+  Harvest = 1,
 }
 
 export interface GcodeFile {
@@ -598,10 +606,10 @@ export interface GcodeFile {
 
 // G-code harvest operations
 export enum GcodeHarvestStatus {
-  Running = 'Running',
-  Completed = 'Completed',
-  Failed = 'Failed',
-  Cancelled = 'Cancelled'
+  Running = "Running",
+  Completed = "Completed",
+  Failed = "Failed",
+  Cancelled = "Cancelled",
 }
 
 export interface HarvestOptions {
@@ -609,7 +617,7 @@ export interface HarvestOptions {
   fileTypes: string[];
   minFileSize: number;
   maxFileAge?: number;
-  duplicateHandling: 'skip' | 'overwrite' | 'rename';
+  duplicateHandling: "skip" | "overwrite" | "rename";
 }
 
 export interface GcodeHarvestOperation {
@@ -642,7 +650,7 @@ export interface HarvestProgress {
   filesProcessed: number;
   filesFound: number;
   currentFile?: string;
-  phase: 'discovering' | 'processing' | 'completing';
+  phase: "discovering" | "processing" | "completing";
 }
 
 // SignalR real-time harvest update envelope
@@ -657,7 +665,7 @@ export interface HarvestUpdateDto {
   duplicatesSkipped?: number;
   progressPercent?: number; // convenience precomputed value (0-100)
   currentFile?: string;
-  phase?: 'discovering' | 'processing' | 'completing';
+  phase?: "discovering" | "processing" | "completing";
   startedAt?: string;
   completedAt?: string;
   error?: string;
@@ -693,8 +701,8 @@ export interface GetGcodeFilesRequest {
   path?: string;
   harvestId?: string;
   printerId?: string;
-  sortBy?: 'name' | 'size' | 'date';
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: "name" | "size" | "date";
+  sortOrder?: "asc" | "desc";
   search?: string;
 }
 
@@ -721,7 +729,7 @@ export enum JobQueueStatus {
   InProgress = 1,
   Completed = 2,
   Failed = 3,
-  Cancelled = 4
+  Cancelled = 4,
 }
 
 export interface JobQueuePrintJob {
@@ -855,11 +863,11 @@ export interface NetworkDiscoverySettingsDto {
 
 // Discovery streaming types
 export enum DiscoveryStatus {
-  Starting = 'Starting',
-  Scanning = 'Scanning',
-  Completed = 'Completed',
-  Cancelled = 'Cancelled',
-  Error = 'Error'
+  Starting = "Starting",
+  Scanning = "Scanning",
+  Completed = "Completed",
+  Cancelled = "Cancelled",
+  Error = "Error",
 }
 
 export interface StartDiscoveryRequest {
@@ -991,14 +999,16 @@ export enum FileAuditType {
 }
 
 export interface FileHealthSummaryDto {
-  totalFiles: number;
-  healthyFiles: number;
-  missingFiles: number;
-  corruptedFiles: number;
-  inaccessibleFiles: number;
-  healthPercentage: number;
-  lastAuditDate?: string;
-  lastAuditType?: FileAuditType;
+  totalModel3DFiles: number;
+  model3DHealthy: number;
+  model3DMissing: number;
+  model3DCorrupted: number;
+  totalGcodeFiles: number;
+  gcodeHealthy: number;
+  gcodeMissing: number;
+  gcodeCorrupted: number;
+  lastHealthyAuditDate?: string;
+  overallHealthPercentage: number;
 }
 
 export interface FileHealthAuditDto {

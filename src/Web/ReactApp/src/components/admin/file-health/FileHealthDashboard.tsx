@@ -43,14 +43,14 @@ export function FileHealthDashboard() {
       };
     }
 
-    const { healthPercentage } = healthSummary.data;
+    const { overallHealthPercentage } = healthSummary.data;
 
-    if (healthPercentage >= 95) {
+    if (overallHealthPercentage >= 95) {
       return {
         status: 'healthy' as const,
         message: 'All files are healthy',
       };
-    } else if (healthPercentage >= 75) {
+    } else if (overallHealthPercentage >= 75) {
       return {
         status: 'warning' as const,
         message: 'Some files have issues',
@@ -94,26 +94,25 @@ export function FileHealthDashboard() {
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-semibold text-pf-text">Overall Health</h2>
                   <div
-                    className={`status-badge ${
-                      statusInfo.status === 'healthy'
+                    className={`status-badge ${statusInfo.status === 'healthy'
                         ? 'success'
                         : statusInfo.status === 'warning'
                           ? 'loading'
                           : 'error'
-                    }`}
+                      }`}
                   >
                     {statusInfo.message}
                   </div>
                 </div>
                 {healthSummary.data && (
                   <div className="flex items-center justify-between">
-                    <HealthGauge percentage={healthSummary.data.healthPercentage} />
+                    <HealthGauge percentage={healthSummary.data.overallHealthPercentage} />
                     <div className="text-right">
                       <div className="text-4xl font-bold text-pf-accent">
-                        {Math.round(healthSummary.data.healthPercentage)}%
+                        {Math.round(healthSummary.data.overallHealthPercentage)}%
                       </div>
                       <p className="text-sm text-pf-text-secondary mt-1">
-                        {healthSummary.data.healthyFiles} of {healthSummary.data.totalFiles} files healthy
+                        {healthSummary.data.model3DHealthy + healthSummary.data.gcodeHealthy} of {healthSummary.data.totalModel3DFiles + healthSummary.data.totalGcodeFiles} files healthy
                       </p>
                     </div>
                   </div>
@@ -123,11 +122,14 @@ export function FileHealthDashboard() {
               {/* Statistics Cards */}
               {healthSummary.data && (
                 <HealthStatistics
-                  totalFiles={healthSummary.data.totalFiles}
-                  healthyFiles={healthSummary.data.healthyFiles}
-                  missingFiles={healthSummary.data.missingFiles}
-                  corruptedFiles={healthSummary.data.corruptedFiles}
-                  inaccessibleFiles={healthSummary.data.inaccessibleFiles}
+                  totalModel3DFiles={healthSummary.data.totalModel3DFiles}
+                  model3DHealthy={healthSummary.data.model3DHealthy}
+                  model3DMissing={healthSummary.data.model3DMissing}
+                  model3DCorrupted={healthSummary.data.model3DCorrupted}
+                  totalGcodeFiles={healthSummary.data.totalGcodeFiles}
+                  gcodeHealthy={healthSummary.data.gcodeHealthy}
+                  gcodeMissing={healthSummary.data.gcodeMissing}
+                  gcodeCorrupted={healthSummary.data.gcodeCorrupted}
                 />
               )}
             </div>

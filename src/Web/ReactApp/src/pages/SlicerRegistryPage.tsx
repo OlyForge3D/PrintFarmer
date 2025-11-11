@@ -30,7 +30,7 @@ export default function SlicerRegistryPage() {
 
   useEffect(() => {
     setupSignalR();
-    
+
     // Cleanup on unmount
     return () => {
       if (connection) {
@@ -79,7 +79,7 @@ export default function SlicerRegistryPage() {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffSecs = Math.floor(diffMs / 1000);
-    
+
     if (diffSecs < 60) return `${diffSecs}s ago`;
     if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)}m ago`;
     if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)}h ago`;
@@ -116,13 +116,13 @@ export default function SlicerRegistryPage() {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Slicer Worker Registry</h1>
-        <p className="text-gray-600">
+        <h1 className="text-3xl font-bold text-pf-text-primary mb-2">Slicer Worker Registry</h1>
+        <p className="text-pf-text-secondary">
           Manage and monitor registered slicer workers. Workers auto-register on startup and send periodic heartbeats.
         </p>
         {connection?.state === 'Connected' && (
-          <div className="mt-2 flex items-center text-sm text-green-600">
-            <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
+          <div className="mt-2 flex items-center text-sm text-pf-success">
+            <span className="inline-block w-2 h-2 bg-pf-success rounded-full mr-2 animate-pulse"></span>
             Real-time updates active
           </div>
         )}
@@ -141,47 +141,47 @@ export default function SlicerRegistryPage() {
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {workers.map((worker) => (
-            <div 
-              key={worker.id} 
+            <div
+              key={worker.id}
               className="card clickable"
               onClick={() => setSelectedWorkerId(worker.id === selectedWorkerId ? null : worker.id)}
             >
               {/* Header */}
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-1">{worker.name}</h3>
-                  <p className="text-sm text-gray-600">{formatWorkerCapacity(worker)}</p>
+                  <h3 className="text-lg font-semibold text-pf-text-primary mb-1">{worker.name}</h3>
+                  <p className="text-sm text-pf-text-secondary">{formatWorkerCapacity(worker)}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`inline-block w-3 h-3 rounded-full ${getWorkerStatusColor(worker.status)}`}></span>
-                  <span className="text-sm font-medium text-gray-700">{worker.status}</span>
+                  <span className="text-sm font-medium text-pf-text-secondary">{worker.status}</span>
                 </div>
               </div>
 
               {/* Details */}
               <div className="space-y-2 mb-4">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Version:</span>
-                  <span className="font-medium text-gray-900">{worker.version}</span>
+                  <span className="text-pf-text-secondary">Version:</span>
+                  <span className="font-medium text-pf-text-primary">{worker.version}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Active Jobs:</span>
-                  <span className="font-medium text-gray-900">{worker.activeJobs} / {worker.totalSlots}</span>
+                  <span className="text-pf-text-secondary">Active Jobs:</span>
+                  <span className="font-medium text-pf-text-primary">{worker.activeJobs} / {worker.totalSlots}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Completed:</span>
-                  <span className="font-medium text-gray-900">{worker.completedJobs}</span>
+                  <span className="text-pf-text-secondary">Completed:</span>
+                  <span className="font-medium text-pf-text-primary">{worker.completedJobs}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Last Seen:</span>
-                  <span className="font-medium text-gray-900">{formatLastSeen(worker.lastHeartbeat)}</span>
+                  <span className="text-pf-text-secondary">Last Seen:</span>
+                  <span className="font-medium text-pf-text-primary">{formatLastSeen(worker.lastHeartbeat)}</span>
                 </div>
               </div>
 
               {/* Capabilities */}
               {worker.capabilities.length > 0 && (
                 <div className="mb-4">
-                  <h4 className="text-xs font-semibold text-gray-700 uppercase mb-2">Capabilities</h4>
+                  <h4 className="text-xs font-semibold text-pf-text-secondary uppercase mb-2">Capabilities</h4>
                   <div className="gap-sm flex-row flex-wrap">
                     {worker.capabilities.map((cap, idx) => (
                       <span
@@ -197,26 +197,26 @@ export default function SlicerRegistryPage() {
 
               {/* Active Jobs Section */}
               {selectedWorkerId === worker.id && (
-                <div className="mt-4 pt-4 border-t border-gray-200">
-                  <h4 className="text-xs font-semibold text-gray-700 uppercase mb-2">
+                <div className="mt-4 pt-4 border-t border-pf-border">
+                  <h4 className="text-xs font-semibold text-pf-text-secondary uppercase mb-2">
                     Active Jobs ({workerJobs.length})
                   </h4>
                   {workerJobs.length === 0 ? (
-                    <p className="text-sm text-gray-500 italic">No active jobs</p>
+                    <p className="text-sm text-pf-text-tertiary italic">No active jobs</p>
                   ) : (
                     <div className="space-y-2">
                       {workerJobs.map((job) => (
-                        <div key={job.jobId} className="bg-gray-50 rounded p-2 text-xs">
+                        <div key={job.jobId} className="bg-pf-bg-1 rounded p-2 text-xs">
                           <div className="flex justify-between items-start mb-1">
-                            <span className="font-medium text-gray-900 truncate flex-1">{job.modelFileName}</span>
-                            <span className="text-gray-600 ml-2">{job.progressPercent}%</span>
+                            <span className="font-medium text-pf-text-primary truncate flex-1">{job.modelFileName}</span>
+                            <span className="text-pf-text-secondary ml-2">{job.progressPercent}%</span>
                           </div>
                           {job.progressMessage && (
-                            <p className="text-gray-600 truncate">{job.progressMessage}</p>
+                            <p className="text-pf-text-secondary truncate">{job.progressMessage}</p>
                           )}
-                          <div className="mt-1 w-full bg-gray-200 rounded-full h-1">
-                            <div 
-                              className="bg-blue-600 h-1 rounded-full transition-all progress-width"
+                          <div className="mt-1 w-full bg-pf-bg-2 rounded-full h-1">
+                            <div
+                              className="bg-pf-accent h-1 rounded-full transition-all progress-width"
                               style={{ '--progress-width': `${job.progressPercent}%` } as React.CSSProperties}
                             ></div>
                           </div>
@@ -228,7 +228,7 @@ export default function SlicerRegistryPage() {
               )}
 
               {/* Endpoint */}
-              <div className="text-xs text-gray-500 truncate mt-2" title={worker.endpointUrl}>
+              <div className="text-xs text-pf-text-tertiary truncate mt-2" title={worker.endpointUrl}>
                 {worker.endpointUrl}
               </div>
             </div>
@@ -240,22 +240,22 @@ export default function SlicerRegistryPage() {
       <div className="card mt-8">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
           <div>
-            <div className="text-2xl font-bold text-gray-900">{workers.length}</div>
-            <div className="text-sm text-gray-600">Total Workers</div>
+            <div className="text-2xl font-bold text-pf-text-primary">{workers.length}</div>
+            <div className="text-sm text-pf-text-secondary">Total Workers</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-green-600">{workers.filter(w => w.status === 'Online').length}</div>
-            <div className="text-sm text-gray-600">Online</div>
+            <div className="text-2xl font-bold text-pf-success">{workers.filter(w => w.status === 'Online').length}</div>
+            <div className="text-sm text-pf-text-secondary">Online</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-gray-600">{workers.filter(w => w.status === 'Offline').length}</div>
-            <div className="text-sm text-gray-600">Offline</div>
+            <div className="text-2xl font-bold text-pf-text-tertiary">{workers.filter(w => w.status === 'Offline').length}</div>
+            <div className="text-sm text-pf-text-secondary">Offline</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-blue-600">
+            <div className="text-2xl font-bold text-pf-accent">
               {workers.reduce((sum, w) => sum + w.totalSlots, 0)}
             </div>
-            <div className="text-sm text-gray-600">Total Capacity</div>
+            <div className="text-sm text-pf-text-secondary">Total Capacity</div>
           </div>
         </div>
       </div>

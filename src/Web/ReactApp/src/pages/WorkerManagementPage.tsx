@@ -13,18 +13,28 @@ export default function WorkerManagementPage() {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    loadWorkers();
-    
-    // Start SignalR connection
-    startSignalRConnection();
+    let isMounted = true;
+
+    const initialize = async () => {
+      // Load initial data
+      if (isMounted) await loadWorkers();
+
+      // Start SignalR connection
+      if (isMounted) await startSignalRConnection();
+    };
+
+    initialize();
 
     // Refresh every 30 seconds as fallback (SignalR should provide real-time updates)
-    const interval = setInterval(loadWorkers, 30000);
-    
+    const interval = setInterval(() => {
+      if (isMounted) loadWorkers();
+    }, 30000);
+
     return () => {
+      isMounted = false;
       clearInterval(interval);
-      // Clean up SignalR connection
-      slicerHubService.stop();
+      // Clean up SignalR connection - properly stop before unmounting
+      slicerHubService.stop().catch(err => console.warn('Error stopping SlicerHub:', err));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -37,6 +47,9 @@ export default function WorkerManagementPage() {
 
   const startSignalRConnection = async () => {
     try {
+      // Ensure we're not double-starting
+      if (isConnected) return;
+
       await slicerHubService.start();
       setIsConnected(true);
 
@@ -59,15 +72,15 @@ export default function WorkerManagementPage() {
   const handleWorkerHeartbeat = (event: SlicerHeartbeatEvent) => {
     console.log('Worker heartbeat:', event);
     // Update worker status in real-time
-    setWorkers(prev => prev.map(worker => 
-      worker.id === event.id 
-        ? { 
-            ...worker, 
-            status: event.status, 
-            freeSlots: event.freeSlots, 
-            lastHeartbeat: event.lastSeen,
-            activeJobs: worker.totalSlots - event.freeSlots
-          }
+    setWorkers(prev => prev.map(worker =>
+      worker.id === event.id
+        ? {
+          ...worker,
+          status: event.status,
+          freeSlots: event.freeSlots,
+          lastHeartbeat: event.lastSeen,
+          activeJobs: worker.totalSlots - event.freeSlots
+        }
         : worker
     ));
   };
@@ -82,13 +95,13 @@ export default function WorkerManagementPage() {
     try {
       setError(null);
       let data: WorkerResponse[];
-      
+
       if (filter === 'all') {
         data = await workerService.getAllWorkers();
       } else {
         data = await workerService.getWorkersByStatus(filter);
       }
-      
+
       setWorkers(data);
       setLoading(false);
     } catch (err) {
@@ -99,7 +112,7 @@ export default function WorkerManagementPage() {
 
   const handleDisableWorker = async () => {
     if (!selectedWorker || !disableReason.trim()) return;
-    
+
     try {
       await workerService.disableWorker(selectedWorker.id, disableReason);
       setShowDisableDialog(false);
@@ -122,7 +135,7 @@ export default function WorkerManagementPage() {
 
   const handleDeleteWorker = async (worker: WorkerResponse) => {
     if (!confirm(`Are you sure you want to delete worker "${worker.name}"?`)) return;
-    
+
     try {
       await workerService.deleteWorker(worker.id);
       loadWorkers();
@@ -161,15 +174,15 @@ export default function WorkerManagementPage() {
   return (
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-3xl font-bold">Worker Management</h1>
-            <div className="flex items-center gap-2 mt-2">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-              <span className="text-sm text-gray-600">
-                {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
-              </span>
-            </div>
+        <div>
+          <h1 className="text-3xl font-bold">Worker Management</h1>
+          <div className="flex items-center gap-2 mt-2">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+            <span className="text-sm text-gray-600">
+              {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
+            </span>
           </div>
+        </div>
         <button
           onClick={loadWorkers}
           className="btn-base btn-md btn-primary"
@@ -250,10 +263,13 @@ export default function WorkerManagementPage() {
                   <div className="text-xs text-gray-500">
                     {workerService.calculateUtilization(worker).toFixed(0)}% utilization
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                  <div className="w-full bg-gray-200 rounded-full h-2 mt-1 overflow-hidden">
                     <div
-                      className="bg-blue-600 h-2 rounded-full progress-width"
-                      style={{ '--progress-width': `${workerService.calculateUtilization(worker)}%` } as React.CSSProperties}
+                      className="bg-blue-600 h-2 rounded-full"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, workerService.calculateUtilization(worker)))}%`,
+                        transition: 'width 0.3s ease-in-out'
+                      }}
                     />
                   </div>
                 </td>
@@ -268,7 +284,7 @@ export default function WorkerManagementPage() {
                     ✗ Failed: {worker.failedJobs}
                   </div>
                   <div className="text-xs text-gray-500">
-                    Success: {workerService.calculateSuccessRate(worker).toFixed(1)}%
+                    Success: {(workerService.calculateSuccessRate(worker) ?? 0).toFixed(1)}%
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -330,19 +346,19 @@ export default function WorkerManagementPage() {
               <h2 className="modal-header-title">Disable Worker</h2>
             </div>
             <div className="modal-body">
-            <p className="mb-4">
-              Disable worker: <strong>{selectedWorker.name}</strong>
-            </p>
-            <div className="form-group">
-              <label className="form-label">Reason (required)</label>
-              <textarea
-                value={disableReason}
-                onChange={(e) => setDisableReason(e.target.value)}
-                className="input-base w-full"
-                rows={3}
-                placeholder="Enter reason for disabling this worker..."
-              />
-            </div>
+              <p className="mb-4">
+                Disable worker: <strong>{selectedWorker.name}</strong>
+              </p>
+              <div className="form-group">
+                <label className="form-label">Reason (required)</label>
+                <textarea
+                  value={disableReason}
+                  onChange={(e) => setDisableReason(e.target.value)}
+                  className="input-base w-full"
+                  rows={3}
+                  placeholder="Enter reason for disabling this worker..."
+                />
+              </div>
             </div>
             <div className="modal-footer">
               <button
