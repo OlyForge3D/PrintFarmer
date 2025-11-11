@@ -6,8 +6,8 @@ import { SlicerUIContext as SlicerUIContextValue } from './SlicerUIContext';
  * Props for SlicerUIProvider
  */
 interface SlicerUIProviderProps {
-  children: ReactNode;
-  registry?: ISlicerUIRegistry;
+    children: ReactNode;
+    registry?: ISlicerUIRegistry;
 }
 
 /**
@@ -24,7 +24,7 @@ interface SlicerUIProviderProps {
  * ```
  */
 export const SlicerUIProvider: React.FC<SlicerUIProviderProps> = ({ children, registry }) => {
-  const registryInstance = registry ?? new SlicerUIRegistry();
+    const registryInstance = registry ?? new SlicerUIRegistry();
 
-  return <SlicerUIContextValue.Provider value={registryInstance}>{children}</SlicerUIContextValue.Provider>;
+    return <SlicerUIContextValue.Provider value={registryInstance}>{children}</SlicerUIContextValue.Provider>;
 };

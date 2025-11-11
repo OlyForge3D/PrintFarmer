@@ -22,10 +22,10 @@ describe('OrcaImportWizard E2E Tests', () => {
         bedDepth: 256,
         maxZHeight: 256,
         nozzleDiameter: 0.4,
-          maxBedTemperature: 110,
-          maxHotendTemperature: 300,
-          hasHeatedBed: true,
-          rawParameters: {},
+        maxBedTemperature: 110,
+        maxHotendTemperature: 300,
+        hasHeatedBed: true,
+        rawParameters: {},
       },
       {
         name: 'Prusa MK4',
@@ -34,10 +34,10 @@ describe('OrcaImportWizard E2E Tests', () => {
         bedDepth: 210,
         maxZHeight: 220,
         nozzleDiameter: 0.4,
-          maxBedTemperature: 120,
-          maxHotendTemperature: 300,
-          hasHeatedBed: true,
-          rawParameters: {},
+        maxBedTemperature: 120,
+        maxHotendTemperature: 300,
+        hasHeatedBed: true,
+        rawParameters: {},
       },
     ],
     filaments: [
@@ -46,40 +46,40 @@ describe('OrcaImportWizard E2E Tests', () => {
         filamentType: 'PLA',
         nozzleTemperature: 215,
         bedTemperature: 60,
-          rawParameters: {},
+        rawParameters: {},
       },
       {
         name: 'Generic PETG',
         filamentType: 'PETG',
         nozzleTemperature: 240,
         bedTemperature: 80,
-          rawParameters: {},
+        rawParameters: {},
       },
     ],
     processes: [
       {
         name: '0.20mm SPEED @BBL X1C',
         layerHeight: 0.2,
-          firstLayerHeight: 0.2,
+        firstLayerHeight: 0.2,
         infillPercentage: 15,
-          enableSupports: false,
-          perimeters: 2,
-          topLayers: 5,
-          bottomLayers: 4,
+        enableSupports: false,
+        perimeters: 2,
+        topLayers: 5,
+        bottomLayers: 4,
         quality: 'Standard',
-          rawParameters: {},
+        rawParameters: {},
       },
       {
         name: '0.12mm FINE @BBL X1C',
         layerHeight: 0.12,
-          firstLayerHeight: 0.2,
+        firstLayerHeight: 0.2,
         infillPercentage: 20,
-          enableSupports: false,
-          perimeters: 3,
-          topLayers: 7,
-          bottomLayers: 6,
+        enableSupports: false,
+        perimeters: 3,
+        topLayers: 7,
+        bottomLayers: 6,
         quality: 'Fine',
-          rawParameters: {},
+        rawParameters: {},
       },
     ],
     metadata: {
@@ -122,7 +122,7 @@ describe('OrcaImportWizard E2E Tests', () => {
       expect(
         screen.getByText(/Select a config bundle JSON file exported from OrcaSlicer/)
       ).toBeInTheDocument();
-        expect(document.querySelector('#bundle-upload')).toBeTruthy();
+      expect(document.querySelector('#bundle-upload')).toBeTruthy();
     });
 
     it('shows file loaded state after file selection', async () => {
@@ -225,9 +225,9 @@ describe('OrcaImportWizard E2E Tests', () => {
     it('displays preset counts correctly', async () => {
       await uploadAndPreview();
 
-        // Check for the count cards with numbers
-        const counts = screen.getAllByText('2');
-        expect(counts.length).toBeGreaterThanOrEqual(3); // 2 printers, 2 filaments, 2 processes
+      // Check for the count cards with numbers
+      const counts = screen.getAllByText('2');
+      expect(counts.length).toBeGreaterThanOrEqual(3); // 2 printers, 2 filaments, 2 processes
       expect(screen.getByText('printer presets')).toBeInTheDocument();
       expect(screen.getByText('filament presets')).toBeInTheDocument();
       expect(screen.getByText('process presets')).toBeInTheDocument();
@@ -343,11 +343,11 @@ describe('OrcaImportWizard E2E Tests', () => {
       vi.mocked(orcaProfilesService.previewBundle).mockResolvedValue(mockPreview);
       vi.mocked(orcaProfilesService.importBundle).mockResolvedValue({
         success: true,
-          printersImported: 2,
-          filamentsImported: 2,
-          processesImported: 2,
-          warnings: [],
-          errors: [],
+        printersImported: 2,
+        filamentsImported: 2,
+        processesImported: 2,
+        warnings: [],
+        errors: [],
       });
     });
 

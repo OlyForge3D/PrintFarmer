@@ -1,5 +1,5 @@
-using Microsoft.Extensions.DependencyInjection;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services.Slicing.Abstractions;
 

@@ -1,13 +1,14 @@
-import axios from 'axios';
+import axios from "axios";
 import {
   OrcaBundlePreview,
   ImportOrcaBundleRequest,
   ImportOrcaBundleResult,
   OrcaBundleMappingResult,
   ExportOrcaBundleRequest,
-} from './orcaProfiles';
+} from "./orcaProfiles";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5245';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5245";
 
 export const orcaProfilesService = {
   /**
@@ -26,7 +27,9 @@ export const orcaProfilesService = {
    * Import selected presets from an OrcaSlicer bundle.
    * Returns import result with counts and any errors/warnings.
    */
-  async importBundle(request: ImportOrcaBundleRequest): Promise<ImportOrcaBundleResult> {
+  async importBundle(
+    request: ImportOrcaBundleRequest
+  ): Promise<ImportOrcaBundleResult> {
     const response = await axios.post<ImportOrcaBundleResult>(
       `${API_BASE_URL}/api/slicer/profiles/import/orca`,
       request
@@ -49,7 +52,9 @@ export const orcaProfilesService = {
   /**
    * Get mapping results for bundle presets (matches to catalog entities).
    */
-  async mapBundlePresets(preview: OrcaBundlePreview): Promise<OrcaBundleMappingResult> {
+  async mapBundlePresets(
+    preview: OrcaBundlePreview
+  ): Promise<OrcaBundleMappingResult> {
     const response = await axios.post<OrcaBundleMappingResult>(
       `${API_BASE_URL}/api/slicer/profiles/import/orca/map`,
       preview

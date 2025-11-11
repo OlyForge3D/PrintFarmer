@@ -1,6 +1,6 @@
 using System.Reflection;
-using Microsoft.Extensions.DependencyInjection;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services.Slicing.Abstractions;
 
@@ -37,7 +37,7 @@ public static class SlicerPluginDiscovery
         {
             // Get all assemblies in the current domain
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            
+
             foreach (var assembly in assemblies)
             {
                 try

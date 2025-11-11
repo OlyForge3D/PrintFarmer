@@ -9,7 +9,7 @@
  * slicer-specific UI as needed.
  */
 
-import React from 'react';
+import React from "react";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ComponentType = React.ComponentType<any>;
@@ -52,7 +52,11 @@ export interface ISlicerUIRegistry {
   /**
    * Register slicer UI exports for a specific slicer and version.
    */
-  registerUI(slicerName: string, slicerVersion: string, ui: SlicerUIExports): void;
+  registerUI(
+    slicerName: string,
+    slicerVersion: string,
+    ui: SlicerUIExports
+  ): void;
 
   /**
    * Get slicer UI exports by name and version.
@@ -62,7 +66,10 @@ export interface ISlicerUIRegistry {
   /**
    * Get a specific UI component for a slicer.
    */
-  getComponent(slicerName: string, componentName: keyof SlicerUIExports): ComponentType | null;
+  getComponent(
+    slicerName: string,
+    componentName: keyof SlicerUIExports
+  ): ComponentType | null;
 
   /**
    * Get a service for a slicer.
@@ -86,10 +93,16 @@ export interface ISlicerUIRegistry {
 export class SlicerUIRegistry implements ISlicerUIRegistry {
   private registry = new Map<string, SlicerUIExports>();
 
-  registerUI(slicerName: string, slicerVersion: string, ui: SlicerUIExports): void {
+  registerUI(
+    slicerName: string,
+    slicerVersion: string,
+    ui: SlicerUIExports
+  ): void {
     const key = this.getKey(slicerName, slicerVersion);
     this.registry.set(key, ui);
-    console.debug(`[SlicerUIRegistry] Registered UI for ${slicerName} v${slicerVersion}`);
+    console.debug(
+      `[SlicerUIRegistry] Registered UI for ${slicerName} v${slicerVersion}`
+    );
   }
 
   getUI(slicerName: string, slicerVersion?: string): SlicerUIExports | null {
@@ -101,7 +114,7 @@ export class SlicerUIRegistry implements ISlicerUIRegistry {
 
     // Otherwise, find latest version of this slicer
     let latest: SlicerUIExports | null = null;
-    let latestVersion = '0.0.0';
+    let latestVersion = "0.0.0";
 
     for (const [key, ui] of this.registry) {
       if (key.startsWith(`${slicerName}:`)) {
@@ -115,12 +128,17 @@ export class SlicerUIRegistry implements ISlicerUIRegistry {
     return latest;
   }
 
-  getComponent(slicerName: string, componentName: keyof SlicerUIExports): ComponentType | null {
+  getComponent(
+    slicerName: string,
+    componentName: keyof SlicerUIExports
+  ): ComponentType | null {
     const ui = this.getUI(slicerName);
     if (!ui) return null;
 
     const component = ui[componentName];
-    return typeof component === 'function' ? (component as ComponentType) : null;
+    return typeof component === "function"
+      ? (component as ComponentType)
+      : null;
   }
 
   getService(slicerName: string, serviceName: string): ServiceType {
@@ -138,7 +156,7 @@ export class SlicerUIRegistry implements ISlicerUIRegistry {
   }
 
   listRegistered(): Array<{ name: string; version: string }> {
-    return Array.from(this.registry.values()).map(ui => ({
+    return Array.from(this.registry.values()).map((ui) => ({
       name: ui.slicerName,
       version: ui.slicerVersion,
     }));
@@ -149,8 +167,8 @@ export class SlicerUIRegistry implements ISlicerUIRegistry {
   }
 
   private compareVersions(v1: string, v2: string): number {
-    const parts1 = v1.split('.').map(Number);
-    const parts2 = v2.split('.').map(Number);
+    const parts1 = v1.split(".").map(Number);
+    const parts2 = v2.split(".").map(Number);
 
     for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
       const p1 = parts1[i] ?? 0;

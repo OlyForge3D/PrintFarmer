@@ -6,10 +6,10 @@
  */
 
 // OrcaSlicer UI Components
-export { OrcaImportWizard } from './components/OrcaImportWizard';
+export { OrcaImportWizard } from "./components/OrcaImportWizard";
 
 // OrcaSlicer UI Services
-export { orcaProfilesService } from './services/orcaProfilesService';
+export { orcaProfilesService } from "./services/orcaProfilesService";
 
 // OrcaSlicer UI Types
 export type {
@@ -24,4 +24,4 @@ export type {
   FilamentPresetMatch,
   ProcessPresetMatch,
   OrcaBundleMappingResult,
-} from './types/orcaProfiles';
+} from "./types/orcaProfiles";

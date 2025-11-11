@@ -11,10 +11,12 @@
       "@/types/*": ["./src/types/*"],
       "@/utils/*": ["./src/utils/*"],
       "@/pages/*": ["./src/pages/*"],
-      "@farm/slicers-orcaslicer-v2_3_x/*": ["../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/*"],
-      "@farm/slicers-orcaslicer-v2_3_x": ["../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/index.ts"]
+      "@farm/slicers-orcaslicer-v2_3_x/*": [
+        "../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/*"
+      ],
+      "@farm/slicers-orcaslicer-v2_3_x": [
+        "../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/index.ts"
+      ]
     }
   }
 }
-
-

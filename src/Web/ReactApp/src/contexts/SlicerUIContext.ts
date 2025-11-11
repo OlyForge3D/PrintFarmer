@@ -1,5 +1,5 @@
-import { createContext } from 'react';
-import type { ISlicerUIRegistry } from '../services/slicer-registry/SlicerUIRegistry';
+import { createContext } from "react";
+import type { ISlicerUIRegistry } from "../services/slicer-registry/SlicerUIRegistry";
 
 /**
  * React Context for accessing the SlicerUIRegistry.
