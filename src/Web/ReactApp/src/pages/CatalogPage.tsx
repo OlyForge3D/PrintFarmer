@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { Plus, Edit, Trash2, Save, X, Settings, Database } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, X, Settings, Database, Image as ImageIcon } from 'lucide-react';
 import type { ManufacturerDto, PrinterModelDto, FilamentTypeDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/components/EditModelModal';
 import { PageTemplate } from '@/components/PageTemplate';
+import { assetService } from '@/services/assetService';
 
 export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
@@ -70,9 +71,15 @@ export function CatalogPage() {
     }
   };
 
+  const getCoverImageUrl = (manufacturerId: string, modelId: string): string | undefined => {
+    const manufacturer = manufacturers.find(m => m.id === manufacturerId);
+    if (!manufacturer) return undefined;
+    return assetService.getCoverImageUrl(manufacturer.name, modelId);
+  };
+
   const addManufacturer = async () => {
     if (!newManufacturer.trim()) return;
-    
+
     try {
       const response = await apiClient.createManufacturer(newManufacturer.trim());
       setManufacturers([...manufacturers, response]);
@@ -85,7 +92,7 @@ export function CatalogPage() {
 
   const addModel = async () => {
     if (!newModel.trim() || !selectedManufacturer) return;
-    
+
     try {
       const response = await apiClient.createModel({
         name: newModel.trim(),
@@ -158,7 +165,7 @@ export function CatalogPage() {
 
   const deleteManufacturer = async (id: string) => {
     if (!confirm('Are you sure? This will also delete all associated models.')) return;
-    
+
     try {
       await apiClient.deleteManufacturer(id);
       setManufacturers(manufacturers.filter(m => m.id !== id));
@@ -174,7 +181,7 @@ export function CatalogPage() {
 
   const deleteModel = async (id: string) => {
     if (!confirm('Are you sure you want to delete this model?')) return;
-    
+
     try {
       await apiClient.deleteModel(id);
       setModels(models.filter(m => m.id !== id));
@@ -246,9 +253,8 @@ export function CatalogPage() {
             {manufacturers.map((manufacturer) => (
               <div
                 key={manufacturer.id}
-                className={`p-3 border border-pf-border rounded cursor-pointer hover:bg-pf-bg-2 transition-colors ${
-                  selectedManufacturer?.id === manufacturer.id ? 'bg-blue-900/30 border-blue-600' : ''
-                }`}
+                className={`p-3 border border-pf-border rounded cursor-pointer hover:bg-pf-bg-2 transition-colors ${selectedManufacturer?.id === manufacturer.id ? 'bg-blue-900/30 border-blue-600' : ''
+                  }`}
                 onClick={() => setSelectedManufacturer(manufacturer)}
               >
                 <div className="flex justify-between items-center">
@@ -411,6 +417,18 @@ export function CatalogPage() {
                                 Filament types: {model.supportedFilamentTypes.join(', ')}
                               </div>
                             )}
+                            {(() => {
+                              const coverUrl = getCoverImageUrl(selectedManufacturer!.id, model.id);
+                              if (coverUrl) {
+                                return (
+                                  <div className="mt-2 flex items-center gap-1 text-xs text-pf-text-tertiary">
+                                    <ImageIcon className="h-3 w-3" />
+                                    <span>Cover image available</span>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                         )}
                       </div>
@@ -441,7 +459,7 @@ export function CatalogPage() {
                       )}
                     </div>
                   </div>
-                  
+
                   {/* Filament Type Editor */}
                   {selectedModel?.id === model.id && showFilamentEditor && (
                     <div className="ml-4 p-3 bg-pf-bg-0 border border-pf-border rounded">
@@ -460,14 +478,14 @@ export function CatalogPage() {
                                   const updatedTypes = e.target.checked
                                     ? [...(model.supportedFilamentTypes || []), filamentType.name]
                                     : (model.supportedFilamentTypes || []).filter(t => t !== filamentType.name);
-                                  
+
                                   // Update local state optimistically
-                                  setModels(models.map(m => 
-                                    m.id === model.id 
+                                  setModels(models.map(m =>
+                                    m.id === model.id
                                       ? { ...m, supportedFilamentTypes: updatedTypes }
                                       : m
                                   ));
-                                  
+
                                   // Update via API
                                   await updateModelFilamentTypes(model.id, updatedTypes);
                                 }}
@@ -503,7 +521,7 @@ export function CatalogPage() {
           </div>
         </div>
       </div>
-      
+
       <EditModelModal
         model={modelToEdit}
         isOpen={editModelModalOpen}

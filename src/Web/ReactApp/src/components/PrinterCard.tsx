@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
 import type { PrintJobStatusDto } from '@/types/api';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { assetService } from '@/services/assetService';
 
 interface PrinterCardProps {
   printer: Printer;
@@ -22,16 +23,27 @@ interface PrinterCardProps {
   onManage?: (printer: Printer) => void;
 }
 
-export function PrinterCard({ 
-  printer, 
+export function PrinterCard({
+  printer,
   viewMode = 'grid',
-  onEdit = () => {},
-  onDelete = () => {},
-  onManage = () => {}
+  onEdit = () => { },
+  onDelete = () => { },
+  onManage = () => { }
 }: PrinterCardProps) {
   const { hasPermission } = useAuth();
   const { getPrinterStatus } = usePrinterStatusUpdates();
   const realtimeStatus = getPrinterStatus(printer.id);
+
+  // State for printer cover image
+  const [coverImageUrl, setCoverImageUrl] = useState<string | undefined>(undefined);
+
+  // Load printer cover image on mount
+  useEffect(() => {
+    if (printer.manufacturerName && printer.modelName) {
+      const url = assetService.getCoverImageUrl(printer.manufacturerName, printer.modelName);
+      setCoverImageUrl(url);
+    }
+  }, [printer.manufacturerName, printer.modelName]);
 
   // If debug info exists on window, we may log it — avoid runtime exceptions
   useEffect(() => {
@@ -58,31 +70,31 @@ export function PrinterCard({
   }, [realtimeStatus, printer.id]);
 
   const renderDebugBadge = (): React.ReactNode => {
-      const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
-      if (pf?.printerCard) {
-        // Guarded debug - emit to console for developers
-        if (pf.printerCard === true) {
-          console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
-        }
+    const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
+    if (pf?.printerCard) {
+      // Guarded debug - emit to console for developers
+      if (pf.printerCard === true) {
+        console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
       }
+    }
 
-      // Render-time debug (enable by setting window.PrintFarmerDebug.printerCardRender = true)
-      if (pf?.printerCardRender) {
-        if (pf.printerCardRender === true) {
-          console.debug('[PrintFarmer] PrinterCard render', { printerId: printer.id });
-        }
+    // Render-time debug (enable by setting window.PrintFarmerDebug.printerCardRender = true)
+    if (pf?.printerCardRender) {
+      if (pf.printerCardRender === true) {
+        console.debug('[PrintFarmer] PrinterCard render', { printerId: printer.id });
       }
+    }
 
-      // Optionally render a small debug badge in the UI
-      if (window.PrintFarmerDebug?.printerCardDisplay) {
-        // Render debug payload safely using renderUnknown
-        const payload = {
-          printer,
-          realtimeStatus
-        } as unknown;
-        return <div className="text-xs text-pf-text-tertiary">{renderUnknown(payload)}</div>;
-      }
-      return null;
+    // Optionally render a small debug badge in the UI
+    if (window.PrintFarmerDebug?.printerCardDisplay) {
+      // Render debug payload safely using renderUnknown
+      const payload = {
+        printer,
+        realtimeStatus
+      } as unknown;
+      return <div className="text-xs text-pf-text-tertiary">{renderUnknown(payload)}</div>;
+    }
+    return null;
   };
 
   // Keep a single guarded console log point to avoid spam; prefer the render badge for payloads
@@ -154,7 +166,7 @@ export function PrinterCard({
 
   const getStatusColor = (isOnline: boolean, state?: string) => {
     if (!isOnline) return 'bg-pf-status-offline-bg text-pf-status-offline-text border-pf-status-offline-border';
-    
+
     switch (state?.toLowerCase()) {
       case 'printing':
         return 'bg-pf-status-online-bg text-pf-status-online-text border-pf-status-online-border';
@@ -188,7 +200,7 @@ export function PrinterCard({
 
   const formatTemperature = (temp?: number, target?: number) => {
     if (temp === undefined && target === undefined) return null;
-    
+
     if (target !== undefined) {
       return `${Math.round(temp || 0)}°/${Math.round(target)}°`;
     }
@@ -212,7 +224,7 @@ export function PrinterCard({
             <div className="flex-shrink-0">
               <span className="text-2xl">{getBackendIcon(printer.backend)}</span>
             </div>
-            
+
             <div className="min-w-0 flex-1">
               <div className="flex items-center space-x-2">
                 <h3 className="text-lg font-bold text-pf-text-primary font-bebas uppercase truncate">
@@ -283,11 +295,11 @@ export function PrinterCard({
                 </button>
               </>
             )}
-            
+
             {hasPermission('printers', 'update') && (
               <button type="button" aria-label="Manage printer" title="Manage printer" className="p-2 text-pf-text-secondary hover:text-pf-accent bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
-                  <Cog className="h-4 w-4" />
-                </button>
+                <Cog className="h-4 w-4" />
+              </button>
             )}
           </div>
         </div>
@@ -336,7 +348,7 @@ export function PrinterCard({
               </p>
             </div>
           </div>
-          
+
           {hasPermission('printers', 'update') && (
             <PrinterActionsDropdown
               printer={printer}
@@ -352,6 +364,20 @@ export function PrinterCard({
             {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
           </span>
         </div>
+
+        {/* Printer Cover Image */}
+        {coverImageUrl && (
+          <div className="mb-4">
+            <img
+              src={coverImageUrl}
+              alt={`${printer.name} cover`}
+              className="w-full h-32 object-cover rounded border border-pf-border"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
 
         {/* Progress Bar */}
         {currentStatus.isOnline && currentStatus.progress !== undefined && currentStatus.progress > 0 && (
@@ -387,7 +413,7 @@ export function PrinterCard({
                 </div>
               </div>
             )}
-            
+
             {currentStatus.bedTemp !== undefined && (
               <div className="text-center">
                 <div className="text-xs text-pf-text-tertiary uppercase font-bold tracking-wide">Bed</div>
@@ -429,7 +455,7 @@ export function PrinterCard({
 
         {/* Action buttons */}
         <div className="flex space-x-2">
-          <button 
+          <button
             type="button"
             onClick={() => onManage(printer)}
             className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-pf-border-light shadow-sm text-sm leading-4 font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2 transition-colors"

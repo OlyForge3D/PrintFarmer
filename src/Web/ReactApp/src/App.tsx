@@ -45,6 +45,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import { ConfirmEmailPage } from './pages/ConfirmEmailPage';
 import { useAuth } from '@/contexts/AuthHooks';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { assetService } from '@/services/assetService';
 import './App.css';
 
 // Create a query client for React Query
@@ -252,6 +253,15 @@ function App() {
     component: 'App',
     logLifecycle: true
   });
+
+  // Initialize asset service on app startup
+  useEffect(() => {
+    assetService.initialize().catch(err => {
+      logger.warn('Failed to initialize asset service', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
+  }, [logger]);
 
   useEffect(() => {
     const checkSetupStatus = async () => {

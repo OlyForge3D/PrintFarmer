@@ -60,11 +60,6 @@ export const NewSliceJobPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const modelIdFromUrl = searchParams.get('modelId') || '';
 
-  // Initialize asset service on component mount
-  useEffect(() => {
-    assetService.initialize().catch(err => console.error('Failed to initialize asset service:', err));
-  }, []);
-
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
@@ -155,7 +150,7 @@ export const NewSliceJobPage: React.FC = () => {
       const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/printers`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error('Failed to load printers');
-      return res.json() as Promise<Array<{ id: string; name: string; model?: string; modelId?: string; modelMaxX?: number; modelMaxY?: number; modelMaxZ?: number }>>;
+      return res.json() as Promise<Array<{ id: string; name: string; model?: string; modelId?: string; modelMaxX?: number; modelMaxY?: number; modelMaxZ?: number; manufacturerName?: string; modelName?: string }>>;
     },
     staleTime: 30_000
   });
@@ -178,13 +173,12 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Get bed texture for the selected printer
   const bedTextureInfo = useMemo(() => {
-    if (!selectedPrinter?.model) {
+    if (!selectedPrinter?.manufacturerName || !selectedPrinter?.modelName) {
       return { url: undefined, format: undefined };
     }
 
-    // Try to find asset by printer model name
-    // First try to parse manufacturer from printer data if available
-    const asset = assetService.searchPrinters(selectedPrinter.model)[0];
+    // Look up asset by manufacturer and model name
+    const asset = assetService.getAsset(selectedPrinter.manufacturerName, selectedPrinter.modelName);
 
     if (asset?.bedTexture) {
       return {
@@ -194,7 +188,7 @@ export const NewSliceJobPage: React.FC = () => {
     }
 
     return { url: undefined, format: undefined };
-  }, [selectedPrinter?.model]);
+  }, [selectedPrinter?.manufacturerName, selectedPrinter?.modelName]);
 
   // Filter printers by search text
   const filteredPrinters = useMemo(() => {
@@ -923,14 +917,14 @@ export const NewSliceJobPage: React.FC = () => {
         </div>
 
         {/* RIGHT SIDE: 3D Model Preview */}
-        <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-96">
-          <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden">
-            <div className="card-header">
+        <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
+          <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden flex flex-col">
+            <div className="card-header flex-shrink-0">
               <h3 className="font-semibold text-pf-text">
                 {modelFileName ? `Preview: ${modelFileName}` : 'Model Preview'}
               </h3>
             </div>
-            <div className="card-body p-0 flex-1">
+            <div className="card-body p-0 flex-1 overflow-hidden">
               {modelFileUrl ? (
                 <Suspense fallback={<ViewerSkeleton variant="model" className="h-full w-full" />}>
                   <ModelViewer3D
