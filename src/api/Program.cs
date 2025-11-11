@@ -374,6 +374,9 @@ builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>
 builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
 
+// Register asset service for OrcaSlicer printer images and bed textures
+builder.Services.AddSingleton<IAssetService, AssetService>();
+
 // Register file consistency audit background service
 // Runs hourly to detect orphaned/missing/corrupted files
 builder.Services.AddHostedService(sp =>

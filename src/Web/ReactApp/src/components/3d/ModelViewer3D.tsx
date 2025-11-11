@@ -1,11 +1,10 @@
 import React, { Suspense, useRef, useState } from 'react';
 // (renderUnknown not required here)
 import { Canvas, useFrame, useLoader } from '@react-three/fiber';
-import { 
-  OrbitControls, 
-  Grid, 
-  Center, 
-  useProgress, 
+import {
+  OrbitControls,
+  Grid,
+  useProgress,
   Html,
   GizmoHelper,
   GizmoViewport,
@@ -14,6 +13,7 @@ import {
 import { STLLoader } from 'three-stdlib';
 import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
+import { TextureLoader } from 'three';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 export interface ModelViewerProps {
@@ -23,6 +23,13 @@ export interface ModelViewerProps {
   showAxes?: boolean;
   autoRotate?: boolean;
   className?: string;
+  bedDimensions?: {
+    width: number;  // X axis (mm)
+    depth: number;  // Y axis (mm)
+    height?: number; // Z axis (mm) - optional for visualization
+  };
+  bedTextureUrl?: string;     // URL to SVG or PNG bed texture
+  bedTextureFormat?: 'svg' | 'png';  // Format of bed texture
 }
 
 function LoadingProgress() {
@@ -38,6 +45,141 @@ function LoadingProgress() {
   );
 }
 
+/**
+ * Textured bed component - loads PNG texture for the bed surface
+ */
+function TexturedPrintBed({
+  width,
+  depth,
+  height,
+  textureUrl
+}: {
+  width: number;
+  depth: number;
+  height: number;
+  textureUrl: string;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const texture = useLoader(TextureLoader, textureUrl);
+
+  return (
+    <>
+      {/* Bed surface with texture */}
+      <mesh
+        ref={meshRef}
+        position={[0, 0, -height / 2]}
+        receiveShadow
+      >
+        <boxGeometry args={[width, depth, height]} />
+        <meshStandardMaterial
+          map={texture}
+          metalness={0.1}
+          roughness={0.5}
+          transparent={false}
+        />
+      </mesh>
+
+      {/* Bed outline */}
+      <lineSegments>
+        <edgesGeometry attach="geometry">
+          <boxGeometry args={[width, depth, height]} />
+        </edgesGeometry>
+        <lineBasicMaterial color="#ffffff" linewidth={2} />
+      </lineSegments>
+    </>
+  );
+}
+
+/**
+ * Plain print bed (no texture)
+ */
+function PlainPrintBed({
+  width,
+  depth,
+  height
+}: {
+  width: number;
+  depth: number;
+  height: number;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  return (
+    <>
+      {/* Bed surface - solid color */}
+      <mesh
+        ref={meshRef}
+        position={[0, 0, -height / 2]}
+        receiveShadow
+      >
+        <boxGeometry args={[width, depth, height]} />
+        <meshStandardMaterial
+          color="#1e40af"
+          metalness={0.2}
+          roughness={0.6}
+          transparent={true}
+          opacity={0.7}
+        />
+      </mesh>
+
+      {/* Bed outline */}
+      <lineSegments>
+        <edgesGeometry attach="geometry">
+          <boxGeometry args={[width, depth, height]} />
+        </edgesGeometry>
+        <lineBasicMaterial color="#ffffff" linewidth={2} />
+      </lineSegments>
+    </>
+  );
+}
+
+/**
+ * Print bed visualization showing the printer's build platform
+ * Supports both solid color and textured bed surfaces using SVG or PNG textures
+ * Objects are placed ON TOP of the bed (Z=0 plane)
+ */
+function PrintBed({
+  width,
+  depth,
+  height = 0.5,
+  textureUrl,
+  textureFormat
+}: {
+  width: number;
+  depth: number;
+  height?: number;
+  textureUrl?: string;
+  textureFormat?: 'svg' | 'png';
+}) {
+  // Render appropriate bed component based on texture availability
+  const shouldUsePngTexture = textureUrl && textureFormat === 'png';
+
+  return (
+    <group>
+      {shouldUsePngTexture ? (
+        <Suspense fallback={<PlainPrintBed width={width} depth={depth} height={height} />}>
+          <TexturedPrintBed
+            width={width}
+            depth={depth}
+            height={height}
+            textureUrl={textureUrl}
+          />
+        </Suspense>
+      ) : (
+        <PlainPrintBed width={width} depth={depth} height={height} />
+      )}
+
+      {/* SVG texture overlay - render as image plane above the bed if provided */}
+      {textureUrl && textureFormat === 'svg' && (
+        <mesh position={[0, 0, (height ?? 0.5) / 2 + 0.01]}>
+          <planeGeometry args={[width, depth]} />
+          <meshBasicMaterial transparent={true} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 function STLModel({ url, color = "#0066cc" }: { url: string; color?: string }) {
   const geometry = useLoader(STLLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
@@ -48,28 +190,97 @@ function STLModel({ url, color = "#0066cc" }: { url: string; color?: string }) {
     }
   });
 
+  // Compute bounding box and center the geometry
+  // Position it on the bed (Z=0 is the top surface)
+  // This ensures the model sits ON the bed, not with the bed through it
+  const positionAttribute = geometry.getAttribute('position');
+  if (positionAttribute && positionAttribute instanceof THREE.BufferAttribute) {
+    const positions = (positionAttribute as THREE.BufferAttribute).array as Float32Array;
+
+    // Find bounds
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+
+    for (let i = 0; i < positions.length; i += 3) {
+      minX = Math.min(minX, positions[i]);
+      maxX = Math.max(maxX, positions[i]);
+      minY = Math.min(minY, positions[i + 1]);
+      maxY = Math.max(maxY, positions[i + 1]);
+      minZ = Math.min(minZ, positions[i + 2]);
+      maxZ = Math.max(maxZ, positions[i + 2]);
+    }
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    // Translate geometry so its bottom is at Z=0 and it's centered in X/Y
+    geometry.translate(-centerX, -centerY, -minZ);
+  }
+
   return (
-    <Center>
-      <mesh ref={meshRef} geometry={geometry} castShadow receiveShadow>
-        <meshStandardMaterial 
-          color={color} 
-          metalness={0.3} 
-          roughness={0.4} 
-        />
-      </mesh>
-    </Center>
+    <mesh
+      ref={meshRef}
+      geometry={geometry}
+      position={[0, 0, 0]}
+      castShadow
+      receiveShadow
+    >
+      <meshStandardMaterial
+        color={color}
+        metalness={0.3}
+        roughness={0.4}
+      />
+    </mesh>
   );
 }
 
 function PLYModel({ url }: { url: string }) {
   const geometry = useLoader(PLYLoader, url);
-  
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame((state) => {
+    if (meshRef.current) {
+      meshRef.current.rotation.y = Math.sin(state.clock.elapsedTime) * 0.1;
+    }
+  });
+
+  // Compute bounding box for PLY model same as STL
+  const positionAttribute = geometry.getAttribute('position');
+  if (positionAttribute && positionAttribute instanceof THREE.BufferAttribute) {
+    const positions = (positionAttribute as THREE.BufferAttribute).array as Float32Array;
+
+    // Find bounds
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+
+    for (let i = 0; i < positions.length; i += 3) {
+      minX = Math.min(minX, positions[i]);
+      maxX = Math.max(maxX, positions[i]);
+      minY = Math.min(minY, positions[i + 1]);
+      maxY = Math.max(maxY, positions[i + 1]);
+      minZ = Math.min(minZ, positions[i + 2]);
+      maxZ = Math.max(maxZ, positions[i + 2]);
+    }
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    // Translate geometry so its bottom is at Z=0 and centered in X/Y
+    geometry.translate(-centerX, -centerY, -minZ);
+  }
+
   return (
-    <Center>
-      <mesh geometry={geometry} castShadow receiveShadow>
-        <meshStandardMaterial vertexColors />
-      </mesh>
-    </Center>
+    <mesh
+      ref={meshRef}
+      geometry={geometry}
+      position={[0, 0, 0]}
+      castShadow
+      receiveShadow
+    >
+      <meshStandardMaterial vertexColors />
+    </mesh>
   );
 }
 
@@ -79,7 +290,10 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
   showGrid = true,
   showAxes = true,
   autoRotate = false,
-  className = "h-96 w-full"
+  className = "h-96 w-full",
+  bedDimensions,
+  bedTextureUrl,
+  bedTextureFormat
 }) => {
   const [error, setError] = useState<string | null>(null);
 
@@ -136,8 +350,8 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
       >
         {/* Lighting */}
         <ambientLight intensity={0.4} />
-        <directionalLight 
-          position={[10, 10, 5]} 
+        <directionalLight
+          position={[10, 10, 5]}
           intensity={1}
           castShadow
           shadow-mapSize-width={2048}
@@ -147,27 +361,38 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
 
         {/* Environment */}
         <Environment preset="studio" />
-        
+
+        {/* Print bed - if printer dimensions provided */}
+        {bedDimensions && (
+          <PrintBed
+            width={bedDimensions.width}
+            depth={bedDimensions.depth}
+            height={bedDimensions.height}
+            textureUrl={bedTextureUrl}
+            textureFormat={bedTextureFormat}
+          />
+        )}
+
         {/* 3D Model */}
         <Suspense fallback={<LoadingProgress />}>
           {renderModel()}
         </Suspense>
 
         {/* Controls and helpers */}
-        <OrbitControls 
-          enableDamping 
+        <OrbitControls
+          enableDamping
           dampingFactor={0.05}
           autoRotate={autoRotate}
           autoRotateSpeed={0.5}
         />
-        
+
         {showGrid && <Grid infiniteGrid />}
-        
+
         {showAxes && (
           <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-            <GizmoViewport 
-              axisColors={['#ff2060', '#20df80', '#2080ff']} 
-              labelColor="white" 
+            <GizmoViewport
+              axisColors={['#ff2060', '#20df80', '#2080ff']}
+              labelColor="white"
             />
           </GizmoHelper>
         )}
@@ -177,6 +402,11 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
       <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-3 py-2 rounded-lg text-sm">
         <div className="font-medium">{fileType.toUpperCase()} Model</div>
         <div className="text-gray-600">Click and drag to rotate</div>
+        {bedDimensions && (
+          <div className="text-xs text-gray-500 mt-1">
+            Bed: {bedDimensions.width} × {bedDimensions.depth}mm
+          </div>
+        )}
       </div>
     </div>
   );

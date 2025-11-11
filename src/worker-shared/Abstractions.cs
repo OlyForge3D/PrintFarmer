@@ -82,3 +82,17 @@ public static class WorkerIdentity
 {
     public static string Create() => Environment.MachineName + "-" + Environment.ProcessId;
 }
+
+/// <summary>
+/// Generic interface for slicer profile discovery services.
+/// Each slicer worker implements this interface to expose profiles from its local installation.
+/// </summary>
+public interface ISlicerProfilesService
+{
+    /// <summary>
+    /// Discover and list all available profiles from the slicer's local installation.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of discovered profiles as DTOs</returns>
+    Task<IList<SlicerProfileDto>> ListAvailableProfilesAsync(CancellationToken ct = default);
+}

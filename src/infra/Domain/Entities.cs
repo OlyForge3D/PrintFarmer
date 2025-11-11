@@ -87,6 +87,9 @@ public class PrinterModel
     public int? MaxBedTemp { get; set; } = 120;
     public int? MaxPrintSpeed { get; set; } = 150; // mm/s
     public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = new List<PrinterModelFilamentType>();
+    // Asset URLs for UI display
+    public string? CoverImageUrl { get; set; } // URL to printer cover image (from OrcaSlicer assets)
+    public string? BedTextureUrl { get; set; } // URL to bed texture image (from OrcaSlicer assets)
     public bool IsActive { get; set; } = true;
 }
 

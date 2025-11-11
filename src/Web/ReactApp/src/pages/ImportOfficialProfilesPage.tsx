@@ -76,32 +76,32 @@ export const ImportOfficialProfilesPage: React.FC = () => {
         staleTime: 30_000
     });
 
-  // Fetch available profiles from OrcaSlicer worker
-  // These are the actual profiles from the OrcaSlicer installation,
-  // not previously imported/system profiles
-  const { data: officialProfiles = [], isLoading: profilesLoading } = useQuery({
-    queryKey: ["official-profiles-from-worker"],
-    queryFn: async () => {
-      try {
-        const profiles = await officialProfilesService.getAvailableProfilesFromWorker();
-        return profiles;
-      } catch (error) {
-        console.error("Failed to fetch profiles from worker:", error);
-        throw error;
-      }
-    },
-  });
-
-  // Group profiles by material and quality
-  const groupedProfiles = useMemo(() => {
-    const groups: { [key: string]: AvailableProfile[] } = {};
-    officialProfiles.forEach((profile: AvailableProfile) => {
-      const key = `${profile.material} • ${profile.quality}`;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(profile);
+    // Fetch available profiles from OrcaSlicer worker
+    // These are the actual profiles from the OrcaSlicer installation,
+    // not previously imported/system profiles
+    const { data: officialProfiles = [], isLoading: profilesLoading } = useQuery({
+        queryKey: ["official-profiles-from-worker"],
+        queryFn: async () => {
+            try {
+                const profiles = await officialProfilesService.getAvailableProfilesFromWorker();
+                return profiles;
+            } catch (error) {
+                console.error("Failed to fetch profiles from worker:", error);
+                throw error;
+            }
+        },
     });
-    return Object.entries(groups).sort();
-  }, [officialProfiles]);
+
+    // Group profiles by material and quality
+    const groupedProfiles = useMemo(() => {
+        const groups: { [key: string]: AvailableProfile[] } = {};
+        officialProfiles.forEach((profile: AvailableProfile) => {
+            const key = `${profile.material} • ${profile.quality}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(profile);
+        });
+        return Object.entries(groups).sort();
+    }, [officialProfiles]);
 
     // Import mutation
     const importMutation = useMutation({

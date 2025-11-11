@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -160,7 +160,9 @@ namespace Farm.Web.Api.Services.Tags
         private static string ToPascalCase(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
+            {
                 return input;
+            }
 
             // First, convert to lowercase to normalize
             var lowered = input.ToLowerInvariant();
@@ -169,13 +171,18 @@ namespace Farm.Web.Api.Services.Tags
 
             // Handle case where input was only delimiters
             if (words.Length == 0)
+            {
                 return input;
+            }
 
             var pascalWords = words.Select(word =>
             {
                 // Safety check in case word is somehow empty
                 if (string.IsNullOrEmpty(word))
+                {
                     return "";
+                }
+
                 return char.ToUpperInvariant(word[0]) + (word.Length > 1 ? word.Substring(1) : "");
             });
 

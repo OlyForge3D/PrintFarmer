@@ -1,4 +1,4 @@
-namespace PrinterDiscovery.Services;
+﻿namespace PrinterDiscovery.Services;
 
 /// <summary>
 /// Represents a printer discovered on the network

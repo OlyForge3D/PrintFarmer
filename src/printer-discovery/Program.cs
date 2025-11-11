@@ -1,4 +1,4 @@
-using PrinterDiscovery.BackgroundServices;
+﻿using PrinterDiscovery.BackgroundServices;
 using PrinterDiscovery.Services;
 
 var builder = WebApplication.CreateBuilder(args);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Worker.Core;
 using Farm.Web.Shared;
 
 namespace Farm.OrcaSlicer.Worker.Services;
@@ -17,16 +18,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 /// - ~/.config/OrcaSlicer/profiles/filament/ (filament/material profiles)
 /// - ~/.config/OrcaSlicer/profiles/process/ (process/quality profiles)
 /// </summary>
-public interface IOrcaProfilesService
-{
-    /// <summary>
-    /// List all available OrcaSlicer profiles (printer, filament, process) from the local installation.
-    /// Returns profiles as DTO objects that can be imported into the database.
-    /// </summary>
-    Task<IList<SlicerProfileDto>> ListAvailableProfilesAsync(CancellationToken ct = default);
-}
-
-public class OrcaProfilesService : IOrcaProfilesService
+public class OrcaProfilesService : ISlicerProfilesService
 {
     private readonly IUnifiedLoggingService _logger;
     private readonly string _orcaConfigPath;

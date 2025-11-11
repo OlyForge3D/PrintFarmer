@@ -267,18 +267,6 @@ namespace Farm.Web.Api.Services.Printers
             return dtos;
         }
 
-        /// <summary>
-        /// Rewrites camera URLs to be accessible from the frontend client environment
-        /// </summary>
-        private string? RewriteCameraUrl(string? url)
-        {
-            if (string.IsNullOrEmpty(url))
-            {
-                return url;
-            }
-            return _urlRewriter.RewriteUrl(url, "camera");
-        }
-
         public async Task<Farm.Web.Shared.PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await _repo.FindByIdAsync(id, ct);

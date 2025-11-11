@@ -5,6 +5,7 @@ import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobServi
 import slicerProfilesService, { SlicerProfileListItem } from '@/services/slicerProfilesService';
 import workersService from '@/services/workersService';
 import { slicerRegistry } from '@/services/slicerRegistry';
+import { assetService } from '@/services/assetService';
 import { WorkerResponse } from '@/types/worker';
 import { hasRequiredCapabilities } from '@/types/worker';
 import * as signalR from '@microsoft/signalr';
@@ -58,6 +59,11 @@ export const NewSliceJobPage: React.FC = () => {
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const modelIdFromUrl = searchParams.get('modelId') || '';
+
+  // Initialize asset service on component mount
+  useEffect(() => {
+    assetService.initialize().catch(err => console.error('Failed to initialize asset service:', err));
+  }, []);
 
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
@@ -149,10 +155,46 @@ export const NewSliceJobPage: React.FC = () => {
       const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/printers`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error('Failed to load printers');
-      return res.json() as Promise<Array<{ id: string; name: string; model?: string }>>;
+      return res.json() as Promise<Array<{ id: string; name: string; model?: string; modelId?: string; modelMaxX?: number; modelMaxY?: number; modelMaxZ?: number }>>;
     },
     staleTime: 30_000
   });
+
+  // Get selected printer's bed dimensions
+  const selectedPrinter = useMemo(() => {
+    return printers.find(p => p.id === selectedPrinterId);
+  }, [printers, selectedPrinterId]);
+
+  const bedDimensions = useMemo(() => {
+    if (!selectedPrinter?.modelMaxX || !selectedPrinter?.modelMaxY) {
+      return undefined;
+    }
+    return {
+      width: selectedPrinter.modelMaxX,
+      depth: selectedPrinter.modelMaxY,
+      height: selectedPrinter.modelMaxZ || 0.5
+    };
+  }, [selectedPrinter]);
+
+  // Get bed texture for the selected printer
+  const bedTextureInfo = useMemo(() => {
+    if (!selectedPrinter?.model) {
+      return { url: undefined, format: undefined };
+    }
+
+    // Try to find asset by printer model name
+    // First try to parse manufacturer from printer data if available
+    const asset = assetService.searchPrinters(selectedPrinter.model)[0];
+
+    if (asset?.bedTexture) {
+      return {
+        url: asset.bedTexture,
+        format: asset.bedTextureFormat as 'svg' | 'png' | undefined
+      };
+    }
+
+    return { url: undefined, format: undefined };
+  }, [selectedPrinter?.model]);
 
   // Filter printers by search text
   const filteredPrinters = useMemo(() => {
@@ -734,7 +776,7 @@ export const NewSliceJobPage: React.FC = () => {
           {/* MODEL SELECTION - Inline, not collapsible */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4 space-y-3">
             <label className="block text-sm font-semibold text-pf-text">Model</label>
-            
+
             <FormField
               label="Use Model Picker"
               helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
@@ -898,6 +940,9 @@ export const NewSliceJobPage: React.FC = () => {
                     showAxes={true}
                     autoRotate={false}
                     className="h-full w-full"
+                    bedDimensions={bedDimensions}
+                    bedTextureUrl={bedTextureInfo.url}
+                    bedTextureFormat={bedTextureInfo.format}
                   />
                 </Suspense>
               ) : (

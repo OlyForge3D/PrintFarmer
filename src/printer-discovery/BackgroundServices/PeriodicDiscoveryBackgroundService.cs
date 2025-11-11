@@ -1,4 +1,4 @@
-using PrinterDiscovery.Services;
+﻿using PrinterDiscovery.Services;
 
 namespace PrinterDiscovery.BackgroundServices;
 
