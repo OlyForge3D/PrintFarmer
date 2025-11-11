@@ -558,13 +558,14 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError($"Failed to connect to OrcaSlicer worker: {ex.Message}");
-            return StatusCode(503, "OrcaSlicer worker unavailable");
+            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+            _logger.LogError($"Failed to connect to OrcaSlicer worker at {workerUrl}: {ex.Message}");
+            return StatusCode(503, $"OrcaSlicer worker unavailable at {workerUrl}. Please ensure the worker service is running.");
         }
         catch (Exception ex)
         {
             _logger.LogError($"Error fetching profiles from OrcaSlicer worker: {ex.Message}");
-            return StatusCode(500, "Error fetching profiles from worker");
+            return StatusCode(500, $"Error fetching profiles from worker: {ex.Message}");
         }
     }
 

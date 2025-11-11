@@ -79,7 +79,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
     // Fetch available profiles from OrcaSlicer worker
     // These are the actual profiles from the OrcaSlicer installation,
     // not previously imported/system profiles
-    const { data: officialProfiles = [], isLoading: profilesLoading } = useQuery({
+    const { data: officialProfiles = [], isLoading: profilesLoading, error: profilesError } = useQuery({
         queryKey: ["official-profiles-from-worker"],
         queryFn: async () => {
             try {
@@ -90,6 +90,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                 throw error;
             }
         },
+        retry: false // Don't retry failed requests
     });
 
     // Group profiles by material and quality
@@ -256,6 +257,13 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                         <div className="card bg-pf-panel border border-pf-border rounded shadow p-8 text-center">
                             <AlertCircle className="w-12 h-12 text-pf-text-muted mx-auto mb-4" />
                             <p className="text-pf-text-muted">Select a printer to see available profiles</p>
+                        </div>
+                    ) : profilesError ? (
+                        <div className="card bg-red-900/50 border border-red-700 rounded shadow p-8 text-center">
+                            <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+                            <p className="text-red-200 font-medium mb-2">Failed to Load Profiles</p>
+                            <p className="text-red-300 text-sm">{(profilesError as Error).message}</p>
+                            <p className="text-red-300 text-xs mt-3 italic">The OrcaSlicer worker service may not be running. Please check the server logs and ensure the worker is started.</p>
                         </div>
                     ) : profilesLoading ? (
                         <div className="card bg-pf-panel border border-pf-border rounded shadow p-8 text-center">
