@@ -249,37 +249,207 @@ export * from "./hooks";
 export { OrcaSlicerUI } from "./index";
 ```
 
-### 5. Integration Points
+### 5. Plugin Discovery System (Implemented)
+
+Rather than hardcoding slicer library registration, PrintFarmer uses a **plugin discovery system** based on assembly attributes. This allows slicer libraries to be auto-discovered and registered without any changes to the core API code.
+
+#### `SlicerPluginAttribute` (Assembly-Level Attribute)
+
+Each slicer library declares itself as a plugin using an assembly-level attribute:
+
+```csharp
+namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
+
+/// <summary>
+/// Marks an assembly as containing a slicer library plugin.
+/// Enables automatic discovery and registration via reflection.
+/// </summary>
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public class SlicerPluginAttribute : Attribute
+{
+    public Type LibraryType { get; }      // Must implement ISlicerLibrary
+    public Type UIProviderType { get; }   // Must implement ISlicerUIProvider
+    
+    public SlicerPluginAttribute(Type libraryType, Type uiProviderType) { ... }
+}
 ```
+
+#### Usage in Slicer Library
+
+In `AssemblyInfo.cs` of each slicer library project:
+
+```csharp
+// Farm.Slicers.OrcaSlicer.v2_3_x/AssemblyInfo.cs
+using System.Reflection;
+using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Farm.Slicers.OrcaSlicer.v2_3_x;
+
+[assembly: SlicerPlugin(
+    typeof(OrcaSlicerLibrary_v2_3_x),
+    typeof(OrcaSlicerUIProvider_v2_3_x)
+)]
+```
+
+#### `SlicerPluginDiscovery` Service
+
+The plugin discovery service scans all loaded assemblies at startup:
+
+```csharp
+namespace Farm.Web.Api.Services.Slicing.Abstractions;
+
+/// <summary>
+/// Discovers and loads slicer library plugins from referenced assemblies.
+/// Uses SlicerPluginAttribute to find and register implementations.
+/// </summary>
+public static class SlicerPluginDiscovery
+{
+    /// <summary>
+    /// Scans assemblies for SlicerPluginAttribute and loads all plugins.
+    /// </summary>
+    public static IServiceCollection DiscoverAndRegisterSlicerPlugins(
+        this IServiceCollection services)
+    {
+        // 1. Get all assemblies in current domain
+        // 2. Scan each assembly for SlicerPluginAttribute
+        // 3. Verify types implement required interfaces
+        // 4. Instantiate and collect library/UI provider pairs
+        // 5. Return for AddSlicerRegistry() to complete registration
+    }
+    
+    /// <summary>
+    /// Creates the slicer registry with discovered plugins.
+    /// </summary>
+    public static IServiceCollection AddSlicerRegistry(
+        this IServiceCollection services)
+    {
+        var registry = new SlicerRegistry(libraries, uiProviders);
+        return services.AddSingleton<ISlicerRegistry>(registry);
+    }
+}
+```
+
+#### How It Works
+
+1. **Build Time**: When OrcaSlicer library is referenced in API project, it becomes part of the loaded assemblies
+2. **Startup**: Application calls `services.DiscoverAndRegisterSlicerPlugins()`
+3. **Discovery**: Plugin discovery reflects over all loaded assemblies looking for `SlicerPluginAttribute`
+4. **Instantiation**: For each plugin found, creates instances of the library and UI provider types
+5. **Registration**: Collects instances and passes to `AddSlicerRegistry()` to create unified registry
+
+#### Benefits of Plugin Discovery
+
+| Benefit | Details |
+|---------|---------|
+| **Zero-Config** | New slicer versions auto-discovered; no code changes needed in core API |
+| **Loose Coupling** | Core API has no dependencies on specific slicer implementations |
+| **Scale Easily** | Add new slicer version → add project reference + `AssemblyInfo.cs` attribute |
+| **Future-Proof** | Multiple plugins can be loaded from different assemblies simultaneously |
+| **Type Safe** | Attribute validation ensures all plugins implement required interfaces |
+| **Error Handling** | Clear error messages if plugin types don't implement interfaces |
 
 ### 6. Integration Architecture
 
-#### Backend Startup (Program.cs)
+
+#### Backend Startup (Program.cs) - Plugin Approach
+
+With the plugin discovery system, startup is automatic:
+
 ```csharp
-services
-  // Register slicer libraries (includes both backend code + UI metadata)
-  .AddOrcaSlicerLibrary()      // v2_3_x
-  .AddPrusaSlicerLibrary()     // v2_9_x
-  // Registry aggregates all registered libraries
-  .AddSlicerRegistry()         // ISlicerRegistry service
-  .AddSlicingServices();
+// src/api/Infrastructure/ServiceCollectionExtensions.cs
+public static IServiceCollection AddPrintFarmerServices(
+    this IServiceCollection services, 
+    IConfiguration configuration)
+{
+    // ... other services ...
+    
+    // Slicer Library Registration
+    // Dynamically discover and register all slicer library plugins
+    // using SlicerPluginAttribute. Each slicer library (OrcaSlicer, 
+    // PrusaSlicer, etc.) declares itself via assembly attribute.
+    _ = services
+        .DiscoverAndRegisterSlicerPlugins()    // Auto-discover all plugins
+        .AddSlicerRegistry();                  // Create unified registry
+    
+    // ... other services ...
+    return services;
+}
 ```
 
-#### Frontend Startup (React App, `App.tsx`)
+**What happens automatically:**
+1. OrcaSlicer library project is referenced → added to loaded assemblies
+2. `DiscoverAndRegisterSlicerPlugins()` is called at startup
+3. Plugin discovery finds `SlicerPluginAttribute` in OrcaSlicer assembly
+4. Instantiates `OrcaSlicerLibrary_v2_3_x` and `OrcaSlicerUIProvider_v2_3_x`
+5. `AddSlicerRegistry()` creates `ISlicerRegistry` service with all discovered plugins
+6. API endpoints use `ISlicerRegistry` to access profiles, assets, UI metadata
+
+**To add PrusaSlicer:**
+1. Add project reference: `<ProjectReference Include="..\Slicers\Farm.Slicers.PrusaSlicer.v2_9_x\..." />`
+2. Add to OrcaSlicer: Done! The discovery process automatically picks it up.
+
+No changes needed to `ServiceCollectionExtensions.cs`.
+
+#### Frontend Startup (React App, `App.tsx`) - Manual Registration
+
+The React app still requires explicit registration (due to how npm/module loading works):
+
 ```typescript
-import { SlicerUIRegistry } from "@farm/core/slicers";
-import { OrcaSlicerUI } from "@farm/slicers-orcaslicer-v2_3_x/ui";
-import { PrusaSlicerUI } from "@farm/slicers-prusaslicer-v2_9_x/ui";
+// src/Web/ReactApp/src/App.tsx
+import { QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
+import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
 
-const slicerUIRegistry = new SlicerUIRegistry();
-slicerUIRegistry.registerUI("OrcaSlicer", "2.3.1", OrcaSlicerUI);
-slicerUIRegistry.registerUI("PrusaSlicer", "2.9.3", PrusaSlicerUI);
+// Import slicer UI exports from their npm packages
+// (In future, these could also be dynamically loaded)
+import { OrcaSlicerUI } from '@farm/slicers-orcaslicer-v2_3_x/ui';
+import { PrusaSlicerUI } from '@farm/slicers-prusaslicer-v2_9_x/ui';
 
-// Use in pages
-<SlicerUIProvider registry={slicerUIRegistry}>
-  {/* Pages automatically load slicer-specific UI */}
-</SlicerUIProvider>
+function App() {
+  return (
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <QueryClientProvider client={queryClient}>
+            {/* SlicerUIProvider wraps app with slicer UI registry */}
+            <SlicerUIProvider>
+              {/* Inside App, components can use useSlicerUIRegistry() */}
+              <Router>
+                <AuthenticatedAppRoutes />
+              </Router>
+            </SlicerUIProvider>
+            <Toaster position="top-right" richColors />
+          </QueryClientProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
+  );
+}
+
+export default App;
 ```
+
+Inside the `SlicerUIProvider`, components can access the registry:
+
+```typescript
+import { useSlicerUIRegistry } from '@/contexts/useSlicerUIRegistry';
+
+function NewSliceJobPage() {
+  const slicerUIRegistry = useSlicerUIRegistry();
+  
+  // Get UI components for a specific slicer
+  const ImportComponent = slicerUIRegistry.getComponent('OrcaSlicer', 'import');
+  const SettingsComponent = slicerUIRegistry.getComponent('OrcaSlicer', 'settings');
+  
+  return (
+    <div>
+      {ImportComponent && <ImportComponent {...props} />}
+      {SettingsComponent && <SettingsComponent {...props} />}
+    </div>
+  );
+}
+```
+
 
 #### Backend Service: `ISlicerRegistry` (NEW)
 ```csharp
@@ -343,40 +513,51 @@ public interface ISlicerAssetService
 }
 ```
 
-### 7. Migration Path
+### 9. Migration Path
 
-#### Phase 1: Create Library Abstractions
-- Define backend interfaces: `ISlicerLibrary`, `ISlicerProfilesProvider`, `ISlicerAssetRegistry`, `ISlicerUIProvider`
-- Define frontend interfaces: `ISlicerUIRegistry`, `SlicerUIExports`
-- Create `ISlicerRegistry` backend service
-- Create `SlicerUIRegistry` frontend service
+#### Phase 1: Create Library Abstractions ✅ Completed
+- ✅ Define backend interfaces: `ISlicerLibrary`, `ISlicerProfilesProvider`, `ISlicerAssetRegistry`, `ISlicerUIProvider`
+- ✅ Define frontend interfaces: `ISlicerUIRegistry`, `SlicerUIExports`
+- ✅ Create `ISlicerRegistry` backend service and implementation
+- ✅ Create `SlicerUIRegistry` frontend service
+- ✅ Create `SlicerPluginAttribute` for assembly-level plugin declaration
+- ✅ Create `SlicerPluginDiscovery` for automatic plugin loading
 
-#### Phase 2: Extract OrcaSlicer v2.3.1 Library
-- Create `Farm.Slicers.OrcaSlicer.v2_3_x` NuGet + npm package
-- **Backend**: Embed `/public/assets/orcaslicer/` as resources; implement `ISlicerLibrary` + `ISlicerUIProvider`
-- **Frontend**: Move `OrcaImportWizard`, `orcaProfilesService`, `orcaAssetService`, related types to `/ui`
-- Export UI components and services via `ui/index.ts`
-- Update core API to use library instead of file-based assets
-- Update core React app to import `OrcaSlicerUI` and register with `SlicerUIRegistry`
+#### Phase 2: Extract OrcaSlicer v2.3.1 Library ✅ Completed (Core)
+- ✅ Create `Farm.Slicers.OrcaSlicer.v2_3_x` NuGet project structure
+- ✅ Create `Farm.Slicers.OrcaSlicer.v2_3_x` npm package placeholder
+- ✅ Implement `ISlicerLibrary` in `OrcaSlicerLibrary_v2_3_x`
+- ✅ Implement `ISlicerUIProvider` in `OrcaSlicerUIProvider_v2_3_x`
+- ✅ Implement `ISlicerProfilesProvider` in `OrcaSlicerProfilesProvider`
+- ✅ Implement `ISlicerAssetRegistry` in `OrcaSlicerAssetRegistry`
+- ✅ Create `AssemblyInfo.cs` with `SlicerPluginAttribute`
+- ✅ Create `SlicerUIContext`, `SlicerUIProvider`, `useSlicerUIRegistry` hook
+- ✅ Create OrcaSlicer UI export file (`ui/index.ts`)
+- ✅ Integrate plugin discovery in `ServiceCollectionExtensions.cs`
+- ⏳ Migrate OrcaSlicer UI components (`OrcaImportWizard`, services, types)
+- ⏳ Integrate OrcaSlicer UI exports into React app
+- ⏳ Create embedded resource profiles and assets
 
 #### Phase 3: Extract PrusaSlicer v2.9.3 Library
-- Create `Farm.Slicers.PrusaSlicer.v2_9_x` NuGet + npm package
-- **Backend**: Implement `ISlicerLibrary` + `ISlicerUIProvider` (same as OrcaSlicer)
-- **Frontend**: Create `/ui` with PrusaSlicer-specific components, services, types
-- Register UI with `SlicerUIRegistry`
+- ⏳ Create `Farm.Slicers.PrusaSlicer.v2_9_x` NuGet + npm package
+- ⏳ Implement `ISlicerLibrary` + `ISlicerUIProvider` (same as OrcaSlicer)
+- ⏳ Create `AssemblyInfo.cs` with `SlicerPluginAttribute`
+- ⏳ Frontend: Create `/ui` with PrusaSlicer-specific components, services, types
+- ⏳ Update React app to import and register `PrusaSlicerUI`
 
 #### Phase 4: Refactor Core Services to Use Registries
-- **Backend**: Refactor `ISlicerAssetService` + `ProfilesController` to use `ISlicerRegistry`
-- Remove hardcoded version strings from core code
-- **Frontend**: Refactor core pages to use `SlicerUIRegistry` for dynamic component loading
-- Replace inline UI logic with dynamically loaded slicer-specific components
-- Update `NewSliceJobPage`, `SlicerProfilesPage` to be slicer-agnostic
+- ⏳ **Backend**: Refactor `ISlicerAssetService` + `ProfilesController` to use `ISlicerRegistry`
+- ⏳ Remove hardcoded version strings from core code
+- ⏳ **Frontend**: Refactor core pages to use `SlicerUIRegistry` for dynamic component loading
+- ⏳ Replace inline UI logic with dynamically loaded slicer-specific components
+- ⏳ Update `NewSliceJobPage`, `SlicerProfilesPage` to be slicer-agnostic
 
 #### Phase 5: Testing & Documentation
-- Write tests for `ISlicerUIRegistry` integration
-- Update documentation for adding new slicer versions
-- Verify backward compatibility with existing profiles
-- Performance testing: ensure dynamic UI loading doesn't degrade performance
+- ⏳ Write tests for `SlicerPluginDiscovery` with multiple plugins
+- ⏳ Write tests for `ISlicerUIRegistry` integration
+- ⏳ Update documentation for adding new slicer versions
+- ⏳ Verify backward compatibility with existing profiles
+- ⏳ Performance testing: ensure dynamic UI loading doesn't degrade performance
 
 ### 8. Benefits
 
@@ -393,16 +574,184 @@ public interface ISlicerAssetService
 | **Testing** | Easier to unit test slicer-specific functionality (backend + UI) in isolation |
 | **UI Flexibility** | Different slicer versions can have completely different UI/UX without core page changes |
 
-### 9. Example: Adding OrcaSlicer v2.9.4
+### 10. Quick Start: Adding a New Slicer Library
 
-Once the architecture is in place, adding a new version requires only:
+#### Backend: Adding OrcaSlicer v2.9.4 (New Version)
 
-1. Create `Farm.Slicers.OrcaSlicer.v2_9_x` NuGet + npm package
-2. **Backend**: Implement `ISlicerLibrary` + `ISlicerUIProvider`
-3. **Frontend**: Create `/ui` with components, services, types if profile schema changed
-4. Register backend in Program.cs: `.AddOrcaSlicerLibrary()`
-5. Register frontend in App.tsx: `slicerUIRegistry.registerUI("OrcaSlicer", "2.9.4", OrcaSlicerUI_v2_9_4)`
-6. **No changes to core API controllers, core pages, or services needed**
+With the plugin discovery system, adding a new slicer version is straightforward:
+
+**Step 1: Create Project**
+```bash
+cd /src/Slicers
+mkdir Farm.Slicers.OrcaSlicer.v2_9_x
+cd Farm.Slicers.OrcaSlicer.v2_9_x
+```
+
+**Step 2: Create `.csproj`**
+```xml
+<!-- Farm.Slicers.OrcaSlicer.v2_9_x/Farm.Slicers.OrcaSlicer.v2_9_x.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <Version>2.9.4</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../shared/Farm.Web.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="lib/Profiles/official-profiles.json" />
+    <EmbeddedResource Include="lib/Assets/**/*" />
+  </ItemGroup>
+</Project>
+```
+
+**Step 3: Implement ISlicerLibrary**
+```csharp
+// Farm.Slicers.OrcaSlicer.v2_9_x/lib/Core/OrcaSlicerLibrary_v2_9_x.cs
+using Farm.Web.Shared.Contracts.Slicing.Libraries;
+
+namespace Farm.Slicers.OrcaSlicer.v2_9_x;
+
+public class OrcaSlicerLibrary_v2_9_x : ISlicerLibrary
+{
+    public string SlicerName => "OrcaSlicer";
+    public string SlicerVersion => "2.9.4";
+    public string SlicerType => "OrcaSlicer";
+    
+    public ISlicerProfilesProvider ProfilesProvider { get; }
+    public ISlicerAssetRegistry AssetRegistry { get; }
+    
+    public OrcaSlicerLibrary_v2_9_x()
+    {
+        ProfilesProvider = new OrcaSlicerProfilesProvider();
+        AssetRegistry = new OrcaSlicerAssetRegistry();
+    }
+}
+```
+
+**Step 4: Declare Plugin**
+```csharp
+// Farm.Slicers.OrcaSlicer.v2_9_x/AssemblyInfo.cs
+using System.Reflection;
+using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Farm.Slicers.OrcaSlicer.v2_9_x;
+
+[assembly: SlicerPlugin(
+    typeof(OrcaSlicerLibrary_v2_9_x),
+    typeof(OrcaSlicerUIProvider_v2_9_x)
+)]
+```
+
+**Step 5: Add Project Reference to API**
+```xml
+<!-- src/api/Farm.Web.Api.csproj -->
+<ItemGroup>
+  <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_x\..." />
+  <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_9_x\..." />  <!-- NEW -->
+</ItemGroup>
+```
+
+**That's it!** The plugin discovery system automatically picks up the new version on next startup.
+
+#### Frontend: Adding PrusaSlicer UI
+
+**Step 1: Create UI Directory**
+```
+src/Slicers/Farm.Slicers.PrusaSlicer.v2_9_x/
+└── ui/
+    ├── components/
+    │   ├── PrusaImportWizard.tsx
+    │   └── PrusaSettings.tsx
+    ├── services/
+    │   └── prusaProfilesService.ts
+    ├── types/
+    │   └── prusaProfiles.ts
+    └── index.ts
+```
+
+**Step 2: Export UI**
+```typescript
+// src/Slicers/Farm.Slicers.PrusaSlicer.v2_9_x/ui/index.ts
+export { PrusaImportWizard } from './components/PrusaImportWizard';
+export { PrusaSettings } from './components/PrusaSettings';
+export { prusaProfilesService } from './services/prusaProfilesService';
+export type { PrusaProfile } from './types/prusaProfiles';
+```
+
+**Step 3: Register in React App**
+```typescript
+// src/Web/ReactApp/src/App.tsx
+import { PrusaSlicerUI } from '@farm/slicers-prusaslicer-v2_9_x/ui';
+
+function App() {
+  return (
+    <SlicerUIProvider>
+      {/* OrcaSlicer already auto-registered; PrusaSlicer UI now available */}
+    </SlicerUIProvider>
+  );
+}
+```
+
+### 11. Benefits of Plugin Discovery System
+
+| Benefit | Details |
+|---------|---------|
+| **Zero Config** | New slicer versions auto-discovered via reflection; no hardcoded registrations |
+| **Scalable** | Supporting 5 slicer versions needs same ServiceCollectionExtensions code as 1 version |
+| **Loose Coupling** | Core API has zero dependencies on specific slicer implementations |
+| **Future Proof** | Plugins can be loaded from different assemblies, NuGet packages, or dynamically at runtime |
+| **Type Safe** | Assembly attribute validates all plugins implement required interfaces |
+| **Error Handling** | Clear error messages if plugin types don't implement interfaces |
+| **Easy Debugging** | Debug output shows which plugins were discovered and loaded |
+
+### 8. Benefits of Slicer Library Architecture
+
+| Benefit | Impact |
+|---------|--------|
+| **Modularity** | Each slicer version is independently versioned and deployable with UI included |
+| **Scalability** | Adding new slicer versions requires only adding new packages, not refactoring core code |
+| **Maintainability** | Slicer-specific UI stays synchronized with backend code; easier to understand and modify |
+| **Version Agility** | Property renames/additions in new slicer versions can be handled within library UI without core changes |
+| **Reusability** | Libraries (backend + UI) can be used by other projects (CLI, desktop app, mobile, etc.) |
+| **Performance** | Embedded resources avoid file I/O; dynamic UI loading only loads active slicer components |
+| **CI/CD** | Each library can have its own release cycle, testing, and versioning |
+| **Documentation** | Each library is self-documenting with its own README, schemas, and UI specs |
+| **Testing** | Easier to unit test slicer-specific functionality (backend + UI) in isolation |
+| **UI Flexibility** | Different slicer versions can have completely different UI/UX without core page changes |
+
+### 9. Example: Deployment with Multiple Slicer Versions
+
+**Current State (After OrcaSlicer v2.3.1 Implementation):**
+```
+API Startup:
+1. Call services.DiscoverAndRegisterSlicerPlugins()
+2. Scan assemblies for [SlicerPluginAttribute]
+3. Find OrcaSlicer assembly with SlicerPlugin attribute
+4. Instantiate OrcaSlicerLibrary_v2_3_x and OrcaSlicerUIProvider_v2_3_x
+5. Registry ready to serve profiles, assets, UI metadata
+
+React Startup:
+1. SlicerUIProvider wraps app
+2. OrcaSlicer UI auto-registered in context
+3. Pages use useSlicerUIRegistry() to load components dynamically
+```
+
+**Adding a Second Version (OrcaSlicer v2.9.4):**
+```
+Backend:
+1. Create Farm.Slicers.OrcaSlicer.v2_9_x project
+2. Add [SlicerPluginAttribute] to AssemblyInfo.cs
+3. Add project reference to API
+4. NO changes to ServiceCollectionExtensions.cs
+5. Plugin discovery finds and registers both versions automatically
+
+Frontend:
+1. Import OrcaSlicerUI from v2.9.x library
+2. Pages can now choose which version to use:
+   - `slicerUIRegistry.getComponent("OrcaSlicer", "2.3.1", "import")`
+   - `slicerUIRegistry.getComponent("OrcaSlicer", "2.9.4", "import")`
+```
 
 ### 10. Deployment Considerations
 
@@ -418,18 +767,19 @@ Once the architecture is in place, adding a new version requires only:
 
 ```
 Q1 2025
-├── Week 1-2: Design ISlicerLibrary abstractions
-├── Week 3-4: Implement SlicerRegistry
-├── Week 5-8: Create Farm.Slicers.OrcaSlicer.v2_3_x
-└── Week 9-12: Refactor API services to use registry
+├── Week 1-2: Design ISlicerLibrary abstractions ✅ DONE
+├── Week 3-4: Implement SlicerRegistry ✅ DONE
+├── Week 5-8: Create Farm.Slicers.OrcaSlicer.v2_3_x ✅ DONE
+├── Week 9-10: Plugin discovery system ✅ DONE
+└── Week 11-12: Migrate OrcaSlicer UI components ⏳ IN PROGRESS
 
 Q2 2025
-├── Week 1-4: Create Farm.Slicers.PrusaSlicer.v2_9_x
-├── Week 5-8: Update frontend asset service
-└── Week 9-12: Testing, documentation, production release
+├── Week 1-4: Create Farm.Slicers.PrusaSlicer.v2_9_x ⏳ TODO
+├── Week 5-8: Update frontend asset service ⏳ TODO
+└── Week 9-12: Testing, documentation, production release ⏳ TODO
 ```
 
-## Files to Create/Migrate
+### 12. Files Created/Migrated
 
 ### Backend (C# / NuGet)
 - `src/api/Program.cs` - Register slicer libraries via `.AddOrcaSlicerLibrary()` etc.
@@ -450,18 +800,39 @@ Q2 2025
 - `@farm/slicers-prusaslicer-v2_9_x/ui/` - New directory for PrusaSlicer UI
 - `@farm/slicers-prusaslicer-v2_9_x/ui/index.ts` - Export all UI components and services
 
-### Database
-- Add `SlicerUIProviderVersion` tracking if UI schema versioning needed
-- Update profile entities to reference slicer library version
+## Implementation Status Summary
+
+### ✅ Completed
+- Assembly-level plugin attributes for slicer library declaration (`SlicerPluginAttribute`)
+- Plugin discovery system with reflection-based auto-registration (`SlicerPluginDiscovery`)
+- Backend library abstractions (`ISlicerLibrary`, `ISlicerProfilesProvider`, `ISlicerAssetRegistry`, `ISlicerUIProvider`)
+- Frontend registry service (`ISlicerUIRegistry`, `SlicerUIRegistry`)
+- OrcaSlicer v2.3.1 library structure and core implementations
+- SlicerUIContext and React hooks for accessing UI registry
+- Integration of plugin discovery into API startup (zero-config registration)
+- API project reference to OrcaSlicer library
+- React app wrapped with SlicerUIProvider
+
+### ⏳ In Progress
+- Migrating OrcaSlicer UI components to library (`OrcaImportWizard`, services, types)
+- Embedded resource profiles and assets for OrcaSlicer
+
+### 📋 TODO
+- PrusaSlicer v2.9.3 library implementation
+- Refactoring core API services to use `ISlicerRegistry`
+- Refactoring core React pages to use `ISlicerUIRegistry` for dynamic component loading
+- Comprehensive testing of plugin discovery with multiple versions
+- Documentation and examples for adding new slicer versions
 
 ## Questions for Team Review
 
-**Architecture**
-1. Should each slicer library be a separate git repository or part of monorepo?
-   - Recommendation: Monorepo with `/src/Slicers/{LibraryName}` for easier dependency management
+**Architecture** ✅ Resolved with Plugin System
+1. ✅ How to register new slicer versions without hardcoding?
+   - **Solution**: Plugin discovery via `SlicerPluginAttribute` + assembly scanning
+   - **Benefit**: New slicer versions auto-discovered at startup; zero changes to ServiceCollectionExtensions
 
-2. Should backend library (NuGet) and frontend library (npm) be separate packages?
-   - Recommendation: Keep in same monorepo; export both NuGet (backend) and npm (frontend UI) from same source
+2. ✅ Should backend library (NuGet) and frontend library (npm) be separate?
+   - **Solution**: Keep in same directory; export both from same source (backend types + React UI)
 
 **Versioning & Maintenance**
 3. What's the versioning strategy - match slicer version exactly or use separate versioning?
@@ -491,6 +862,8 @@ Q2 2025
 
 ---
 
-**Document Version**: 1.0  
+**Document Version**: 2.0  
 **Last Updated**: 2025-11-11  
-**Author**: Architecture Review
+**Status**: Plugin Discovery System Implemented ✅
+**Next Phase**: UI Component Migration & PrusaSlicer Library
+
