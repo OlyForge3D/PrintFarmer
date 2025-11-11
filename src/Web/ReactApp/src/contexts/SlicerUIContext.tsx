@@ -1,5 +1,6 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect, useMemo } from 'react';
 import { SlicerUIRegistry, type ISlicerUIRegistry } from '../services/slicer-registry/SlicerUIRegistry';
+import { registerAllSlicerUI } from '../services/slicer-registry/registerSlicerUI';
 import { SlicerUIContext as SlicerUIContextValue } from './SlicerUIContext';
 
 /**
@@ -14,6 +15,7 @@ interface SlicerUIProviderProps {
  * SlicerUIProvider component
  *
  * Wraps the application with access to the SlicerUIRegistry.
+ * Automatically registers all available slicer UI libraries on mount.
  * If no registry is provided, a new one is created.
  *
  * @example
@@ -24,7 +26,12 @@ interface SlicerUIProviderProps {
  * ```
  */
 export const SlicerUIProvider: React.FC<SlicerUIProviderProps> = ({ children, registry }) => {
-    const registryInstance = registry ?? new SlicerUIRegistry();
+    const registryInstance = useMemo(() => registry ?? new SlicerUIRegistry(), [registry]);
+
+    useEffect(() => {
+        // Register all slicer UI libraries on provider mount
+        registerAllSlicerUI(registryInstance);
+    }, [registryInstance]);
 
     return <SlicerUIContextValue.Provider value={registryInstance}>{children}</SlicerUIContextValue.Provider>;
 };
