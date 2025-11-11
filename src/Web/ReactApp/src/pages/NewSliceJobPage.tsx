@@ -11,6 +11,7 @@ import { hasRequiredCapabilities } from '@/types/worker';
 import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
+import { PrinterSelectorModal } from '@/components/PrinterSelectorModal';
 
 // Lazy load the 3D model viewer for better performance
 const ModelViewer3D = React.lazy(() =>
@@ -63,7 +64,6 @@ export const NewSliceJobPage: React.FC = () => {
   // === Main Sidebar Controls ===
   const [selectedSlicerId, setSelectedSlicerId] = useState<number>(1);
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>('');
-  const [printerSearchText, setPrinterSearchText] = useState('');
   const [selectedFilamentMaterial, setSelectedFilamentMaterial] = useState<MaterialType>('PLA');
   const [selectedProcessPresetId, setSelectedProcessPresetId] = useState<string>('');
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
@@ -100,6 +100,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [priority, setPriority] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [isPrinterSelectorOpen, setIsPrinterSelectorOpen] = useState(false);
 
   // === Queries ===
   const { data: availableWorkers = [] } = useQuery<WorkerResponse[], Error>({
@@ -150,35 +151,63 @@ export const NewSliceJobPage: React.FC = () => {
       const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/printers`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error('Failed to load printers');
-      return res.json() as Promise<Array<{ id: string; name: string; model?: string; modelId?: string; modelMaxX?: number; modelMaxY?: number; modelMaxZ?: number; manufacturerName?: string; modelName?: string }>>;
+      return res.json() as Promise<Array<{ id: string; name: string; model?: string; modelId?: string; manufacturerName?: string; modelName?: string }>>;
     },
     staleTime: 30_000
   });
 
-  // Get selected printer's bed dimensions
+  // Fetch full printer details including bed dimensions when a printer is selected
+  const { data: selectedPrinterDetails } = useQuery({
+    queryKey: ['printerDetails', selectedPrinterId],
+    queryFn: async () => {
+      if (!selectedPrinterId) return null;
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/printers/${selectedPrinterId}/details`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('Failed to load printer details');
+      return res.json() as Promise<{
+        id: string;
+        name: string;
+        manufacturerName?: string;
+        modelName?: string;
+        modelMaxX?: number;
+        modelMaxY?: number;
+        modelMaxZ?: number;
+      }>;
+    },
+    enabled: !!selectedPrinterId,
+    staleTime: 30_000
+  });
+
+  // Get selected printer basic info from list
   const selectedPrinter = useMemo(() => {
     return printers.find(p => p.id === selectedPrinterId);
   }, [printers, selectedPrinterId]);
 
+  // Use detailed info if available, fall back to basic
+  const selectedPrinterWithDetails = useMemo(() => {
+    return selectedPrinterDetails || selectedPrinter;
+  }, [selectedPrinterDetails, selectedPrinter]);
+
   const bedDimensions = useMemo(() => {
-    if (!selectedPrinter?.modelMaxX || !selectedPrinter?.modelMaxY) {
+    if (!selectedPrinterWithDetails || !('modelMaxX' in selectedPrinterWithDetails) || !selectedPrinterWithDetails.modelMaxX || !selectedPrinterWithDetails.modelMaxY) {
       return undefined;
     }
+    const detailedPrinter = selectedPrinterWithDetails as { modelMaxX: number; modelMaxY: number; modelMaxZ?: number };
     return {
-      width: selectedPrinter.modelMaxX,
-      depth: selectedPrinter.modelMaxY,
-      height: selectedPrinter.modelMaxZ || 0.5
+      width: detailedPrinter.modelMaxX,
+      depth: detailedPrinter.modelMaxY,
+      height: detailedPrinter.modelMaxZ || 0.5
     };
-  }, [selectedPrinter]);
+  }, [selectedPrinterWithDetails]);
 
   // Get bed texture for the selected printer
   const bedTextureInfo = useMemo(() => {
-    if (!selectedPrinter?.manufacturerName || !selectedPrinter?.modelName) {
+    if (!selectedPrinterWithDetails?.manufacturerName || !selectedPrinterWithDetails?.modelName) {
       return { url: undefined, format: undefined };
     }
 
     // Look up asset by manufacturer and model name
-    const asset = assetService.getAsset(selectedPrinter.manufacturerName, selectedPrinter.modelName);
+    const asset = assetService.getAsset(selectedPrinterWithDetails.manufacturerName, selectedPrinterWithDetails.modelName);
 
     if (asset?.bedTexture) {
       return {
@@ -188,14 +217,7 @@ export const NewSliceJobPage: React.FC = () => {
     }
 
     return { url: undefined, format: undefined };
-  }, [selectedPrinter?.manufacturerName, selectedPrinter?.modelName]);
-
-  // Filter printers by search text
-  const filteredPrinters = useMemo(() => {
-    if (!printerSearchText.trim()) return printers;
-    const search = printerSearchText.toLowerCase();
-    return printers.filter(p => p.name.toLowerCase().includes(search) || p.model?.toLowerCase().includes(search));
-  }, [printers, printerSearchText]);
+  }, [selectedPrinterWithDetails?.manufacturerName, selectedPrinterWithDetails?.modelName]);
 
   // Fetch process profiles - filter by selected printer
   const { data: profiles = [] } = useQuery<SlicerProfileListItem[], Error>({
@@ -309,8 +331,7 @@ export const NewSliceJobPage: React.FC = () => {
   // Derive model file URL when selected
   useEffect(() => {
     if (useModelPicker && selectedModelId) {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-      const apiBase = !baseUrl || baseUrl.trim() === '' ? '/api' : baseUrl;
+      const apiBase = getApiBaseUrl();
       setModelFileUrl(`${apiBase}/3d-models/${selectedModelId}/file`);
       const mdl = models?.find(m => m.id === selectedModelId);
       if (mdl) {
@@ -457,26 +478,37 @@ export const NewSliceJobPage: React.FC = () => {
             </Select>
           </div>
 
-          {/* PRINTER SELECTION with Search */}
+          {/* PRINTER SELECTION Modal Trigger */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-4">
             <label className="block text-sm font-semibold text-pf-text mb-2">Printer</label>
-            <Input
-              type="text"
-              placeholder="Search printers..."
-              value={printerSearchText}
-              onChange={e => setPrinterSearchText(e.target.value)}
-              className="mb-2 text-sm"
-            />
-            <Select
-              value={selectedPrinterId}
-              onChange={e => setSelectedPrinterId(e.target.value)}
-              className="w-full"
-            >
-              <option value="">-- Select Printer --</option>
-              {filteredPrinters.map(p => (
-                <option key={p.id} value={p.id}>{p.name} {p.model ? `(${p.model})` : ''}</option>
-              ))}
-            </Select>
+            {selectedPrinter ? (
+              <div className="space-y-2">
+                <div className="p-3 bg-pf-bg-0 rounded border border-pf-border">
+                  <p className="font-medium text-pf-text">{selectedPrinter.name}</p>
+                  {selectedPrinter.modelName && (
+                    <p className="text-sm text-pf-text-muted">
+                      {selectedPrinter.manufacturerName && `${selectedPrinter.manufacturerName} • `}
+                      {selectedPrinter.modelName}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPrinterSelectorOpen(true)}
+                  className="w-full px-3 py-2 bg-pf-bg-1 border border-pf-border hover:border-pf-accent rounded text-pf-text text-sm transition-colors"
+                >
+                  Change Printer
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsPrinterSelectorOpen(true)}
+                className="w-full px-3 py-2 bg-pf-accent text-pf-bg-0 border border-pf-accent hover:bg-pf-accent/90 rounded text-sm font-medium transition-colors"
+              >
+                Select Printer
+              </button>
+            )}
           </div>
 
           {/* FILAMENT / MATERIAL PROFILE - Shows slicer + custom profiles */}
@@ -950,6 +982,15 @@ export const NewSliceJobPage: React.FC = () => {
           </div>
         </div>
       </form>
+
+      {/* Printer Selector Modal */}
+      <PrinterSelectorModal
+        isOpen={isPrinterSelectorOpen}
+        printers={printers}
+        selectedPrinterId={selectedPrinterId}
+        onSelect={(printerId) => setSelectedPrinterId(printerId)}
+        onClose={() => setIsPrinterSelectorOpen(false)}
+      />
     </PageTemplate>
   );
 };
