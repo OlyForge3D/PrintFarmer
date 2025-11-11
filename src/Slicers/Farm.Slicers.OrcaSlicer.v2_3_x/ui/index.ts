@@ -2,31 +2,26 @@
  * OrcaSlicer v2.3.1 UI Export
  *
  * This file aggregates all OrcaSlicer-specific UI components, services, types, and hooks.
- * The React app imports this single export and registers it with the SlicerUIRegistry.
+ * The React app imports these exports and registers them with the SlicerUIRegistry.
  */
 
-// Re-export all OrcaSlicer-specific UI pieces
-export const OrcaSlicerUI = {
-  // Slicer metadata
-  slicerName: 'OrcaSlicer',
-  slicerVersion: '2.3.1',
+// OrcaSlicer UI Components
+export { OrcaImportWizard } from './components/OrcaImportWizard';
 
-  // UI Components (to be migrated from core)
-  // - OrcaImportWizard: Multi-step bundle import component
-  // - OrcaBundleExport: Export profiles as bundle
-  // - OrcaSlicerSettings: Engine-specific settings component
+// OrcaSlicer UI Services
+export { orcaProfilesService } from './services/orcaProfilesService';
 
-  // Services (to be migrated from core)
-  // - orcaProfilesService: Bundle import/export operations
-  // - orcaAssetService: Bed texture/cover image management
-
-  // Types (to be migrated from core)
-  // - OrcaSlicer profile config types
-  // - OrcaSlicer bundle types
-
-  // Hooks (to be created)
-  // - useOrcaProfiles: Manage OrcaSlicer profiles
-  // - useOrcaBundles: Handle bundle import/export
-};
-
-export type OrcaSlicerUIType = typeof OrcaSlicerUI;
+// OrcaSlicer UI Types
+export type {
+  OrcaPrinterPreset,
+  OrcaFilamentPreset,
+  OrcaProcessPreset,
+  OrcaBundlePreview,
+  ImportOrcaBundleRequest,
+  ImportOrcaBundleResult,
+  ExportOrcaBundleRequest,
+  PrinterPresetMatch,
+  FilamentPresetMatch,
+  ProcessPresetMatch,
+  OrcaBundleMappingResult,
+} from './types/orcaProfiles';

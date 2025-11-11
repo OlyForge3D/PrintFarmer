@@ -2,13 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrcaImportWizard } from '../../components/profiles/OrcaImportWizard';
-import type { OrcaBundlePreview } from '../../types/orcaProfiles';
+import { OrcaImportWizard, type OrcaBundlePreview } from '@farm/slicers-orcaslicer-v2_3_x';
 
 // Mock the orcaProfilesService
-vi.mock('../../services/orcaProfilesService');
+vi.mock('@farm/slicers-orcaslicer-v2_3_x/services/orcaProfilesService');
 
-import { orcaProfilesService } from '../../services/orcaProfilesService';
+import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_x/services/orcaProfilesService';
 
 describe('OrcaImportWizard E2E Tests', () => {
   let queryClient: QueryClient;
