@@ -1,0 +1,5511 @@
+{
+  "version": "2.3.1",
+  "id": "ratrig_ratrig_v-core_4_400",
+  "name": "RatRig V-Core 4 400",
+  "manufacturer": "Ratrig",
+  "machine": {
+    "type": "machine_model",
+    "name": "RatRig V-Core 4 400",
+    "model_id": "V-Core_4_400",
+    "nozzle_diameter": "0.4;0.5;0.6;0.8",
+    "machine_tech": "FFF",
+    "family": "RatRig_V-Core",
+    "bed_model": "ratrig-vcore-bed-400.stl",
+    "bed_texture": "ratrig_logo.svg",
+    "hotend_model": "",
+    "default_materials": "RatRig Generic ABS;RatRig Generic PLA;RatRig Generic PLA-CF;RatRig Generic PETG;RatRig Generic TPU;RatRig Generic ASA;RatRig Generic PC;RatRig Generic PVA;RatRig Generic PA;RatRig Generic PA-CF"
+  },
+  "processes": [
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_fdm_process_common",
+      "name": "fdm_process_common (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "fdm_process_common",
+        "from": "system",
+        "instantiation": "false",
+        "adaptive_layer_height": "0",
+        "reduce_crossing_wall": "0",
+        "bridge_flow": "0.95",
+        "bridge_speed": "25",
+        "brim_width": "5",
+        "compatible_printers": [],
+        "print_sequence": "by layer",
+        "default_acceleration": "10000",
+        "bridge_no_support": "0",
+        "elefant_foot_compensation": "0.1",
+        "outer_wall_line_width": "0.4",
+        "outer_wall_speed": "120",
+        "line_width": "0.45",
+        "infill_direction": "45",
+        "sparse_infill_density": "15%",
+        "sparse_infill_pattern": "crosshatch",
+        "initial_layer_line_width": "0.42",
+        "initial_layer_print_height": "0.2",
+        "initial_layer_speed": "20",
+        "gap_infill_speed": "30",
+        "infill_combination": "0",
+        "sparse_infill_line_width": "0.45",
+        "infill_wall_overlap": "25%",
+        "sparse_infill_speed": "50",
+        "interface_shells": "0",
+        "detect_overhang_wall": "0",
+        "reduce_infill_retraction": "0",
+        "filename_format": "{input_filename_base}.gcode",
+        "wall_loops": "3",
+        "inner_wall_line_width": "0.45",
+        "inner_wall_speed": "40",
+        "print_settings_id": "",
+        "raft_layers": "0",
+        "seam_position": "nearest",
+        "skirt_distance": "2",
+        "skirt_height": "2",
+        "minimum_sparse_infill_area": "0",
+        "internal_solid_infill_line_width": "0.45",
+        "internal_solid_infill_speed": "40",
+        "spiral_mode": "0",
+        "standby_temperature_delta": "-5",
+        "enable_support": "0",
+        "support_filament": "0",
+        "support_line_width": "0.42",
+        "support_interface_filament": "0",
+        "support_on_build_plate_only": "0",
+        "support_top_z_distance": "0.15",
+        "support_interface_loop_pattern": "0",
+        "support_interface_top_layers": "2",
+        "support_interface_spacing": "0",
+        "support_interface_speed": "80",
+        "support_base_pattern": "rectilinear",
+        "support_base_pattern_spacing": "2",
+        "support_speed": "40",
+        "support_threshold_angle": "30",
+        "support_object_xy_distance": "0.5",
+        "detect_thin_wall": "0",
+        "top_surface_line_width": "0.4",
+        "top_surface_speed": "30",
+        "travel_speed": "400",
+        "enable_prime_tower": "0",
+        "prime_tower_width": "60",
+        "xy_hole_compensation": "0",
+        "xy_contour_compensation": "0"
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_fdm_process_ratrig_common",
+      "name": "fdm_process_ratrig_common (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "fdm_process_ratrig_common",
+        "inherits": "fdm_process_common",
+        "from": "system",
+        "instantiation": "false",
+        "adaptive_layer_height": "0",
+        "reduce_crossing_wall": "0",
+        "max_travel_detour_distance": "0",
+        "bottom_surface_pattern": "monotonic",
+        "bottom_shell_layers": "3",
+        "bottom_shell_thickness": "0",
+        "bridge_flow": "0.80",
+        "bridge_speed": "25",
+        "internal_bridge_speed": "70",
+        "brim_width": "5",
+        "brim_object_gap": "0.1",
+        "compatible_printers_condition": "",
+        "print_sequence": "by layer",
+        "default_acceleration": "5000",
+        "top_surface_acceleration": "3000",
+        "travel_acceleration": "5000",
+        "inner_wall_acceleration": "5000",
+        "outer_wall_acceleration": "3000",
+        "bridge_no_support": "0",
+        "draft_shield": "disabled",
+        "elefant_foot_compensation": "0",
+        "outer_wall_line_width": "0.4",
+        "wall_infill_order": "inner wall/outer wall/infill",
+        "line_width": "0.4",
+        "infill_direction": "45",
+        "sparse_infill_density": "15%",
+        "sparse_infill_pattern": "crosshatch",
+        "initial_layer_acceleration": "500",
+        "initial_layer_line_width": "0.45",
+        "inital_layer_height": "0.2",
+        "infill_combination": "0",
+        "sparse_infill_line_width": "0.4",
+        "infill_wall_overlap": "25%",
+        "interface_shells": "0",
+        "ironing_flow": "10%",
+        "ironing_spacing": "0.15",
+        "ironing_speed": "30",
+        "ironing_type": "no ironing",
+        "layer_height": "0.2",
+        "reduce_infill_retraction": "1",
+        "filename_format": "{input_filename_base}_{layer_height}mm_{filament_type[0]}_{print_time}.gcode",
+        "detect_overhang_wall": "1",
+        "overhang_1_4_speed": "0",
+        "overhang_2_4_speed": "60",
+        "overhang_3_4_speed": "30",
+        "overhang_4_4_speed": "10",
+        "inner_wall_line_width": "0.40",
+        "wall_loops": "3",
+        "print_settings_id": "",
+        "raft_layers": "0",
+        "seam_position": "aligned",
+        "skirt_distance": "2",
+        "skirt_height": "1",
+        "skirt_loops": "0",
+        "minimum_sparse_infill_area": "15",
+        "internal_solid_infill_line_width": "0.4",
+        "spiral_mode": "0",
+        "standby_temperature_delta": "-5",
+        "enable_support": "0",
+        "resolution": "0.012",
+        "support_type": "normal(auto)",
+        "support_on_build_plate_only": "0",
+        "support_top_z_distance": "0.2",
+        "support_filament": "0",
+        "support_line_width": "0.4",
+        "support_interface_loop_pattern": "0",
+        "support_interface_filament": "0",
+        "support_interface_top_layers": "2",
+        "support_interface_bottom_layers": "2",
+        "support_interface_spacing": "0.5",
+        "support_interface_speed": "80",
+        "support_base_pattern": "rectilinear",
+        "support_base_pattern_spacing": "2.5",
+        "support_speed": "150",
+        "support_threshold_angle": "30",
+        "support_object_xy_distance": "0.35",
+        "tree_support_branch_angle": "45",
+        "tree_support_wall_count": "0",
+        "detect_thin_wall": "0",
+        "top_surface_pattern": "monotonicline",
+        "top_surface_line_width": "0.4",
+        "top_shell_layers": "3",
+        "top_shell_thickness": "0.8",
+        "initial_layer_speed": "50",
+        "initial_layer_infill_speed": "105",
+        "outer_wall_speed": "120",
+        "inner_wall_speed": "200",
+        "internal_solid_infill_speed": "200",
+        "top_surface_speed": "100",
+        "gap_infill_speed": "100",
+        "sparse_infill_speed": "200",
+        "travel_speed": "350",
+        "enable_prime_tower": "0",
+        "wipe_tower_no_sparse_layers": "0",
+        "prime_tower_width": "60",
+        "xy_hole_compensation": "0",
+        "xy_contour_compensation": "0",
+        "enable_arc_fitting": "0",
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle"
+        ],
+        "exclude_object": "1"
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_fdm_process_ratrig_common_idex",
+      "name": "fdm_process_ratrig_common_idex (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "fdm_process_ratrig_common_idex",
+        "inherits": "fdm_process_common",
+        "from": "system",
+        "instantiation": "false",
+        "adaptive_layer_height": "0",
+        "reduce_crossing_wall": "0",
+        "max_travel_detour_distance": "0",
+        "bottom_surface_pattern": "monotonic",
+        "bottom_shell_layers": "3",
+        "bottom_shell_thickness": "0",
+        "bridge_flow": "0.80",
+        "bridge_speed": "50",
+        "internal_bridge_speed": "70",
+        "brim_width": "5",
+        "brim_object_gap": "0.1",
+        "compatible_printers_condition": "",
+        "print_sequence": "by layer",
+        "default_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "travel_acceleration": "10000",
+        "inner_wall_acceleration": "8000",
+        "outer_wall_acceleration": "4000",
+        "bridge_no_support": "0",
+        "draft_shield": "disabled",
+        "elefant_foot_compensation": "0",
+        "outer_wall_line_width": "0.4",
+        "wall_infill_order": "inner wall/outer wall/infill",
+        "line_width": "0.4",
+        "infill_direction": "45",
+        "sparse_infill_density": "15%",
+        "sparse_infill_pattern": "crosshatch",
+        "initial_layer_acceleration": "1500",
+        "initial_layer_line_width": "0.45",
+        "inital_layer_height": "0.2",
+        "infill_combination": "0",
+        "sparse_infill_line_width": "0.4",
+        "infill_wall_overlap": "25%",
+        "interface_shells": "0",
+        "ironing_flow": "10%",
+        "ironing_spacing": "0.15",
+        "ironing_speed": "30",
+        "ironing_type": "no ironing",
+        "layer_height": "0.2",
+        "reduce_infill_retraction": "1",
+        "filename_format": "{input_filename_base}_{layer_height}mm_{filament_type[0]}_{print_time}.gcode",
+        "detect_overhang_wall": "1",
+        "overhang_1_4_speed": "0",
+        "overhang_2_4_speed": "60",
+        "overhang_3_4_speed": "30",
+        "overhang_4_4_speed": "10",
+        "inner_wall_line_width": "0.40",
+        "wall_loops": "3",
+        "print_settings_id": "",
+        "raft_layers": "0",
+        "seam_position": "aligned",
+        "skirt_distance": "2",
+        "skirt_height": "1",
+        "skirt_loops": "0",
+        "minimum_sparse_infill_area": "15",
+        "internal_solid_infill_line_width": "0.4",
+        "spiral_mode": "0",
+        "standby_temperature_delta": "-5",
+        "enable_support": "0",
+        "resolution": "0.012",
+        "support_type": "normal(auto)",
+        "support_on_build_plate_only": "0",
+        "support_top_z_distance": "0.2",
+        "support_filament": "0",
+        "support_line_width": "0.4",
+        "support_interface_loop_pattern": "0",
+        "support_interface_filament": "0",
+        "support_interface_top_layers": "2",
+        "support_interface_bottom_layers": "2",
+        "support_interface_spacing": "0.5",
+        "support_interface_speed": "100%",
+        "support_base_pattern": "rectilinear",
+        "support_base_pattern_spacing": "2.5",
+        "support_speed": "50",
+        "support_threshold_angle": "30",
+        "support_object_xy_distance": "0.35",
+        "tree_support_branch_angle": "45",
+        "tree_support_wall_count": "0",
+        "detect_thin_wall": "0",
+        "top_surface_pattern": "monotonicline",
+        "top_surface_line_width": "0.4",
+        "top_shell_layers": "3",
+        "top_shell_thickness": "0.8",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "enable_prime_tower": "0",
+        "wipe_tower_no_sparse_layers": "0",
+        "prime_tower_width": "60",
+        "xy_hole_compensation": "0",
+        "xy_contour_compensation": "0",
+        "enable_arc_fitting": "0",
+        "exclude_object": "1"
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_fdm_process_ratrig_idex",
+      "name": "fdm_process_ratrig_idex (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "fdm_process_ratrig_idex",
+        "inherits": "fdm_process_common",
+        "from": "system",
+        "instantiation": "false",
+        "adaptive_layer_height": "0",
+        "reduce_crossing_wall": "0",
+        "max_travel_detour_distance": "0",
+        "bottom_surface_pattern": "monotonic",
+        "bottom_shell_layers": "3",
+        "bottom_shell_thickness": "0",
+        "bridge_flow": "0.80",
+        "bridge_speed": "50",
+        "internal_bridge_speed": "70",
+        "brim_width": "5",
+        "brim_object_gap": "0.1",
+        "compatible_printers_condition": "",
+        "print_sequence": "by layer",
+        "default_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "travel_acceleration": "10000",
+        "inner_wall_acceleration": "8000",
+        "outer_wall_acceleration": "4000",
+        "bridge_no_support": "0",
+        "draft_shield": "disabled",
+        "elefant_foot_compensation": "0",
+        "outer_wall_line_width": "0.4",
+        "wall_infill_order": "inner wall/outer wall/infill",
+        "line_width": "0.4",
+        "infill_direction": "45",
+        "sparse_infill_density": "15%",
+        "sparse_infill_pattern": "crosshatch",
+        "initial_layer_acceleration": "1500",
+        "initial_layer_line_width": "0.45",
+        "inital_layer_height": "0.2",
+        "infill_combination": "0",
+        "sparse_infill_line_width": "0.4",
+        "infill_wall_overlap": "25%",
+        "interface_shells": "0",
+        "ironing_flow": "10%",
+        "ironing_spacing": "0.15",
+        "ironing_speed": "30",
+        "ironing_type": "no ironing",
+        "layer_height": "0.2",
+        "reduce_infill_retraction": "1",
+        "filename_format": "{input_filename_base}_{layer_height}mm_{filament_type[0]}_{print_time}.gcode",
+        "detect_overhang_wall": "1",
+        "overhang_1_4_speed": "0",
+        "overhang_2_4_speed": "60",
+        "overhang_3_4_speed": "30",
+        "overhang_4_4_speed": "10",
+        "inner_wall_line_width": "0.40",
+        "wall_loops": "3",
+        "print_settings_id": "",
+        "raft_layers": "0",
+        "seam_position": "aligned",
+        "skirt_distance": "2",
+        "skirt_height": "1",
+        "skirt_loops": "0",
+        "minimum_sparse_infill_area": "15",
+        "internal_solid_infill_line_width": "0.4",
+        "spiral_mode": "0",
+        "standby_temperature_delta": "-5",
+        "enable_support": "0",
+        "resolution": "0.012",
+        "support_type": "normal(auto)",
+        "support_on_build_plate_only": "0",
+        "support_top_z_distance": "0.2",
+        "support_filament": "0",
+        "support_line_width": "0.4",
+        "support_interface_loop_pattern": "0",
+        "support_interface_filament": "0",
+        "support_interface_top_layers": "2",
+        "support_interface_bottom_layers": "2",
+        "support_interface_spacing": "0.5",
+        "support_interface_speed": "50",
+        "support_base_pattern": "rectilinear",
+        "support_base_pattern_spacing": "2.5",
+        "support_speed": "50",
+        "support_threshold_angle": "30",
+        "support_object_xy_distance": "0.35",
+        "tree_support_branch_angle": "45",
+        "tree_support_wall_count": "0",
+        "detect_thin_wall": "0",
+        "top_surface_pattern": "monotonicline",
+        "top_surface_line_width": "0.4",
+        "top_shell_layers": "3",
+        "top_shell_thickness": "0.8",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "400",
+        "top_surface_speed": "160",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "enable_prime_tower": "0",
+        "wipe_tower_no_sparse_layers": "0",
+        "prime_tower_width": "60",
+        "xy_hole_compensation": "0",
+        "xy_contour_compensation": "0",
+        "enable_arc_fitting": "0",
+        "exclude_object": "1"
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.08mm_extra_fine_@ratrig",
+      "name": "0.08mm Extra Fine @RatRig (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.08mm Extra Fine @RatRig",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP001",
+        "instantiation": "true",
+        "layer_height": "0.08",
+        "bottom_shell_layers": "7",
+        "top_shell_layers": "9",
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.12mm_fine_@ratrig",
+      "name": "0.12mm Fine @RatRig (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.12mm Fine @RatRig",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP002",
+        "instantiation": "true",
+        "layer_height": "0.12",
+        "bottom_shell_layers": "5",
+        "top_shell_layers": "6",
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.15mm_optimal_@ratrig",
+      "name": "0.15mm Optimal @RatRig (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.15mm Optimal @RatRig",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP003",
+        "instantiation": "true",
+        "bottom_shell_layers": "4",
+        "top_shell_layers": "5",
+        "layer_height": "0.15",
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_0.4",
+      "name": "0.20mm Quality @RatRig V-Core 4 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 0.4",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "outer_wall_acceleration": "4000",
+        "inner_wall_acceleration": "8000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "initial_layer_acceleration": "1500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "10000",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_0.5",
+      "name": "0.20mm Quality @RatRig V-Core 4 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "outer_wall_acceleration": "4000",
+        "inner_wall_acceleration": "8000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "initial_layer_acceleration": "1500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "10000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_hybrid_0.4",
+      "name": "0.20mm Quality @RatRig V-Core 4 HYBRID 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 HYBRID 0.4",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_hybrid_0.5",
+      "name": "0.20mm Quality @RatRig V-Core 4 HYBRID 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 HYBRID 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_hybrid_0.6",
+      "name": "0.20mm Quality @RatRig V-Core 4 HYBRID 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 HYBRID 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.8",
+        "inner_wall_line_width": "0.60",
+        "outer_wall_line_width": "0.58",
+        "sparse_infill_line_width": "0.60",
+        "internal_solid_infill_line_width": "0.60",
+        "top_surface_line_width": "0.60",
+        "support_line_width": "0.60",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_idex_0.5",
+      "name": "0.20mm Quality @RatRig V-Core 4 IDEX 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 IDEX 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_standard_@ratrig",
+      "name": "0.20mm Standard @RatRig (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Standard @RatRig",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP005",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "bottom_shell_layers": "3",
+        "top_shell_layers": "4",
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.24mm_draft_@ratrig",
+      "name": "0.24mm Draft @RatRig (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.24mm Draft @RatRig",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.24",
+        "top_surface_line_width": "0.45",
+        "bottom_shell_layers": "3",
+        "top_shell_layers": "4",
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_0.4",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 0.4",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "outer_wall_acceleration": "4000",
+        "inner_wall_acceleration": "8000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "initial_layer_acceleration": "1500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "10000",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_0.5",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "outer_wall_acceleration": "4000",
+        "inner_wall_acceleration": "8000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "initial_layer_acceleration": "1500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "10000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_0.6",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.35",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "outer_wall_acceleration": "4000",
+        "inner_wall_acceleration": "8000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "initial_layer_acceleration": "1500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "10000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.84",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.65",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_hybrid_0.4",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.4",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_hybrid_0.5",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_hybrid_0.6",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 HYBRID 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.84",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.65",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_idex_0.5",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 IDEX 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 IDEX 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.55",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_idex_0.6",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 IDEX 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 IDEX 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.84",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.65",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_0.4",
+      "name": "0.25mm Speed @RatRig V-Core 4 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 0.4",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "400",
+        "small_perimeter_speed": "350",
+        "outer_wall_speed": "400",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "10000",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_0.5",
+      "name": "0.25mm Speed @RatRig V-Core 4 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "400",
+        "small_perimeter_speed": "350",
+        "outer_wall_speed": "400",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "10000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_0.6",
+      "name": "0.25mm Speed @RatRig V-Core 4 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "400",
+        "small_perimeter_speed": "350",
+        "outer_wall_speed": "400",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "10000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.85",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.60",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_hybrid_0.4",
+      "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.4",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "20000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_hybrid_0.5",
+      "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.5",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "20000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_hybrid_0.6",
+      "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "20000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.9",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.60",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_hybrid_0.8",
+      "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.8 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 HYBRID 0.8",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "20000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.75",
+        "initial_layer_line_width": "1.1",
+        "inner_wall_line_width": "0.75",
+        "outer_wall_line_width": "0.70",
+        "sparse_infill_line_width": "0.75",
+        "internal_solid_infill_line_width": "0.75",
+        "top_surface_line_width": "0.75",
+        "support_line_width": "0.75",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.8 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.8 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.8 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_idex_0.6",
+      "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "20000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.9",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.60",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_idex_0.8",
+      "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.8 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.8",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "20000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.75",
+        "initial_layer_line_width": "1.1",
+        "inner_wall_line_width": "0.75",
+        "outer_wall_line_width": "0.70",
+        "sparse_infill_line_width": "0.75",
+        "internal_solid_infill_line_width": "0.75",
+        "top_surface_line_width": "0.75",
+        "support_line_width": "0.75",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.8 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.28mm_extra_draft_@ratrig",
+      "name": "0.28mm Extra Draft @RatRig (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.28mm Extra Draft @RatRig",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP007",
+        "instantiation": "true",
+        "layer_height": "0.28",
+        "top_surface_line_width": "0.45",
+        "bottom_shell_layers": "3",
+        "top_shell_layers": "4",
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.30mm_big_@ratrig_v_core_4_0.6",
+      "name": "0.30mm Big @RatRig V-Core 4 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.30mm Big @RatRig V-Core 4 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.3",
+        "inital_layer_height": "0.35",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "350",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "500",
+        "initial_layer_speed": "50",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "20",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "80",
+        "overhang_4_4_speed": "100",
+        "outer_wall_acceleration": "4000",
+        "inner_wall_acceleration": "8000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "2500",
+        "initial_layer_acceleration": "1500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "10000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.84",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.65",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.30mm_big_@ratrig_v_core_4_hybrid_0.6",
+      "name": "0.30mm Big @RatRig V-Core 4 HYBRID 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.30mm Big @RatRig V-Core 4 HYBRID 0.6",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.3",
+        "inital_layer_height": "0.35",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "20",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "80",
+        "overhang_4_4_speed": "100",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.84",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.65",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.30mm_big_@ratrig_v_core_4_hybrid_0.8",
+      "name": "0.30mm Big @RatRig V-Core 4 HYBRID 0.8 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.30mm Big @RatRig V-Core 4 HYBRID 0.8",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.3",
+        "inital_layer_height": "0.35",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "20",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "80",
+        "overhang_4_4_speed": "100",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.75",
+        "initial_layer_line_width": "1.1",
+        "inner_wall_line_width": "0.75",
+        "outer_wall_line_width": "0.70",
+        "sparse_infill_line_width": "0.75",
+        "internal_solid_infill_line_width": "0.75",
+        "top_surface_line_width": "0.75",
+        "support_line_width": "0.75",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.8 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.8 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.8 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.30mm_big_@ratrig_v_core_4_idex_0.8",
+      "name": "0.30mm Big @RatRig V-Core 4 IDEX 0.8 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.30mm Big @RatRig V-Core 4 IDEX 0.8",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.3",
+        "inital_layer_height": "0.35",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "20",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "80",
+        "overhang_4_4_speed": "100",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.75",
+        "initial_layer_line_width": "1.1",
+        "inner_wall_line_width": "0.75",
+        "outer_wall_line_width": "0.70",
+        "sparse_infill_line_width": "0.75",
+        "internal_solid_infill_line_width": "0.75",
+        "top_surface_line_width": "0.75",
+        "support_line_width": "0.75",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.8 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.35mm_extra_big_@ratrig_v_core_4_hybrid_0.8",
+      "name": "0.35mm Extra Big @RatRig V-Core 4 HYBRID 0.8 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.35mm Extra Big @RatRig V-Core 4 HYBRID 0.8",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.35",
+        "inital_layer_height": "0.4",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "30%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "20",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "80",
+        "overhang_4_4_speed": "100",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.75",
+        "initial_layer_line_width": "1.1",
+        "inner_wall_line_width": "0.75",
+        "outer_wall_line_width": "0.70",
+        "sparse_infill_line_width": "0.75",
+        "internal_solid_infill_line_width": "0.75",
+        "top_surface_line_width": "0.75",
+        "support_line_width": "0.75",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 HYBRID 300 0.8 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.8 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.8 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.35mm_extra_big_@ratrig_v_core_4_idex_0.8",
+      "name": "0.35mm Extra Big @RatRig V-Core 4 IDEX 0.8 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.35mm Extra Big @RatRig V-Core 4 IDEX 0.8",
+        "inherits": "fdm_process_ratrig_common",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.35",
+        "inital_layer_height": "0.4",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "30%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "20",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "80",
+        "overhang_4_4_speed": "100",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.75",
+        "initial_layer_line_width": "1.1",
+        "inner_wall_line_width": "0.75",
+        "outer_wall_line_width": "0.70",
+        "sparse_infill_line_width": "0.75",
+        "internal_solid_infill_line_width": "0.75",
+        "top_surface_line_width": "0.75",
+        "support_line_width": "0.75",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.8 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.8 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_idex_0.4",
+      "name": "0.20mm Quality @RatRig V-Core 4 IDEX 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 IDEX 0.4",
+        "inherits": "fdm_process_ratrig_idex",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "initial_layer_print_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.20mm_quality_@ratrig_v_core_4_idex_0.6",
+      "name": "0.20mm Quality @RatRig V-Core 4 IDEX 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Quality @RatRig V-Core 4 IDEX 0.6",
+        "inherits": "fdm_process_ratrig_idex",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.2",
+        "inital_layer_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.8",
+        "inner_wall_line_width": "0.60",
+        "outer_wall_line_width": "0.58",
+        "sparse_infill_line_width": "0.60",
+        "internal_solid_infill_line_width": "0.60",
+        "top_surface_line_width": "0.60",
+        "support_line_width": "0.60",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_quality_speed_@ratrig_v_core_4_idex_0.4",
+      "name": "0.25mm Quality Speed @RatRig V-Core 4 IDEX 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Quality Speed @RatRig V-Core 4 IDEX 0.4",
+        "inherits": "fdm_process_ratrig_idex",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "initial_layer_print_height": "0.3",
+        "wall_count": "4",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_idex_0.4",
+      "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.4 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.4",
+        "inherits": "fdm_process_ratrig_idex",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "initial_layer_print_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.45",
+        "initial_layer_line_width": "0.5",
+        "inner_wall_line_width": "0.45",
+        "outer_wall_line_width": "0.45",
+        "sparse_infill_line_width": "0.45",
+        "internal_solid_infill_line_width": "0.45",
+        "top_surface_line_width": "0.45",
+        "support_line_width": "0.45",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.4 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.4 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.25mm_speed_@ratrig_v_core_4_idex_0.5",
+      "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.5 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.25mm Speed @RatRig V-Core 4 IDEX 0.5",
+        "inherits": "fdm_process_ratrig_idex",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.25",
+        "inital_layer_height": "0.3",
+        "wall_count": "2",
+        "top_shell_layers": "3",
+        "bottom_shell_layers": "2",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "10%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "500",
+        "small_perimeter_speed": "500",
+        "outer_wall_speed": "500",
+        "sparse_infill_speed": "500",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "150",
+        "gap_infill_speed": "200",
+        "travel_speed": "800",
+        "initial_layer_speed": "200",
+        "outer_wall_acceleration": "15000",
+        "inner_wall_acceleration": "20000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "10000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "10000",
+        "default_acceleration": "20000",
+        "line_width": "0.55",
+        "initial_layer_line_width": "0.7",
+        "inner_wall_line_width": "0.55",
+        "outer_wall_line_width": "0.52",
+        "sparse_infill_line_width": "0.55",
+        "internal_solid_infill_line_width": "0.55",
+        "top_surface_line_width": "0.55",
+        "support_line_width": "0.55",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.5 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.5 nozzle"
+        ]
+      }
+    },
+    {
+      "id": "process_ratrig_ratrig_v-core_4_400_0.30mm_big_@ratrig_v_core_4_idex_0.6",
+      "name": "0.30mm Big @RatRig V-Core 4 IDEX 0.6 (RatRig V-Core 4 400)",
+      "manufacturer": "Ratrig",
+      "printer": "RatRig V-Core 4 400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.30mm Big @RatRig V-Core 4 IDEX 0.6",
+        "inherits": "fdm_process_ratrig_idex",
+        "from": "system",
+        "setting_id": "GP006",
+        "instantiation": "true",
+        "layer_height": "0.3",
+        "inital_layer_height": "0.35",
+        "wall_count": "3",
+        "top_shell_layers": "4",
+        "bottom_shell_layers": "3",
+        "top_shell_thickness": "0",
+        "sparse_infill_density": "25%",
+        "infill_anchor": "600%",
+        "infill_anchor_max": "5",
+        "infill_combination": "1",
+        "skirt_loops": "2",
+        "skirt_distance": "10",
+        "support_threshold_angle": "65",
+        "support_bottom_z_distance": "0.2",
+        "support_on_build_plate_only": "1",
+        "support_object_xy_distance": "60%",
+        "inner_wall_speed": "300",
+        "small_perimeter_speed": "250",
+        "outer_wall_speed": "250",
+        "sparse_infill_speed": "400",
+        "internal_solid_infill_speed": "100%",
+        "top_surface_speed": "100%",
+        "support_speed": "50",
+        "support_interface_speed": "100%",
+        "bridge_speed": "50",
+        "gap_infill_speed": "200",
+        "travel_speed": "600",
+        "initial_layer_speed": "80",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "20",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "80",
+        "overhang_4_4_speed": "100",
+        "outer_wall_acceleration": "8000",
+        "inner_wall_acceleration": "10000",
+        "top_surface_acceleration": "0",
+        "internal_solid_infill_acceleration": "0",
+        "sparse_infill_acceleration": "15000",
+        "bridge_acceleration": "5000",
+        "initial_layer_acceleration": "2500",
+        "travel_acceleration": "15000",
+        "default_acceleration": "15000",
+        "line_width": "0.65",
+        "initial_layer_line_width": "0.84",
+        "inner_wall_line_width": "0.65",
+        "outer_wall_line_width": "0.65",
+        "sparse_infill_line_width": "0.65",
+        "internal_solid_infill_line_width": "0.65",
+        "top_surface_line_width": "0.65",
+        "support_line_width": "0.65",
+        "infill_wall_overlap": "18%",
+        "bridge_flow": "0.85",
+        "resolution": "0.0125",
+        "elefant_foot_compensation": "0.1",
+        "compatible_printers": [
+          "RatRig V-Core 4 IDEX 300 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 COPY MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 300 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 400 MIRROR MODE 0.6 nozzle",
+          "RatRig V-Core 4 IDEX 500 MIRROR MODE 0.6 nozzle"
+        ]
+      }
+    }
+  ],
+  "filaments": [
+    {
+      "name": "fdm_filament_common",
+      "file": "filament/fdm_filament_common.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "60"
+        ],
+        "eng_plate_temp": [
+          "60"
+        ],
+        "hot_plate_temp": [
+          "60"
+        ],
+        "textured_plate_temp": [
+          "60"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "60"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "60"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "60"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "60"
+        ],
+        "overhang_fan_threshold": [
+          "95%"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \n"
+        ],
+        "filament_flow_ratio": [
+          "1"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "0"
+        ],
+        "fan_cooling_layer_time": [
+          "60"
+        ],
+        "filament_cost": [
+          "0"
+        ],
+        "filament_density": [
+          "0"
+        ],
+        "filament_deretraction_speed": [
+          "nil"
+        ],
+        "filament_diameter": [
+          "1.75"
+        ],
+        "filament_max_volumetric_speed": [
+          "0"
+        ],
+        "filament_minimal_purge_on_wipe_tower": [
+          "15"
+        ],
+        "filament_retraction_minimum_travel": [
+          "nil"
+        ],
+        "filament_retract_before_wipe": [
+          "nil"
+        ],
+        "filament_retract_when_changing_layer": [
+          "nil"
+        ],
+        "filament_retraction_length": [
+          "nil"
+        ],
+        "filament_z_hop": [
+          "nil"
+        ],
+        "filament_retract_restart_extra": [
+          "nil"
+        ],
+        "filament_retraction_speed": [
+          "nil"
+        ],
+        "filament_settings_id": [
+          ""
+        ],
+        "filament_soluble": [
+          "0"
+        ],
+        "filament_type": [
+          "PLA"
+        ],
+        "filament_vendor": [
+          "Generic"
+        ],
+        "filament_wipe": [
+          "nil"
+        ],
+        "filament_wipe_distance": [
+          "nil"
+        ],
+        "bed_type": [
+          "Cool Plate"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "200"
+        ],
+        "full_fan_speed_layer": [
+          "0"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "35"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "filament_start_gcode": [
+          "; Filament gcode\n"
+        ],
+        "nozzle_temperature": [
+          "200"
+        ],
+        "temperature_vitrification": [
+          "100"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_abs",
+      "file": "filament/fdm_filament_abs.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_abs",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "105"
+        ],
+        "eng_plate_temp": [
+          "105"
+        ],
+        "hot_plate_temp": [
+          "105"
+        ],
+        "textured_plate_temp": [
+          "105"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "105"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "105"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "105"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "105"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "filament_max_volumetric_speed": [
+          "28.6"
+        ],
+        "filament_type": [
+          "ABS"
+        ],
+        "filament_density": [
+          "1.04"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "260"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "fan_max_speed": [
+          "80"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "overhang_fan_speed": [
+          "80"
+        ],
+        "nozzle_temperature": [
+          "260"
+        ],
+        "temperature_vitrification": [
+          "110"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "nozzle_temperature_range_high": [
+          "270"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "3"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_asa",
+      "file": "filament/fdm_filament_asa.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_asa",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "105"
+        ],
+        "eng_plate_temp": [
+          "105"
+        ],
+        "hot_plate_temp": [
+          "105"
+        ],
+        "textured_plate_temp": [
+          "105"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "105"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "105"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "105"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "105"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "35"
+        ],
+        "filament_max_volumetric_speed": [
+          "28.6"
+        ],
+        "filament_type": [
+          "ASA"
+        ],
+        "filament_density": [
+          "1.04"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "260"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "fan_max_speed": [
+          "80"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "overhang_fan_speed": [
+          "80"
+        ],
+        "nozzle_temperature": [
+          "260"
+        ],
+        "temperature_vitrification": [
+          "110"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "nozzle_temperature_range_high": [
+          "270"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "3"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_pa",
+      "file": "filament/fdm_filament_pa.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_pa",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "0"
+        ],
+        "eng_plate_temp": [
+          "100"
+        ],
+        "hot_plate_temp": [
+          "100"
+        ],
+        "textured_plate_temp": [
+          "100"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "0"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "100"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "100"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "100"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "4"
+        ],
+        "filament_max_volumetric_speed": [
+          "8"
+        ],
+        "filament_type": [
+          "PA"
+        ],
+        "filament_density": [
+          "1.04"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "290"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "0"
+        ],
+        "fan_max_speed": [
+          "60"
+        ],
+        "fan_min_speed": [
+          "0"
+        ],
+        "overhang_fan_speed": [
+          "30"
+        ],
+        "nozzle_temperature": [
+          "290"
+        ],
+        "temperature_vitrification": [
+          "108"
+        ],
+        "nozzle_temperature_range_low": [
+          "270"
+        ],
+        "nozzle_temperature_range_high": [
+          "300"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "2"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_pc",
+      "file": "filament/fdm_filament_pc.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_pc",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "0"
+        ],
+        "eng_plate_temp": [
+          "110"
+        ],
+        "hot_plate_temp": [
+          "110"
+        ],
+        "textured_plate_temp": [
+          "110"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "0"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "110"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "110"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "110"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "filament_max_volumetric_speed": [
+          "23.2"
+        ],
+        "filament_type": [
+          "PC"
+        ],
+        "filament_density": [
+          "1.04"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "270"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "fan_max_speed": [
+          "60"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "overhang_fan_speed": [
+          "60"
+        ],
+        "nozzle_temperature": [
+          "280"
+        ],
+        "temperature_vitrification": [
+          "140"
+        ],
+        "nozzle_temperature_range_low": [
+          "260"
+        ],
+        "nozzle_temperature_range_high": [
+          "280"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "2"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_pet",
+      "file": "filament/fdm_filament_pet.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_pet",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "60"
+        ],
+        "eng_plate_temp": [
+          "0"
+        ],
+        "hot_plate_temp": [
+          "80"
+        ],
+        "textured_plate_temp": [
+          "80"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "60"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "0"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "80"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "80"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "20"
+        ],
+        "filament_max_volumetric_speed": [
+          "25"
+        ],
+        "filament_type": [
+          "PETG"
+        ],
+        "filament_density": [
+          "1.27"
+        ],
+        "filament_cost": [
+          "30"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "255"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "20"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "nozzle_temperature": [
+          "255"
+        ],
+        "temperature_vitrification": [
+          "80"
+        ],
+        "nozzle_temperature_range_low": [
+          "220"
+        ],
+        "nozzle_temperature_range_high": [
+          "260"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\n"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_pla",
+      "file": "filament/fdm_filament_pla.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_pla",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "fan_cooling_layer_time": [
+          "100"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_type": [
+          "PLA"
+        ],
+        "filament_density": [
+          "1.24"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "cool_plate_temp": [
+          "60"
+        ],
+        "eng_plate_temp": [
+          "60"
+        ],
+        "hot_plate_temp": [
+          "60"
+        ],
+        "textured_plate_temp": [
+          "60"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "60"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "60"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "60"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "60"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "220"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "100"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "overhang_fan_threshold": [
+          "50%"
+        ],
+        "close_fan_the_first_x_layers": [
+          "1"
+        ],
+        "nozzle_temperature": [
+          "220"
+        ],
+        "temperature_vitrification": [
+          "60"
+        ],
+        "nozzle_temperature_range_low": [
+          "190"
+        ],
+        "nozzle_temperature_range_high": [
+          "230"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "4"
+        ],
+        "additional_cooling_fan_speed": [
+          "70"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\n"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_pva",
+      "file": "filament/fdm_filament_pva.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_pva",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "35"
+        ],
+        "eng_plate_temp": [
+          "0"
+        ],
+        "hot_plate_temp": [
+          "45"
+        ],
+        "textured_plate_temp": [
+          "45"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "35"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "0"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "45"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "45"
+        ],
+        "fan_cooling_layer_time": [
+          "100"
+        ],
+        "filament_max_volumetric_speed": [
+          "15"
+        ],
+        "filament_soluble": [
+          "1"
+        ],
+        "filament_is_support": [
+          "1"
+        ],
+        "filament_type": [
+          "PVA"
+        ],
+        "filament_density": [
+          "1.24"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "220"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "100"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "overhang_fan_threshold": [
+          "50%"
+        ],
+        "close_fan_the_first_x_layers": [
+          "1"
+        ],
+        "nozzle_temperature": [
+          "220"
+        ],
+        "temperature_vitrification": [
+          "50"
+        ],
+        "nozzle_temperature_range_low": [
+          "190"
+        ],
+        "nozzle_temperature_range_high": [
+          "250"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "4"
+        ],
+        "additional_cooling_fan_speed": [
+          "70"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\n"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_tpu",
+      "file": "filament/fdm_filament_tpu.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_tpu",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "30"
+        ],
+        "eng_plate_temp": [
+          "30"
+        ],
+        "hot_plate_temp": [
+          "35"
+        ],
+        "textured_plate_temp": [
+          "35"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "30"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "30"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "35"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "35"
+        ],
+        "fan_cooling_layer_time": [
+          "100"
+        ],
+        "filament_max_volumetric_speed": [
+          "15"
+        ],
+        "filament_type": [
+          "TPU"
+        ],
+        "filament_density": [
+          "1.24"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "filament_retraction_length": [
+          "0.4"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "240"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "100"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "additional_cooling_fan_speed": [
+          "70"
+        ],
+        "close_fan_the_first_x_layers": [
+          "1"
+        ],
+        "nozzle_temperature": [
+          "240"
+        ],
+        "temperature_vitrification": [
+          "60"
+        ],
+        "nozzle_temperature_range_low": [
+          "200"
+        ],
+        "nozzle_temperature_range_high": [
+          "250"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\n"
+        ]
+      }
+    },
+    {
+      "name": "RatRig BigNozzle ABS",
+      "file": "filament/RatRig BigNozzle ABS.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig BigNozzle ABS",
+        "inherits": "fdm_filament_abs",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFB99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.94"
+        ],
+        "filament_max_volumetric_speed": [
+          "18"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.03"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "108"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "270"
+        ],
+        "nozzle_temperature": [
+          "265"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "nozzle_temperature_range_high": [
+          "290"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "fan_cooling_layer_time": [
+          "10"
+        ],
+        "fan_max_speed": [
+          "30"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "overhang_fan_speed": [
+          "30"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic ABS",
+      "file": "filament/RatRig Generic ABS.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic ABS",
+        "inherits": "fdm_filament_abs",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFB99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.980"
+        ],
+        "filament_max_volumetric_speed": [
+          "18"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.03"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "108"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "248"
+        ],
+        "nozzle_temperature": [
+          "243"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "fan_cooling_layer_time": [
+          "10"
+        ],
+        "fan_max_speed": [
+          "30"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "overhang_fan_speed": [
+          "30"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig PunkFil ABS",
+      "file": "filament/RatRig PunkFil ABS.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig PunkFil ABS",
+        "inherits": "fdm_filament_abs",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFB99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "40"
+        ],
+        "filament_z_hop": [
+          "nil"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.022"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "110"
+        ],
+        "hot_plate_temp": [
+          "110"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "260"
+        ],
+        "nozzle_temperature": [
+          "260"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "fan_cooling_layer_time": [
+          "7"
+        ],
+        "fan_max_speed": [
+          "60"
+        ],
+        "fan_min_speed": [
+          "30"
+        ],
+        "overhang_fan_speed": [
+          "60"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "slow_down_min_speed": [
+          "50"
+        ],
+        "slow_down_layer_time": [
+          "2"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "filament_cost": [
+          "25.5"
+        ],
+        "filament_vendor": [
+          "RatRig"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig BigNozzle ASA",
+      "file": "filament/RatRig BigNozzle ASA.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig BigNozzle ASA",
+        "inherits": "fdm_filament_asa",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFB98",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "19"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.033"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "108"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "270"
+        ],
+        "nozzle_temperature": [
+          "265"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "nozzle_temperature_range_high": [
+          "290"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "fan_cooling_layer_time": [
+          "10"
+        ],
+        "fan_max_speed": [
+          "30"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "overhang_fan_speed": [
+          "28"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic ASA",
+      "file": "filament/RatRig Generic ASA.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic ASA",
+        "inherits": "fdm_filament_asa",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFB98",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.93"
+        ],
+        "filament_max_volumetric_speed": [
+          "19"
+        ],
+        "filament_density": [
+          "1.1"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.033"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "fan_cooling_layer_time": [
+          "10"
+        ],
+        "fan_max_speed": [
+          "30"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "overhang_fan_speed": [
+          "25"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PA",
+      "file": "filament/RatRig Generic PA.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PA",
+        "inherits": "fdm_filament_pa",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFN99",
+        "instantiation": "true",
+        "nozzle_temperature_initial_layer": [
+          "270"
+        ],
+        "nozzle_temperature": [
+          "270"
+        ],
+        "hot_plate_temp": [
+          "80"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "80"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.045"
+        ],
+        "filament_density": [
+          "1.24"
+        ],
+        "nozzle_temperature_range_high": [
+          "280"
+        ],
+        "overhang_fan_speed": [
+          "50"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PA-CF",
+      "file": "filament/RatRig Generic PA-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PA-CF",
+        "inherits": "fdm_filament_pa",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFN98",
+        "instantiation": "true",
+        "filament_type": [
+          "PA-CF"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.045"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "270"
+        ],
+        "nozzle_temperature": [
+          "270"
+        ],
+        "hot_plate_temp": [
+          "80"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "80"
+        ],
+        "filament_density": [
+          "1.24"
+        ],
+        "nozzle_temperature_range_high": [
+          "280"
+        ],
+        "overhang_fan_speed": [
+          "50"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PC",
+      "file": "filament/RatRig Generic PC.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PC",
+        "inherits": "fdm_filament_pc",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFC99",
+        "instantiation": "true",
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_flow_ratio": [
+          "0.93"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.045"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "280"
+        ],
+        "nozzle_temperature_range_high": [
+          "290"
+        ],
+        "hot_plate_temp": [
+          "100"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "100"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig BigNozzle PCTG",
+      "file": "filament/RatRig BigNozzle PCTG.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig BigNozzle PCTG",
+        "inherits": "fdm_filament_pet",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFC99",
+        "instantiation": "true",
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "overhang_fan_speed": [
+          "90"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "fan_max_speed": [
+          "50"
+        ],
+        "fan_min_speed": [
+          "15"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_density": [
+          "1.29"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.045"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "280"
+        ],
+        "nozzle_temperature": [
+          "275"
+        ],
+        "nozzle_temperature_range_high": [
+          "300"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "temperature_vitrification": [
+          "90"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig BigNozzle PETG",
+      "file": "filament/RatRig BigNozzle PETG.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig BigNozzle PETG",
+        "inherits": "fdm_filament_pet",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFG99",
+        "instantiation": "true",
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "fan_cooling_layer_time": [
+          "10"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "fan_max_speed": [
+          "90"
+        ],
+        "fan_min_speed": [
+          "40"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.045"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "260"
+        ],
+        "nozzle_temperature": [
+          "255"
+        ],
+        "nozzle_temperature_range_high": [
+          "280"
+        ],
+        "nozzle_temperature_range_low": [
+          "230"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PCTG",
+      "file": "filament/RatRig Generic PCTG.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PCTG",
+        "inherits": "fdm_filament_pet",
+        "from": "system",
+        "setting_id": "GFCA04",
+        "filament_id": "GFC99",
+        "instantiation": "true",
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "overhang_fan_speed": [
+          "90"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "fan_max_speed": [
+          "40"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "filament_flow_ratio": [
+          "0.93"
+        ],
+        "filament_density": [
+          "1.29"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.045"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "260"
+        ],
+        "nozzle_temperature": [
+          "255"
+        ],
+        "nozzle_temperature_range_high": [
+          "270"
+        ],
+        "temperature_vitrification": [
+          "90"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PETG",
+      "file": "filament/RatRig Generic PETG.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PETG",
+        "inherits": "fdm_filament_pet",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFG99",
+        "instantiation": "true",
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "fan_cooling_layer_time": [
+          "10"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "40"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "filament_flow_ratio": [
+          "0.94"
+        ],
+        "filament_max_volumetric_speed": [
+          "11"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.045"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "240"
+        ],
+        "nozzle_temperature": [
+          "235"
+        ],
+        "nozzle_temperature_range_high": [
+          "250"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig PunkFil PETG",
+      "file": "filament/RatRig PunkFil PETG.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig PunkFil PETG",
+        "inherits": "fdm_filament_pet",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFB99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.93"
+        ],
+        "filament_max_volumetric_speed": [
+          "40"
+        ],
+        "filament_z_hop": [
+          "nil"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.025"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "80"
+        ],
+        "hot_plate_temp": [
+          "80"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "235"
+        ],
+        "nozzle_temperature": [
+          "235"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "fan_cooling_layer_time": [
+          "8"
+        ],
+        "fan_max_speed": [
+          "60"
+        ],
+        "fan_min_speed": [
+          "30"
+        ],
+        "overhang_fan_speed": [
+          "50"
+        ],
+        "overhang_fan_threshold": [
+          "50%"
+        ],
+        "slow_down_min_speed": [
+          "50"
+        ],
+        "slow_down_layer_time": [
+          "2"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "filament_cost": [
+          "24.5"
+        ],
+        "filament_vendor": [
+          "RatRig"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig PunkFil PETG CF",
+      "file": "filament/RatRig PunkFil PETG CF.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig PunkFil PETG CF",
+        "inherits": "fdm_filament_pet",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFB99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.93"
+        ],
+        "filament_max_volumetric_speed": [
+          "20"
+        ],
+        "filament_z_hop": [
+          "nil"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.038"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "80"
+        ],
+        "hot_plate_temp": [
+          "80"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "230"
+        ],
+        "nozzle_temperature": [
+          "230"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "fan_cooling_layer_time": [
+          "10"
+        ],
+        "fan_max_speed": [
+          "30"
+        ],
+        "fan_min_speed": [
+          "0"
+        ],
+        "overhang_fan_speed": [
+          "40"
+        ],
+        "overhang_fan_threshold": [
+          "50%"
+        ],
+        "slow_down_min_speed": [
+          "30"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "filament_cost": [
+          "48"
+        ],
+        "filament_type": [
+          "PETG-CF10"
+        ],
+        "filament_vendor": [
+          "RatRig"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig BigNozzle PLA",
+      "file": "filament/RatRig BigNozzle PLA.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig BigNozzle PLA",
+        "inherits": "fdm_filament_pla",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFL99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.94"
+        ],
+        "filament_max_volumetric_speed": [
+          "20"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.05"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "230"
+        ],
+        "nozzle_temperature": [
+          "235"
+        ],
+        "nozzle_temperature_range_high": [
+          "260"
+        ],
+        "nozzle_temperature_range_low": [
+          "210"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PLA",
+      "file": "filament/RatRig Generic PLA.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PLA",
+        "inherits": "fdm_filament_pla",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFL99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "20"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.05"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "205"
+        ],
+        "nozzle_temperature": [
+          "200"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PLA-CF",
+      "file": "filament/RatRig Generic PLA-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PLA-CF",
+        "inherits": "fdm_filament_pla",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFL98",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_type": [
+          "PLA-CF"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.05"
+        ],
+        "slow_down_layer_time": [
+          "7"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "210"
+        ],
+        "nozzle_temperature": [
+          "205"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic PVA",
+      "file": "filament/RatRig Generic PVA.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic PVA",
+        "inherits": "fdm_filament_pva",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFS99",
+        "instantiation": "true",
+        "filament_flow_ratio": [
+          "0.95"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.03"
+        ],
+        "slow_down_layer_time": [
+          "7"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig BigNozzle TPU",
+      "file": "filament/RatRig BigNozzle TPU.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig BigNozzle TPU",
+        "inherits": "fdm_filament_tpu",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFL99",
+        "instantiation": "true",
+        "filament_max_volumetric_speed": [
+          "5"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.1"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "240"
+        ],
+        "nozzle_temperature": [
+          "245"
+        ],
+        "nozzle_temperature_range_high": [
+          "270"
+        ],
+        "nozzle_temperature_range_low": [
+          "220"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    },
+    {
+      "name": "RatRig Generic TPU",
+      "file": "filament/RatRig Generic TPU.json",
+      "data": {
+        "type": "filament",
+        "name": "RatRig Generic TPU",
+        "inherits": "fdm_filament_tpu",
+        "from": "system",
+        "setting_id": "GFSA04",
+        "filament_id": "GFU99",
+        "instantiation": "true",
+        "filament_max_volumetric_speed": [
+          "5"
+        ],
+        "filament_z_hop": [
+          "0"
+        ],
+        "enable_pressure_advance": [
+          "1"
+        ],
+        "pressure_advance": [
+          "0.1"
+        ],
+        "nozzle_temperature": [
+          "220"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "220"
+        ],
+        "compatible_printers": [
+          "RatRig V-Core 3 200 0.4 nozzle",
+          "RatRig V-Core 3 300 0.4 nozzle",
+          "RatRig V-Core 3 400 0.4 nozzle",
+          "RatRig V-Core 3 500 0.4 nozzle",
+          "RatRig V-Minion 0.4 nozzle",
+          "RatRig V-Cast 0.4 nozzle",
+          "RatRig V-Cast 0.6 nozzle",
+          "RatRig V-Core 4 300 0.4 nozzle",
+          "RatRig V-Core 4 300 0.5 nozzle",
+          "RatRig V-Core 4 300 0.6 nozzle",
+          "RatRig V-Core 4 400 0.4 nozzle",
+          "RatRig V-Core 4 400 0.5 nozzle",
+          "RatRig V-Core 4 400 0.6 nozzle",
+          "RatRig V-Core 4 500 0.4 nozzle",
+          "RatRig V-Core 4 500 0.5 nozzle",
+          "RatRig V-Core 4 500 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 300 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 400 0.6 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.4 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.5 nozzle",
+          "RatRig V-Core 4 HYBRID 500 0.6 nozzle"
+        ]
+      }
+    }
+  ],
+  "lastUpdated": "2025-11-11T12:39:26.816030",
+  "source": "/Applications/Orcaslicer.app/Contents/Resources/profiles"
+}

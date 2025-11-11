@@ -1,0 +1,2096 @@
+{
+  "version": "2.3.1",
+  "id": "eryone_thinker_x400",
+  "name": "Thinker X400",
+  "manufacturer": "Eryone",
+  "machine": {
+    "type": "machine_model",
+    "name": "Thinker X400",
+    "model_id": "Thinker-X400",
+    "nozzle_diameter": "0.4",
+    "machine_tech": "FFF",
+    "family": "Eryone",
+    "bed_model": "X400_bed.stl",
+    "bed_texture": "Thinker_texture.png",
+    "hotend_model": "",
+    "default_materials": "Eryone PLA;Eryone ABS;Eryone ASA;Eryone PETG;Eryone Silk PLA;Eryone TPU;Eryone ABS-CF;Eryone ASA-CF;Eryone PA;Eryone PA-CF;Eryone PA-GF;Eryone PETG-CF;Eryone PLA-CF;Eryone PP;Eryone PP-CF"
+  },
+  "processes": [
+    {
+      "id": "process_eryone_thinker_x400_fdm_process_common",
+      "name": "fdm_process_common (Thinker X400)",
+      "manufacturer": "Eryone",
+      "printer": "Thinker X400",
+      "process_profile": {
+        "type": "process",
+        "name": "fdm_process_common",
+        "from": "system",
+        "instantiation": "false",
+        "adaptive_layer_height": "0",
+        "reduce_crossing_wall": "0",
+        "max_travel_detour_distance": "0",
+        "bottom_surface_pattern": "monotonic",
+        "bottom_shell_thickness": "0.5",
+        "bridge_speed": "50",
+        "bridge_acceleration": "500",
+        "brim_width": "5",
+        "brim_object_gap": "0.1",
+        "compatible_printers": [],
+        "compatible_printers_condition": "",
+        "print_sequence": "by layer",
+        "default_acceleration": "2500",
+        "travel_acceleration": "2500",
+        "inner_wall_acceleration": "500",
+        "outer_wall_acceleration": "500",
+        "bridge_no_support": "0",
+        "draft_shield": "disabled",
+        "elefant_foot_compensation": "0.2",
+        "outer_wall_line_width": "0.42",
+        "wall_infill_order": "inner wall/outer wall/infill",
+        "line_width": "0.45",
+        "infill_direction": "45",
+        "sparse_infill_density": "15%",
+        "sparse_infill_pattern": "cubic",
+        "initial_layer_line_width": "0.45",
+        "initial_layer_print_height": "0.2",
+        "infill_combination": "0",
+        "sparse_infill_line_width": "0.48",
+        "infill_wall_overlap": "23%",
+        "interface_shells": "0",
+        "ironing_flow": "10%",
+        "ironing_spacing": "0.15",
+        "ironing_speed": "30",
+        "ironing_type": "no ironing",
+        "reduce_infill_retraction": "1",
+        "filename_format": "{input_filename_base}_{filament_type[0]}_{printer_model}.gcode",
+        "detect_overhang_wall": "1",
+        "enable_overhang_speed": "1",
+        "overhang_1_4_speed": "0",
+        "overhang_2_4_speed": "50",
+        "overhang_3_4_speed": "25",
+        "overhang_4_4_speed": "15",
+        "inner_wall_line_width": "0.45",
+        "wall_loops": "3",
+        "print_settings_id": "",
+        "raft_layers": "0",
+        "seam_position": "aligned",
+        "skirt_distance": "3",
+        "skirt_height": "1",
+        "skirt_loops": "2",
+        "minimum_sparse_infill_area": "15",
+        "internal_solid_infill_line_width": "0.45",
+        "spiral_mode": "0",
+        "standby_temperature_delta": "-5",
+        "enable_support": "0",
+        "resolution": "0.012",
+        "support_type": "normal(auto)",
+        "support_on_build_plate_only": "0",
+        "support_top_z_distance": "0.2",
+        "support_filament": "0",
+        "support_line_width": "0.36",
+        "support_interface_loop_pattern": "0",
+        "support_interface_filament": "0",
+        "support_interface_top_layers": "2",
+        "support_interface_bottom_layers": "2",
+        "support_interface_spacing": "0.5",
+        "support_interface_speed": "80",
+        "support_base_pattern": "rectilinear",
+        "support_base_pattern_spacing": "2.5",
+        "support_speed": "125",
+        "support_threshold_angle": "40",
+        "support_object_xy_distance": "2.5",
+        "tree_support_branch_angle": "30",
+        "tree_support_wall_count": "0",
+        "tree_support_with_infill": "0",
+        "detect_thin_wall": "0",
+        "top_surface_pattern": "monotonicline",
+        "top_surface_line_width": "0.4",
+        "top_shell_thickness": "0.7",
+        "top_solid_infill_flow_ratio": "1",
+        "enable_prime_tower": "0",
+        "wipe_tower_no_sparse_layers": "0",
+        "prime_tower_width": "60",
+        "xy_hole_compensation": "0",
+        "xy_contour_compensation": "0",
+        "layer_height": "0.2",
+        "bottom_shell_layers": "4",
+        "top_shell_layers": "5",
+        "bridge_flow": "0.95",
+        "initial_layer_speed": "50",
+        "initial_layer_infill_speed": "50",
+        "initial_layer_travel_speed": "100%",
+        "outer_wall_speed": "125",
+        "inner_wall_speed": "250",
+        "sparse_infill_speed": "250",
+        "internal_solid_infill_speed": "200",
+        "top_surface_speed": "150",
+        "gap_infill_speed": "150",
+        "travel_speed": "300",
+        "travel_speed_z": "0",
+        "enable_arc_fitting": "0",
+        "ensure_vertical_shell_thickness": "1",
+        "precise_outer_wall": "1",
+        "independent_support_layer_height": "1",
+        "default_jerk": "15",
+        "infill_jerk": "15",
+        "initial_layer_jerk": "12",
+        "inner_wall_jerk": "15",
+        "outer_wall_jerk": "10",
+        "top_surface_jerk": "12",
+        "travel_jerk": "20"
+      }
+    },
+    {
+      "id": "process_eryone_thinker_x400_0.20mm_standard_@thinker_x400",
+      "name": "0.20mm Standard @Thinker X400 (Thinker X400)",
+      "manufacturer": "Eryone",
+      "printer": "Thinker X400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.20mm Standard @Thinker X400",
+        "inherits": "fdm_process_common",
+        "from": "",
+        "setting_id": "GP004",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "accel_to_decel_enable": "1",
+        "accel_to_decel_factor": "50%",
+        "bottom_shell_layers": "3",
+        "bottom_shell_thickness": "0",
+        "bottom_solid_infill_flow_ratio": "1",
+        "bottom_surface_pattern": "monotonic",
+        "bridge_acceleration": "50%",
+        "bridge_angle": "0",
+        "bridge_density": "100%",
+        "bridge_flow": "0.95",
+        "bridge_no_support": "0",
+        "bridge_speed": "45",
+        "brim_ears_detection_length": "1",
+        "brim_ears_max_angle": "125",
+        "brim_object_gap": "0.1",
+        "brim_type": "auto_brim",
+        "brim_width": "5",
+        "compatible_printers_condition": "",
+        "default_acceleration": "10000",
+        "default_jerk": "0",
+        "detect_overhang_wall": "1",
+        "detect_thin_wall": "0",
+        "draft_shield": "disabled",
+        "elefant_foot_compensation": "0.12",
+        "elefant_foot_compensation_layers": "1",
+        "enable_arc_fitting": "1",
+        "enable_overhang_speed": "1",
+        "enable_prime_tower": "0",
+        "enable_support": "0",
+        "enforce_support_layers": "0",
+        "exclude_object": "0",
+        "extra_perimeters_on_overhangs": "0",
+        "filename_format": "{input_filename_base}_{filament_type[0]}_{print_time}.gcode",
+        "filter_out_gap_fill": "0",
+        "flush_into_infill": "0",
+        "flush_into_objects": "0",
+        "flush_into_support": "1",
+        "fuzzy_skin": "none",
+        "fuzzy_skin_point_distance": "0.8",
+        "fuzzy_skin_thickness": "0.3",
+        "gap_infill_speed": "250",
+        "gcode_add_line_number": "0",
+        "gcode_comments": "0",
+        "gcode_label_objects": "1",
+        "hole_to_polyhole": "0",
+        "hole_to_polyhole_threshold": "0.01",
+        "hole_to_polyhole_twisted": "1",
+        "independent_support_layer_height": "1",
+        "infill_anchor": "400%",
+        "infill_anchor_max": "20",
+        "infill_combination": "0",
+        "infill_direction": "45",
+        "infill_jerk": "9",
+        "infill_wall_overlap": "25%",
+        "initial_layer_acceleration": "500",
+        "initial_layer_infill_speed": "105",
+        "initial_layer_jerk": "9",
+        "initial_layer_line_width": "0.5",
+        "initial_layer_min_bead_width": "85%",
+        "initial_layer_print_height": "0.2",
+        "initial_layer_speed": "50",
+        "initial_layer_travel_speed": "100%",
+        "inner_wall_acceleration": "8000",
+        "inner_wall_jerk": "9",
+        "inner_wall_line_width": "0.45",
+        "inner_wall_speed": "250",
+        "interface_shells": "0",
+        "internal_bridge_speed": "150%",
+        "internal_solid_infill_acceleration": "100%",
+        "internal_solid_infill_line_width": "0.42",
+        "internal_solid_infill_pattern": "monotonic",
+        "internal_solid_infill_speed": "250",
+        "ironing_angle": "-1",
+        "ironing_flow": "10%",
+        "ironing_pattern": "zig-zag",
+        "ironing_spacing": "0.15",
+        "ironing_speed": "30",
+        "ironing_type": "no ironing",
+        "layer_height": "0.2",
+        "line_width": "0.42",
+        "make_overhang_printable": "0",
+        "make_overhang_printable_angle": "55",
+        "make_overhang_printable_hole_size": "0",
+        "max_bridge_length": "10",
+        "max_travel_detour_distance": "0",
+        "max_volumetric_extrusion_rate_slope": "0",
+        "max_volumetric_extrusion_rate_slope_segment_length": "3",
+        "min_bead_width": "85%",
+        "min_feature_size": "25%",
+        "min_width_top_surface": "300%",
+        "minimum_sparse_infill_area": "15",
+        "notes": "",
+        "only_one_wall_first_layer": "0",
+        "only_one_wall_top": "1",
+        "ooze_prevention": "0",
+        "outer_wall_acceleration": "4000",
+        "outer_wall_jerk": "9",
+        "outer_wall_line_width": "0.42",
+        "outer_wall_speed": "200",
+        "overhang_1_4_speed": "0",
+        "overhang_2_4_speed": "45",
+        "overhang_3_4_speed": "30",
+        "overhang_4_4_speed": "10",
+        "overhang_reverse": "0",
+        "overhang_reverse_threshold": "50%",
+        "overhang_speed_classic": "0",
+        "post_process": [],
+        "precise_outer_wall": "0",
+        "prime_tower_brim_width": "3",
+        "prime_tower_width": "60",
+        "prime_volume": "45",
+        "print_flow_ratio": "1",
+        "print_sequence": "by layer",
+        "print_settings_id": "0.20mm Standard @Thinker X400",
+        "raft_contact_distance": "0.1",
+        "raft_expansion": "1.5",
+        "raft_first_layer_density": "95%",
+        "raft_first_layer_expansion": "10",
+        "raft_layers": "0",
+        "reduce_crossing_wall": "0",
+        "reduce_infill_retraction": "1",
+        "resolution": "0.012",
+        "role_based_wipe_speed": "1",
+        "seam_gap": "10%",
+        "seam_position": "aligned",
+        "single_extruder_multi_material_priming": "1",
+        "skirt_distance": "2",
+        "skirt_height": "1",
+        "skirt_loops": "0",
+        "skirt_speed": "0",
+        "slice_closing_radius": "0.049",
+        "slicing_mode": "regular",
+        "slow_down_layers": "0",
+        "slowdown_for_curled_perimeters": "0",
+        "small_perimeter_speed": "50%",
+        "small_perimeter_threshold": "0",
+        "solid_infill_filament": "1",
+        "sparse_infill_acceleration": "100%",
+        "sparse_infill_density": "15%",
+        "sparse_infill_filament": "1",
+        "sparse_infill_line_width": "0.54",
+        "sparse_infill_pattern": "crosshatch",
+        "sparse_infill_speed": "250",
+        "spiral_mode": "0",
+        "staggered_inner_seams": "0",
+        "standby_temperature_delta": "-5",
+        "support_angle": "0",
+        "support_base_pattern": "rectilinear",
+        "support_base_pattern_spacing": "2.5",
+        "support_bottom_interface_spacing": "0.5",
+        "support_bottom_z_distance": "0.2",
+        "support_critical_regions_only": "0",
+        "support_expansion": "0",
+        "support_filament": "0",
+        "support_interface_bottom_layers": "2",
+        "support_interface_filament": "0",
+        "support_interface_loop_pattern": "0",
+        "support_interface_pattern": "rectilinear",
+        "support_interface_spacing": "0.5",
+        "support_interface_speed": "60",
+        "support_interface_top_layers": "2",
+        "support_line_width": "0.42",
+        "support_object_xy_distance": "0.35",
+        "support_on_build_plate_only": "0",
+        "support_remove_small_overhang": "1",
+        "support_speed": "80",
+        "support_style": "default",
+        "support_threshold_angle": "30",
+        "support_top_z_distance": "0.2",
+        "support_type": "normal(auto)",
+        "thick_bridges": "0",
+        "timelapse_type": "0",
+        "top_shell_layers": "5",
+        "top_shell_thickness": "1",
+        "top_solid_infill_flow_ratio": "1",
+        "top_surface_acceleration": "2000",
+        "top_surface_jerk": "9",
+        "top_surface_line_width": "0.42",
+        "top_surface_pattern": "monotonic",
+        "top_surface_speed": "200",
+        "travel_acceleration": "10000",
+        "travel_jerk": "12",
+        "travel_speed": "400",
+        "travel_speed_z": "0",
+        "tree_support_adaptive_layer_height": "1",
+        "tree_support_angle_slow": "25",
+        "tree_support_auto_brim": "1",
+        "tree_support_branch_angle": "45",
+        "tree_support_branch_angle_organic": "40",
+        "tree_support_branch_diameter": "5",
+        "tree_support_branch_diameter_angle": "5",
+        "tree_support_branch_diameter_double_wall": "3",
+        "tree_support_branch_diameter_organic": "2",
+        "tree_support_branch_distance": "5",
+        "tree_support_branch_distance_organic": "1",
+        "tree_support_brim_width": "3",
+        "tree_support_tip_diameter": "0.8",
+        "tree_support_top_rate": "30%",
+        "tree_support_wall_count": "2",
+        "wall_distribution_count": "1",
+        "wall_filament": "1",
+        "wall_generator": "classic",
+        "wall_infill_order": "inner wall/outer wall/infill",
+        "wall_loops": "2",
+        "wall_transition_angle": "10",
+        "wall_transition_filter_deviation": "25%",
+        "wall_transition_length": "100%",
+        "wipe_on_loops": "0",
+        "wipe_speed": "80%",
+        "wipe_tower_bridging": "10",
+        "wipe_tower_cone_angle": "0",
+        "wipe_tower_extra_spacing": "100%",
+        "wipe_tower_extruder": "0",
+        "wipe_tower_no_sparse_layers": "0",
+        "wipe_tower_rotation_angle": "0",
+        "wiping_volumes_extruders": [
+          "70",
+          "70",
+          "70",
+          "70",
+          "70",
+          "70",
+          "70",
+          "70",
+          "70",
+          "70"
+        ],
+        "xy_contour_compensation": "0",
+        "xy_hole_compensation": "0"
+      }
+    },
+    {
+      "id": "process_eryone_thinker_x400_0.12mm_standard_@thinker_x400",
+      "name": "0.12mm Standard @Thinker X400 (Thinker X400)",
+      "manufacturer": "Eryone",
+      "printer": "Thinker X400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.12mm Standard @Thinker X400",
+        "inherits": "0.20mm Standard @Thinker X400",
+        "from": "User",
+        "instantiation": "true",
+        "brim_object_gap": "0",
+        "default_acceleration": "10000",
+        "elefant_foot_compensation": "0.12",
+        "gap_infill_speed": "250",
+        "inner_wall_acceleration": "8000",
+        "inner_wall_speed": "250",
+        "internal_solid_infill_speed": "250",
+        "layer_height": "0.12",
+        "only_one_wall_top": "1",
+        "outer_wall_speed": "200",
+        "overhang_1_4_speed": "60",
+        "overhang_2_4_speed": "30",
+        "overhang_3_4_speed": "10",
+        "print_settings_id": "0.12mm Standard @Thinker X400",
+        "raft_first_layer_expansion": "10",
+        "sparse_infill_density": "15%",
+        "sparse_infill_speed": "250",
+        "top_shell_layers": "5",
+        "top_shell_thickness": "1",
+        "wall_generator": "classic"
+      }
+    },
+    {
+      "id": "process_eryone_thinker_x400_0.16mm_standard_@thinker_x400",
+      "name": "0.16mm Standard @Thinker X400 (Thinker X400)",
+      "manufacturer": "Eryone",
+      "printer": "Thinker X400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.16mm Standard @Thinker X400",
+        "inherits": "0.20mm Standard @Thinker X400",
+        "from": "User",
+        "instantiation": "true",
+        "brim_object_gap": "0",
+        "default_acceleration": "10000",
+        "elefant_foot_compensation": "0.12",
+        "gap_infill_speed": "250",
+        "inner_wall_acceleration": "8000",
+        "inner_wall_speed": "250",
+        "internal_solid_infill_speed": "250",
+        "layer_height": "0.16",
+        "only_one_wall_top": "1",
+        "outer_wall_speed": "200",
+        "overhang_1_4_speed": "60",
+        "overhang_2_4_speed": "30",
+        "overhang_3_4_speed": "10",
+        "print_settings_id": "0.16mm Standard @Thinker X400",
+        "raft_first_layer_expansion": "10",
+        "sparse_infill_density": "15%",
+        "sparse_infill_speed": "250",
+        "top_shell_layers": "5",
+        "top_shell_thickness": "1",
+        "wall_generator": "classic"
+      }
+    },
+    {
+      "id": "process_eryone_thinker_x400_0.24mm_standard_@thinker_x400",
+      "name": "0.24mm Standard @Thinker X400 (Thinker X400)",
+      "manufacturer": "Eryone",
+      "printer": "Thinker X400",
+      "process_profile": {
+        "type": "process",
+        "name": "0.24mm Standard @Thinker X400",
+        "inherits": "0.20mm Standard @Thinker X400",
+        "from": "User",
+        "instantiation": "true",
+        "brim_object_gap": "0",
+        "default_acceleration": "10000",
+        "elefant_foot_compensation": "0.12",
+        "gap_infill_speed": "250",
+        "inner_wall_acceleration": "8000",
+        "inner_wall_speed": "250",
+        "internal_solid_infill_speed": "250",
+        "layer_height": "0.24",
+        "only_one_wall_top": "1",
+        "outer_wall_speed": "200",
+        "print_settings_id": "0.24mm Standard @Thinker X400",
+        "raft_first_layer_expansion": "10",
+        "sparse_infill_density": "15%",
+        "sparse_infill_speed": "250",
+        "top_shell_layers": "5",
+        "top_shell_thickness": "1",
+        "wall_generator": "classic"
+      }
+    }
+  ],
+  "filaments": [
+    {
+      "name": "Eryone Standard PLA",
+      "file": "filament/Eryone Standard PLA.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone Standard PLA",
+        "from": "system",
+        "instantiation": "false",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "activate_air_filtration": [
+          "0"
+        ],
+        "activate_chamber_temp_control": [
+          "0"
+        ],
+        "additional_cooling_fan_speed": [
+          "70"
+        ],
+        "chamber_temperature": [
+          "0"
+        ],
+        "close_fan_the_first_x_layers": [
+          "1"
+        ],
+        "compatible_printers_condition": "",
+        "compatible_prints": [],
+        "compatible_prints_condition": "",
+        "complete_print_exhaust_fan_speed": [
+          "80"
+        ],
+        "cool_plate_temp": [
+          "60"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "60"
+        ],
+        "default_filament_colour": [
+          ""
+        ],
+        "during_print_exhaust_fan_speed": [
+          "60"
+        ],
+        "enable_overhang_bridge_fan": [
+          "1"
+        ],
+        "enable_pressure_advance": [
+          "0"
+        ],
+        "eng_plate_temp": [
+          "60"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "60"
+        ],
+        "fan_cooling_layer_time": [
+          "100"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "100"
+        ],
+        "filament_cooling_final_speed": [
+          "3.4"
+        ],
+        "filament_cooling_initial_speed": [
+          "2.2"
+        ],
+        "filament_cooling_moves": [
+          "4"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "filament_density": [
+          "1.24"
+        ],
+        "filament_deretraction_speed": [
+          "nil"
+        ],
+        "filament_diameter": [
+          "1.75"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \n"
+        ],
+        "filament_flow_ratio": [
+          "0.98"
+        ],
+        "filament_is_support": [
+          "0"
+        ],
+        "filament_load_time": [
+          "0"
+        ],
+        "filament_loading_speed": [
+          "28"
+        ],
+        "filament_loading_speed_start": [
+          "3"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_minimal_purge_on_wipe_tower": [
+          "15"
+        ],
+        "filament_multitool_ramming": [
+          "0"
+        ],
+        "filament_multitool_ramming_flow": [
+          "10"
+        ],
+        "filament_multitool_ramming_volume": [
+          "10"
+        ],
+        "filament_notes": [
+          ""
+        ],
+        "filament_ramming_parameters": [
+          "120 100 6.6 6.8 7.2 7.6 7.9 8.2 8.7 9.4 9.9 10.0| 0.05 6.6 0.45 6.8 0.95 7.8 1.45 8.3 1.95 9.7 2.45 10 2.95 7.6 3.45 7.6 3.95 7.6 4.45 7.6 4.95 7.6"
+        ],
+        "filament_retract_before_wipe": [
+          "nil"
+        ],
+        "filament_retract_lift_above": [
+          "nil"
+        ],
+        "filament_retract_lift_below": [
+          "nil"
+        ],
+        "filament_retract_lift_enforce": [
+          "nil"
+        ],
+        "filament_retract_restart_extra": [
+          "nil"
+        ],
+        "filament_retract_when_changing_layer": [
+          "nil"
+        ],
+        "filament_retraction_length": [
+          "nil"
+        ],
+        "filament_retraction_minimum_travel": [
+          "nil"
+        ],
+        "filament_retraction_speed": [
+          "nil"
+        ],
+        "filament_settings_id": [
+          "Eryone Standard PLA"
+        ],
+        "filament_shrink": [
+          "100%"
+        ],
+        "filament_soluble": [
+          "0"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode"
+        ],
+        "filament_toolchange_delay": [
+          "0"
+        ],
+        "filament_type": [
+          "PLA"
+        ],
+        "filament_unload_time": [
+          "0"
+        ],
+        "filament_unloading_speed": [
+          "90"
+        ],
+        "filament_unloading_speed_start": [
+          "100"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "filament_wipe": [
+          "nil"
+        ],
+        "filament_wipe_distance": [
+          "nil"
+        ],
+        "filament_z_hop": [
+          "nil"
+        ],
+        "filament_z_hop_types": [
+          "nil"
+        ],
+        "full_fan_speed_layer": [
+          "0"
+        ],
+        "hot_plate_temp": [
+          "60"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "65"
+        ],
+        "nozzle_temperature": [
+          "220"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "220"
+        ],
+        "nozzle_temperature_range_high": [
+          "260"
+        ],
+        "nozzle_temperature_range_low": [
+          "180"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "overhang_fan_threshold": [
+          "50%"
+        ],
+        "pressure_advance": [
+          "0.02"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "required_nozzle_HRC": [
+          "0"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "slow_down_layer_time": [
+          "5"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "support_material_interface_fan_speed": [
+          "-1"
+        ],
+        "temperature_vitrification": [
+          "60"
+        ],
+        "textured_plate_temp": [
+          "60"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "60"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_common",
+      "file": "filament/fdm_filament_common.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "cool_plate_temp": [
+          "60"
+        ],
+        "eng_plate_temp": [
+          "60"
+        ],
+        "hot_plate_temp": [
+          "60"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "60"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "60"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "60"
+        ],
+        "overhang_fan_threshold": [
+          "95%"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "slow_down_for_layer_cooling": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \n"
+        ],
+        "filament_flow_ratio": [
+          "1"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "0"
+        ],
+        "fan_cooling_layer_time": [
+          "60"
+        ],
+        "filament_cost": [
+          "0"
+        ],
+        "filament_density": [
+          "0"
+        ],
+        "filament_deretraction_speed": [
+          "nil"
+        ],
+        "filament_diameter": [
+          "1.75"
+        ],
+        "filament_max_volumetric_speed": [
+          "0"
+        ],
+        "filament_minimal_purge_on_wipe_tower": [
+          "15"
+        ],
+        "filament_retraction_minimum_travel": [
+          "nil"
+        ],
+        "filament_retract_before_wipe": [
+          "nil"
+        ],
+        "filament_retract_when_changing_layer": [
+          "nil"
+        ],
+        "filament_retraction_length": [
+          "nil"
+        ],
+        "filament_z_hop": [
+          "nil"
+        ],
+        "filament_retract_restart_extra": [
+          "nil"
+        ],
+        "filament_retraction_speed": [
+          "nil"
+        ],
+        "filament_settings_id": [
+          ""
+        ],
+        "filament_soluble": [
+          "0"
+        ],
+        "filament_type": [
+          "PLA"
+        ],
+        "filament_vendor": [
+          "Generic"
+        ],
+        "filament_wipe": [
+          "nil"
+        ],
+        "filament_wipe_distance": [
+          "nil"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "200"
+        ],
+        "full_fan_speed_layer": [
+          "0"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "35"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "5"
+        ],
+        "filament_start_gcode": [
+          "; Filament gcode\n"
+        ],
+        "nozzle_temperature": [
+          "200"
+        ],
+        "temperature_vitrification": [
+          "100"
+        ]
+      }
+    },
+    {
+      "name": "Eryone ABS",
+      "file": "filament/Eryone ABS.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone ABS",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA01",
+        "filament_id": "EFL91",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "additional_cooling_fan_speed": [
+          "0"
+        ],
+        "complete_print_exhaust_fan_speed": [
+          "70"
+        ],
+        "cool_plate_temp": [
+          "0"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "0"
+        ],
+        "during_print_exhaust_fan_speed": [
+          "70"
+        ],
+        "eng_plate_temp": [
+          "100"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "105"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "fan_max_speed": [
+          "70"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "filament_settings_id": [
+          "Eryone ABS"
+        ],
+        "filament_density": [
+          "1.04"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0\n"
+        ],
+        "filament_type": [
+          "ABS"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "15"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "hot_plate_temp": [
+          "95"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "95"
+        ],
+        "nozzle_temperature": [
+          "255"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "260"
+        ],
+        "nozzle_temperature_range_high": [
+          "290"
+        ],
+        "overhang_fan_speed": [
+          "80"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "required_nozzle_HRC": [
+          "3"
+        ],
+        "slow_down_layer_time": [
+          "4"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "100"
+        ],
+        "textured_plate_temp": [
+          "100"
+        ],
+        "textured_plate_temp_initial_layer": [
+          "105"
+        ]
+      }
+    },
+    {
+      "name": "Eryone ABS-CF",
+      "file": "filament/Eryone ABS-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone ABS-CF",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA11",
+        "filament_id": "EFL81",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "10"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "fan_max_speed": [
+          "60"
+        ],
+        "fan_min_speed": [
+          "30"
+        ],
+        "filament_settings_id": [
+          "Eryone ABS-CF"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_type": [
+          "ABS-CF"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "hot_plate_temp": [
+          "100"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "100"
+        ],
+        "nozzle_temperature": [
+          "250"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "260"
+        ],
+        "nozzle_temperature_range_high": [
+          "290"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "slow_down_layer_time": [
+          "10"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "100"
+        ]
+      }
+    },
+    {
+      "name": "Eryone ASA",
+      "file": "filament/Eryone ASA.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone ASA",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA02",
+        "filament_id": "EFL92",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "fan_max_speed": [
+          "50"
+        ],
+        "fan_min_speed": [
+          "20"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "14"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_settings_id": [
+          "Eryone ASA"
+        ],
+        "filament_type": [
+          "ASA"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "hot_plate_temp": [
+          "110"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "110"
+        ],
+        "nozzle_temperature": [
+          "265"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "270"
+        ],
+        "nozzle_temperature_range_high": [
+          "290"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "slow_down_layer_time": [
+          "12"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "slow_down_min_speed": [
+          "20"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "180"
+        ]
+      }
+    },
+    {
+      "name": "Eryone ASA-CF",
+      "file": "filament/Eryone ASA-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone ASA-CF",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA82",
+        "filament_id": "EFL82",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "fan_max_speed": [
+          "50"
+        ],
+        "fan_min_speed": [
+          "20"
+        ],
+        "filament_settings_id": [
+          "Eryone ASA-CF"
+        ],
+        "filament_type": [
+          "ASA-CF"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "8"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "hot_plate_temp": [
+          "110"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "110"
+        ],
+        "nozzle_temperature": [
+          "260"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "275"
+        ],
+        "nozzle_temperature_range_high": [
+          "290"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "180"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "slow_down_layer_time": [
+          "12"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PA",
+      "file": "filament/Eryone PA.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PA",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA71",
+        "filament_id": "EFL71",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "fan_max_speed": [
+          "20"
+        ],
+        "fan_min_speed": [
+          "10"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "filament_max_volumetric_speed": [
+          "8"
+        ],
+        "filament_notes": [
+          "brim width >= 20;"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_settings_id": [
+          "Eryone PA"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_type": [
+          "PA"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "hot_plate_temp": [
+          "115"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "115"
+        ],
+        "nozzle_temperature": [
+          "265"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "270"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "slow_down_layer_time": [
+          "10"
+        ],
+        "slow_down_min_speed": [
+          "15"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "200"
+        ],
+        "nozzle_temperature_range_high": [
+          "280"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PA-CF",
+      "file": "filament/Eryone PA-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PA-CF",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA72",
+        "filament_id": "EFL72",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "20"
+        ],
+        "fan_max_speed": [
+          "40"
+        ],
+        "fan_min_speed": [
+          "20"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.94"
+        ],
+        "filament_max_volumetric_speed": [
+          "8"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_settings_id": [
+          "Eryone PA-CF"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_type": [
+          "PA-CF"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "hot_plate_temp": [
+          "115"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "115"
+        ],
+        "nozzle_temperature": [
+          "265"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "275"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "nozzle_temperature_range_high": [
+          "280"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "200"
+        ],
+        "slow_down_layer_time": [
+          "10"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PA-GF",
+      "file": "filament/Eryone PA-GF.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PA-GF",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA73",
+        "filament_id": "EFL73",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "20"
+        ],
+        "fan_max_speed": [
+          "40"
+        ],
+        "fan_min_speed": [
+          "20"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.94"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_settings_id": [
+          "Eryone PA-GF"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_type": [
+          "PA-GF"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "hot_plate_temp": [
+          "110"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "110"
+        ],
+        "nozzle_temperature": [
+          "270"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "280"
+        ],
+        "nozzle_temperature_range_high": [
+          "280"
+        ],
+        "nozzle_temperature_range_low": [
+          "240"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "200"
+        ],
+        "slow_down_layer_time": [
+          "10"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PETG",
+      "file": "filament/Eryone PETG.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PETG",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA03",
+        "filament_id": "EFL93",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "fan_min_speed": [
+          "90"
+        ],
+        "close_fan_the_first_x_layers": [
+          "2"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0\n"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=1"
+        ],
+        "filament_max_volumetric_speed": [
+          "14"
+        ],
+        "filament_settings_id": [
+          "Eryone PETG"
+        ],
+        "filament_type": [
+          "PETG"
+        ],
+        "hot_plate_temp": [
+          "75"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "75"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "nozzle_temperature": [
+          "245"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "245"
+        ],
+        "nozzle_temperature_range_high": [
+          "270"
+        ],
+        "nozzle_temperature_range_low": [
+          "225"
+        ],
+        "slow_down_layer_time": [
+          "7"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PETG-CF",
+      "file": "filament/Eryone PETG-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PETG-CF",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA43",
+        "filament_id": "EFL43",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "fan_max_speed": [
+          "90"
+        ],
+        "fan_min_speed": [
+          "50"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0\n"
+        ],
+        "filament_flow_ratio": [
+          "0.94"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=1"
+        ],
+        "filament_max_volumetric_speed": [
+          "14"
+        ],
+        "filament_settings_id": [
+          "Eryone PETG"
+        ],
+        "filament_type": [
+          "PETG-CF"
+        ],
+        "hot_plate_temp": [
+          "80"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "80"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "nozzle_temperature": [
+          "245"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "250"
+        ],
+        "nozzle_temperature_range_high": [
+          "270"
+        ],
+        "nozzle_temperature_range_low": [
+          "225"
+        ],
+        "slow_down_min_speed": [
+          "20"
+        ],
+        "support_material_interface_fan_speed": [
+          "80"
+        ],
+        "temperature_vitrification": [
+          "80"
+        ],
+        "slow_down_layer_time": [
+          "7"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PLA",
+      "file": "filament/Eryone PLA.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PLA",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA00",
+        "filament_id": "EFL90",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "fan_min_speed": [
+          "90"
+        ],
+        "filament_max_volumetric_speed": [
+          "20"
+        ],
+        "filament_settings_id": [
+          "Eryone PLA"
+        ],
+        "hot_plate_temp": [
+          "60"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "60"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=1"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "slow_down_layer_time": [
+          "4"
+        ],
+        "slow_down_min_speed": [
+          "15"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PLA-CF",
+      "file": "filament/Eryone PLA-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PLA-CF",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA40",
+        "filament_id": "EFL40",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "fan_min_speed": [
+          "100"
+        ],
+        "filament_flow_ratio": [
+          "0.95"
+        ],
+        "filament_max_volumetric_speed": [
+          "15"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_settings_id": [
+          "Eryone PLA-CF"
+        ],
+        "filament_type": [
+          "PLA-CF"
+        ],
+        "hot_plate_temp": [
+          "55"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "55"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=1"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "nozzle_temperature": [
+          "225"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "230"
+        ],
+        "nozzle_temperature_range_high": [
+          "250"
+        ],
+        "slow_down_layer_time": [
+          "7"
+        ],
+        "support_material_interface_fan_speed": [
+          "100"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PP",
+      "file": "filament/Eryone PP.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PP",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA43",
+        "filament_id": "EFL43",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "fan_max_speed": [
+          "35"
+        ],
+        "fan_min_speed": [
+          "20"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.95"
+        ],
+        "filament_max_volumetric_speed": [
+          "10"
+        ],
+        "filament_notes": [
+          "Printing platform glue spraying"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "filament_settings_id": [
+          "Eryone PP"
+        ],
+        "filament_type": [
+          "PP"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "hot_plate_temp": [
+          "100"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "100"
+        ],
+        "nozzle_temperature": [
+          "230"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "235"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "nozzle_temperature_range_high": [
+          "270"
+        ],
+        "nozzle_temperature_range_low": [
+          "225"
+        ],
+        "slow_down_layer_time": [
+          "10"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "160"
+        ]
+      }
+    },
+    {
+      "name": "Eryone PP-CF",
+      "file": "filament/Eryone PP-CF.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone PP-CF",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA33",
+        "filament_id": "EFL33",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "fan_max_speed": [
+          "35"
+        ],
+        "fan_min_speed": [
+          "20"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_flow_ratio": [
+          "0.92"
+        ],
+        "fan_cooling_layer_time": [
+          "30"
+        ],
+        "close_fan_the_first_x_layers": [
+          "3"
+        ],
+        "filament_max_volumetric_speed": [
+          "8"
+        ],
+        "filament_notes": [
+          "Printing platform glue spraying"
+        ],
+        "filament_retraction_length": [
+          "1"
+        ],
+        "filament_vendor": [
+          "Eryone"
+        ],
+        "filament_settings_id": [
+          "Eryone PP-CF"
+        ],
+        "filament_type": [
+          "PP-CF"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "hot_plate_temp": [
+          "100"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "100"
+        ],
+        "nozzle_temperature": [
+          "240"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "240"
+        ],
+        "overhang_fan_threshold": [
+          "25%"
+        ],
+        "slow_down_layer_time": [
+          "10"
+        ],
+        "support_material_interface_fan_speed": [
+          "60"
+        ],
+        "temperature_vitrification": [
+          "160"
+        ]
+      }
+    },
+    {
+      "name": "Eryone Silk PLA",
+      "file": "filament/Eryone Silk PLA.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone Silk PLA",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA041",
+        "filament_id": "EFL941",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=1"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0\n"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_type": [
+          "Silk"
+        ],
+        "filament_settings_id": [
+          "Eryone Silk PLA"
+        ],
+        "hot_plate_temp": [
+          "60"
+        ],
+        "nozzle_temperature": [
+          "230"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "230"
+        ],
+        "slow_down_layer_time": [
+          "7"
+        ]
+      }
+    },
+    {
+      "name": "Eryone TPU",
+      "file": "filament/Eryone TPU.json",
+      "data": {
+        "type": "filament",
+        "name": "Eryone TPU",
+        "inherits": "Eryone Standard PLA",
+        "from": "system",
+        "setting_id": "EFSA05",
+        "filament_id": "EFL95",
+        "instantiation": "true",
+        "compatible_printers": [
+          "Thinker X400 0.4 nozzle"
+        ],
+        "filament_end_gcode": [
+          "; filament end gcode \nSET_FAN_SPEED FAN=filter_fan SPEED=0"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\nSET_FAN_SPEED FAN=filter_fan SPEED=1"
+        ],
+        "fan_min_speed": [
+          "90"
+        ],
+        "filament_max_volumetric_speed": [
+          "5"
+        ],
+        "filament_retraction_length": [
+          "1.6"
+        ],
+        "filament_settings_id": [
+          "Eryone TPU"
+        ],
+        "filament_type": [
+          "TPU"
+        ],
+        "nozzle_temperature": [
+          "230"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "230"
+        ],
+        "hot_plate_temp": [
+          "50"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "50"
+        ],
+        "slow_down_layer_time": [
+          "8"
+        ]
+      }
+    },
+    {
+      "name": "fdm_filament_pla",
+      "file": "filament/fdm_filament_pla.json",
+      "data": {
+        "type": "filament",
+        "name": "fdm_filament_pla",
+        "inherits": "fdm_filament_common",
+        "from": "system",
+        "instantiation": "false",
+        "fan_cooling_layer_time": [
+          "100"
+        ],
+        "filament_max_volumetric_speed": [
+          "12"
+        ],
+        "filament_type": [
+          "PLA"
+        ],
+        "filament_density": [
+          "1.24"
+        ],
+        "filament_cost": [
+          "20"
+        ],
+        "cool_plate_temp": [
+          "35"
+        ],
+        "eng_plate_temp": [
+          "0"
+        ],
+        "hot_plate_temp": [
+          "60"
+        ],
+        "cool_plate_temp_initial_layer": [
+          "35"
+        ],
+        "eng_plate_temp_initial_layer": [
+          "0"
+        ],
+        "hot_plate_temp_initial_layer": [
+          "60"
+        ],
+        "nozzle_temperature_initial_layer": [
+          "220"
+        ],
+        "reduce_fan_stop_start_freq": [
+          "1"
+        ],
+        "slow_down_for_layer_cooling": [
+          "0"
+        ],
+        "fan_max_speed": [
+          "100"
+        ],
+        "fan_min_speed": [
+          "100"
+        ],
+        "overhang_fan_speed": [
+          "100"
+        ],
+        "overhang_fan_threshold": [
+          "50%"
+        ],
+        "close_fan_the_first_x_layers": [
+          "1"
+        ],
+        "nozzle_temperature": [
+          "220"
+        ],
+        "temperature_vitrification": [
+          "60"
+        ],
+        "nozzle_temperature_range_low": [
+          "190"
+        ],
+        "nozzle_temperature_range_high": [
+          "230"
+        ],
+        "slow_down_min_speed": [
+          "10"
+        ],
+        "slow_down_layer_time": [
+          "4"
+        ],
+        "additional_cooling_fan_speed": [
+          "70"
+        ],
+        "enable_overhang_bridge_fan": [
+          "0"
+        ],
+        "filament_start_gcode": [
+          "; filament start gcode\n"
+        ]
+      }
+    }
+  ],
+  "lastUpdated": "2025-11-11T12:39:26.754427",
+  "source": "/Applications/Orcaslicer.app/Contents/Resources/profiles"
+}

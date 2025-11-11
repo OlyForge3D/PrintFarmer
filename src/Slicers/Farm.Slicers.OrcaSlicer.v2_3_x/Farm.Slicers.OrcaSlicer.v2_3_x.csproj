@@ -17,10 +17,30 @@
     <ProjectReference Include="../../shared/Farm.Web.Shared.csproj" />
   </ItemGroup>
 
+  <!-- Test dependencies -->
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="2.6.6" />
+    <PackageReference Include="FluentAssertions" Version="6.11.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
   <!-- Embed official profiles as resources -->
   <ItemGroup>
-    <EmbeddedResource Include="lib/Profiles/official-profiles.json">
-      <LogicalName>OrcaSlicer_v2_3_x_Profiles.json</LogicalName>
+    <EmbeddedResource Include="lib/Profiles/index.json">
+      <LogicalName>OrcaSlicer_v2_3_x_Profiles_Index.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="lib/Profiles/machines/*.json">
+      <LogicalName>OrcaSlicer_v2_3_x_Profiles_Machines_%(Filename).json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- Embed universal filaments as resources -->
+  <ItemGroup>
+    <EmbeddedResource Include="lib/Filaments/universal_filaments.json">
+      <LogicalName>OrcaSlicer_v2_3_x_Filaments_Universal.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

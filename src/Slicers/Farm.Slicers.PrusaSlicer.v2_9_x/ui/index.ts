@@ -9,14 +9,14 @@
  */
 
 // PrusaSlicer UI Components
-export { PrusaImportWizard } from './components/PrusaImportWizard';
+export { PrusaImportWizard } from "./components/PrusaImportWizard";
 
 // PrusaSlicer UI Services
-export { prusaProfilesService } from './services/prusaProfilesService';
+export { prusaProfilesService } from "./services/prusaProfilesService";
 
 // PrusaSlicer UI Types
 export type {
   PrusaPrinterPreset,
   PrusaMaterialPreset,
   PrusaBundlePreview,
-} from './types/prusaProfiles';
+} from "./types/prusaProfiles";
