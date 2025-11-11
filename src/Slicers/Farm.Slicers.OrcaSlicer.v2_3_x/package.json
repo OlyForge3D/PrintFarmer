@@ -1,0 +1,22 @@
+{
+  "name": "@farm/slicers-orcaslicer-v2_3_x",
+  "version": "2.3.1",
+  "description": "OrcaSlicer v2.3.1 UI library for PrintFarmer",
+  "main": "ui/index.ts",
+  "types": "ui/index.ts",
+  "files": [
+    "ui"
+  ],
+  "exports": {
+    ".": "./ui/index.ts",
+    "./ui": "./ui/index.ts"
+  },
+  "keywords": [
+    "printfarmer",
+    "slicer",
+    "orcaslicer",
+    "3d-printing"
+  ],
+  "author": "PrintFarmer",
+  "license": "MIT"
+}
