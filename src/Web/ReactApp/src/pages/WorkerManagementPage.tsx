@@ -289,7 +289,7 @@ export default function WorkerManagementPage() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm text-gray-900">
-                    Avg: {worker.averageProcessingTimeSeconds.toFixed(0)}s
+                    Avg: {(worker.averageProcessingTimeSeconds ?? 0).toFixed(0)}s
                   </div>
                   <div className="text-xs text-gray-500">
                     Uptime: {workerService.getUptime(worker)}

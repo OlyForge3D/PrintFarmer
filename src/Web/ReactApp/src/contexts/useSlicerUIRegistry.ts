@@ -1,5 +1,5 @@
 import { useContext } from "react";
-import { SlicerUIContext } from "./SlicerUIContext";
+import { SlicerUIContext } from "./SlicerUIContextValue";
 import type { ISlicerUIRegistry } from "../services/slicer-registry/SlicerUIRegistry";
 
 /**

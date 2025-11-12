@@ -93,20 +93,42 @@ module.exports = {
   },
   plugins: [],
   safelist: [
-    // PrintFarmer specific colors
+    // PrintFarmer specific colors - Backgrounds
     'bg-pf-bg-0', 'bg-pf-bg-1', 'bg-pf-bg-2', 'bg-pf-panel',
+    'bg-pf-accent', 'bg-pf-accent-2', 'bg-pf-accent-bg', 'bg-pf-accent-2-hover',
+    'bg-pf-success', 'bg-pf-success-bg', 'bg-pf-success-hover',
+    'bg-pf-error', 'bg-pf-error-bg',
+    'bg-pf-warning',
+    'bg-pf-status-online-bg', 'bg-pf-status-offline-bg',
+    'bg-pf-loading',
+    
+    // PrintFarmer specific colors - Text
     'text-pf-text-primary', 'text-pf-text-secondary', 'text-pf-text-tertiary',
     'text-pf-text-light', 'text-pf-text-muted',
-    'border-pf-border', 'border-pf-border-light', 'border-pf-border-medium',
-    'bg-pf-accent', 'bg-pf-success', 'text-pf-accent', 'text-pf-success',
-    'bg-pf-status-online-bg', 'text-pf-status-online-text', 'border-pf-status-online-border',
-    'bg-pf-status-offline-bg', 'text-pf-status-offline-text', 'border-pf-status-offline-border',
-    'bg-pf-error', 'text-pf-error-text', 'border-pf-error-border',
-    'text-pf-link', 'bg-pf-loading', 'text-pf-loading',
+    'text-pf-accent', 'text-pf-accent-2',
+    'text-pf-success', 'text-pf-error', 'text-pf-error-text', 'text-pf-warning-text',
+    'text-pf-status-online-text', 'text-pf-status-offline-text',
+    'text-pf-link', 'text-pf-loading',
+    
+    // PrintFarmer specific colors - Borders
+    'border-pf-border', 'border-pf-border-light', 'border-pf-border-medium', 'border-pf-border-dark', 'border-pf-border-gray',
+    'border-pf-accent', 'border-pf-accent-2',
+    'border-pf-success', 'border-pf-error', 'border-pf-error-border',
+    'border-pf-status-online-border', 'border-pf-status-offline-border',
+    'border-pf-loading', 'border-pf-loading-border',
     
     // Hover states for PrintFarmer colors
-    'hover:bg-pf-bg-1', 'hover:bg-pf-bg-2', 'hover:bg-pf-success-hover',
-    'hover:text-pf-text-primary', 'hover:text-pf-accent', 'hover:border-pf-accent-2',
+    'hover:bg-pf-bg-0', 'hover:bg-pf-bg-1', 'hover:bg-pf-bg-2',
+    'hover:bg-pf-accent', 'hover:bg-pf-accent-2', 'hover:bg-pf-accent-2-hover',
+    'hover:bg-pf-success', 'hover:bg-pf-success-hover',
+    'hover:bg-pf-error',
+    'hover:text-pf-text-primary', 'hover:text-pf-text-secondary',
+    'hover:text-pf-accent', 'hover:text-pf-accent-2',
+    'hover:text-pf-success',
+    'hover:border-pf-border', 'hover:border-pf-accent', 'hover:border-pf-accent-2',
+    
+    // Checkbox/Radio accent colors
+    'accent-pf-accent', 'accent-pf-accent-2', 'accent-pf-success',
     
     // Traditional Tailwind colors (for fallback)
     'bg-white', 'bg-gray-100', 'bg-gray-200', 'bg-gray-800', 'bg-gray-900',

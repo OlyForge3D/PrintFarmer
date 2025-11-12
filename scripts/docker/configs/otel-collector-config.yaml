@@ -18,7 +18,9 @@ processors:
     send_batch_size: 1024
   
   memory_limiter:
+    check_interval: 1s
     limit_mib: 512
+    spike_limit_mib: 128
   
   resourcedetection:
     detectors: [env, system]
@@ -33,46 +35,39 @@ processors:
         action: insert
 
 exporters:
-  # Jaeger for distributed tracing
-  jaeger:
-    endpoint: jaeger:14250
+  # Jaeger for distributed tracing (using OTLP gRPC for better compatibility)
+  otlp:
+    endpoint: jaeger:4317
     tls:
       insecure: true
 
   # Prometheus for metrics
   prometheus:
-    endpoint: "0.0.0.0:8888"
+    endpoint: "0.0.0.0:8889"
     namespace: printfarmer
     const_labels:
       environment: development
 
   # Console output for debugging
-  logging:
-    loglevel: debug
-
-  # OTLP HTTP for external observability platforms
-  otlphttp:
-    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
-    headers:
-      Authorization: ${OTEL_EXPORTER_OTLP_HEADERS}
-    compression: gzip
+  debug:
+    verbosity: detailed
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, attributes, batch]
-      exporters: [jaeger, logging]
+      exporters: [otlp, debug]
     
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, attributes, batch]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, debug]
     
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, attributes, batch]
-      exporters: [logging]
+      exporters: [debug]
 
   extensions: [health_check]
   

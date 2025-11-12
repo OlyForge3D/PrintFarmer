@@ -1,7 +1,7 @@
 import React, { ReactNode, useEffect, useMemo } from 'react';
 import { SlicerUIRegistry, type ISlicerUIRegistry } from '../services/slicer-registry/SlicerUIRegistry';
 import { registerAllSlicerUI } from '../services/slicer-registry/registerSlicerUI';
-import { SlicerUIContext as SlicerUIContextValue } from './SlicerUIContext';
+import { SlicerUIContext } from './SlicerUIContextValue';
 
 /**
  * Props for SlicerUIProvider
@@ -33,5 +33,5 @@ export const SlicerUIProvider: React.FC<SlicerUIProviderProps> = ({ children, re
         registerAllSlicerUI(registryInstance);
     }, [registryInstance]);
 
-    return <SlicerUIContextValue.Provider value={registryInstance}>{children}</SlicerUIContextValue.Provider>;
+    return <SlicerUIContext.Provider value={registryInstance}>{children}</SlicerUIContext.Provider>;
 };
