@@ -5,7 +5,7 @@ import {
   ImportOrcaBundleResult,
   OrcaBundleMappingResult,
   ExportOrcaBundleRequest,
-} from "./orcaProfiles";
+} from "../types/orcaProfiles";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:5245";

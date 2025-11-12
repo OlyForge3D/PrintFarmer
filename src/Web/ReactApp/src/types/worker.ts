@@ -18,7 +18,7 @@ export interface WorkerResponse {
   activeJobs: number;
   completedJobs: number;
   failedJobs: number;
-  averageProcessingTimeSeconds: number;
+  averageProcessingTimeSeconds?: number;
   lastHeartbeat: string; // ISO 8601 datetime
   registeredAt: string; // ISO 8601 datetime
   onlineAt?: string; // ISO 8601 datetime

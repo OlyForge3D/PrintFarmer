@@ -12,12 +12,21 @@ try {
 
 export default defineConfig({
   plugins: [react(), tsconfigPaths()],
+  logLevel: 'info', // Only show info and above; suppress debug/warnings
   resolve: {
     // Keep an explicit fallback alias mapping for environments where
     // the vite-tsconfig-paths plugin may not run (tests/CI). This
     // mirrors the tsconfig path mapping for '@/...' -> './src/...'
     alias: [
-      { find: '@', replacement: resolve(__dirname, 'src') }
+      { find: '@', replacement: resolve(__dirname, 'src') },
+      // Ensure all peerDependencies from OrcaSlicer workspace package resolve from root node_modules
+      // npm symlinks these but in Docker build context, Rollup needs explicit paths
+      { find: /^react\/jsx-runtime$/, replacement: resolve(__dirname, '../../../node_modules/react/jsx-runtime.js') },
+      { find: /^react$/, replacement: resolve(__dirname, '../../../node_modules/react') },
+      { find: /^react-dom$/, replacement: resolve(__dirname, '../../../node_modules/react-dom') },
+      { find: /^axios$/, replacement: resolve(__dirname, '../../../node_modules/axios') },
+      { find: /^@tanstack\/react-query$/, replacement: resolve(__dirname, '../../../node_modules/@tanstack/react-query') },
+      { find: /^lucide-react$/, replacement: resolve(__dirname, '../../../node_modules/lucide-react') }
     ]
   },
   optimizeDeps: {
@@ -58,17 +67,18 @@ export default defineConfig({
     outDir: 'dist',
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
+      // NOTE: Do NOT mark dependencies as external for a Vite SPA
+      // External modules expect to be provided by the runtime environment
+      // In a browser SPA, we need all dependencies bundled
       output: {
         manualChunks: {
-          react: ['react', 'react-dom'],
           routing: ['react-router-dom'],
-          vendor_misc: ['axios', '@tanstack/react-query'],
           three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib'],
-            viewers: [
-              // Heavy 3D viewer components (ensure paths resolved at build time)
-              'src/components/3d/ModelViewer3D.tsx',
-              'src/components/3d/GCodeViewer3D.tsx'
-            ]
+          viewers: [
+            // Heavy 3D viewer components (ensure paths resolved at build time)
+            'src/components/3d/ModelViewer3D.tsx',
+            'src/components/3d/GCodeViewer3D.tsx'
+          ]
         }
       }
     }

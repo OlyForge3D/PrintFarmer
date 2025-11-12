@@ -1,3 +1,17 @@
+/**
+ * ⚠️ IMPORTANT: This component uses PrintFarmer Design System
+ * 
+ * DESIGN SYSTEM REQUIREMENTS for workspace package UI:
+ * - Use CSS variables from src/Web/ReactApp/src/styles/theme.css (pf-* variables)
+ * - Import PrintFarmer components: PageTemplate, Button, Alert, FormField, Select
+ * - Reference: src/Web/ReactApp/src/pages/ImportOfficialProfilesPage.tsx for correct styling patterns
+ * - Do NOT use generic Tailwind colors (bg-blue-600, text-red-800, etc)
+ * - Use pf-* classes: bg-pf-panel, text-pf-text-primary, border-pf-border, etc.
+ * - For interactive states: bg-pf-accent-2 (primary), bg-pf-error (danger), bg-pf-accent (success)
+ */
+
+'use client';
+
 import React, { useState } from 'react';
 import { Upload, FileJson, CheckCircle, AlertCircle, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
@@ -18,7 +32,6 @@ export const OrcaImportWizard: React.FC = () => {
         mutationFn: (json: string) => orcaProfilesService.previewBundle(json),
         onSuccess: (data) => {
             setPreview(data);
-            // Select all presets by default
             setSelectedPrinters(new Set(data.printers.map((p) => p.name)));
             setSelectedFilaments(new Set(data.filaments.map((f) => f.name)));
             setSelectedProcesses(new Set(data.processes.map((p) => p.name)));
@@ -33,6 +46,9 @@ export const OrcaImportWizard: React.FC = () => {
                 importPrinters: selectedPrinters.size > 0,
                 importFilaments: selectedFilaments.size > 0,
                 importProcesses: selectedProcesses.size > 0,
+                selectedPrinters: Array.from(selectedPrinters),
+                selectedFilaments: Array.from(selectedFilaments),
+                selectedProcesses: Array.from(selectedProcesses),
             }),
         onSuccess: () => {
             setCurrentStep('complete');
@@ -77,24 +93,27 @@ export const OrcaImportWizard: React.FC = () => {
                     <React.Fragment key={step.id}>
                         <div className="flex items-center">
                             <div
-                                className={`flex items-center justify-center w-10 h-10 rounded-full font-semibold ${index <= stepIndex
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-200 text-gray-600'
-                                    }`}
+                                className={`flex items-center justify-center w-10 h-10 rounded-full font-semibold transition-colors ${
+                                    index <= stepIndex
+                                        ? 'bg-pf-accent-2 text-pf-text-primary'
+                                        : 'bg-pf-border text-pf-text-secondary'
+                                }`}
                             >
                                 {index + 1}
                             </div>
                             <span
-                                className={`ml-2 font-medium ${index <= stepIndex ? 'text-blue-600' : 'text-gray-500'
-                                    }`}
+                                className={`ml-2 font-medium transition-colors ${
+                                    index <= stepIndex ? 'text-pf-accent-2' : 'text-pf-text-muted'
+                                }`}
                             >
                                 {step.label}
                             </span>
                         </div>
                         {index < steps.length - 1 && (
                             <div
-                                className={`w-16 h-1 mx-4 ${index < stepIndex ? 'bg-blue-600' : 'bg-gray-200'
-                                    }`}
+                                className={`w-16 h-1 mx-4 transition-colors ${
+                                    index < stepIndex ? 'bg-pf-accent-2' : 'bg-pf-border-light'
+                                }`}
                             />
                         )}
                     </React.Fragment>
@@ -106,14 +125,14 @@ export const OrcaImportWizard: React.FC = () => {
     const renderUploadStep = () => (
         <div className="max-w-2xl mx-auto">
             <div className="text-center mb-6">
-                <FileJson className="w-16 h-16 mx-auto mb-4 text-blue-600" />
-                <h2 className="text-2xl font-bold mb-2">Upload OrcaSlicer Bundle</h2>
-                <p className="text-gray-600">
+                <FileJson className="w-16 h-16 mx-auto mb-4 text-pf-accent-2" />
+                <h2 className="text-2xl font-bold mb-2 text-pf-text-primary">Upload OrcaSlicer Bundle</h2>
+                <p className="text-pf-text-secondary">
                     Select a config bundle JSON file exported from OrcaSlicer to import presets.
                 </p>
             </div>
 
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition-colors">
+            <div className="border-2 border-dashed border-pf-border-medium rounded-lg p-8 text-center hover:border-pf-accent-2 transition-colors bg-pf-bg-2">
                 <input
                     type="file"
                     accept=".json"
@@ -122,11 +141,11 @@ export const OrcaImportWizard: React.FC = () => {
                     id="bundle-upload"
                 />
                 <label htmlFor="bundle-upload" className="cursor-pointer">
-                    <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                    <p className="text-lg font-medium mb-2">
+                    <Upload className="w-12 h-12 mx-auto mb-4 text-pf-text-muted" />
+                    <p className="text-lg font-medium mb-2 text-pf-text-primary">
                         {bundleJson ? 'File loaded' : 'Click to select bundle file'}
                     </p>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-pf-text-secondary">
                         Supports OrcaSlicer config bundle JSON format
                     </p>
                 </label>
@@ -137,11 +156,11 @@ export const OrcaImportWizard: React.FC = () => {
                     <button
                         onClick={handlePreview}
                         disabled={previewMutation.isPending}
-                        className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                        className="w-full bg-pf-accent-2 text-pf-text-primary px-6 py-3 rounded-lg font-semibold hover:opacity-90 disabled:bg-pf-border disabled:cursor-not-allowed transition-colors"
                     >
                         {previewMutation.isPending ? (
                             <span className="flex items-center justify-center">
-                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current mr-2" />
                                 Parsing bundle...
                             </span>
                         ) : (
@@ -152,12 +171,12 @@ export const OrcaImportWizard: React.FC = () => {
             )}
 
             {previewMutation.isError && (
-                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="mt-4 p-4 bg-pf-error-bg border border-pf-error rounded-lg">
                     <div className="flex items-start">
-                        <AlertCircle className="w-5 h-5 text-red-600 mr-2 mt-0.5" />
+                        <AlertCircle className="w-5 h-5 text-pf-error mr-2 mt-0.5" />
                         <div>
-                            <p className="font-semibold text-red-800">Failed to parse bundle</p>
-                            <p className="text-sm text-red-700 mt-1">
+                            <p className="font-semibold text-pf-error">Failed to parse bundle</p>
+                            <p className="text-sm text-pf-error mt-1">
                                 {previewMutation.error instanceof Error
                                     ? previewMutation.error.message
                                     : 'Invalid bundle format'}
@@ -174,33 +193,33 @@ export const OrcaImportWizard: React.FC = () => {
 
         return (
             <div className="max-w-4xl mx-auto">
-                <h2 className="text-2xl font-bold mb-6">Bundle Preview</h2>
+                <h2 className="text-2xl font-bold mb-6 text-pf-text-primary">Bundle Preview</h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
-                        <h3 className="font-semibold text-blue-900 mb-2">Printers</h3>
-                        <p className="text-3xl font-bold text-blue-600">{preview.printers.length}</p>
-                        <p className="text-sm text-blue-700 mt-1">printer presets</p>
+                    <div className="bg-pf-panel p-6 rounded-lg border border-pf-border">
+                        <h3 className="font-semibold text-pf-text-primary mb-2">Printers</h3>
+                        <p className="text-3xl font-bold text-pf-accent-2">{preview.printers.length}</p>
+                        <p className="text-sm text-pf-text-secondary mt-1">printer presets</p>
                     </div>
 
-                    <div className="bg-green-50 p-6 rounded-lg border border-green-200">
-                        <h3 className="font-semibold text-green-900 mb-2">Filaments</h3>
-                        <p className="text-3xl font-bold text-green-600">{preview.filaments.length}</p>
-                        <p className="text-sm text-green-700 mt-1">filament presets</p>
+                    <div className="bg-pf-panel p-6 rounded-lg border border-pf-border">
+                        <h3 className="font-semibold text-pf-text-primary mb-2">Filaments</h3>
+                        <p className="text-3xl font-bold text-pf-accent">{preview.filaments.length}</p>
+                        <p className="text-sm text-pf-text-secondary mt-1">filament presets</p>
                     </div>
 
-                    <div className="bg-purple-50 p-6 rounded-lg border border-purple-200">
-                        <h3 className="font-semibold text-purple-900 mb-2">Processes</h3>
-                        <p className="text-3xl font-bold text-purple-600">{preview.processes.length}</p>
-                        <p className="text-sm text-purple-700 mt-1">process presets</p>
+                    <div className="bg-pf-panel p-6 rounded-lg border border-pf-border">
+                        <h3 className="font-semibold text-pf-text-primary mb-2">Processes</h3>
+                        <p className="text-3xl font-bold text-pf-accent-2">{preview.processes.length}</p>
+                        <p className="text-sm text-pf-text-secondary mt-1">process presets</p>
                     </div>
                 </div>
 
                 <div className="space-y-6">
                     {/* Printer Presets */}
                     {preview.printers.length > 0 && (
-                        <div className="bg-white border border-gray-200 rounded-lg p-6">
-                            <h3 className="text-lg font-semibold mb-4 flex items-center">
+                        <div className="bg-pf-panel border border-pf-border rounded-lg p-6">
+                            <h3 className="text-lg font-semibold mb-4 flex items-center text-pf-text-primary">
                                 <input
                                     type="checkbox"
                                     checked={selectedPrinters.size === preview.printers.length}
@@ -211,7 +230,7 @@ export const OrcaImportWizard: React.FC = () => {
                                             setSelectedPrinters(new Set());
                                         }
                                     }}
-                                    className="mr-3"
+                                    className="mr-3 w-4 h-4 rounded border-pf-border bg-pf-bg-1 cursor-pointer accent-pf-accent-2"
                                     aria-label="Select all printer presets"
                                 />
                                 Printer Presets ({preview.printers.length})
@@ -220,7 +239,7 @@ export const OrcaImportWizard: React.FC = () => {
                                 {preview.printers.map((printer) => (
                                     <label
                                         key={printer.name}
-                                        className="flex items-start p-3 hover:bg-gray-50 rounded cursor-pointer"
+                                        className="flex items-start p-3 hover:bg-pf-bg-2 rounded cursor-pointer transition-colors"
                                     >
                                         <input
                                             type="checkbox"
@@ -234,11 +253,11 @@ export const OrcaImportWizard: React.FC = () => {
                                                 }
                                                 setSelectedPrinters(newSet);
                                             }}
-                                            className="mt-1 mr-3"
+                                            className="mt-1 mr-3 w-4 h-4 rounded border-pf-border bg-pf-bg-1 cursor-pointer accent-pf-accent-2"
                                         />
                                         <div className="flex-1">
-                                            <p className="font-medium">{printer.name}</p>
-                                            <p className="text-sm text-gray-600">
+                                            <p className="font-medium text-pf-text-primary">{printer.name}</p>
+                                            <p className="text-sm text-pf-text-secondary">
                                                 {printer.manufacturer} • {printer.bedWidth}x{printer.bedDepth}x
                                                 {printer.maxZHeight}mm • {printer.nozzleDiameter}mm nozzle
                                             </p>
@@ -251,8 +270,8 @@ export const OrcaImportWizard: React.FC = () => {
 
                     {/* Filament Presets */}
                     {preview.filaments.length > 0 && (
-                        <div className="bg-white border border-gray-200 rounded-lg p-6">
-                            <h3 className="text-lg font-semibold mb-4 flex items-center">
+                        <div className="bg-pf-panel border border-pf-border rounded-lg p-6">
+                            <h3 className="text-lg font-semibold mb-4 flex items-center text-pf-text-primary">
                                 <input
                                     type="checkbox"
                                     checked={selectedFilaments.size === preview.filaments.length}
@@ -263,7 +282,7 @@ export const OrcaImportWizard: React.FC = () => {
                                             setSelectedFilaments(new Set());
                                         }
                                     }}
-                                    className="mr-3"
+                                    className="mr-3 w-4 h-4 rounded border-pf-border bg-pf-bg-1 cursor-pointer accent-pf-accent-2"
                                     aria-label="Select all filament presets"
                                 />
                                 Filament Presets ({preview.filaments.length})
@@ -272,7 +291,7 @@ export const OrcaImportWizard: React.FC = () => {
                                 {preview.filaments.map((filament) => (
                                     <label
                                         key={filament.name}
-                                        className="flex items-start p-3 hover:bg-gray-50 rounded cursor-pointer"
+                                        className="flex items-start p-3 hover:bg-pf-bg-2 rounded cursor-pointer transition-colors"
                                     >
                                         <input
                                             type="checkbox"
@@ -286,11 +305,11 @@ export const OrcaImportWizard: React.FC = () => {
                                                 }
                                                 setSelectedFilaments(newSet);
                                             }}
-                                            className="mt-1 mr-3"
+                                            className="mt-1 mr-3 w-4 h-4 rounded border-pf-border bg-pf-bg-1 cursor-pointer accent-pf-accent-2"
                                         />
                                         <div className="flex-1">
-                                            <p className="font-medium">{filament.name}</p>
-                                            <p className="text-sm text-gray-600">
+                                            <p className="font-medium text-pf-text-primary">{filament.name}</p>
+                                            <p className="text-sm text-pf-text-secondary">
                                                 {filament.filamentType}
                                                 {filament.nozzleTemperature &&
                                                     ` • ${filament.nozzleTemperature}°C nozzle`}
@@ -305,8 +324,8 @@ export const OrcaImportWizard: React.FC = () => {
 
                     {/* Process Presets */}
                     {preview.processes.length > 0 && (
-                        <div className="bg-white border border-gray-200 rounded-lg p-6">
-                            <h3 className="text-lg font-semibold mb-4 flex items-center">
+                        <div className="bg-pf-panel border border-pf-border rounded-lg p-6">
+                            <h3 className="text-lg font-semibold mb-4 flex items-center text-pf-text-primary">
                                 <input
                                     type="checkbox"
                                     checked={selectedProcesses.size === preview.processes.length}
@@ -317,7 +336,7 @@ export const OrcaImportWizard: React.FC = () => {
                                             setSelectedProcesses(new Set());
                                         }
                                     }}
-                                    className="mr-3"
+                                    className="mr-3 w-4 h-4 rounded border-pf-border bg-pf-bg-1 cursor-pointer accent-pf-accent-2"
                                     aria-label="Select all process presets"
                                 />
                                 Process Presets ({preview.processes.length})
@@ -326,7 +345,7 @@ export const OrcaImportWizard: React.FC = () => {
                                 {preview.processes.map((process) => (
                                     <label
                                         key={process.name}
-                                        className="flex items-start p-3 hover:bg-gray-50 rounded cursor-pointer"
+                                        className="flex items-start p-3 hover:bg-pf-bg-2 rounded cursor-pointer transition-colors"
                                     >
                                         <input
                                             type="checkbox"
@@ -340,11 +359,11 @@ export const OrcaImportWizard: React.FC = () => {
                                                 }
                                                 setSelectedProcesses(newSet);
                                             }}
-                                            className="mt-1 mr-3"
+                                            className="mt-1 mr-3 w-4 h-4 rounded border-pf-border bg-pf-bg-1 cursor-pointer accent-pf-accent-2"
                                         />
                                         <div className="flex-1">
-                                            <p className="font-medium">{process.name}</p>
-                                            <p className="text-sm text-gray-600">
+                                            <p className="font-medium text-pf-text-primary">{process.name}</p>
+                                            <p className="text-sm text-pf-text-secondary">
                                                 {process.layerHeight}mm layer • {process.infillPercentage}% infill
                                                 {process.quality && ` • ${process.quality} quality`}
                                             </p>
@@ -359,7 +378,7 @@ export const OrcaImportWizard: React.FC = () => {
                 <div className="mt-8 flex justify-between">
                     <button
                         onClick={() => setCurrentStep('upload')}
-                        className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors flex items-center"
+                        className="px-6 py-2 border border-pf-border rounded-lg font-medium hover:bg-pf-bg-2 transition-colors flex items-center text-pf-text-primary"
                     >
                         <ArrowLeft className="w-4 h-4 mr-2" />
                         Back
@@ -372,11 +391,11 @@ export const OrcaImportWizard: React.FC = () => {
                                 selectedFilaments.size === 0 &&
                                 selectedProcesses.size === 0)
                         }
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center"
+                        className="px-6 py-2 bg-pf-accent-2 text-pf-text-primary rounded-lg font-semibold hover:opacity-90 disabled:bg-pf-border disabled:cursor-not-allowed transition-colors flex items-center"
                     >
                         {importMutation.isPending ? (
                             <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2" />
                                 Importing...
                             </>
                         ) : (
@@ -389,12 +408,12 @@ export const OrcaImportWizard: React.FC = () => {
                 </div>
 
                 {importMutation.isError && (
-                    <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="mt-4 p-4 bg-pf-error-bg border border-pf-error rounded-lg">
                         <div className="flex items-start">
-                            <AlertCircle className="w-5 h-5 text-red-600 mr-2 mt-0.5" />
+                            <AlertCircle className="w-5 h-5 text-pf-error mr-2 mt-0.5" />
                             <div>
-                                <p className="font-semibold text-red-800">Import failed</p>
-                                <p className="text-sm text-red-700 mt-1">
+                                <p className="font-semibold text-pf-error">Import failed</p>
+                                <p className="text-sm text-pf-error mt-1">
                                     {importMutation.error instanceof Error
                                         ? importMutation.error.message
                                         : 'Failed to import presets'}
@@ -409,25 +428,25 @@ export const OrcaImportWizard: React.FC = () => {
 
     const renderCompleteStep = () => (
         <div className="max-w-2xl mx-auto text-center">
-            <CheckCircle className="w-20 h-20 mx-auto mb-6 text-green-600" />
-            <h2 className="text-3xl font-bold mb-4">Import Complete!</h2>
-            <p className="text-lg text-gray-600 mb-8">
+            <CheckCircle className="w-20 h-20 mx-auto mb-6 text-pf-accent" />
+            <h2 className="text-3xl font-bold mb-4 text-pf-text-primary">Import Complete!</h2>
+            <p className="text-lg text-pf-text-secondary mb-8">
                 Your OrcaSlicer presets have been successfully imported.
             </p>
 
-            <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-8">
+            <div className="bg-pf-panel border border-pf-border rounded-lg p-6 mb-8">
                 <div className="grid grid-cols-3 gap-4">
                     <div>
-                        <p className="text-2xl font-bold text-green-600">{selectedPrinters.size}</p>
-                        <p className="text-sm text-gray-700">Printers</p>
+                        <p className="text-2xl font-bold text-pf-accent">{selectedPrinters.size}</p>
+                        <p className="text-sm text-pf-text-secondary">Printers</p>
                     </div>
                     <div>
-                        <p className="text-2xl font-bold text-green-600">{selectedFilaments.size}</p>
-                        <p className="text-sm text-gray-700">Filaments</p>
+                        <p className="text-2xl font-bold text-pf-accent">{selectedFilaments.size}</p>
+                        <p className="text-sm text-pf-text-secondary">Filaments</p>
                     </div>
                     <div>
-                        <p className="text-2xl font-bold text-green-600">{selectedProcesses.size}</p>
-                        <p className="text-sm text-gray-700">Processes</p>
+                        <p className="text-2xl font-bold text-pf-accent">{selectedProcesses.size}</p>
+                        <p className="text-sm text-pf-text-secondary">Processes</p>
                     </div>
                 </div>
             </div>
@@ -442,13 +461,13 @@ export const OrcaImportWizard: React.FC = () => {
                         setSelectedFilaments(new Set());
                         setSelectedProcesses(new Set());
                     }}
-                    className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                    className="px-6 py-2 border border-pf-border rounded-lg font-medium hover:bg-pf-bg-2 transition-colors text-pf-text-primary"
                 >
                     Import Another Bundle
                 </button>
                 <button
                     onClick={() => (window.location.href = '/profiles')}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                    className="px-6 py-2 bg-pf-accent-2 text-pf-text-primary rounded-lg font-semibold hover:opacity-90 transition-colors"
                 >
                     View Profiles
                 </button>
@@ -457,20 +476,20 @@ export const OrcaImportWizard: React.FC = () => {
     );
 
     return (
-        <div className="min-h-screen bg-gray-50 py-12 px-4">
+        <div className="min-h-screen bg-pf-bg-0 py-12 px-4">
             <div className="max-w-6xl mx-auto">
                 <div className="mb-8">
-                    <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                    <h1 className="text-3xl font-bold text-pf-text-primary mb-2">
                         Import OrcaSlicer Profiles
                     </h1>
-                    <p className="text-gray-600">
+                    <p className="text-pf-text-secondary">
                         Import printer, filament, and process presets from OrcaSlicer config bundles.
                     </p>
                 </div>
 
                 {currentStep !== 'complete' && renderStepIndicator()}
 
-                <div className="bg-white rounded-lg shadow-lg p-8">
+                <div className="bg-pf-panel rounded-lg border border-pf-border shadow-lg p-8">
                     {currentStep === 'upload' && renderUploadStep()}
                     {currentStep === 'preview' && renderPreviewStep()}
                     {currentStep === 'complete' && renderCompleteStep()}

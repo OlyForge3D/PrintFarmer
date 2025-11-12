@@ -10,19 +10,7 @@
       "@/services/*": ["./src/services/*"],
       "@/types/*": ["./src/types/*"],
       "@/utils/*": ["./src/utils/*"],
-      "@/pages/*": ["./src/pages/*"],
-      "@farm/slicers-orcaslicer-v2_3_x/*": [
-        "../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/*"
-      ],
-      "@farm/slicers-orcaslicer-v2_3_x": [
-        "../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/index.ts"
-      ],
-      "@farm/slicers-prasalicer-v2_9_x/*": [
-        "../../Slicers/Farm.Slicers.PrusaSlicer.v2_9_x/ui/*"
-      ],
-      "@farm/slicers-prasalicer-v2_9_x": [
-        "../../Slicers/Farm.Slicers.PrusaSlicer.v2_9_x/ui/index.ts"
-      ]
+      "@/pages/*": ["./src/pages/*"]
     }
   }
 }

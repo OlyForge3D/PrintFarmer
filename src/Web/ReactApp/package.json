@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
@@ -15,6 +15,7 @@
     "icons": "dotnet run --project ../../tools/IconGen/IconGen.csproj"
   },
   "dependencies": {
+    "@farm/slicers-orcaslicer-v2_3_x": "file:../../src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x",
     "@headlessui/react": "^2.2.7",
     "@heroicons/react": "^2.2.0",
     "@hookform/resolvers": "^5.2.2",
