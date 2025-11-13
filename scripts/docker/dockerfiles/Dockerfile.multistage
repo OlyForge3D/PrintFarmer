@@ -168,8 +168,11 @@ COPY --from=orcaslicer-binaries /usr/local/bin/orcaslicer /usr/local/bin/orcasli
 # Copy OrcaSlicer Worker binaries from shared build stage
 COPY --from=shared-build /app/publish/orcaslicer-worker .
 
-# Verify binary installation
+# Fix permissions on copied files for appuser access
 RUN set -e; \
+    chown -R appuser:appuser /app && \
+    chmod -R u+rw /app && \
+    chmod +x /usr/local/bin/orcaslicer && \
     test -f /usr/local/bin/orcaslicer && \
     test -s ./Farm.OrcaSlicer.Worker.dll && \
     echo "OrcaSlicer worker setup completed successfully"
