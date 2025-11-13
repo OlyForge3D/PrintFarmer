@@ -18,10 +18,15 @@
 #   - Infrastructure-as-Code (IaC) scenarios
 #   - Containerized deployments that bypass manual setup
 #
-#   Usage: ./scripts/deploy-docker.sh --auto-admin
-#   With custom credentials: --auto-admin --auto-admin-username=admin --auto-admin-password=SecurePass123!
+#   METHODS:
+#   1. Command-line flags: ./scripts/deploy-docker.sh --auto-admin --auto-admin-password=SecurePass123!
+#   2. Config file: Create ~/.auto-admin-config, ~/.config/printfarmer/auto-admin-config, or ./.auto-admin-config
+#      with AUTO_ADMIN=true, AUTO_ADMIN_USERNAME=admin, AUTO_ADMIN_PASSWORD=secret, AUTO_ADMIN_EMAIL=admin@example.com
+#      Script auto-detects and loads these files (same pattern as start-all-local.sh)
+#   3. Environment variables: export AUTO_ADMIN=true && ./scripts/deploy-docker.sh
 #
 #   If no password is provided, one is automatically generated and displayed.
+#   Config file method keeps credentials separate from main .deploy-config file.
 
 set -euo pipefail
 
@@ -49,6 +54,33 @@ COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
 # Generated files are retained by default; allow env override for CI
 KEEP_GENERATED=${KEEP_GENERATED:-true}
+
+# Auto-admin config file (separate from main .deploy-config to keep credentials isolated)
+# Uses same search pattern as start-all-local.sh for consistency
+AUTO_ADMIN_CONFIG_FILE=""
+
+# Auto-detect auto-admin config file if not provided via --auto-admin-config
+auto_detect_admin_config() {
+    # Check for config in common locations (in order of priority)
+    for default_location in ~/.auto-admin-config ~/.config/printfarmer/auto-admin-config ./.auto-admin-config; do
+        if [ -f "$default_location" ]; then
+            AUTO_ADMIN_CONFIG_FILE="$default_location"
+            break
+        fi
+    done
+}
+
+# Load auto-admin config file if found
+load_auto_admin_config() {
+    if [ -n "$AUTO_ADMIN_CONFIG_FILE" ] && [ -f "$AUTO_ADMIN_CONFIG_FILE" ]; then
+        print_info "Loading auto-admin config from $AUTO_ADMIN_CONFIG_FILE"
+        # shellcheck disable=SC1090
+        source "$AUTO_ADMIN_CONFIG_FILE"
+        print_success "Auto-admin config loaded"
+        return 0
+    fi
+    return 1
+}
 
  # Verify deployment
 # Note: verify_deployment() is defined later in this script. The older/duplicate
@@ -752,6 +784,7 @@ VERIFY / UTILITY OPTIONS:
 
 INITIAL ADMIN SETUP OPTIONS:
     --auto-admin                Create initial admin user automatically after deployment
+    --auto-admin-config FILE    Load auto-admin settings from config file (searches: ~/.auto-admin-config, ~/.config/printfarmer/auto-admin-config, ./.auto-admin-config)
     --auto-admin-username USER  Set admin username (default: admin)
     --auto-admin-password PASS  Set admin password (default: auto-generated)
     --auto-admin-email EMAIL    Set admin email (default: admin@printfarmer.local)
@@ -779,6 +812,13 @@ EXAMPLES:
 
     # Deploy with automatic initial admin setup (skip setup wizard)
     ./scripts/deploy-docker.sh --non-interactive --auto-admin
+    
+    # Deploy with auto-admin config file (credentials stored separately)
+    # Create ~/.auto-admin-config with AUTO_ADMIN=true, AUTO_ADMIN_PASSWORD=secret, etc.
+    ./scripts/deploy-docker.sh --non-interactive  # Auto-detects config
+    
+    # Or explicitly specify auto-admin config file
+    ./scripts/deploy-docker.sh --non-interactive --auto-admin-config /etc/printfarmer/admin.conf
     
     # Deploy with auto-admin and custom credentials
     ./scripts/deploy-docker.sh --auto-admin \
@@ -4741,6 +4781,18 @@ while [ $# -gt 0 ]; do
             PREPULL=true
             shift
             ;;
+        --auto-admin-config)
+            if [ -n "${2:-}" ]; then
+                AUTO_ADMIN_CONFIG_FILE="$2"
+                shift 2
+            else
+                echo "Missing value for --auto-admin-config" >&2; exit 2
+            fi
+            ;;
+        --auto-admin-config=*)
+            AUTO_ADMIN_CONFIG_FILE="${1#--auto-admin-config=}"
+            shift
+            ;;
         --auto-admin)
             AUTO_ADMIN=true
             shift
@@ -4809,6 +4861,16 @@ while [ $# -gt 0 ]; do
 done
 
 set -- "${_ARGS_KEEP[@]:-}"
+
+# Auto-detect and load auto-admin config if not explicitly provided via --auto-admin-config
+if [ -z "$AUTO_ADMIN_CONFIG_FILE" ]; then
+    auto_detect_admin_config
+fi
+
+# Load auto-admin config file if found (can be overridden by command-line flags)
+if [ -n "$AUTO_ADMIN_CONFIG_FILE" ] && [ -f "$AUTO_ADMIN_CONFIG_FILE" ]; then
+    load_auto_admin_config
+fi
 
 # If verify-only requested, load existing config and environment and run verification
 if [ "$VERIFY_DEPLOYMENT" = "true" ]; then
