@@ -3592,23 +3592,25 @@ deploy_containers() {
             # Try using the --platform flag first (supported on modern compose). If it fails
             # (for example older compose binary that reports unknown flag), fall back to
             # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
-            if "${compose_cmd[@]}" build --no-cache --platform "${DOCKER_BUILD_PLATFORM}"; then
+            if "${compose_cmd[@]}" build --no-cache --progress=plain --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
                 print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
                 export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
-                if "${compose_cmd[@]}" build --no-cache; then
+                if "${compose_cmd[@]}" build --no-cache --progress=plain; then
                     print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
                 else
                     print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
+                    print_error "For detailed build logs, run: ./debug-docker-build.sh"
                     exit 1
                 fi
             fi
         else
-            if "${compose_cmd[@]}" build --no-cache; then
+            if "${compose_cmd[@]}" build --no-cache --progress=plain; then
                 print_success "Docker images built successfully"
             else
                 print_error "Failed to build Docker images"
+                print_error "For detailed build logs, run: ./debug-docker-build.sh"
                 exit 1
             fi
         fi

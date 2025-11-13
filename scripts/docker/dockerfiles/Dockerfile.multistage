@@ -44,19 +44,25 @@ COPY proto /proto
 RUN dotnet publish ./api/Farm.Web.Api.csproj \
     -c Release \
     -o /app/publish/api \
-    --no-restore
+    --no-restore \
+    --verbosity detailed 2>&1 | tee /tmp/api-build.log && \
+    if [ $? -ne 0 ]; then echo "=== API BUILD FAILED ===" && cat /tmp/api-build.log && exit 1; fi
 
 # Build and publish OrcaSlicer Worker
 RUN dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj \
     -c Release \
     -o /app/publish/orcaslicer-worker \
-    --no-restore
+    --no-restore \
+    --verbosity detailed 2>&1 | tee /tmp/orca-build.log && \
+    if [ $? -ne 0 ]; then echo "=== ORCASLICER WORKER BUILD FAILED ===" && cat /tmp/orca-build.log && exit 1; fi
 
 # Build and publish Printer Discovery Service
 RUN dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj \
     -c Release \
     -o /app/publish/printer-discovery \
-    --no-restore
+    --no-restore \
+    --verbosity detailed 2>&1 | tee /tmp/discovery-build.log && \
+    if [ $? -ne 0 ]; then echo "=== PRINTER DISCOVERY BUILD FAILED ===" && cat /tmp/discovery-build.log && exit 1; fi
 
 # Verify critical runtime files exist
 RUN test -s /app/publish/api/Farm.Web.Api.dll && \
