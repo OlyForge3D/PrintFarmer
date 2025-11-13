@@ -2380,7 +2380,7 @@ configure_additional() {
             print_warning "macOS Docker has limited network access. Discovery may not work for all WiFi-connected printers."
         fi
         
-        prompt_yes_no "Enable network printer discovery?" "yes" "INCLUDE_DISCOVERY_CHOICE"
+        prompt_yes_no "Enable network printer discovery?" "no" "INCLUDE_DISCOVERY_CHOICE"
         
         if [ "$INCLUDE_DISCOVERY_CHOICE" = "yes" ]; then
             INCLUDE_DISCOVERY="true"
@@ -2669,7 +2669,7 @@ EOF
             ;;
     esac
 
-    # Always expose a unified default connection string key consumed by Program.cs
+    # Write unified default connection string key consumed by Program.cs
     # If we're deploying in host network mode, rewrite any Docker service hostnames
     # (e.g., 'database', 'postgres', 'mysql', 'sqlserver') to 'localhost' so the
     # API running in host network mode connects to the host services correctly.
@@ -2681,23 +2681,10 @@ EOF
     else
         CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
     fi
-    # Also expose provider-specific canonical connection strings for consumers
-    # If DB_PROVIDER is empty, avoid writing provider-specific connection keys
     # IMPORTANT: Do NOT quote the connection string in the .env file - Docker Compose
     # includes literal quotes as part of the value, breaking connection string parsing.
-    # Store as bare variable without surrounding quotes.
-    case "${DB_PROVIDER:-}" in
-        postgres)
-            echo "ConnectionStrings__Postgres=$CONNECTION_STRING" >> "$ENV_FILE"
-            ;;
-        sqlserver)
-            echo "ConnectionStrings__SqlServer=$CONNECTION_STRING" >> "$ENV_FILE"
-            ;;
-        mysql)
-            echo "ConnectionStrings__MySql=$CONNECTION_STRING" >> "$ENV_FILE"
-            ;;
-        *) ;;
-    esac
+    # The application reads only ConnectionStrings__Default and determines the provider
+    # from the DB_PROVIDER environment variable. Provider-specific keys are not used.
     echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
     
     # Generate monitoring service credentials
