@@ -539,7 +539,8 @@ tear_down_deployment() {
     echo "  2. Remove ALL Docker volumes (⚠️  ALL DATA WILL BE DELETED!)"
     echo "  3. Remove all PrintFarmer Docker images"
     echo "  4. Prune orphaned and dangling images"
-    echo "  5. Clean up generated configuration files"
+    echo "  5. Clear Docker builder cache"
+    echo "  6. Clean up generated configuration files"
     echo
     
     if [ "$NON_INTERACTIVE" = "false" ]; then
@@ -698,9 +699,21 @@ tear_down_deployment() {
     # 5-6. Docker system cleanup
     docker_system_cleanup aggressive
     
+    # Clear Docker builder cache for next build
+    print_info "Step 6/7: Clearing Docker builder cache..."
+    docker builder prune -af 2>/dev/null || true
+    print_success "Builder cache cleared"
+    
     # 7. Remove generated files
-    print_info "Step 5/5: Removing generated configuration files..."
+    print_info "Step 7/7: Removing generated configuration and build artifacts..."
     local files_removed=0
+    
+    # Remove docker-compose files
+    if [ -f docker-compose.yml ]; then
+        rm -f docker-compose.yml
+        echo "  • Removed docker-compose.yml"
+        ((files_removed++))
+    fi
     
     if [ -f docker-compose.override.yml ]; then
         rm -f docker-compose.override.yml
@@ -708,6 +721,7 @@ tear_down_deployment() {
         ((files_removed++))
     fi
     
+    # Remove environment file
     if [ -f .env ]; then
         rm -f .env
         echo "  • Removed .env"
