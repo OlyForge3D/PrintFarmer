@@ -13,6 +13,7 @@ public static class DatabaseInitializationExtensions
     /// <summary>
     /// Initializes and seeds the database during application startup.
     /// Ensures schema exists before any services query the database.
+    /// Enforces timeouts to prevent hanging containers during startup.
     /// </summary>
     public static async Task InitializeDatabaseAsync(this WebApplication app,
         IUnifiedLoggingService logger,
@@ -20,22 +21,37 @@ public static class DatabaseInitializationExtensions
         Farm.Web.Api.Services.Interfaces.IDatabaseInitializer dbInitializer,
         IStartupStatus startupStatus)
     {
+        // Get startup timeout from environment (default: 120 seconds)
+        var dbStartupTimeout = TimeSpan.FromSeconds(
+            int.TryParse(Environment.GetEnvironmentVariable("DB_STARTUP_TIMEOUT"), out int timeoutSec) ? timeoutSec : 120
+        );
+
         try
         {
+            using var startupCts = new CancellationTokenSource(dbStartupTimeout);
+            
             // STEP 1: Ensure database schema exists FIRST (before any services query it)
-            logger.LogInformation("[Startup] Ensuring database schema exists...");
+            logger.LogInformation("[Startup] Step 1/3: Creating/verifying database schema (timeout: {Timeout}s)...", dbStartupTimeout.TotalSeconds);
 
-            // For local development and testing we prefer EnsureCreated to avoid relying on migrations
-            // which may not be embedded in test assemblies. Production scenarios should use migrations.
-            if (app.Environment.IsDevelopment() || string.Equals(app.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                _ = await db.Database.EnsureCreatedAsync();
-                logger.LogInformation("[Startup] Database schema created (EnsureCreated)");
+                // For local development and testing we prefer EnsureCreated to avoid relying on migrations
+                // which may not be embedded in test assemblies. Production scenarios should use migrations.
+                if (app.Environment.IsDevelopment() || string.Equals(app.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = await db.Database.EnsureCreatedAsync(startupCts.Token);
+                    logger.LogInformation("[Startup]   ✓ Schema ensured (EnsureCreated)");
+                }
+                else
+                {
+                    await db.Database.MigrateAsync(startupCts.Token);
+                    logger.LogInformation("[Startup]   ✓ Migrations applied");
+                }
             }
-            else
+            catch (OperationCanceledException)
             {
-                await db.Database.MigrateAsync();
-                logger.LogInformation("[Startup] Database migrations applied");
+                logger.LogError("[Startup] FATAL: Schema operation exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds);
+                throw;
             }
 
             // STEP 2: Optionally skip the heavy initialization/seeding for test runners
@@ -46,7 +62,7 @@ public static class DatabaseInitializationExtensions
             bool skipStartupInit = string.Equals(Environment.GetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT"), "true", StringComparison.OrdinalIgnoreCase);
             if (skipStartupInit)
             {
-                logger.LogInformation("[Startup][TEST] Skipping database initializer/seed because TEST_SKIP_STARTUP_DB_INIT=true");
+                logger.LogInformation("[Startup] Step 2/3: Skipping database initialization (TEST_SKIP_STARTUP_DB_INIT=true)");
             }
             else
             {
@@ -57,7 +73,7 @@ public static class DatabaseInitializationExtensions
                 int retryCount = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_COUNT"), out int rc) ? rc : 3;
                 int retryDelay = int.TryParse(Environment.GetEnvironmentVariable("DB_CONNECTION_RETRY_DELAY"), out int rd) ? rd : 2;
 
-                logger.LogInformation($"[Startup] Initializing database provider: {provider}");
+                logger.LogInformation("[Startup] Step 2/3: Seeding reference data (provider: {Provider})...", provider);
 
                 // Small verification: for SQLite-backed test databases EnsureCreated may
                 // return before other connections observe the created schema. Poll
@@ -69,7 +85,7 @@ public static class DatabaseInitializationExtensions
                     if (providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
                     {
                         var conn = db.Database.GetDbConnection();
-                        await conn.OpenAsync();
+                        await conn.OpenAsync(startupCts.Token);
                         try
                         {
                             var required = new[] { "Manufacturers", "FilamentTypes", "SystemLogs" };
@@ -93,15 +109,15 @@ public static class DatabaseInitializationExtensions
                                     break;
                                 }
                                 attempts++;
-                                await Task.Delay(delayMs);
+                                await Task.Delay(delayMs, startupCts.Token);
                             }
                             if (!allPresent)
                             {
-                                logger.LogWarning("[Startup][DB] Core tables did not appear within the short wait window. Seeding will proceed but may retry on missing-table errors.");
+                                logger.LogWarning("[Startup] Core tables did not appear within the short wait window. Seeding will proceed but may retry on missing-table errors.");
                             }
                             else
                             {
-                                logger.LogInformation("[Startup][DB] Core tables detected before seeding.");
+                                logger.LogInformation("[Startup]   ✓ Core tables detected before seeding");
                             }
                         }
                         finally
@@ -112,14 +128,22 @@ public static class DatabaseInitializationExtensions
                 }
                 catch (Exception ex)
                 {
-                    logger.LogDebug(ex, "[Startup][DB] Short verification of core tables failed (non-fatal)");
+                    logger.LogDebug(ex, "[Startup] Short verification of core tables failed (non-fatal)");
                 }
 
-                // STEP 3: Run initialization and seeding
-                await dbInitializer.InitializeAsync(provider, retryCount, retryDelay);
-                logger.LogInformation("[Startup] Database initialization complete");
+                // STEP 2B: Run initialization and seeding with retry logic
+                try
+                {
+                    await dbInitializer.InitializeAsync(provider, retryCount, retryDelay);
+                    logger.LogInformation("[Startup]   ✓ Reference data seeded successfully");
+                }
+                catch (OperationCanceledException)
+                {
+                    logger.LogError("[Startup] FATAL: Seeding exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds);
+                    throw;
+                }
 
-                // Diagnostic: ensure key domain tables exist before running shadow-column checks or seed queries
+                // Diagnostic: ensure key domain tables exist before proceeding
                 try
                 {
                     // Only run SQLite-specific diagnostics when the provider is SQLite. Previously
@@ -133,7 +157,7 @@ public static class DatabaseInitializationExtensions
                         envProvider.Equals("sqlite", StringComparison.OrdinalIgnoreCase))
                     {
                         var conn = db.Database.GetDbConnection();
-                        await conn.OpenAsync();
+                        await conn.OpenAsync(startupCts.Token);
                         try
                         {
                             using var cmd = conn.CreateCommand();
@@ -146,11 +170,7 @@ public static class DatabaseInitializationExtensions
                             }
                             if (!tables.Contains("Manufacturers") || !tables.Contains("FilamentTypes"))
                             {
-                                logger.LogWarning("[Startup][DB] Core domain tables not present yet: {Tables}. Will attempt seeding but this may fail. TablesFound={TablesFound}", string.Join(',', tables), tables.Count);
-                            }
-                            else
-                            {
-                                logger.LogInformation("[Startup][DB] Core tables detected before seeding.");
+                                logger.LogWarning("[Startup] Core domain tables not present yet: {Tables}. Will proceed but this may indicate a seeding issue. TablesFound={TablesFound}", string.Join(',', tables), tables.Count);
                             }
                         }
                         finally
@@ -161,24 +181,34 @@ public static class DatabaseInitializationExtensions
                 }
                 catch (Exception diagEx)
                 {
-                    // Non-fatal diagnostic failure - continue to initialization which includes retries
-                    logger.LogDebug(diagEx, "[Startup][DB] Diagnostics check for core tables failed (non-fatal)");
+                    logger.LogDebug(diagEx, "[Startup] Post-seed diagnostics check for core tables failed (non-fatal)");
                 }
+            }
 
-                await dbInitializer.SeedAllAsync();
-                logger.LogInformation("[Startup] Database seeding complete");
+            // STEP 3: Initialize application settings from environment variables
+            logger.LogInformation("[Startup] Step 3/3: Initializing application settings...");
+            try
+            {
+                ISettingsInitializationService settingsInit = app.Services.GetRequiredService<ISettingsInitializationService>();
+                settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
+                settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+                logger.LogInformation("[Startup]   ✓ Settings initialized from environment");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[Startup]   ⚠ Settings initialization failed (non-fatal)");
             }
 
             // STEP 4: Mark application as ready
             startupStatus.MarkReady();
 
-            logger.LogInformation("[Startup] Application ready to serve requests");
+            logger.LogInformation("[Startup] ✓ Database initialization complete - application ready to serve requests");
         }
-        catch (Exception ex)
+        catch (OperationCanceledException ex)
         {
-            logger.LogError(ex, "[Startup][FATAL] Database initialization failed: {Message}", ex.Message);
-            await Console.Error.WriteAsync($"[Startup][FATAL] Database initialization failed: {ex.Message}\n{ex.StackTrace}");
-            throw; // Fail fast for container restart
+            logger.LogError(ex, "[Startup] FATAL: Database startup sequence exceeded timeout ({Timeout}s). API will not start.", Environment.GetEnvironmentVariable("DB_STARTUP_TIMEOUT") ?? "120");
+            await Console.Error.WriteAsync($"[Startup] FATAL: Database startup timeout. Last error: {ex.Message}\n");
+            throw;
         }
     }
 }

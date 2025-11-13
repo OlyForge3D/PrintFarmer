@@ -21,6 +21,9 @@ services:
       - ASPNETCORE_URLS=http://+:5245
       - DB_PROVIDER=Sqlite
       - ConnectionStrings__Default=Data Source=/data/farm.db
+      - DB_STARTUP_TIMEOUT=${DB_STARTUP_TIMEOUT:-120}
+      - DB_CONNECTION_RETRY_COUNT=${DB_CONNECTION_RETRY_COUNT:-3}
+      - DB_CONNECTION_RETRY_DELAY=${DB_CONNECTION_RETRY_DELAY:-2}
       - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080,http://localhost:5245}
       - DEPLOYMENT_MODE=monolithic
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
