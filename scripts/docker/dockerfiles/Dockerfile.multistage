@@ -64,10 +64,19 @@ RUN dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj \
     --verbosity detailed 2>&1 | tee /tmp/discovery-build.log && \
     if [ $? -ne 0 ]; then echo "=== PRINTER DISCOVERY BUILD FAILED ===" && cat /tmp/discovery-build.log && exit 1; fi
 
-# Verify critical runtime files exist
-RUN test -s /app/publish/api/Farm.Web.Api.dll && \
-    test -s /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll && \
-    echo "All .NET builds completed successfully"
+# Verify critical runtime files exist and provide diagnostics
+RUN echo "Checking published artifacts..." && \
+    echo "API publish directory:" && ls -lah /app/publish/api/ 2>&1 | head -20 || echo "API directory not found" && \
+    echo "OrcaSlicer Worker publish directory:" && ls -lah /app/publish/orcaslicer-worker/ 2>&1 | head -20 || echo "OrcaSlicer directory not found" && \
+    echo "Printer Discovery publish directory:" && ls -lah /app/publish/printer-discovery/ 2>&1 | head -20 || echo "Discovery directory not found" && \
+    if [ -f /app/publish/api/Farm.Web.Api.dll ] && [ -f /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll ]; then \
+        echo "✓ All .NET builds completed successfully"; \
+    else \
+        echo "✗ Critical .NET builds are missing:"; \
+        [ -f /app/publish/api/Farm.Web.Api.dll ] || echo "  - Missing: /app/publish/api/Farm.Web.Api.dll"; \
+        [ -f /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll ] || echo "  - Missing: /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll"; \
+        exit 1; \
+    fi
 
 ############################################################
 # API Runtime Container
