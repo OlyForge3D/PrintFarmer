@@ -29,9 +29,9 @@ public static class DatabaseInitializationExtensions
         try
         {
             using var startupCts = new CancellationTokenSource(dbStartupTimeout);
-            
+
             // STEP 1: Ensure database schema exists FIRST (before any services query it)
-            logger.LogInformation("[Startup] Step 1/3: Creating/verifying database schema (timeout: {Timeout}s)...", dbStartupTimeout.TotalSeconds);
+            logger.LogInformation("[Startup] Step 1/3: Creating/verifying database schema (timeout: {Timeout}s)...", dbStartupTimeout.TotalSeconds.ToString());
 
             try
             {
@@ -50,7 +50,7 @@ public static class DatabaseInitializationExtensions
             }
             catch (OperationCanceledException)
             {
-                logger.LogError("[Startup] FATAL: Schema operation exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds);
+                logger.LogError("[Startup] FATAL: Schema operation exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds.ToString());
                 throw;
             }
 
@@ -139,7 +139,7 @@ public static class DatabaseInitializationExtensions
                 }
                 catch (OperationCanceledException)
                 {
-                    logger.LogError("[Startup] FATAL: Seeding exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds);
+                    logger.LogError("[Startup] FATAL: Seeding exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds.ToString());
                     throw;
                 }
 
@@ -209,6 +209,12 @@ public static class DatabaseInitializationExtensions
             logger.LogError(ex, "[Startup] FATAL: Database startup sequence exceeded timeout ({Timeout}s). API will not start.", Environment.GetEnvironmentVariable("DB_STARTUP_TIMEOUT") ?? "120");
             await Console.Error.WriteAsync($"[Startup] FATAL: Database startup timeout. Last error: {ex.Message}\n");
             throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[Startup] FATAL: Database initialization failed: {Message}", ex.Message);
+            await Console.Error.WriteAsync($"[Startup] FATAL: Database initialization failed: {ex.Message}\n{ex.StackTrace}");
+            throw; // Fail fast for container restart
         }
     }
 }
