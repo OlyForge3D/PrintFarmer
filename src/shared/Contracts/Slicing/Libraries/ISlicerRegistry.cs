@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
+﻿namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
 
 /// <summary>
 /// Registry that aggregates all registered slicer libraries.

@@ -1,6 +1,6 @@
-﻿using PrinterDiscovery.BackgroundServices;
+﻿using Farm.Shared.Discovery;
+using PrinterDiscovery.BackgroundServices;
 using PrinterDiscovery.Services;
-using Farm.Shared.Discovery;
 
 var builder = WebApplication.CreateBuilder(args);
 

@@ -25,14 +25,13 @@ services:
         TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
     image: printfarmer-printer-discovery-multistage
     container_name: printfarmer-printer-discovery
-    # Host network mode allows access to local network and broadcast/multicast
-    network_mode: host
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # Use bridge network for microservices deployments (host network reserved for specific scenarios)
+    networks:
+      - printfarmer-network
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
-      - ASPNETCORE_URLS=http://+:5246
-      - Discovery__ApiBaseUrl=${DISCOVERY__API_BASE_URL:-http://host.docker.internal:5245}
+      - ASPNETCORE_URLS=http://+:5247
+      - Discovery__ApiBaseUrl=${DISCOVERY__API_BASE_URL:-http://api:5245}
       - DB_STARTUP_TIMEOUT=${DB_STARTUP_TIMEOUT:-120}
       - DB_CONNECTION_RETRY_COUNT=${DB_CONNECTION_RETRY_COUNT:-3}
       - DB_CONNECTION_RETRY_DELAY=${DB_CONNECTION_RETRY_DELAY:-2}
@@ -53,7 +52,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5246/api/discovery/health"]
+      test: ["CMD", "curl", "-f", "http://printer-discovery:5247/api/discovery/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -76,3 +75,17 @@ services:
         reservations:
           cpus: "0.1"
           memory: 64M
+
+# Network and volume definitions shared with other services
+networks:
+  printfarmer-network:
+    name: printfarmer-network
+    driver: bridge
+
+volumes:
+  printfarmer-database:
+  printfarmer-app-data:
+  printfarmer-model-uploads:
+  printfarmer-gcode-storage:
+  printfarmer-slicer-profiles:
+  printfarmer-orcaslicer-temp:

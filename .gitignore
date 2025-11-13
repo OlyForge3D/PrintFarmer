@@ -96,3 +96,7 @@ src/test-artifacts/
 # but ignore src/api/artifacts/ as a safety-net for leftover files.
 src/api/artifacts/
 
+# Auto-generated docker files 
+/dockerfiles/
+/docker-entrypoint-config.sh
+/Dockerfile.multistage

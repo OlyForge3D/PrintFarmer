@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.Json;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
 
@@ -68,7 +68,7 @@ public class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
             var indexRoot = indexDoc.RootElement;
 
             // Parse machine entries from index
-            if (indexRoot.TryGetProperty("machines", out var machinesElement) && 
+            if (indexRoot.TryGetProperty("machines", out var machinesElement) &&
                 machinesElement.ValueKind == JsonValueKind.Array)
             {
                 foreach (var machineEntry in machinesElement.EnumerateArray())
@@ -77,7 +77,7 @@ public class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
                     var name = machineEntry.GetProperty("name").GetString();
                     var manufacturer = machineEntry.GetProperty("manufacturer").GetString();
 
-                    if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name) || 
+                    if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name) ||
                         string.IsNullOrEmpty(manufacturer))
                     {
                         continue;
@@ -115,7 +115,7 @@ public class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
             // Load individual machine profile
             var resourceName = $"OrcaSlicer_v2_3_x_Profiles_Machines_{machineId}.json";
             var profileStream = assembly.GetManifestResourceStream(resourceName);
-            
+
             if (profileStream != null)
             {
                 using var reader = new StreamReader(profileStream);
@@ -136,7 +136,7 @@ public class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
             // Load universal filaments library
             const string filamentsResourceName = "OrcaSlicer_v2_3_x_Filaments_Universal.json";
             var filamentsStream = assembly.GetManifestResourceStream(filamentsResourceName);
-            
+
             if (filamentsStream != null)
             {
                 using var reader = new StreamReader(filamentsStream);

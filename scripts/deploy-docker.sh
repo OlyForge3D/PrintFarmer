@@ -2683,19 +2683,22 @@ EOF
     fi
     # Also expose provider-specific canonical connection strings for consumers
     # If DB_PROVIDER is empty, avoid writing provider-specific connection keys
+    # IMPORTANT: Do NOT quote the connection string in the .env file - Docker Compose
+    # includes literal quotes as part of the value, breaking connection string parsing.
+    # Store as bare variable without surrounding quotes.
     case "${DB_PROVIDER:-}" in
         postgres)
-            echo "ConnectionStrings__Postgres=\"$CONNECTION_STRING\"" >> "$ENV_FILE"
+            echo "ConnectionStrings__Postgres=$CONNECTION_STRING" >> "$ENV_FILE"
             ;;
         sqlserver)
-            echo "ConnectionStrings__SqlServer=\"$CONNECTION_STRING\"" >> "$ENV_FILE"
+            echo "ConnectionStrings__SqlServer=$CONNECTION_STRING" >> "$ENV_FILE"
             ;;
         mysql)
-            echo "ConnectionStrings__MySql=\"$CONNECTION_STRING\"" >> "$ENV_FILE"
+            echo "ConnectionStrings__MySql=$CONNECTION_STRING" >> "$ENV_FILE"
             ;;
         *) ;;
     esac
-    echo "ConnectionStrings__Default=\"$CONNECTION_STRING_TO_WRITE\"" >> "$ENV_FILE"
+    echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
     
     # Generate monitoring service credentials
     GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-$(generate_random_password)}

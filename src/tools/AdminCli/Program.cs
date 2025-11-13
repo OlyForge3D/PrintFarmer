@@ -1,7 +1,7 @@
-﻿using System.Net.Http.Json;
-using System.Text.Json;
+﻿using System.Globalization;
+using System.Net.Http.Json;
 using System.Text;
-using System.Globalization;
+using System.Text.Json;
 using Farm.Shared.Discovery;
 
 namespace Farm.Tools.AdminCli;
@@ -293,7 +293,7 @@ internal static class Program
     {
         rangeConstraints ??= new List<string>();
         interfaceConstraints ??= new List<string>();
-        
+
         var discovered = new List<DiscoveredPrinterInfo>();
 
         // Get local network interfaces
@@ -342,7 +342,7 @@ internal static class Program
                             return false;
                         }
                     });
-                    
+
                     if (!matchesConstraint)
                     {
                         Console.WriteLine($"[Discovery] Skipping {cidr} (does not match constraints)");
@@ -357,7 +357,7 @@ internal static class Program
                 // If range constraints exist, use the intersection of interface range and constraint range
                 var scanStart = network;
                 var scanEnd = broadcast;
-                
+
                 if (rangeConstraints.Count > 0)
                 {
                     // Find the tightest (smallest) constraint that applies to this interface
@@ -405,7 +405,7 @@ internal static class Program
                         try
                         {
                             var scanCountLocal = Interlocked.Increment(ref scanCount);
-                            
+
                             // Show progress every 10 IPs scanned
                             if (scanCountLocal % 10 == 0 || scanCountLocal == 1)
                             {
@@ -439,7 +439,7 @@ internal static class Program
                             {
                                 var bestResult = probeResults.MaxBy(r => r.ConfidenceScore)!;
                                 var result = bestResult.Printer;
-                                
+
                                 var printerInfo = new DiscoveredPrinterInfo
                                 {
                                     IpAddress = result.IpAddress,
@@ -513,7 +513,7 @@ internal static class Program
         {
             throw new ArgumentException("CIDR must be between 0 and 32");
         }
-        
+
         var mask = (uint.MaxValue << (32 - cidr)) & 0xFFFFFFFF;
         var bytes = BitConverter.GetBytes(mask).Reverse().ToArray();
         return new System.Net.IPAddress(bytes);
@@ -572,7 +572,6 @@ internal static class Program
     {
         public string IpAddress { get; set; } = string.Empty;
         public string Backend { get; set; } = string.Empty;
-        public int Port { get; set; }
         public int? BackendPort { get; set; }
         public int? FrontendPort { get; set; }
         public string? FriendlyName { get; set; }

@@ -50,7 +50,7 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
         return GetEmbeddedResourceStream($"cover-images/{manufacturerName}/{modelName}_cover.png");
     }
 
-    private async Task EnsureInitializedAsync(CancellationToken ct)
+    private async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
         if (_initialized)
         {

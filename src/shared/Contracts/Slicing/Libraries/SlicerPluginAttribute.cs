@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
+﻿namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
 
 /// <summary>
 /// Marks an assembly as containing a slicer library plugin.
@@ -11,7 +11,7 @@ namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
 /// [assembly: SlicerPlugin(typeof(OrcaSlicerLibrary_v2_3_x), typeof(OrcaSlicerUIProvider_v2_3_x))]
 /// </remarks>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
-public class SlicerPluginAttribute : Attribute
+public sealed class SlicerPluginAttribute : Attribute
 {
     /// <summary>
     /// Gets the type of the slicer library implementation (must implement ISlicerLibrary).

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
@@ -53,7 +53,7 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
             {
                 HttpResponseMessage response = await client.GetAsync(url, cancellationToken);
                 string content = await response.Content.ReadAsStringAsync(cancellationToken);
-                
+
                 var (isValid, confidence, reason) = await ValidateResponseAsync(response, content);
                 if (!isValid)
                 {

@@ -1,7 +1,7 @@
-﻿using Farm.Shared.Discovery;
-using Farm.Web.Shared;
-using System.Net;
+﻿using System.Net;
 using System.Net.NetworkInformation;
+using Farm.Shared.Discovery;
+using Farm.Web.Shared;
 
 namespace PrinterDiscovery.Services;
 
@@ -59,12 +59,12 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
         try
         {
             _logger.LogInformation("Starting manual printer discovery scan...");
-            
+
             // Get configured network ranges or auto-detect
             var subnetsConfig = _config["Discovery:Subnets"] ?? "192.168.0.0/16,10.0.0.0/8";
             var subnets = subnetsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
             var ipAddresses = GenerateIpAddresses(subnets.ToList());
-            
+
             _logger.LogInformation("Scanning {IpCount} IP addresses across {SubnetCount} subnets", ipAddresses.Count, subnets.Length);
 
             // Use the core discovery service to probe all IPs

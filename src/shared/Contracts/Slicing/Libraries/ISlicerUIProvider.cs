@@ -1,4 +1,4 @@
-namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
+﻿namespace Farm.Web.Shared.Contracts.Slicing.Libraries;
 
 /// <summary>
 /// Provides UI metadata for a slicer library version.
