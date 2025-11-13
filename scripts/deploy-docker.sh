@@ -49,6 +49,8 @@ AUTO_ADMIN=false
 AUTO_ADMIN_USERNAME=""
 AUTO_ADMIN_PASSWORD=""
 AUTO_ADMIN_EMAIL=""
+# Build verbosity: quiet (default), minimal, normal, detailed
+BUILD_VERBOSITY="${BUILD_VERBOSITY:-quiet}"
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
@@ -779,6 +781,8 @@ OPTIONS:
     --tear-down             Tear down existing deployment (stops containers, removes
         --teardown          volumes, cleans up). Useful for starting fresh.
         --clean             Same as --tear-down
+    --build-verbosity LEVEL Set Docker build verbosity: quiet (default), minimal, normal, detailed
+        --verbose-build     Shorthand for --build-verbosity detailed
         --cleanup-generated Remove generated Docker files after deployment (default keeps them)
         --keep-generated    Preserve generated files (default; retained for compatibility)
 
@@ -3398,6 +3402,7 @@ deploy_containers() {
     
     print_info "Step 1/3: Building Docker images..."
     print_info "This may take several minutes on first run..."
+    print_info "Build verbosity: $BUILD_VERBOSITY (set with --build-verbosity or --verbose-build)"
     # Always include selected compose file
     local compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
@@ -3606,12 +3611,12 @@ deploy_containers() {
             # Try using the --platform flag first (supported on modern compose). If it fails
             # (for example older compose binary that reports unknown flag), fall back to
             # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
-            if "${compose_cmd[@]}" build --no-cache --progress=plain --platform "${DOCKER_BUILD_PLATFORM}"; then
+            if "${compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}" --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
                 print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
                 export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
-                if "${compose_cmd[@]}" build --no-cache --progress=plain; then
+                if "${compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
                     print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
                 else
                     print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
@@ -3620,11 +3625,12 @@ deploy_containers() {
                 fi
             fi
         else
-            if "${compose_cmd[@]}" build --no-cache --progress=plain; then
+            if "${compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
                 print_success "Docker images built successfully"
             else
                 print_error "Failed to build Docker images"
                 print_error "For detailed build logs, run: ./debug-docker-build.sh"
+                print_info "To force a clean rebuild, run: ./scripts/deploy-docker.sh --tear-down --non-interactive"
                 exit 1
             fi
         fi
@@ -4717,6 +4723,22 @@ while [ $# -gt 0 ]; do
             ;;
         --tear-down|--teardown|--clean)
             TEAR_DOWN=true
+            shift
+            ;;
+        --build-verbosity)
+            if [ -n "${2:-}" ]; then
+                BUILD_VERBOSITY="$2"
+                shift 2
+            else
+                echo "Missing value for --build-verbosity" >&2; exit 2
+            fi
+            ;;
+        --build-verbosity=*)
+            BUILD_VERBOSITY="${1#--build-verbosity=}"
+            shift
+            ;;
+        --verbose-build)
+            BUILD_VERBOSITY="detailed"
             shift
             ;;
         --architecture)
