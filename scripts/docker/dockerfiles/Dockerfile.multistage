@@ -76,13 +76,15 @@ EXPOSE 5000
 # Install network tools for enhanced Docker Desktop networking
 RUN apt-get update && \
     apt-get install -y curl iputils-ping iproute2 net-tools dnsutils && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    # Create non-root user for runtime
+    groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --create-home appuser && \
+    # Create necessary directories with proper ownership
+    mkdir -p /app/uploads /app/gcode /app/slicers /data /app/wwwroot/gcode-library && \
+    chown -R appuser:appuser /app
 
-# Copy API binaries from shared build stage
-COPY --from=shared-build /app/publish/api .
-
-# Create necessary directories
-RUN mkdir -p /app/uploads /app/gcode /app/slicers /data /app/wwwroot/gcode-library
+# Copy API binaries from shared build stage (as appuser)
+COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
 
 # Set environment
 ENV ASPNETCORE_WEBROOT=/app/wwwroot
@@ -91,6 +93,9 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 ENV GCODE_STORAGE_PATH=/app/gcode
 ENV MODEL_UPLOAD_PATH=/app/uploads
 ENV SLICER_PROFILES_PATH=/app/profiles
+
+# Run as non-root user
+USER appuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
@@ -129,7 +134,6 @@ RUN set -e; \
 # Slicer Base Runtime (shared runtime for all workers)
 ############################################################
 FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS slicer-base
-USER root
 WORKDIR /app
 
 # Avoid interactive prompts and install a minimal, compatible set of runtime
@@ -144,10 +148,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user for runtime
 RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --create-home appuser
 
-# Create necessary directories and set ownership
+# Create necessary directories and set ownership for appuser
 RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
-
-USER appuser
 
 ############################################################
 # OrcaSlicer Worker Runtime Container  
@@ -155,29 +157,26 @@ USER appuser
 FROM --platform=${TARGETPLATFORM} slicer-base AS orcaslicer-worker
 ARG ORCASLICER_VERSION
 ARG ALLOW_STUB
-USER root
 
 LABEL component="orcaslicer-worker" \
       orcaslicer.version="${ORCASLICER_VERSION}" \
       description="Dedicated OrcaSlicer worker container" \
       security.sandbox="true"
 
-# Copy OrcaSlicer binaries from the binary layer
-COPY --from=orcaslicer-binaries /usr/local/bin/orcaslicer /usr/local/bin/orcaslicer
+# Copy OrcaSlicer binaries from the binary layer (as appuser)
+COPY --chown=appuser:appuser --from=orcaslicer-binaries /usr/local/bin/orcaslicer /usr/local/bin/orcaslicer
 
-# Copy OrcaSlicer Worker binaries from shared build stage
-COPY --from=shared-build /app/publish/orcaslicer-worker .
+# Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
+COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
 
-# Fix permissions on copied files for appuser access
+# Verify binary installation and set executable permissions
 RUN set -e; \
-    chown -R appuser:appuser /app && \
-    chmod -R u+rw /app && \
     chmod +x /usr/local/bin/orcaslicer && \
     test -f /usr/local/bin/orcaslicer && \
     test -s ./Farm.OrcaSlicer.Worker.dll && \
     echo "OrcaSlicer worker setup completed successfully"
 
-# Switch to app user for security
+# Run as non-root user
 USER appuser
 
 # Set environment
@@ -269,11 +268,15 @@ CMD ["nginx", "-g", "daemon off;"]
 FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS printer-discovery-runtime
 WORKDIR /app
 
-# Copy published printer discovery service
-COPY --from=shared-build /app/publish/printer-discovery .
-
 # Create non-root user for security
-RUN groupadd -r discovery && useradd -r -g discovery discovery
+RUN groupadd -r discovery && useradd -r -g discovery discovery && \
+    # Create app directory with proper ownership
+    chown -R discovery:discovery /app
+
+# Copy published printer discovery service (as discovery user)
+COPY --chown=discovery:discovery --from=shared-build /app/publish/printer-discovery .
+
+# Run as non-root user
 USER discovery
 
 # Health check
