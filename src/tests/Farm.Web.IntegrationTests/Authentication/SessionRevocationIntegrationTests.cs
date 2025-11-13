@@ -14,6 +14,7 @@ using RegisterRequest = Farm.Web.Shared.Contracts.Auth.RegisterRequest;
 
 namespace Farm.Web.Api.Tests.Authentication;
 
+[Collection("Sequential")]
 public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

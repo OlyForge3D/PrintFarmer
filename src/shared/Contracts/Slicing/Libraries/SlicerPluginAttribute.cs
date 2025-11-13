@@ -8,7 +8,7 @@
 /// Usage: Add this attribute at the assembly level in your slicer library project.
 /// Example in AssemblyInfo.cs or at the top of any file:
 /// 
-/// [assembly: SlicerPlugin(typeof(OrcaSlicerLibrary_v2_3_x), typeof(OrcaSlicerUIProvider_v2_3_x))]
+/// [assembly: SlicerPlugin(typeof(OrcaSlicerLibrary_v2_3_1), typeof(OrcaSlicerUIProvider_v2_3_1))]
 /// </remarks>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class SlicerPluginAttribute : Attribute

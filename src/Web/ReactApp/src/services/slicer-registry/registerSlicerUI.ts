@@ -18,7 +18,7 @@ import type { ISlicerUIRegistry, SlicerUIExports } from "./SlicerUIRegistry";
  * it with the SlicerUIRegistry. Handles load failures gracefully.
  */
 export function registerOrcaSlicerUI(registry: ISlicerUIRegistry): void {
-  import("@farm/slicers-orcaslicer-v2_3_x")
+  import("@farm/slicers-orcaslicer-v2_3_1")
     .then((module) => {
       const orcaExports: SlicerUIExports = {
         slicerName: "OrcaSlicer",

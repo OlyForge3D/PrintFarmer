@@ -39,7 +39,6 @@ using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using Swashbuckle.AspNetCore.Swagger;
 
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
@@ -120,21 +119,10 @@ builder.Services.AddControllers(options =>
     });
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
+builder.Services.AddOpenApi(options =>
 {
-    // Include XML documentation if generated (for enriched Swagger docs)
-    string xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    // CA3003: xmlFile is assembly name, not user input
-#pragma warning disable CA3003
-    string xmlPath = System.IO.Path.Combine(AppContext.BaseDirectory, xmlFile);
-    if (System.IO.File.Exists(xmlPath))
-#pragma warning restore CA3003
-    {
-        options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
-    }
-
-    // Add JWT Bearer authentication to Swagger UI
-    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    // Configure OpenAPI document with JWT Bearer security
+    var securityScheme = new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
         Name = "Authorization",
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
@@ -142,25 +130,31 @@ builder.Services.AddSwaggerGen(options =>
         BearerFormat = "JWT",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
         Description = "JWT Authorization header using the Bearer scheme. Enter your JWT token in the text input below.\n\nExample: \"abc123xyz\""
-    });
+    };
 
-    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    options.AddOperationTransformer((operation, api, ct) =>
     {
+        operation.Security ??= [];
+        operation.Security.Add(new()
         {
-            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            [new Microsoft.OpenApi.Models.OpenApiSecurityScheme
             {
                 Reference = new Microsoft.OpenApi.Models.OpenApiReference
                 {
                     Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
                     Id = "Bearer"
                 }
-            },
-            Array.Empty<string>()
-        }
+            }] = []
+        });
+        return Task.CompletedTask;
     });
 
-    options.SchemaFilter<Farm.Web.Api.Infrastructure.Swagger.ExampleSchemaFilter>();
-    options.OperationFilter<Farm.Web.Api.Infrastructure.Swagger.ExampleOperationFilter>();
+    options.AddDocumentTransformer((document, context, ct) =>
+    {
+        document.Components ??= new();
+        document.Components.SecuritySchemes["Bearer"] = securityScheme;
+        return Task.CompletedTask;
+    });
 });
 
 // CORS configuration for API access
@@ -624,17 +618,10 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.UseSwagger();
-    _ = app.UseSwaggerUI();
+    app.MapOpenApi();
 }
 
-// Always expose raw OpenAPI JSON at a stable path for tooling (even outside dev UI)
-app.MapGet("/openapi.json", (Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider adp, ISwaggerProvider provider) =>
-{
-    // Delegate to internal swagger generator service (provider injected by DI)
-    OpenApiDocument doc = provider.GetSwagger("v1");
-    return Results.Json(doc);
-});
+// Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
 
 app.UseCors("Default");
 

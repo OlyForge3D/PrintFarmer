@@ -469,8 +469,8 @@ export function PrintersAdminPage() {
             name: printer.name,
             serverUrl: printer.serverUrl || '',
             notes: printer.notes,
-            manufacturerId: bulkManufacturerId ? (bulkManufacturerId as any as Guid) : printer.manufacturerId,
-            modelId: bulkModelId ? (bulkModelId as any as Guid) : printer.modelId,
+            manufacturerId: bulkManufacturerId ? (bulkManufacturerId as unknown as string) : printer.manufacturerId,
+            modelId: bulkModelId ? (bulkModelId as unknown as string) : printer.modelId,
             backend: printer.backend,
             isEnabled: bulkIsEnabled !== null ? bulkIsEnabled : undefined
           });

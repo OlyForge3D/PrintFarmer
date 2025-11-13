@@ -1,12 +1,12 @@
 ﻿using Farm.Web.Shared.Contracts.Slicing.Libraries;
 
-namespace Farm.Slicers.OrcaSlicer.v2_3_x;
+namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 
 /// <summary>
 /// OrcaSlicer v2.3.1 UI provider.
 /// Exposes UI capabilities and metadata for this slicer version.
 /// </summary>
-public class OrcaSlicerUIProvider_v2_3_x : ISlicerUIProvider
+public class OrcaSlicerUIProvider_v2_3_1 : ISlicerUIProvider
 {
     public string SlicerName => "OrcaSlicer";
     public string SlicerVersion => "2.3.1";

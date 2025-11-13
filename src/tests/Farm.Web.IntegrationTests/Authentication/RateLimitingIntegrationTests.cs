@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Authentication;
 
+[Collection("Sequential")]
 public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;

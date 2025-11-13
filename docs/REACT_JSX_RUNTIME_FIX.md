@@ -16,12 +16,12 @@ Browser error: `Uncaught TypeError: Failed to resolve module specifier 'react/js
 When building React app with OrcaSlicer npm workspace package, the browser couldn't resolve `react/jsx-runtime` imports. This occurred because:
 1. OrcaSlicer TypeScript files use JSX syntax (e.g., `import React` + `<Component />`)
 2. @vitejs/plugin-react automatically transforms JSX to use `react/jsx-runtime`
-3. OrcaSlicer files are in an external directory (`/src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/`)
+3. OrcaSlicer files are in an external directory (`/src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/`)
 4. During build, Rollup couldn't resolve `react/jsx-runtime` from the external directory path
 5. At runtime, the module specifier wasn't resolvable from the browser context
 
 ### Problem 2: React and Other Peerhe Dependencies Resolution
-Docker build error: `Rollup failed to resolve import "react" from "/src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/components/OrcaImportWizard.tsx"`
+Docker build error: `Rollup failed to resolve import "react" from "/src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/components/OrcaImportWizard.tsx"`
 
 OrcaSlicer specifies React, React-DOM, axios, @tanstack/react-query, and lucide-react as peerDependencies. In npm workspaces, these should be symlinked from the root node_modules. However:
 1. In local development, npm symlinks work fine

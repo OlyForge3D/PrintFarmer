@@ -56,7 +56,7 @@ public class SignalRSlicerProgressNotifierTests
         // Assert
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.Once);
         _mockClientProxy.Verify(p => p.SendCoreAsync(
-            "SlicingProgress",
+            "slicingprogress",
             It.Is<object[]>(args => args.Length == 1 && args[0].Equals(update)),
             It.IsAny<CancellationToken>()
         ), Times.AtLeastOnce);
@@ -87,7 +87,7 @@ public class SignalRSlicerProgressNotifierTests
         // Assert
         _mockClients.Verify(c => c.Clients(It.Is<IReadOnlyList<string>>(list => list.Contains(connectionId))), Times.Once);
         _mockClientProxy.Verify(p => p.SendCoreAsync(
-            "SlicingProgress",
+            "slicingprogress",
             It.Is<object[]>(args => args.Length == 1 && args[0].Equals(update)),
             It.IsAny<CancellationToken>()
         ), Times.AtLeastOnce);
@@ -119,7 +119,7 @@ public class SignalRSlicerProgressNotifierTests
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.Once);
 
         _mockClientProxy.Verify(p => p.SendCoreAsync(
-            "SlicingCompleted",
+            "slicingcompleted",
             It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
                 ((SlicingCompletionNotification)args[0]).Success &&
@@ -153,7 +153,7 @@ public class SignalRSlicerProgressNotifierTests
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.Once);
 
         _mockClientProxy.Verify(p => p.SendCoreAsync(
-            "SlicingCompleted",
+            "slicingcompleted",
             It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
                 !((SlicingCompletionNotification)args[0]).Success &&
@@ -208,7 +208,7 @@ public class SignalRSlicerProgressNotifierTests
         _mockClients.Verify(c => c.Group("SlicingMonitors"), Times.Once);
 
         _mockClientProxy.Verify(p => p.SendCoreAsync(
-            "SlicingFailed",
+            "slicingfailed",
             It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingFailureNotification)args[0]).JobId == job.Id &&
                 ((SlicingFailureNotification)args[0]).ErrorMessage == errorMessage
@@ -391,7 +391,7 @@ public class SignalRSlicerProgressNotifierTests
 
         // Assert
         _mockClientProxy.Verify(p => p.SendCoreAsync(
-            "SlicingProgress",
+            "slicingprogress",
             It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingProgressUpdate)args[0]).Progress == progress &&
                 ((SlicingProgressUpdate)args[0]).CurrentStep == step

@@ -1,20 +1,22 @@
 ﻿using Farm.Web.Shared;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
-using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace Farm.Web.Api.Infrastructure.Swagger;
 
 /// <summary>
-/// Adds example objects to OpenAPI schemas for improved Swagger UI clarity.
+/// OpenAPI schema enrichment utilities for improved Swagger UI clarity.
+/// Note: With native ASP.NET Core OpenAPI (no Swashbuckle), custom filters
+/// are applied via AddOperationTransformer and AddDocumentTransformer in Program.cs
 /// </summary>
-public sealed class ExampleSchemaFilter : ISchemaFilter
+public static class ExampleSchemaFilter
 {
-    public void Apply(OpenApiSchema schema, SchemaFilterContext context)
+    /// <summary>
+    /// Creates an example schema for a given DTO type for use in OpenAPI transformers.
+    /// </summary>
+    public static OpenApiSchema? GetExampleForType(Type t)
     {
-        ArgumentNullException.ThrowIfNull(schema);
-        ArgumentNullException.ThrowIfNull(context);
-        Type t = context.Type;
+        var schema = new OpenApiSchema();
 
         if (t == typeof(CreatePrinterDto))
         {
@@ -267,5 +269,7 @@ public sealed class ExampleSchemaFilter : ISchemaFilter
                 prop.Example = new OpenApiString("00:02:30");
             }
         }
+
+        return schema;
     }
 }

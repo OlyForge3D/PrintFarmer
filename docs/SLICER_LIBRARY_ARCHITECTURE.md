@@ -21,7 +21,7 @@ Create separate NuGet/npm packages for each slicer version:
 
 ```
 Slicer Libraries (NuGet packages + npm packages)
-├── Farm.Slicers.OrcaSlicer.v2_3_x/
+├── Farm.Slicers.OrcaSlicer.v2_3_1/
 │   ├── lib/ (C# backend)
 │   │   ├── Profiles/
 │   │   │   ├── official-profiles.json (embedded resource)
@@ -55,7 +55,7 @@ Slicer Libraries (NuGet packages + npm packages)
 │   │   ├── bed-textures/
 │   │   ├── cover-images/
 │   │   └── manifest.json
-│   └── package.json / Farm.Slicers.OrcaSlicer.v2_3_x.csproj
+│   └── package.json / Farm.Slicers.OrcaSlicer.v2_3_1.csproj
 │
 ├── Farm.Slicers.OrcaSlicer.v2_4_x/ (future - same structure)
 ├── Farm.Slicers.PrusaSlicer.v2_9_x/
@@ -227,14 +227,14 @@ Each slicer npm package would contain:
 ```typescript
 Each slicer library exports backend and frontend components for unified versioning.
 
-**Backend Export** (`Farm.Slicers.OrcaSlicer.v2_3_x.csproj`):
+**Backend Export** (`Farm.Slicers.OrcaSlicer.v2_3_1.csproj`):
 ```csharp
 public class OrcaSlicerLibraryExtensions
 {
     public static IServiceCollection AddOrcaSlicerLibrary(this IServiceCollection services)
     {
-        services.AddSingleton<ISlicerLibrary>(new OrcaSlicerLibrary_v2_3_x());
-        services.AddSingleton<ISlicerUIProvider>(new OrcaSlicerUIProvider_v2_3_x());
+        services.AddSingleton<ISlicerLibrary>(new OrcaSlicerLibrary_v2_3_1());
+        services.AddSingleton<ISlicerUIProvider>(new OrcaSlicerUIProvider_v2_3_1());
         return services;
     }
 }
@@ -279,14 +279,14 @@ public class SlicerPluginAttribute : Attribute
 In `AssemblyInfo.cs` of each slicer library project:
 
 ```csharp
-// Farm.Slicers.OrcaSlicer.v2_3_x/AssemblyInfo.cs
+// Farm.Slicers.OrcaSlicer.v2_3_1/AssemblyInfo.cs
 using System.Reflection;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
-using Farm.Slicers.OrcaSlicer.v2_3_x;
+using Farm.Slicers.OrcaSlicer.v2_3_1;
 
 [assembly: SlicerPlugin(
-    typeof(OrcaSlicerLibrary_v2_3_x),
-    typeof(OrcaSlicerUIProvider_v2_3_x)
+    typeof(OrcaSlicerLibrary_v2_3_1),
+    typeof(OrcaSlicerUIProvider_v2_3_1)
 )]
 ```
 
@@ -379,7 +379,7 @@ public static IServiceCollection AddPrintFarmerServices(
 1. OrcaSlicer library project is referenced → added to loaded assemblies
 2. `DiscoverAndRegisterSlicerPlugins()` is called at startup
 3. Plugin discovery finds `SlicerPluginAttribute` in OrcaSlicer assembly
-4. Instantiates `OrcaSlicerLibrary_v2_3_x` and `OrcaSlicerUIProvider_v2_3_x`
+4. Instantiates `OrcaSlicerLibrary_v2_3_1` and `OrcaSlicerUIProvider_v2_3_1`
 5. `AddSlicerRegistry()` creates `ISlicerRegistry` service with all discovered plugins
 6. API endpoints use `ISlicerRegistry` to access profiles, assets, UI metadata
 
@@ -524,10 +524,10 @@ public interface ISlicerAssetService
 - ✅ Create `SlicerPluginDiscovery` for automatic plugin loading
 
 #### Phase 2: Extract OrcaSlicer v2.3.1 Library ✅ Completed (Core)
-- ✅ Create `Farm.Slicers.OrcaSlicer.v2_3_x` NuGet project structure
-- ✅ Create `Farm.Slicers.OrcaSlicer.v2_3_x` npm package placeholder
-- ✅ Implement `ISlicerLibrary` in `OrcaSlicerLibrary_v2_3_x`
-- ✅ Implement `ISlicerUIProvider` in `OrcaSlicerUIProvider_v2_3_x`
+- ✅ Create `Farm.Slicers.OrcaSlicer.v2_3_1` NuGet project structure
+- ✅ Create `Farm.Slicers.OrcaSlicer.v2_3_1` npm package placeholder
+- ✅ Implement `ISlicerLibrary` in `OrcaSlicerLibrary_v2_3_1`
+- ✅ Implement `ISlicerUIProvider` in `OrcaSlicerUIProvider_v2_3_1`
 - ✅ Implement `ISlicerProfilesProvider` in `OrcaSlicerProfilesProvider`
 - ✅ Implement `ISlicerAssetRegistry` in `OrcaSlicerAssetRegistry`
 - ✅ Create `AssemblyInfo.cs` with `SlicerPluginAttribute`
@@ -647,7 +647,7 @@ using Farm.Slicers.OrcaSlicer.v2_9_x;
 ```xml
 <!-- src/api/Farm.Web.Api.csproj -->
 <ItemGroup>
-  <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_x\..." />
+  <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\..." />
   <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_9_x\..." />  <!-- NEW -->
 </ItemGroup>
 ```
@@ -728,7 +728,7 @@ API Startup:
 1. Call services.DiscoverAndRegisterSlicerPlugins()
 2. Scan assemblies for [SlicerPluginAttribute]
 3. Find OrcaSlicer assembly with SlicerPlugin attribute
-4. Instantiate OrcaSlicerLibrary_v2_3_x and OrcaSlicerUIProvider_v2_3_x
+4. Instantiate OrcaSlicerLibrary_v2_3_1 and OrcaSlicerUIProvider_v2_3_1
 5. Registry ready to serve profiles, assets, UI metadata
 
 React Startup:
@@ -769,7 +769,7 @@ Frontend:
 Q1 2025
 ├── Week 1-2: Design ISlicerLibrary abstractions ✅ DONE
 ├── Week 3-4: Implement SlicerRegistry ✅ DONE
-├── Week 5-8: Create Farm.Slicers.OrcaSlicer.v2_3_x ✅ DONE
+├── Week 5-8: Create Farm.Slicers.OrcaSlicer.v2_3_1 ✅ DONE
 ├── Week 9-10: Plugin discovery system ✅ DONE
 └── Week 11-12: Migrate OrcaSlicer UI components ⏳ IN PROGRESS
 
@@ -787,7 +787,7 @@ Q2 2025
 - `src/api/Interfaces/ISlicerRegistry.cs` - Update to include UI provider lookup
 - `src/api/Controllers/Slicing/ProfilesController.cs` - Refactor to use `ISlicerRegistry`
 - `src/api/Services/Slicing/AssetService.cs` - Refactor to use `ISlicerAssetRegistry`
-- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/` - New library package
+- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/` - New library package
 - `src/Slicers/Farm.Slicers.PrusaSlicer.v2_9_x/` - New library package
 
 ### Frontend (TypeScript / npm)

@@ -1,7 +1,7 @@
 using System.Reflection;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
 
-namespace Farm.Slicers.OrcaSlicer.v2_3_x;
+namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 
 /// <summary>
 /// Provides access to OrcaSlicer v2.3.1 assets (bed models, textures, printer cover images).
@@ -60,8 +60,8 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
         _initialized = true;
 
         // Load asset manifest from embedded resources
-        var assembly = typeof(OrcaSlicerLibrary_v2_3_x).Assembly;
-        const string manifestResource = "OrcaSlicer_v2_3_x_Assets_manifest.json";
+        var assembly = typeof(OrcaSlicerLibrary_v2_3_1).Assembly;
+        const string manifestResource = "OrcaSlicer_v2_3_1_Assets_manifest.json";
 
         var manifestStream = assembly.GetManifestResourceStream(manifestResource);
         if (manifestStream == null)
@@ -76,8 +76,8 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
 
     private static Stream? GetEmbeddedResourceStream(string resourcePath)
     {
-        var assembly = typeof(OrcaSlicerLibrary_v2_3_x).Assembly;
-        var resourceName = $"OrcaSlicer_v2_3_x_Assets_{resourcePath}".Replace('/', '_');
+        var assembly = typeof(OrcaSlicerLibrary_v2_3_1).Assembly;
+        var resourceName = $"OrcaSlicer_v2_3_1_Assets_{resourcePath}".Replace('/', '_');
 
         return assembly.GetManifestResourceStream(resourceName);
     }

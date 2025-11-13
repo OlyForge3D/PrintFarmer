@@ -58,14 +58,14 @@ SlicerUIProvider (React)
 
 ### ✅ OrcaSlicer v2.3.1 Library
 
-**Backend** (`src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/lib/`)
-- ✅ `OrcaSlicerLibrary_v2_3_x.cs` - Implements ISlicerLibrary
-- ✅ `OrcaSlicerUIProvider_v2_3_x.cs` - Implements ISlicerUIProvider
+**Backend** (`src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/lib/`)
+- ✅ `OrcaSlicerLibrary_v2_3_1.cs` - Implements ISlicerLibrary
+- ✅ `OrcaSlicerUIProvider_v2_3_1.cs` - Implements ISlicerUIProvider
 - ✅ `OrcaSlicerProfilesProvider.cs` - Loads embedded profiles
 - ✅ `OrcaSlicerAssetRegistry.cs` - Manages bed models/textures
 - ✅ `AssemblyInfo.cs` - Plugin declaration with attribute
 
-**Frontend** (`src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/`)
+**Frontend** (`src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/`)
 - ✅ `components/OrcaImportWizard.tsx` - Migrated (485 lines)
 - ✅ `services/orcaProfilesService.ts` - Migrated (60 lines)
 - ✅ `types/orcaProfiles.ts` - Migrated (117 lines)
@@ -76,7 +76,7 @@ SlicerUIProvider (React)
 - ✅ `lib/Assets/manifest.json` - Embedded
 
 **Integration**
-- ✅ `Farm.Slicers.OrcaSlicer.v2_3_x.csproj` - NuGet metadata
+- ✅ `Farm.Slicers.OrcaSlicer.v2_3_1.csproj` - NuGet metadata
 - ✅ Removed from core app (cleanroom migration)
 - ✅ Registered with plugin discovery system
 
@@ -274,7 +274,7 @@ Rendered with OrcaProfilesService from library
 
 ### The Library Pattern
 ```
-Farm.Slicers.OrcaSlicer.v2_3_x (NuGet + Path Alias)
+Farm.Slicers.OrcaSlicer.v2_3_1 (NuGet + Path Alias)
 ├── Backend: .NET classes, embedded resources
 └── Frontend: TypeScript components, services, types
   ↓ Exports

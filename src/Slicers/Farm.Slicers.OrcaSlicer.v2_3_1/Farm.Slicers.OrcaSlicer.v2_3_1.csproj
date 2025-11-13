@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <WarningsNotAsErrors>nullable</WarningsNotAsErrors>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <Title>Farm.Slicers.OrcaSlicer.v2_3_x</Title>
+    <Title>Farm.Slicers.OrcaSlicer.v2_3_1</Title>
     <Description>OrcaSlicer v2.3.1 slicer library for PrintFarmer. Contains profiles, assets, and UI components.</Description>
     <Version>2.3.1</Version>
     <Authors>PrintFarmer</Authors>
@@ -30,24 +30,24 @@
   <!-- Embed official profiles as resources -->
   <ItemGroup>
     <EmbeddedResource Include="lib/Profiles/index.json">
-      <LogicalName>OrcaSlicer_v2_3_x_Profiles_Index.json</LogicalName>
+      <LogicalName>OrcaSlicer_v2_3_1_Profiles_Index.json</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="lib/Profiles/machines/*.json">
-      <LogicalName>OrcaSlicer_v2_3_x_Profiles_Machines_%(Filename).json</LogicalName>
+      <LogicalName>OrcaSlicer_v2_3_1_Profiles_Machines_%(Filename).json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
   <!-- Embed universal filaments as resources -->
   <ItemGroup>
     <EmbeddedResource Include="lib/Filaments/universal_filaments.json">
-      <LogicalName>OrcaSlicer_v2_3_x_Filaments_Universal.json</LogicalName>
+      <LogicalName>OrcaSlicer_v2_3_1_Filaments_Universal.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
   <!-- Embed assets as resources -->
   <ItemGroup>
     <EmbeddedResource Include="lib/Assets/**/*">
-      <LogicalName>OrcaSlicer_v2_3_x_Assets_%(Filename)</LogicalName>
+      <LogicalName>OrcaSlicer_v2_3_1_Assets_%(Filename)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

@@ -23,7 +23,7 @@ Successfully implemented proper npm workspaces architecture for Slicer packages 
 ### 2. OrcaSlicer Package Integration ✅
 - **Method**: Added as `file:` dependency in React app's package.json
   ```json
-  "@farm/slicers-orcaslicer-v2_3_x": "file:../../src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x"
+  "@farm/slicers-orcaslicer-v2_3_x": "file:../../src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1"
   ```
 - **Peer Dependencies**: Declared in OrcaSlicer package.json
   - react, react-dom, axios, @tanstack/react-query, lucide-react
@@ -58,11 +58,11 @@ Successfully implemented proper npm workspaces architecture for Slicer packages 
 ### 6. Docker Dockerfile Updates ✅
 - **Added**: OrcaSlicer C# project files to build stage
   ```dockerfile
-  COPY src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/*.csproj ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/
+  COPY src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/*.csproj ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/
   ```
 - **Added**: OrcaSlicer restore step
   ```dockerfile
-  dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/Farm.Slicers.OrcaSlicer.v2_3_x.csproj
+  dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj
   ```
 - **Changed**: React install from `npm ci` to `npm install`
   - `npm ci` incompatible with `file:` paths
@@ -132,7 +132,7 @@ Successfully implemented proper npm workspaces architecture for Slicer packages 
 
 ### TypeScript Configuration
 - `src/Web/ReactApp/tsconfig.paths.json`: Removed Slicer-specific path mappings
-- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/tsconfig.json`: Created with relaxed settings
+- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/tsconfig.json`: Created with relaxed settings
   - `noImplicitAny: false` (external package doesn't need strict types)
   - `strict: false` (allows implicit any, unused variables)
   - `moduleResolution: bundler` (modern resolution)
@@ -146,8 +146,8 @@ Successfully implemented proper npm workspaces architecture for Slicer packages 
 - `src/Web/ReactApp/tsconfig.paths.json`: Removed Slicer path mappings
 
 ### TypeScript
-- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/tsconfig.json`: Created
-- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_x/ui/services/orcaProfilesService.ts`: Fixed import path
+- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/tsconfig.json`: Created
+- `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/services/orcaProfilesService.ts`: Fixed import path
 
 ### React Components
 - `src/Web/ReactApp/src/contexts/SlicerUIContextValue.ts`: Renamed from SlicerUIContext.ts

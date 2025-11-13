@@ -11,7 +11,6 @@ var enablePeriodicDiscovery = builder.Configuration.GetValue<bool>("Discovery:En
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
-builder.Services.AddSwaggerGen();
 
 // Register discovery probes as services
 builder.Services.AddSingleton<INetworkDiscoveryProbe, MoonrakerDiscoveryProbe>();
@@ -48,8 +47,6 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    app.UseSwagger();
-    app.UseSwaggerUI();
 }
 
 app.UseRouting();

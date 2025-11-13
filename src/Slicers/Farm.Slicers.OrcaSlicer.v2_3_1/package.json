@@ -1,5 +1,5 @@
 {
-  "name": "@farm/slicers-orcaslicer-v2_3_x",
+  "name": "@farm/slicers-orcaslicer-v2_3_1",
   "version": "2.3.1",
   "description": "OrcaSlicer v2.3.1 UI library for PrintFarmer",
   "main": "ui/index.ts",

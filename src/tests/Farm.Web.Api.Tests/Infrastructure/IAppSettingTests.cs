@@ -4,6 +4,8 @@ using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Xunit;
 
+namespace Farm.Infrastructure.Settings.Tests;
+
 public class IAppSettingTests
 {
     [Theory]

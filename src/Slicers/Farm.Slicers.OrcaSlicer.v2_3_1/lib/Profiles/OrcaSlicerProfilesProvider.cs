@@ -2,7 +2,7 @@
 using System.Text.Json;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
 
-namespace Farm.Slicers.OrcaSlicer.v2_3_x;
+namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 
 /// <summary>
 /// Provides access to OrcaSlicer v2.3.1 official profiles.
@@ -53,8 +53,8 @@ public class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         try
         {
             // Load the index
-            var assembly = typeof(OrcaSlicerLibrary_v2_3_x).Assembly;
-            const string indexResourceName = "OrcaSlicer_v2_3_x_Profiles_Index.json";
+            var assembly = typeof(OrcaSlicerLibrary_v2_3_1).Assembly;
+            const string indexResourceName = "OrcaSlicer_v2_3_1_Profiles_Index.json";
 
             var indexStream = assembly.GetManifestResourceStream(indexResourceName);
             if (indexStream == null)
@@ -113,7 +113,7 @@ public class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         try
         {
             // Load individual machine profile
-            var resourceName = $"OrcaSlicer_v2_3_x_Profiles_Machines_{machineId}.json";
+            var resourceName = $"OrcaSlicer_v2_3_1_Profiles_Machines_{machineId}.json";
             var profileStream = assembly.GetManifestResourceStream(resourceName);
 
             if (profileStream != null)
@@ -134,7 +134,7 @@ public class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         try
         {
             // Load universal filaments library
-            const string filamentsResourceName = "OrcaSlicer_v2_3_x_Filaments_Universal.json";
+            const string filamentsResourceName = "OrcaSlicer_v2_3_1_Filaments_Universal.json";
             var filamentsStream = assembly.GetManifestResourceStream(filamentsResourceName);
 
             if (filamentsStream != null)
