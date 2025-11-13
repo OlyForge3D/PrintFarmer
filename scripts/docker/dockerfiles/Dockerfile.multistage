@@ -43,9 +43,11 @@ COPY proto /proto
 
 # Build and publish all services in parallel (3x faster compilation)
 # Using BUILD_VERBOSITY argument: quiet, minimal, normal, or detailed
-RUN dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY} & \
-    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY} & \
-    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY} & \
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    BUILD_VERB=${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity $BUILD_VERB & \
+    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity $BUILD_VERB & \
+    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity $BUILD_VERB & \
     wait; if [ $? -ne 0 ]; then echo "Build failed, showing diagnostics:"; exit 1; fi
 
 # Verify critical runtime files exist and provide diagnostics
