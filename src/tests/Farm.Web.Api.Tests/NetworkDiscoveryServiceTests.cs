@@ -20,7 +20,7 @@ public class NetworkDiscoveryServiceTests
 
         // Assert
         result.ServerUrl.Should().Be("http://192.168.1.100");
-        result.Port.Should().Be(80);
+        result.BackendPort.Should().Be(80);
         result.Backend.Should().Be(PrinterBackend.Moonraker);
     }
 
@@ -38,7 +38,7 @@ public class NetworkDiscoveryServiceTests
 
         // Assert
         result.ServerUrl.Should().Be("http://192.168.1.100:7125");
-        result.Port.Should().Be(7125);
+        result.BackendPort.Should().Be(7125);
         result.Backend.Should().Be(PrinterBackend.Moonraker);
     }
 
@@ -56,7 +56,7 @@ public class NetworkDiscoveryServiceTests
 
         // Assert
         result.ServerUrl.Should().Be("http://192.168.1.100:80");
-        result.Port.Should().Be(80);
+        result.BackendPort.Should().Be(80);
         result.Backend.Should().Be(PrinterBackend.PrusaLink);
     }
 
@@ -341,7 +341,7 @@ public class NetworkDiscoveryServiceTests
         var fallback = new DiscoveredPrinterDto
         {
             IpAddress = ipAddress,
-            Port = port,
+            BackendPort = port,
             Backend = backend,
             ServerUrl = serverUrl,
             Name = name ?? string.Empty,

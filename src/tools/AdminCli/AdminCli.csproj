@@ -8,4 +8,9 @@
     <!-- Avoid generating native apphost during build which can cause copy errors on some hosts -->
     <UseAppHost>false</UseAppHost>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../discovery/Farm.Shared.Discovery.csproj" />
+    <ProjectReference Include="../../shared/Farm.Web.Shared.csproj" />
+  </ItemGroup>
 </Project>

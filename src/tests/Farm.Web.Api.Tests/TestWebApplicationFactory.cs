@@ -30,7 +30,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     // Optional shared connection used as a lightweight fixture across factory instances
     private static SqliteConnection? _sharedSqliteConnection;
     private static readonly object _sharedConnLock = new object();
-    public Mock<INetworkDiscoveryService> MockNetworkDiscoveryService { get; private set; }
     public Mock<IMoonrakerClient> MockMoonrakerClient { get; private set; }
     public Mock<IPrusaLinkClient> MockPrusaLinkClient { get; private set; }
     public Mock<ISdcpClient> MockSdcpClient { get; private set; }
@@ -64,7 +63,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("WORKER_SHARED_API_KEY", "test-worker-key");
 
         // Initialize mocks
-        MockNetworkDiscoveryService = new Mock<INetworkDiscoveryService>();
         MockMoonrakerClient = new Mock<IMoonrakerClient>();
         MockPrusaLinkClient = new Mock<IPrusaLinkClient>();
         MockSdcpClient = new Mock<ISdcpClient>();
@@ -703,10 +701,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 catch { }
 
                 // Remove network/HTTP client descriptors that would otherwise create real connections
-                var networkDiscoveryDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(INetworkDiscoveryService));
-                if (networkDiscoveryDescriptor != null)
-                { services.Remove(networkDiscoveryDescriptor); }
-
                 var moonrakerDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IMoonrakerClient));
                 if (moonrakerDescriptor != null)
                 { services.Remove(moonrakerDescriptor); }
@@ -746,7 +740,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // Register mocked services (use explicit service interfaces so they override
             // any existing typed-client / concrete registrations that may otherwise
             // attempt to construct real implementations during DI activation).
-            services.AddSingleton<INetworkDiscoveryService>(MockNetworkDiscoveryService.Object);
             services.AddSingleton<IMoonrakerClient>(MockMoonrakerClient.Object);
             services.AddSingleton<IPrusaLinkClient>(MockPrusaLinkClient.Object);
             services.AddSingleton<ISdcpClient>(MockSdcpClient.Object);
@@ -1060,12 +1053,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     private void SetupDefaultMockBehaviors()
     {
-        // Set up default discovery behavior to return empty list
-        MockNetworkDiscoveryService
-            .Setup(x => x.DiscoverPrintersAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DiscoveredPrinterDto>());
-
-        // Spoolman: default behaviors so controller endpoints and health checks are deterministic
+        // Set up default Spoolman behaviors so controller endpoints and health checks are deterministic
         MockSpoolmanService.Setup(s => s.GetConfig()).Returns(() => null);
         MockSpoolmanService.Setup(s => s.SetConfig(It.IsAny<Farm.Web.Shared.SpoolmanConfigDto>())).Callback<Farm.Web.Shared.SpoolmanConfigDto>((cfg) => { /* no-op for tests */ });
         MockSpoolmanService.Setup(s => s.ClearConfig()).Callback(() => { /* no-op */ });

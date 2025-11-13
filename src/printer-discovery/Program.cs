@@ -1,5 +1,6 @@
 ﻿using PrinterDiscovery.BackgroundServices;
 using PrinterDiscovery.Services;
+using Farm.Shared.Discovery;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,12 +13,17 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddSwaggerGen();
 
-// Discovery services
-builder.Services.AddScoped<INetworkScanner, NetworkScanner>();
-builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
+// Register discovery probes as services
+builder.Services.AddSingleton<INetworkDiscoveryProbe, MoonrakerDiscoveryProbe>();
+builder.Services.AddSingleton<INetworkDiscoveryProbe, PrusaLinkDiscoveryProbe>();
+builder.Services.AddSingleton<INetworkDiscoveryProbe, OctoPrintDiscoveryProbe>();
+builder.Services.AddSingleton<INetworkDiscoveryProbe, SdcpDiscoveryProbe>();
 
-// HTTP client for network scanning
-builder.Services.AddHttpClient<NetworkScanner>();
+// Register shared core discovery service
+builder.Services.AddSingleton<ICoreNetworkDiscoveryService, CoreNetworkDiscoveryService>();
+
+// Network discovery service (uses the shared core service)
+builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 
 // API client for registering discovered printers with central API
 builder.Services.AddHttpClient<ApiClient>(client =>
@@ -59,4 +65,3 @@ logger.LogInformation("Manual scan endpoint: POST /api/discovery/scan");
 logger.LogInformation("Health check endpoint: GET /api/discovery/health");
 
 app.Run();
-

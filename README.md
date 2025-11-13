@@ -254,9 +254,14 @@ grep -E "POSTGRES_PASSWORD|MSSQL_SA_PASSWORD|MYSQL_PASSWORD|ConnectionStrings__D
 
 #### Admin CLI (Headless / Automation)
 
+**Admin Account Management:**
+
 Create the first admin when no browser is available:
-```
+```bash
+# Check system status
 dotnet run --project src/tools/AdminCli -- --status
+
+# Create initial admin account
 dotnet run --project src/tools/AdminCli -- \
   --username admin \
   --email admin@example.com \
@@ -267,6 +272,49 @@ dotnet run --project src/tools/AdminCli -- \
 Output includes a JWT token if creation/login succeeds. The command is idempotent: if the same credentials already created the admin it returns a fresh token.
 
 Additional users can be added via authenticated `POST /api/users` (requires `farm_admin`).
+
+**CSV Import / Discovery (Headless Setup):**
+
+**Generate sample CSV template:**
+```bash
+# Display sample CSV with examples for each backend type
+dotnet run --project src/tools/AdminCli -- --sample-csv
+
+# Save sample to file
+dotnet run --project src/tools/AdminCli -- --sample-csv --output sample.csv
+```
+
+**Discover printers on your network:**
+```bash
+# Discover all printers (output as JSON)
+dotnet run --project src/tools/AdminCli -- --discover --format json
+
+# Export discovered printers to CSV for review/approval
+dotnet run --project src/tools/AdminCli -- --discover --format csv --output discovered.csv
+
+# Discover on specific networks
+dotnet run --project src/tools/AdminCli -- --discover --networks "192.168.1.0/24,10.0.0.0/24"
+
+# Discover only Moonraker or PrusaLink printers
+dotnet run --project src/tools/AdminCli -- --discover --backends Moonraker,PrusaLink
+
+# Auto-approve discovered printers (enable them immediately)
+dotnet run --project src/tools/AdminCli -- --discover --no-approval --format csv --output approved.csv
+```
+
+**Full discovery → import workflow:**
+1. Generate sample: `dotnet run --project src/tools/AdminCli -- --sample-csv --output sample.csv`
+2. Discover printers: `dotnet run --project src/tools/AdminCli -- --discover --format csv --output discovered.csv`
+3. Edit CSV file to customize manufacturer/model names and set `isEnabled=true` for approved printers
+4. Import via API: `curl -X POST http://localhost:5245/api/printers/import -F "file=@discovered.csv"`
+5. Printers with `isEnabled=true` appear immediately; `isEnabled=false` are hidden pending approval
+
+**CSV Format:**
+- **Required fields**: `Name`, `IpAddress`, `Backend` (Moonraker, PrusaLink, or SDCP)
+- **Optional fields**: `ManufacturerName`, `ModelName`, `Notes`, `IsEnabled`, backend/frontend ports, camera URLs, date acquired
+- **Benefits**: Names instead of IDs = portable between systems
+- See [CSV_IMPORT_FORMAT_DETAILED.md](CSV_IMPORT_FORMAT_DETAILED.md) for complete reference and examples
+````
 
 #### /api/users Schemas
 

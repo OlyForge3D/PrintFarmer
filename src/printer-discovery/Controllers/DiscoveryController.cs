@@ -50,11 +50,10 @@ public class DiscoveryController : ControllerBase
             // Return results
             var results = discovered.Select(p => new DiscoveryResult
             {
-                Hostname = p.Hostname,
+                Hostname = p.Name,
                 IpAddress = p.IpAddress,
-                Port = p.Port,
-                PrinterBackend = p.PrinterBackend,
-                FriendlyName = p.FriendlyName,
+                Port = p.BackendPort ?? 80,
+                PrinterBackend = p.Backend.ToString().ToLowerInvariant(),
                 DiscoveredAt = p.DiscoveredAt,
                 Registered = autoRegister
             }).ToList();
@@ -127,7 +126,6 @@ public class DiscoveryResult
     public string IpAddress { get; set; } = string.Empty;
     public int Port { get; set; }
     public string PrinterBackend { get; set; } = string.Empty;
-    public string? FriendlyName { get; set; }
     public DateTime DiscoveredAt { get; set; }
     public bool Registered { get; set; }
 }

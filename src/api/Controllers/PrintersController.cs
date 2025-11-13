@@ -30,16 +30,13 @@ public class PrintersController(
     IUnifiedLoggingService logger,
     Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
-    INetworkDiscoveryService networkDiscoveryService,
     IDefaultCatalogService defaultCatalogService,
-    IDiscoveryProgressCache discoveryProgressCache,
     IValidator<CreatePrinterDto> validator)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
-    private readonly INetworkDiscoveryService networkDiscovery = networkDiscoveryService;
     private readonly IDefaultCatalogService defaultCatalog = defaultCatalogService;
     private readonly IValidator<CreatePrinterDto> _validator = validator;
 
@@ -94,7 +91,9 @@ public class PrintersController(
         try
         {
             var dtos = await _printersService.GetAllFastDtosAsync(ct);
-            return Ok(dtos);
+            // Filter to only enabled printers for normal users (admins can use /api/printers/all or query with includeDisabled flag if implemented)
+            var enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
+            return Ok(enabledDtos);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -230,142 +229,6 @@ public class PrintersController(
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Import operation failed",
-                error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Starts a real-time printer discovery stream that broadcasts results via SignalR.
-    /// The frontend should connect to the PrinterHub and call JoinDiscoveryGroupAsync(sessionId) to receive updates.
-    /// </summary>
-    /// <param name="request">Discovery request parameters (optional) - can specify backends to probe</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Discovery session information including session ID for SignalR subscription</returns>
-    /// <response code="200">Returns discovery session ID and group name for SignalR subscription</response>
-    /// <response code="400">If request parameters are invalid</response>
-    /// <response code="500">If there was an error starting discovery</response>
-    [HttpPost("discover/stream")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(500)]
-#pragma warning disable CS1998 // Async method without await - intentional fire-and-forget pattern with background Task.Run
-    public async Task<IActionResult> StartDiscoveryStreamAsync(
-        [FromBody] Farm.Web.Shared.StartDiscoveryRequest? request,
-        CancellationToken ct)
-#pragma warning restore CS1998 // Async method without await
-    {
-        try
-        {
-            // Create unique session ID for this discovery operation
-            var sessionId = Guid.NewGuid().ToString();
-
-            _logger.LogInformation($"[Discovery] Starting discovery stream with sessionId={sessionId}");
-
-            // Extract optional backend filter from request
-            IEnumerable<PrinterBackend>? backends = null;
-            if (request?.Backends != null && request.Backends.Count > 0)
-            {
-                backends = request.Backends;
-                _logger.LogInformation($"[Discovery] Filtering discovery to backends: {string.Join(", ", backends)}");
-            }
-
-            // Start background discovery task (fire and forget with proper error handling)
-            // This will broadcast updates via SignalR and populate the discovery progress cache
-            // NOTE: We create a NEW CancellationTokenSource (not linked to request token) because:
-            // 1. Request token is disposed when response is sent
-            // 2. We want discovery to run in background independent of request lifecycle
-            // 3. Users should be able to cancel via separate API call (/discover/{sessionId}/cancel)
-            _ = Task.Run(async () =>
-            {
-                CancellationTokenSource discoveryCts = new();
-                try
-                {
-                    // Store the CTS so clients can request cancellation via API endpoint
-                    discoveryProgressCache.SetCancellationSource(sessionId, discoveryCts);
-
-                    // Set a hard timeout of 15 minutes to prevent discovery from running forever
-                    discoveryCts.CancelAfter(TimeSpan.FromMinutes(15));
-
-                    await networkDiscovery.DiscoverPrintersWithProgressAsync(sessionId, backends, discoveryCts.Token);
-                    _logger.LogInformation($"[Discovery] Discovery stream completed for sessionId={sessionId}");
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogWarning($"[Discovery] Discovery stream cancelled for sessionId={sessionId}");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, $"[Discovery] Error during discovery stream (sessionId={sessionId}): {ex.Message}");
-                }
-                finally
-                {
-                    // Clean up: remove from cache and dispose token
-                    discoveryProgressCache.Remove(sessionId);
-                    discoveryCts.Dispose();
-                }
-            });
-
-            // Return session info immediately so frontend can subscribe to SignalR group
-            return Ok(new
-            {
-                sessionId = sessionId,
-                groupName = $"discovery-{sessionId}",
-                message = "Discovery started. Connect to PrinterHub and call JoinDiscoveryGroupAsync to receive real-time updates.",
-                timestamp = DateTime.UtcNow
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"[Discovery] Failed to start discovery stream: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Failed to start discovery stream",
-                error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Cancels an active network discovery session by sessionId.
-    /// Users can call this endpoint to stop an ongoing discovery operation.
-    /// </summary>
-    /// <param name="sessionId">The discovery session ID returned from /discover/stream endpoint</param>
-    /// <returns>Success or error response</returns>
-    /// <response code="200">Discovery cancellation requested successfully</response>
-    /// <response code="404">Discovery session not found or already completed</response>
-    [HttpPost("discover/{sessionId}/cancel")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(404)]
-    public IActionResult CancelDiscovery(string sessionId)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(sessionId))
-            {
-                return BadRequest(new { error = "sessionId is required" });
-            }
-
-            // Attempt to cancel the discovery session
-            bool cancelled = discoveryProgressCache.TryCancel(sessionId);
-
-            if (cancelled)
-            {
-                _logger.LogInformation($"[Discovery] Cancellation requested for sessionId={sessionId}");
-                return Ok(new { message = "Discovery cancellation requested successfully" });
-            }
-            else
-            {
-                _logger.LogInformation($"[Discovery] Cannot cancel sessionId={sessionId} - session not found or already completed");
-                return NotFound(new { error = "Discovery session not found or already completed" });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"[Discovery] Error cancelling discovery session: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Error cancelling discovery",
                 error = ex.Message
             });
         }
@@ -600,12 +463,13 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Register printers discovered by the network discovery service
+    /// Register printers discovered by the network discovery service.
+    /// Accepts both single printers and arrays for backward compatibility.
     /// </summary>
-    /// <param name="discoveredPrinters">List of discovered printers to register</param>
+    /// <param name="discoveredPrinters">Discovered printer(s) to register</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of registered printers</returns>
-    /// <response code="200">Successfully registered discovered printers</response>
+    /// <response code="200">Successfully registered discovered printer(s)</response>
     /// <response code="400">Invalid printer data</response>
     /// <response code="500">Server error</response>
     [HttpPost("discovered")]
@@ -613,33 +477,78 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<PrinterDto>>> RegisterDiscoveredAsync(
-        [FromBody] IEnumerable<RegisterDiscoveredPrinterDto> discoveredPrinters,
+        [FromBody] object? discoveredPrinters,
         CancellationToken ct)
     {
-        if (discoveredPrinters == null || !discoveredPrinters.Any())
+        if (discoveredPrinters == null)
         {
             return BadRequest("No printers provided");
         }
 
+        // Parse input - could be single DiscoveredPrinterDto or array
+        List<DiscoveredPrinterDto> printers = new();
+
+        if (discoveredPrinters is System.Collections.Generic.List<DiscoveredPrinterDto> list)
+        {
+            printers.AddRange(list);
+        }
+        else if (discoveredPrinters is DiscoveredPrinterDto single)
+        {
+            printers.Add(single);
+        }
+        else if (discoveredPrinters is System.Text.Json.JsonElement jsonElem)
+        {
+            // Handle JSON deserialization
+            try
+            {
+                var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                if (jsonElem.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    var array = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto[]>(jsonElem.GetRawText(), options);
+                    if (array != null)
+                    {
+                        printers.AddRange(array);
+                    }
+                }
+                else
+                {
+                    var obj = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto>(jsonElem.GetRawText(), options);
+                    if (obj != null)
+                    {
+                        printers.Add(obj);
+                    }
+                }
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse discovered printers JSON");
+                return BadRequest("Invalid printer data format");
+            }
+        }
+
+        if (!printers.Any())
+        {
+            return BadRequest("No valid printers provided");
+        }
+
         var registered = new List<PrinterDto>();
 
-        foreach (var discovered in discoveredPrinters)
+        foreach (var discovered in printers)
         {
             try
             {
                 _logger.LogInformation(
-                    $"Processing discovered printer: {discovered.FriendlyName ?? discovered.Hostname} " +
-                    $"({discovered.IpAddress}:{discovered.Port}) - Backend: {discovered.PrinterBackend}");
+                    $"Processing discovered printer: {discovered.Name} " +
+                    $"({discovered.IpAddress}:{discovered.BackendPort ?? 80}) - Backend: {discovered.Backend}");
 
-                // Check if printer already exists by IP
+                // Check if printer already exists by normalized server URL
+                var normalizedUrl = _printersService.NormalizeServerUrl(discovered.ServerUrl, discovered.BackendPort ?? 80);
                 var existing = (await _printersService.GetAllAsync(ct))
-                    .FirstOrDefault(p => p.ServerUrl?.Contains(discovered.IpAddress) ?? false);
+                    .FirstOrDefault(p => _printersService.NormalizeServerUrl(p.ServerUrl, 80) == normalizedUrl);
 
                 if (existing != null)
                 {
                     _logger.LogInformation($"Printer already registered: {existing.Name}");
-
-                    // Convert Printer entity to PrinterDto
                     var existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
@@ -648,24 +557,8 @@ public class PrintersController(
                     continue;
                 }
 
-                // Build server URL from discovered data
-                var serverUrl = $"http://{discovered.IpAddress}:{discovered.Port}";
-
-                // Parse backend enum from string
-                if (!Enum.TryParse<PrinterBackend>(discovered.PrinterBackend, ignoreCase: true, out var backend))
-                {
-                    _logger.LogWarning($"Unknown printer backend: {discovered.PrinterBackend}");
-                    backend = PrinterBackend.Moonraker;  // Default
-                }
-
-                // Create new printer from discovered data
-                var createDto = new CreatePrinterDto
-                {
-                    Name = discovered.FriendlyName ?? discovered.Hostname ?? $"{backend}-{discovered.IpAddress}",
-                    ServerUrl = serverUrl,
-                    Backend = backend,
-                    // Note: API key will need to be configured manually
-                };
+                // Create new printer from discovered data, preserving all discovered metadata
+                var createDto = CreatePrinterDto.FromDiscovered(discovered);
 
                 var validationResult = await _validator.ValidateAsync(createDto, ct);
                 if (!validationResult.IsValid)
@@ -683,7 +576,7 @@ public class PrintersController(
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Failed to register discovered printer: {discovered.Hostname}");
+                _logger.LogWarning(ex, $"Failed to register discovered printer: {discovered.Name}");
                 // Continue with next printer on error
             }
         }
@@ -848,6 +741,12 @@ public class PrintersController(
         if (dto.ApiKey != null)
         {
             p.ApiKey = dto.ApiKey;
+        }
+
+        // Update IsEnabled if provided
+        if (dto.IsEnabled.HasValue)
+        {
+            p.IsEnabled = dto.IsEnabled.Value;
         }
 
         // Update or create printer capabilities
@@ -1571,72 +1470,6 @@ public class PrintersController(
     {
         _logger.LogError($"=== SIMPLE TEST ENDPOINT CALLED ===");
         return Ok(new { message = "Simple test works!", timestamp = DateTime.UtcNow });
-    }
-
-    [HttpGet("discover")]
-    [ProducesResponseType(typeof(IEnumerable<DiscoveredPrinterDto>), 200)]
-    [ProducesResponseType(408)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<DiscoveredPrinterDto>>> DiscoverPrintersAsync([FromQuery] string? backends, CancellationToken ct)
-    {
-        try
-        {
-            _logger.LogInformation($"Starting network printer discovery... Backends={backends}");
-
-            // Set timeout for network discovery - with 100ms per IP, 254 IPs * 2 ports = ~51 seconds + overhead
-            using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromMinutes(15)); // 15 minute total timeout for full network scan
-
-            // Parse optional backends query parameter (comma-separated names)
-            List<PrinterBackend>? backendList = null;
-            if (!string.IsNullOrWhiteSpace(backends))
-            {
-                string[] parts = backends.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                List<PrinterBackend> parsed = new();
-                foreach (string p in parts)
-                {
-                    if (Enum.TryParse(p, true, out PrinterBackend b))
-                    {
-                        parsed.Add(b);
-                    }
-                }
-                if (parsed.Count > 0)
-                {
-                    backendList = parsed;
-                }
-            }
-
-            List<DiscoveredPrinterDto> discovered = await networkDiscovery.DiscoverPrintersAsync(timeoutCts.Token);
-
-            // If backend filter provided, apply it at controller layer
-            if (backendList != null && backendList.Count > 0)
-            {
-                discovered = discovered.Where(d => backendList.Contains(d.Backend)).ToList();
-            }
-
-            // Get existing normalized server URLs from the service to filter out duplicates
-            HashSet<string> normalizedExistingUrls = await _printersService.GetAllNormalizedServerUrlsAsync(80, ct);
-
-            // Filter out printers that already exist in the database using service-normalized URLs
-            List<DiscoveredPrinterDto> newPrinters = discovered
-                .Where(d => !normalizedExistingUrls.Contains(_printersService.NormalizeServerUrl(d.ServerUrl, 80)))
-                .ToList();
-
-            _logger.LogInformation($"Discovery completed. Found {discovered.Count} printers, {newPrinters.Count} are new");
-
-            return Ok(newPrinters);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogWarning("Printer discovery operation was canceled or timed out");
-            return StatusCode(StatusCodes.Status408RequestTimeout, "Discovery timed out");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to discover printers");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to discover printers");
-        }
-
     }
 
     // ===== PHASE 4: PRINTER CONFIGURATION ENDPOINTS =====

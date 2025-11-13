@@ -439,6 +439,14 @@ npm run dev
 - Follow React and TypeScript best practices for frontend code
 - Run `dotnet format` for .NET code and `npm run lint` for React code before committing
 
+**Documentation Standards:**
+- **⚠️ CRITICAL: DO NOT create new markdown files for specific implementations or features**
+- Always integrate feature documentation into existing markdown files (README.md, docs/, etc.)
+- Only create new markdown files for genuinely novel content that doesn't fit existing docs (e.g., CSV_IMPORT_FORMAT_DETAILED.md for reference formats, architectural decision records)
+- **Philosophy**: Update existing documentation rather than creating new files; keep documentation centralized and maintainable
+- When implementing features: search for existing related documentation first, then update it with new information
+- Reduces documentation debt and prevents duplication
+
 **Entity Framework:**
 - **⚠️ CRITICAL: DO NOT CREATE MIGRATIONS** - The project uses `EnsureCreated()` for development
 - Database schema is initialized automatically via `EnsureCreated()` on startup

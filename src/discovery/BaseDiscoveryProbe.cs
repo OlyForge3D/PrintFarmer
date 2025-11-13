@@ -1,12 +1,16 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Shared;
 
-namespace Farm.Web.Api.Services.DiscoveryProbes;
+namespace Farm.Shared.Discovery;
 
+/// <summary>
+/// Base class for HTTP-based discovery probes.
+/// Handles common probe logic: HTTP requests, DNS resolution, response validation with scoring.
+/// </summary>
 public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
 {
     public abstract string DisplayName { get; }
@@ -15,14 +19,30 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
     protected abstract PrinterBackend Backend { get; }
     protected abstract string PrinterName { get; }
 
-    // Expose the backend via the public interface
+    // Expose backend via interface
     PrinterBackend INetworkDiscoveryProbe.Backend => Backend;
 
-    // Optionally override for custom validation/parse
+    /// <summary>
+    /// Override to provide backend-specific validation with confidence scoring.
+    /// Returns (isValid, confidenceScore, reason).
+    /// Default implementation delegates to IsValidResponseAsync for backward compatibility.
+    /// </summary>
+    protected virtual async Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
+        HttpResponseMessage response, string content)
+    {
+        // Default: delegate to legacy IsValidResponseAsync
+        // Subclasses should override this method to provide scoring
+        bool isValid = await IsValidResponseAsync(response, content);
+        return isValid ? (true, 100, "Response valid") : (false, 0, "Response invalid");
+    }
+
+    /// <summary>
+    /// Legacy validation method. Override ValidateResponseAsync for new code.
+    /// </summary>
     protected virtual Task<bool> IsValidResponseAsync(HttpResponseMessage response, string content)
         => Task.FromResult(response.IsSuccessStatusCode);
 
-    public virtual async Task<DiscoveredPrinterDto?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
+    public virtual async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
         using HttpClient client = new()
         { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
@@ -33,12 +53,14 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
             {
                 HttpResponseMessage response = await client.GetAsync(url, cancellationToken);
                 string content = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (!await IsValidResponseAsync(response, content))
+                
+                var (isValid, confidence, reason) = await ValidateResponseAsync(response, content);
+                if (!isValid)
                 {
                     continue;
                 }
 
-                // after you detect the IP:
+                // Attempt reverse DNS lookup for hostname
                 IPHostEntry entry;
                 string? hostName = null;
                 try
@@ -51,14 +73,16 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
                     // no PTR record or lookup failed
                 }
 
-                return new DiscoveredPrinterDto
+                var dto = new DiscoveredPrinterDto
                 {
                     IpAddress = ipAddress,
-                    Port = port,
+                    BackendPort = port,
                     Backend = Backend,
                     ServerUrl = $"http://{ipAddress}",
                     Name = hostName ?? PrinterName
                 };
+
+                return new ProbeResult(dto, confidence, reason);
             }
             catch { }
         }

@@ -8,7 +8,6 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.DiscoveryProbes;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing.Abstractions;
@@ -114,13 +113,7 @@ public static class ServiceCollectionExtensions
         // Use typed HttpClient registrations below (IMoonrakerClient, IPrusaLinkClient, IOctoPrintClient, ISdcpClient)
         // Avoid duplicate raw scoped registrations for the concrete client types.
 
-        // Discovery Services
-        _ = services.AddAllNetworkDiscoveryProbes();
-        _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
-        _ = services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
-        _ = services.AddScoped<IPrinterCapabilityDiscoveryService, PrinterCapabilityDiscoveryService>();
-
-        // Repositories (in infra project)
+        // Business Services (Note: Network discovery is handled by the printer-discovery microservice)
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Printers.IPrintersRepository, Farm.Infrastructure.Repositories.Printers.EfPrintersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IProfilesRepository, Farm.Infrastructure.Repositories.Slicing.EfProfilesRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();

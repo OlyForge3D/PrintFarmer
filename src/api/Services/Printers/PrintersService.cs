@@ -393,7 +393,7 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<Farm.Web.Shared.PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
-            return items.Select(p => new Farm.Web.Shared.PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink : p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP : Farm.Web.Shared.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress)).ToArray();
+            return items.Select(p => new Farm.Web.Shared.PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == 1 ? Farm.Web.Shared.PrinterBackend.PrusaLink : p.Backend == 2 ? Farm.Web.Shared.PrinterBackend.SDCP : Farm.Web.Shared.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, IsEnabled: p.IsEnabled)).ToArray();
         }
 
         private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
@@ -404,27 +404,17 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
-            Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await GetCapabilitiesDictionaryAsync(ids, ct);
 
-            // build header
-            List<string> headerParts = new() { "Name", "ServerUrl", "OriginalServerUrl", "Notes", "Manufacturer", "Model", "Backend", "ApiKey", "DateAcquired" };
-            BuildCsvHeaderAndCapProps(ref headerParts, out List<string> capPropsForCsv, out List<System.Reflection.PropertyInfo> capPropInfos);
+            // Export minimum required fields for re-import (IDs are not portable between systems)
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
 
             StringBuilder csv = new();
             csv.AppendLine(string.Join(',', headerParts));
 
             foreach (Printer printer in printers)
             {
-                csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.ServerUrl)},{EscapeCsvValue(printer.OriginalServerUrl)},{EscapeCsvValue(printer.Notes)},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Backend.ToString())},{EscapeCsvValue(printer.ApiKey)},{EscapeCsvValue(printer.DateAcquired?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))}");
-                // capability row will be added via WriteCsvRowAsync when streaming; for BuildExportCsvAsync we'll append capability columns inline
-                Farm.Infrastructure.Domain.PrinterCapabilities? cap = capabilities.TryGetValue(printer.Id, out Farm.Infrastructure.Domain.PrinterCapabilities? c) ? c : null;
-                // append capability columns
-                foreach (PropertyInfo prop in capPropInfos)
-                {
-                    object? val = cap == null ? null : prop.GetValue(cap);
-                    csv.Append($",{EscapeCsvValue(val?.ToString())}");
-                }
-                csv.AppendLine();
+                string backendName = printer.Backend == 1 ? "PrusaLink" : printer.Backend == 2 ? "SDCP" : "Moonraker";
+                csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{printer.IsEnabled}");
             }
 
             return System.Text.Encoding.UTF8.GetBytes(csv.ToString());
@@ -433,38 +423,31 @@ namespace Farm.Web.Api.Services.Printers
         public async Task StreamExportToResponseAsync(Guid[]? ids, string format, HttpResponse response, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
-            Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await GetCapabilitiesDictionaryAsync(ids, ct);
 
             IQueryable<Printer> query = printers.AsQueryable();
 
             if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
             {
+                Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await GetCapabilitiesDictionaryAsync(ids, ct);
                 await StreamJsonExportAsync(query, capabilities, response, ct);
                 return;
             }
 
-            // CSV
+            // CSV - export minimum required fields for re-import
             response.ContentType = "text/csv";
             string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
             response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
 
-            List<string> headerParts = new() { "Name", "ServerUrl", "OriginalServerUrl", "Notes", "Manufacturer", "Model", "Backend", "ApiKey", "DateAcquired" };
-            BuildCsvHeaderAndCapProps(ref headerParts, out List<string> capPropsForCsv, out List<System.Reflection.PropertyInfo> capPropInfos);
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
 
             await using var writer = new System.IO.StreamWriter(response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
             await writer.WriteLineAsync(string.Join(',', headerParts));
 
             foreach (Printer p in query)
             {
-                Farm.Infrastructure.Domain.PrinterCapabilities? cap = capabilities.TryGetValue(p.Id, out Farm.Infrastructure.Domain.PrinterCapabilities? c) ? c : null;
-                string baseLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.ServerUrl)},{EscapeCsvValue(p.OriginalServerUrl)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Backend.ToString())},{EscapeCsvValue(p.ApiKey)},{EscapeCsvValue(p.DateAcquired?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))}";
-                await writer.WriteAsync(baseLine);
-                foreach (PropertyInfo prop in capPropInfos)
-                {
-                    object? val = cap == null ? null : prop.GetValue(cap);
-                    await writer.WriteAsync("," + EscapeCsvValue(val?.ToString()));
-                }
-                await writer.WriteLineAsync();
+                string backendName = p.Backend == 1 ? "PrusaLink" : p.Backend == 2 ? "SDCP" : "Moonraker";
+                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{p.IsEnabled}";
+                await writer.WriteLineAsync(csvLine);
                 await writer.FlushAsync();
             }
         }
@@ -530,19 +513,6 @@ namespace Farm.Web.Api.Services.Printers
                 return '"' + raw.Replace("\"", "\"\"") + '"';
             }
             return raw;
-        }
-
-        private static void BuildCsvHeaderAndCapProps(ref List<string> headerParts, out List<string> capPropsForCsv, out List<System.Reflection.PropertyInfo> capPropInfos)
-        {
-            Type capType = typeof(Farm.Infrastructure.Domain.PrinterCapabilities);
-            IJsonTypeInfoResolver? resolver = _exportJsonOptions?.TypeInfoResolver;
-            List<System.Reflection.PropertyInfo> props = capType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-                .Where(pi => !PropertySuppressedForExport(pi))
-                .ToList();
-
-            capPropsForCsv = props.Select(pi => pi.Name).ToList();
-            capPropInfos = props;
-            headerParts.AddRange(capPropsForCsv);
         }
 
         private static bool PropertySuppressedForExport(System.Reflection.PropertyInfo? pi)
@@ -838,7 +808,8 @@ namespace Farm.Web.Api.Services.Printers
                 FrontendPort = dto.FrontendPort,
                 // Use provided camera URLs from discovery, or leave null
                 CameraStreamUrl = dto.CameraStreamUrl,
-                CameraSnapshotUrl = dto.CameraSnapshotUrl
+                CameraSnapshotUrl = dto.CameraSnapshotUrl,
+                IsEnabled = dto.IsEnabled
             };
 
             await AddAsync(p, ct).ConfigureAwait(false);
@@ -1592,7 +1563,9 @@ namespace Farm.Web.Api.Services.Printers
 
         /// <summary>
         /// Parses a CSV file into printer DTOs.
-        /// Expected CSV format: Name,ServerUrl,Backend,ModelId,ManufacturerId,CameraStreamUrl,CameraSnapshotUrl,ApiKey,Notes
+        /// Required columns: Name, IpAddress, Backend
+        /// Optional columns: Notes, ManufacturerName, ModelName, ApiKey, IsEnabled, BackendPort, FrontendPort, CameraStreamUrl, CameraSnapshotUrl
+        /// IDs are not portable between systems; use names instead.
         /// </summary>
         private async Task<CreatePrinterDto[]> ParseCsvFileAsync(IFormFile file, CancellationToken ct)
         {
@@ -1612,20 +1585,23 @@ namespace Farm.Web.Api.Services.Printers
                     // Parse header
                     var headers = headerLine.Split(',').Select(h => h.Trim().ToLowerInvariant()).ToArray();
                     var nameIdx = Array.IndexOf(headers, "name");
-                    var urlIdx = Array.IndexOf(headers, "serverurl");
+                    var ipAddressIdx = Array.IndexOf(headers, "ipaddress");
                     var backendIdx = Array.IndexOf(headers, "backend");
-                    var modelIdx = Array.IndexOf(headers, "modelid");
-                    var mfgIdx = Array.IndexOf(headers, "manufacturerid");
-                    var cameraStreamIdx = Array.IndexOf(headers, "camerastreamurl");
-                    var cameraSnapshotIdx = Array.IndexOf(headers, "camerasnapshoturl");
-                    var apiKeyIdx = Array.IndexOf(headers, "apikey");
                     var notesIdx = Array.IndexOf(headers, "notes");
+                    var manufacturerNameIdx = Array.IndexOf(headers, "manufacturername");
+                    var modelNameIdx = Array.IndexOf(headers, "modelname");
+                    var apiKeyIdx = Array.IndexOf(headers, "apikey");
+                    var isEnabledIdx = Array.IndexOf(headers, "isenabled");
                     var backendPortIdx = Array.IndexOf(headers, "backendport");
                     var frontendPortIdx = Array.IndexOf(headers, "frontendport");
+                    var cameraStreamIdx = Array.IndexOf(headers, "camerastreamurl");
+                    var cameraSnapshotIdx = Array.IndexOf(headers, "camerasnapshoturl");
+                    var dateAcquiredIdx = Array.IndexOf(headers, "dateacquired");
 
-                    if (nameIdx < 0 || urlIdx < 0)
+                    // Validate required columns
+                    if (nameIdx < 0 || ipAddressIdx < 0 || backendIdx < 0)
                     {
-                        throw new InvalidOperationException("CSV must have 'Name' and 'ServerUrl' columns");
+                        throw new InvalidOperationException("CSV must have required columns: 'Name', 'IpAddress', 'Backend'");
                     }
 
                     int lineNumber = 1;
@@ -1643,36 +1619,44 @@ namespace Farm.Web.Api.Services.Printers
                         {
                             var values = line.Split(',').Select(v => v.Trim()).ToArray();
 
-                            if (values.Length < 2)
+                            if (values.Length < 3)
                             {
-                                errors.Add($"Line {lineNumber}: Insufficient columns");
+                                errors.Add($"Line {lineNumber}: Insufficient columns (need at least Name, IpAddress, Backend)");
                                 continue;
                             }
+
+                            // Validate backend
+                            if (!Enum.TryParse<PrinterBackend>(values[backendIdx], true, out var backendEnum))
+                            {
+                                errors.Add($"Line {lineNumber}: Invalid backend '{values[backendIdx]}' (must be Moonraker, PrusaLink, or SDCP)");
+                                continue;
+                            }
+
+                            // Build ServerUrl from IpAddress and backend
+                            string ipAddress = values[ipAddressIdx];
+                            int defaultPort = backendEnum == PrinterBackend.PrusaLink ? 80 : backendEnum == PrinterBackend.SDCP ? 80 : 7125;
+                            string serverUrl = $"http://{ipAddress}:{defaultPort}";
 
                             var printer = new CreatePrinterDto
                             {
                                 Name = values[nameIdx],
-                                ServerUrl = values[urlIdx],
-                                Backend = backendIdx >= 0 && backendIdx < values.Length && Enum.TryParse<PrinterBackend>(values[backendIdx], true, out var b) ? b : PrinterBackend.Moonraker,
-                                ModelId = modelIdx >= 0 && modelIdx < values.Length && Guid.TryParse(values[modelIdx], out var mid) ? mid : null,
-                                ManufacturerId = mfgIdx >= 0 && mfgIdx < values.Length && Guid.TryParse(values[mfgIdx], out var mfid) ? mfid : null,
-                                CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
-                                CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,
+                                ServerUrl = serverUrl,
+                                Backend = backendEnum,
+                                NewManufacturerName = manufacturerNameIdx >= 0 && manufacturerNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[manufacturerNameIdx]) ? values[manufacturerNameIdx] : null,
+                                NewModelName = modelNameIdx >= 0 && modelNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[modelNameIdx]) ? values[modelNameIdx] : null,
                                 ApiKey = apiKeyIdx >= 0 && apiKeyIdx < values.Length ? values[apiKeyIdx] : null,
                                 Notes = notesIdx >= 0 && notesIdx < values.Length ? values[notesIdx] : null,
+                                IsEnabled = isEnabledIdx >= 0 && isEnabledIdx < values.Length && bool.TryParse(values[isEnabledIdx], out var ie) ? ie : true,
                                 BackendPort = backendPortIdx >= 0 && backendPortIdx < values.Length && int.TryParse(values[backendPortIdx], out var bp) ? bp : null,
-                                FrontendPort = frontendPortIdx >= 0 && frontendPortIdx < values.Length && int.TryParse(values[frontendPortIdx], out var fp) ? fp : null
+                                FrontendPort = frontendPortIdx >= 0 && frontendPortIdx < values.Length && int.TryParse(values[frontendPortIdx], out var fp) ? fp : null,
+                                CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
+                                CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,
+                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], out var da) ? da : null
                             };
 
                             if (string.IsNullOrWhiteSpace(printer.Name))
                             {
                                 errors.Add($"Line {lineNumber}: Name is required");
-                                continue;
-                            }
-
-                            if (string.IsNullOrWhiteSpace(printer.ServerUrl))
-                            {
-                                errors.Add($"Line {lineNumber}: ServerUrl is required");
                                 continue;
                             }
 

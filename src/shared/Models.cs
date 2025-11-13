@@ -174,7 +174,8 @@ public partial record PrinterFastDto(
     string? OriginalServerUrl = null,
     string? IpAddress = null,
     int? BackendPort = null,
-    int? FrontendPort = null);
+    int? FrontendPort = null,
+    bool IsEnabled = true);
 
 public partial record PrinterFastDto
 {
@@ -235,24 +236,73 @@ public record PrinterStatusUpdate(
 /// <summary>
 /// Request payload for creating a new printer entry.
 /// </summary>
-public class CreatePrinterDto
+public class CreatePrinterDto : PrinterInfoDto
 {
-    public string Name { get; set; } = string.Empty;
-    public string ServerUrl { get; set; } = string.Empty;
-    public string? OriginalServerUrl { get; set; }
-    public string? Notes { get; set; }
+    /// <summary>
+    /// Reference to existing manufacturer in catalog.
+    /// If null and NewManufacturerName is provided, a new manufacturer will be created.
+    /// </summary>
     public Guid? ManufacturerId { get; set; }
+
+    /// <summary>
+    /// Reference to existing model in catalog.
+    /// If null and NewModelName is provided, a new model will be created.
+    /// </summary>
     public Guid? ModelId { get; set; }
-    // Optional: create new manufacturer/model
+
+    /// <summary>
+    /// Create new manufacturer with this name if ManufacturerId is not provided.
+    /// </summary>
     public string? NewManufacturerName { get; set; }
+
+    /// <summary>
+    /// Create new model with this name if ModelId is not provided.
+    /// </summary>
     public string? NewModelName { get; set; }
+
+    /// <summary>
+    /// Date the printer was acquired (optional metadata).
+    /// </summary>
     public DateTime? DateAcquired { get; set; }
-    public PrinterBackend Backend { get; set; } = PrinterBackend.Moonraker;
-    public string? ApiKey { get; set; }
-    public string? CameraStreamUrl { get; set; }
-    public string? CameraSnapshotUrl { get; set; }
-    public int? BackendPort { get; set; }
-    public int? FrontendPort { get; set; }
+
+    /// <summary>
+    /// Whether this printer is visible to normal users.
+    /// false = pending admin approval, hidden from normal users
+    /// </summary>
+    public bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Create from discovered printer info with optional catalog metadata.
+    /// </summary>
+    public static CreatePrinterDto FromDiscovered(
+        DiscoveredPrinterDto discovered,
+        Guid? manufacturerId = null,
+        Guid? modelId = null,
+        string? newManufacturerName = null,
+        string? newModelName = null) =>
+        new CreatePrinterDto
+        {
+            Name = discovered.Name,
+            ServerUrl = discovered.ServerUrl,
+            OriginalServerUrl = discovered.OriginalServerUrl,
+            IpAddress = discovered.IpAddress,
+            Backend = discovered.Backend,
+            BackendPort = discovered.BackendPort,
+            FrontendPort = discovered.FrontendPort,
+            CameraStreamUrl = discovered.CameraStreamUrl,
+            CameraSnapshotUrl = discovered.CameraSnapshotUrl,
+            Manufacturer = discovered.Manufacturer,
+            Model = discovered.Model,
+            Notes = discovered.Notes,
+            ApiKey = discovered.ApiKey,
+            DiscoveredAt = discovered.DiscoveredAt,
+            IsReachable = discovered.IsReachable,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId,
+            NewManufacturerName = newManufacturerName,
+            NewModelName = newModelName,
+            IsEnabled = true
+        };
 }
 
 /// <summary>
@@ -289,7 +339,9 @@ public record UpdatePrinterDto(
     bool? SupportsAutoLeveling = null,
     int? MaxPrintSpeed = null,
     int? BackendPort = null,
-    int? FrontendPort = null);
+    int? FrontendPort = null,
+    // Approval workflow
+    bool? IsEnabled = null);
 
 // Local spools removed; Spoolman is the source of truth
 
@@ -512,33 +564,101 @@ public record ResolveHostnameRequest(string ServerUrl, PrinterBackend Backend);
 /// </summary>
 public record ResolveHostnameResponse(string NormalizedInputUrl, string? ResolvedIp, string ResolvedBaseUrl);
 
-// Network discovery
+// Network discovery and printer creation (consolidated pipeline)
 /// <summary>
-/// Printer discovered during network scanning.
+/// Base printer information shared across discovery, registration, and creation flows.
+/// This DTO consolidates the discovery → registration → creation pipeline to eliminate data loss.
 /// </summary>
-public class DiscoveredPrinterDto
+public class PrinterInfoDto
 {
-    public string IpAddress { get; set; } = string.Empty;
-    public int Port { get; set; }
-    public int? BackendPort { get; set; }
-    public int? FrontendPort { get; set; }
-    public string ServerUrl { get; set; } = string.Empty;
-    public PrinterBackend Backend { get; set; }
+    /// <summary>Display name for the printer</summary>
     public string Name { get; set; } = string.Empty;
-    public string? Manufacturer { get; set; }
-    public string? Model { get; set; }
-    public string? Firmware { get; set; }
-    public string? Version { get; set; }
-    public bool IsReachable { get; set; }
-    public DateTime DiscoveredAt { get; set; }
-    // Camera URLs discovered from printer API (if available)
+
+    /// <summary>Normalized server URL (e.g., http://hostname:7125)</summary>
+    public string ServerUrl { get; set; } = string.Empty;
+
+    /// <summary>Original user-supplied URL before normalization (if different)</summary>
+    public string? OriginalServerUrl { get; set; }
+
+    /// <summary>IP address of the printer on the network</summary>
+    public string IpAddress { get; set; } = string.Empty;
+
+    /// <summary>Backend type (moonraker, prusalink, octoprint, sdcp)</summary>
+    public PrinterBackend Backend { get; set; }
+
+    /// <summary>Backend-specific port number (default varies by backend)</summary>
+    public int? BackendPort { get; set; }
+
+    /// <summary>Frontend web UI port (if different from backend port)</summary>
+    public int? FrontendPort { get; set; }
+
+    /// <summary>Camera stream URL discovered from printer API (optional)</summary>
     public string? CameraStreamUrl { get; set; }
+
+    /// <summary>Camera snapshot URL discovered from printer API (optional)</summary>
     public string? CameraSnapshotUrl { get; set; }
+
+    /// <summary>Printer manufacturer name (from discovery or catalog match)</summary>
+    public string? Manufacturer { get; set; }
+
+    /// <summary>Printer model name (from discovery or catalog match)</summary>
+    public string? Model { get; set; }
+
+    /// <summary>User notes or description</summary>
+    public string? Notes { get; set; }
+
+    /// <summary>API key for backend authentication (if required)</summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>Timestamp when printer was discovered</summary>
+    public DateTime DiscoveredAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Whether the printer is currently reachable</summary>
+    public bool IsReachable { get; set; }
 }
 
 /// <summary>
-/// DTO for registering a discovered printer with the central API.
-/// Used by printer-discovery service to register newly found printers.
+/// Printer discovered during network scanning.
+/// Now a type alias to PrinterInfoDto for backward compatibility.
+/// All discovery operations should use PrinterInfoDto going forward.
+/// </summary>
+public class DiscoveredPrinterDto : PrinterInfoDto
+{
+    /// <summary>
+    /// Create a DiscoveredPrinterDto from raw discovery data.
+    /// </summary>
+    public static DiscoveredPrinterDto FromProbe(
+        string ipAddress,
+        string serverUrl,
+        string name,
+        PrinterBackend backend,
+        int? backendPort = null,
+        int? frontendPort = null,
+        string? manufacturer = null,
+        string? model = null,
+        string? cameraStreamUrl = null,
+        string? cameraSnapshotUrl = null) =>
+        new DiscoveredPrinterDto
+        {
+            IpAddress = ipAddress,
+            ServerUrl = serverUrl,
+            Name = name,
+            Backend = backend,
+            BackendPort = backendPort,
+            FrontendPort = frontendPort,
+            Manufacturer = manufacturer,
+            Model = model,
+            CameraStreamUrl = cameraStreamUrl,
+            CameraSnapshotUrl = cameraSnapshotUrl,
+            DiscoveredAt = DateTime.UtcNow,
+            IsReachable = true
+        };
+}
+
+/// <summary>
+/// DEPRECATED: Use PrinterInfoDto directly instead.
+/// This bridge DTO existed to pass data from discovery service to API registration.
+/// Data loss in this layer has been eliminated by consolidating to PrinterInfoDto.
 /// </summary>
 public class RegisterDiscoveredPrinterDto
 {
@@ -559,6 +679,21 @@ public class RegisterDiscoveredPrinterDto
 
     /// <summary>Timestamp when printer was discovered</summary>
     public DateTime DiscoveredAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Convert to PrinterInfoDto (preferred modern format)</summary>
+    public PrinterInfoDto ToPrinterInfoDto() =>
+        new PrinterInfoDto
+        {
+            Name = FriendlyName ?? Hostname,
+            IpAddress = IpAddress,
+            ServerUrl = $"http://{IpAddress}:{Port}",
+            OriginalServerUrl = null,
+            Backend = Enum.TryParse<PrinterBackend>(PrinterBackend, ignoreCase: true, out var b) ? b : global::Farm.Web.Shared.PrinterBackend.Moonraker,
+            BackendPort = Port,
+            FrontendPort = null,
+            DiscoveredAt = DiscoveredAt,
+            IsReachable = true
+        };
 }
 
 // Discovery progress events for SignalR streaming

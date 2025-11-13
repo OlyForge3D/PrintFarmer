@@ -41,6 +41,7 @@ public class Printer
     public DateTime? DateAcquired { get; set; }
     public PrinterCapabilities? Capabilities { get; set; }
     public bool InMaintenance { get; set; } = false;
+    public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
 }
 
 public class Spool

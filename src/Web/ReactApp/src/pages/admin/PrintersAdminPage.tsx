@@ -20,7 +20,7 @@ function downloadJson(filename: string, data: unknown) {
 }
 
 export function PrintersAdminPage() {
-  const { data: printers, isLoading, error } = usePrintersWithCameraUrls();
+  const { data: printers, isLoading, error, refetch } = usePrintersWithCameraUrls();
   type PreviewItem = {
     __index: number;
     raw: Record<string, unknown>;
@@ -47,6 +47,10 @@ export function PrintersAdminPage() {
   const [exporting, setExporting] = React.useState<boolean>(false);
   const [showDiscovery, setShowDiscovery] = React.useState(false);
   const [discoveryAvailable, setDiscoveryAvailable] = React.useState(false);
+  const [bulkManufacturerId, setBulkManufacturerId] = React.useState<string>('');
+  const [bulkModelId, setBulkModelId] = React.useState<string>('');
+  const [bulkIsEnabled, setBulkIsEnabled] = React.useState<boolean | null>(null);
+  const [bulkOperating, setBulkOperating] = React.useState(false);
 
   // Check if discovery service is available
   React.useEffect(() => {
@@ -440,6 +444,61 @@ export function PrintersAdminPage() {
     }
   };
 
+  const handleBulkUpdate = async () => {
+    if (selectedIds.length === 0) {
+      toast('No printers selected');
+      return;
+    }
+
+    if (!bulkManufacturerId && !bulkModelId && bulkIsEnabled === null) {
+      toast('Select at least one field to update');
+      return;
+    }
+
+    setBulkOperating(true);
+    try {
+      let updated = 0;
+      let failed = 0;
+
+      for (const id of selectedIds) {
+        try {
+          const printer = printers?.find(p => p.id === id);
+          if (!printer) continue;
+
+          await apiClient.updatePrinter(id, {
+            name: printer.name,
+            serverUrl: printer.serverUrl || '',
+            notes: printer.notes,
+            manufacturerId: bulkManufacturerId ? (bulkManufacturerId as any as Guid) : printer.manufacturerId,
+            modelId: bulkModelId ? (bulkModelId as any as Guid) : printer.modelId,
+            backend: printer.backend,
+            isEnabled: bulkIsEnabled !== null ? bulkIsEnabled : undefined
+          });
+          updated++;
+        } catch (err) {
+          console.error(`Failed to update printer ${id}:`, err);
+          failed++;
+        }
+      }
+
+      toast.success(`Updated ${updated} printer${updated !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`);
+      
+      // Clear selections and reset form
+      setSelectedIds([]);
+      setBulkManufacturerId('');
+      setBulkModelId('');
+      setBulkIsEnabled(null);
+      
+      // Refetch printers to show updates
+      if (refetch) await refetch();
+    } catch (err) {
+      console.error('Bulk update failed', err);
+      toast.error('Bulk update failed');
+    } finally {
+      setBulkOperating(false);
+    }
+  };
+
   return (
     <ProtectedRoute requiredRole="farm_admin">
       <PageTemplate title="Admin: Printers" subtitle="Import and export printers" maxWidth="max-w-4xl">
@@ -530,9 +589,11 @@ export function PrintersAdminPage() {
                             />
                           </th>
                           <th>Printer Name</th>
+                          <th>Backend</th>
                           <th>Manufacturer</th>
                           <th>Model</th>
                           <th>Server URL</th>
+                          <th>Enabled</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -550,14 +611,103 @@ export function PrintersAdminPage() {
                               />
                             </td>
                             <td className="text-pf-text-primary font-medium">{p.name}</td>
+                            <td className="text-pf-text-secondary text-xs">{p.backend || '-'}</td>
                             <td className="text-pf-text-secondary">{p.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.modelName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.ipAddress ?? p.serverUrl ?? ''}</td>
+                            <td className="text-center">
+                              <input
+                                type="checkbox"
+                                checked={p.isEnabled || false}
+                                disabled
+                                aria-label={`Printer ${p.name} enabled status`}
+                                title="Use bulk operations to toggle enabled status"
+                              />
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+
+                  {selectedIds.length > 0 && (
+                    <div className="card bg-pf-bg-secondary border border-pf-border rounded p-4 mt-4">
+                      <div className="text-sm font-semibold mb-3">Bulk operations ({selectedIds.length} selected)</div>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="form-group">
+                          <label className="text-sm text-pf-text-secondary mb-1 block" htmlFor="bulk-manufacturer">Set Manufacturer</label>
+                          <select
+                            id="bulk-manufacturer"
+                            value={bulkManufacturerId}
+                            onChange={(e) => setBulkManufacturerId(e.target.value)}
+                            className="input-base input-sm w-full"
+                          >
+                            <option value="">-- Keep unchanged --</option>
+                            {/* Manufacturers would be populated from API - placeholder for now */}
+                            <option value="">No manufacturers loaded</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="text-sm text-pf-text-secondary mb-1 block" htmlFor="bulk-model">Set Model</label>
+                          <select
+                            id="bulk-model"
+                            value={bulkModelId}
+                            onChange={(e) => setBulkModelId(e.target.value)}
+                            className="input-base input-sm w-full"
+                          >
+                            <option value="">-- Keep unchanged --</option>
+                            {/* Models would be populated from API - placeholder for now */}
+                            <option value="">No models loaded</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="form-group">
+                          <label className="text-sm text-pf-text-secondary mb-2 block">Enabled Status</label>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setBulkIsEnabled(true)}
+                              className={`btn-base btn-sm flex-1 ${bulkIsEnabled === true ? 'btn-primary' : 'btn-secondary'}`}
+                            >
+                              Enable
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBulkIsEnabled(false)}
+                              className={`btn-base btn-sm flex-1 ${bulkIsEnabled === false ? 'btn-primary' : 'btn-secondary'}`}
+                            >
+                              Disable
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBulkIsEnabled(null)}
+                              className={`btn-base btn-sm flex-1 ${bulkIsEnabled === null ? 'btn-primary' : 'btn-secondary'}`}
+                            >
+                              Skip
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            type="button"
+                            onClick={handleBulkUpdate}
+                            disabled={bulkOperating}
+                            className="btn-base btn-sm btn-primary w-full"
+                          >
+                            {bulkOperating ? 'Updating...' : 'Apply to selected'}
+                          </button>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedIds([])}
+                        className="btn-base btn-sm btn-secondary w-full"
+                      >
+                        Clear selection
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
