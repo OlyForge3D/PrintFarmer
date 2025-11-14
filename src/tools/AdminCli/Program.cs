@@ -475,6 +475,9 @@ internal static class Program
             }
         }
 
+        // Sort results by IP address for deterministic output
+        // This ensures consistent ordering across multiple discovery runs
+        discovered.Sort((a, b) => CompareIpAddresses(a.IpAddress, b.IpAddress));
         return discovered;
     }
 
@@ -502,6 +505,35 @@ internal static class Program
         // Check if constraint overlaps with or is contained in target range
         // Returns true if: constraint is fully within target, or they overlap, or target is fully within constraint
         return !(constraintEnd < targetStart || constraintStart > targetEnd);
+    }
+
+    /// <summary>
+    /// Compares two IP addresses numerically for sorting.
+    /// </summary>
+    private static int CompareIpAddresses(string? ip1, string? ip2)
+    {
+        if (ip1 == null && ip2 == null)
+        {
+            return 0;
+        }
+        if (ip1 == null)
+        {
+            return -1;
+        }
+        if (ip2 == null)
+        {
+            return 1;
+        }
+
+        if (System.Net.IPAddress.TryParse(ip1, out var addr1) &&
+            System.Net.IPAddress.TryParse(ip2, out var addr2))
+        {
+            var bytes1 = BitConverter.ToUInt32(addr1.GetAddressBytes().Reverse().ToArray(), 0);
+            var bytes2 = BitConverter.ToUInt32(addr2.GetAddressBytes().Reverse().ToArray(), 0);
+            return bytes1.CompareTo(bytes2);
+        }
+
+        return string.Compare(ip1, ip2, StringComparison.Ordinal);
     }
 
     /// <summary>

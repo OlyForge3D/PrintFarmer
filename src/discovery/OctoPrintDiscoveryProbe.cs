@@ -51,22 +51,22 @@ public class OctoPrintDiscoveryProbe : BaseDiscoveryProbe
                 return Task.FromResult((false, 0, "Missing 'api' field"));
             }
 
-            // Check for Moonraker in server element (compatibility mode)
+            // Check for Moonraker in text field (compatibility mode)
             // If Moonraker is detected, return confidence 0 to let Moonraker probe take precedence
-            if (root.TryGetProperty("server", out JsonElement serverElem))
+            if (root.TryGetProperty("text", out JsonElement textElem))
             {
-                if (serverElem.ValueKind == JsonValueKind.String)
+                if (textElem.ValueKind == JsonValueKind.String)
                 {
-                    string? serverStr = serverElem.GetString();
-                    if (serverStr?.Contains("Moonraker", StringComparison.OrdinalIgnoreCase) == true)
+                    string? textStr = textElem.GetString();
+                    if (textStr?.Contains("Moonraker", StringComparison.OrdinalIgnoreCase) == true)
                     {
-                        return Task.FromResult((false, 0, "Moonraker detected in server element - let Moonraker probe handle"));
+                        return Task.FromResult((false, 0, "Moonraker detected in text field - let Moonraker probe handle"));
                     }
 
                     // Check for explicit OctoPrint string for higher confidence
-                    if (serverStr?.Contains("OctoPrint", StringComparison.OrdinalIgnoreCase) == true)
+                    if (textStr?.Contains("OctoPrint", StringComparison.OrdinalIgnoreCase) == true)
                     {
-                        return Task.FromResult((true, 100, "OctoPrint detected (server field confirms)"));
+                        return Task.FromResult((true, 100, "OctoPrint detected (text field confirms)"));
                     }
                 }
             }
