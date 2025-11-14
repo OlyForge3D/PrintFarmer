@@ -151,6 +151,13 @@ update_kv_file() {
     mv "$tmp" "$file"
 }
 
+get_kv_from_file() {
+    local file="$1"
+    local key="$2"
+    [ -f "$file" ] || return 1
+    grep -E "^${key}=" "$file" 2>/dev/null | tail -1 | sed -E "s/^${key}=//"
+}
+
 load_env_file() {
     if [ -f "$ENV_FILE" ]; then
         set -a
@@ -162,10 +169,13 @@ load_env_file() {
 
 ensure_database_passwords() {
     local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+    local env_pw=""
+    env_pw=$(get_kv_from_file "$ENV_FILE" "POSTGRES_PASSWORD" || true)
 
     case "$provider" in
         postgres)
-            if [ -n "${POSTGRES_PASSWORD:-}" ]; then
+            if [ -n "$env_pw" ]; then
+                POSTGRES_PASSWORD="$env_pw"
                 return 0
             fi
 
