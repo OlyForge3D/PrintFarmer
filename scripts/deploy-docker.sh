@@ -3853,7 +3853,7 @@ deploy_containers() {
 
             # Wait for API health endpoint before bringing up UI and workers
             if wait_for_api; then
-                print_success "API is healthy - proceeding to start remaining services"
+                print_success "API reported Healthy via /health - starting remaining services"
             else
                 print_warning "API did not become healthy within timeout. Proceeding to start remaining services anyway. Monitor API logs for issues."
             fi
@@ -4118,22 +4118,88 @@ prompt_remove_orphans() {
     done
 }
 
+fetch_api_health_summary() {
+    local base_url="$1"
+    local status_var="$2"
+    local desc_var="$3"
+    local http_var="$4"
+    local payload_var="$5"
+
+    local health_url="${base_url%/}/health"
+    local raw
+    raw=$(curl -s --max-time 5 "$health_url" -w "\n%{http_code}" 2>/dev/null || true)
+
+    if [ -z "$raw" ]; then
+        printf -v "$status_var" ''
+        printf -v "$desc_var" ''
+        printf -v "$http_var" '000'
+        printf -v "$payload_var" ''
+        return 1
+    fi
+
+    local http_code
+    http_code=$(printf '%s\n' "$raw" | tail -n1 | tr -d '\r')
+    local body
+    body=$(printf '%s\n' "$raw" | sed '$d')
+
+    local status desc
+    status=$(printf '%s' "$body" | grep -o '"status":"[^"]*"' | head -n1 | cut -d '"' -f4)
+    desc=$(printf '%s' "$body" | grep -o '"description":"[^"]*"' | head -n1 | cut -d '"' -f4)
+
+    printf -v "$status_var" '%s' "$status"
+    printf -v "$desc_var" '%s' "$desc"
+    printf -v "$http_var" '%s' "$http_code"
+    printf -v "$payload_var" '%s' "$body"
+
+    if [ -z "$body" ]; then
+        return 1
+    fi
+
+    if [ -z "$status" ]; then
+        return 2
+    fi
+
+    return 0
+}
 
 wait_for_api() {
-    print_info "Waiting for API to become healthy (timeout configurable via API_WAIT_TIMEOUT)..."
+    print_info "Waiting for API to become healthy (validated via /health)..."
     local timeout=${API_WAIT_TIMEOUT:-180}
     local interval=3
     local elapsed=0
-    local api_url="http://localhost:${API_PORT:-5245}/healthz"
+    local api_base="http://localhost:${API_PORT:-5245}"
+    local healthz_url="${api_base}/healthz"
+    local last_detail_log=-999
 
     while [ $elapsed -lt $timeout ]; do
-        if curl -sf "$api_url" >/dev/null 2>&1; then
-            print_success "API responded to health check: $api_url"
-            return 0
+        local health_status="" health_desc="" health_http="" health_payload=""
+        if fetch_api_health_summary "$api_base" health_status health_desc health_http health_payload; then
+            if [ "$health_status" = "Healthy" ]; then
+                print_success "API /health reports Healthy (HTTP ${health_http:-200})"
+                return 0
+            fi
+
+            if [ $((elapsed - last_detail_log)) -ge 15 ]; then
+                print_warning "API responded but dependencies still initializing (status=${health_status:-unknown}, http=${health_http:-n/a})."
+                [ -n "$health_desc" ] && print_info "Health description: $health_desc"
+              
+                if [ -n "$health_payload" ]; then
+                    print_info "Latest /health payload (truncated):"
+                    printf '%s\n' "$health_payload" | head -n 20
+                fi
+                last_detail_log=$elapsed
+            fi
+        else
+            if curl -sf "$healthz_url" >/dev/null 2>&1; then
+                if [ $((elapsed - last_detail_log)) -ge 15 ]; then
+                    print_info "Quick /healthz responded but /health not ready yet. Waiting for database connectivity..."
+                    last_detail_log=$elapsed
+                fi
+            fi
         fi
 
         if [ $((elapsed % 15)) -eq 0 ]; then
-            print_info "Still waiting for API to be healthy... ($elapsed/$timeout seconds)"
+            print_info "Still waiting for API to be fully healthy... ($elapsed/$timeout seconds)"
             dc ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "api|frontend|orcaslicer" || true
         fi
 
@@ -4141,14 +4207,12 @@ wait_for_api() {
         elapsed=$((elapsed + interval))
     done
 
-    print_warning "Timeout waiting for API health after ${timeout}s. Proceeding with deployment but UI may show errors until API is ready."
-    # If configured, fail the deployment on API health timeout
-    # API_FAIL_ON_TIMEOUT: if "true" (default), exit with non-zero to stop deployment
+    print_warning "Timeout waiting for API comprehensive health after ${timeout}s. Proceeding with deployment but UI may show errors until API stabilizes."
     local fail_on_timeout=${API_FAIL_ON_TIMEOUT:-true}
 
     if [ "$fail_on_timeout" = "true" ] || [ "$fail_on_timeout" = "1" ]; then
         run_api_diagnostics "🩺 API Startup Diagnostics"
-        print_error "API did not become healthy within ${timeout}s and API_FAIL_ON_TIMEOUT is enabled. Failing deployment."
+        print_error "API did not reach Healthy status within ${timeout}s and API_FAIL_ON_TIMEOUT is enabled. Failing deployment."
         echo
         print_info "Useful diagnostic commands to investigate the API container:"
         echo "  docker compose --env-file $ENV_FILE ps"
