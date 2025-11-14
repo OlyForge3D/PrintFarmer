@@ -5,6 +5,7 @@ import { printerHubService } from '@/services/printerHubService';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { toast } from 'sonner';
 
 function downloadJson(filename: string, data: unknown) {
@@ -258,61 +259,33 @@ export function PrintersAdminPage() {
     try {
       const f = file || (fileInputRef.current?.files ? fileInputRef.current.files[0] : undefined);
       if (!f) return;
-      const text = await f.text();
-      const parsed = JSON.parse(text);
-      const printersToCreate = Array.isArray(parsed) ? parsed : [parsed];
-
-      // Simple validation: ensure name and at least one of serverUrl/ipAddress exist
-      const validated = printersToCreate.map((p: unknown, idx: number) => {
-        const rec = (p ?? {}) as Record<string, unknown>;
-        // Support both formats: import format ('name', 'serverUrl') and export format ('printerName', 'serverUrl')
-        const name = typeof rec.name === 'string' 
-          ? rec.name 
-          : (typeof rec.printerName === 'string' ? rec.printerName : '');
-        const serverUrl = typeof rec.serverUrl === 'string'
-          ? rec.serverUrl
-          : (typeof rec.ipAddress === 'string' ? rec.ipAddress : '');
-        const backend = typeof rec.backend === 'number' ? rec.backend : 0;
-        const apiKey = typeof rec.apiKey === 'string' ? rec.apiKey : undefined;
-        const notes = typeof rec.notes === 'string' ? rec.notes : undefined;
-        const manufacturerId = typeof rec.manufacturerId === 'string' ? rec.manufacturerId : undefined;
-        const modelId = typeof rec.modelId === 'string' ? rec.modelId : undefined;
-        // Support multiple field name formats from different export/import sources:
-        // - camelCase: manufacturerName, modelName (old format)
-        // - PascalCase: Manufacturer, Model (intermediate format)
-        // - API export: ManufacturerName, PrinterModel (current format)
-        const manufacturerName = typeof rec.manufacturerName === 'string' 
-          ? rec.manufacturerName 
-          : (typeof rec.ManufacturerName === 'string' 
-            ? rec.ManufacturerName 
-            : (typeof rec.Manufacturer === 'string' ? rec.Manufacturer : undefined));
-        const modelName = typeof rec.modelName === 'string' 
-          ? rec.modelName 
-          : (typeof rec.PrinterModel === 'string' 
-            ? rec.PrinterModel 
-            : (typeof rec.Model === 'string' ? rec.Model : undefined));
-
-        return {
-          __index: idx,
-          raw: rec,
-          name,
-          serverUrl,
-          backend,
-          apiKey,
-          notes,
-          manufacturerId,
-          modelId,
-          manufacturerName,
-          modelName,
-          valid: Boolean(name && serverUrl)
-        } as PreviewItem;
+      
+      // Send file directly to backend - it handles CSV/JSON parsing
+      const formData = new FormData();
+      formData.append('file', f);
+      formData.append('duplicateHandling', duplicateHandling);
+      
+      const response = await fetch(`${getApiBaseUrl()}/printers/import`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData
       });
-
-      setPreviewItems(validated);
-      toast.success(`Loaded ${validated.length} printers for preview`);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.message || `Import failed: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      const resultsArray = Array.isArray(result?.results) ? result.results : [];
+      
+      // Map results for display
+      setImportResults(resultsArray);
+      setPreviewItems(null);
+      toast.success(`Import complete: ${resultsArray.length} items processed`);
     } catch (err) {
       console.error('Import failed', err);
-      toast.error('Failed to parse import file');
+      toast.error(err instanceof Error ? err.message : 'Failed to import file');
     }
   };
 
@@ -523,7 +496,7 @@ export function PrintersAdminPage() {
               ) : 'Export printers'}
             </button>
             <button type="button" aria-label="Open file picker to import printers" onClick={handleImportClick} className="btn-base btn-md btn-primary">Import printers</button>
-            <input aria-label="Import printers JSON file" ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+            <input aria-label="Import printers CSV or JSON file" ref={fileInputRef} type="file" accept=".csv,.json,text/csv,application/json" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </div>
 
           <div className="card">
