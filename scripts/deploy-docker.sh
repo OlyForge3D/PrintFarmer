@@ -167,6 +167,34 @@ load_env_file() {
     fi
 }
 
+# Helper: ensure the current shell exports a KEY=value pair.
+set_exported_env_var() {
+    local key="$1"
+    local value="$2"
+    if [ -z "$key" ]; then
+        return 1
+    fi
+    export "$key=$value"
+}
+
+# Helper: resync a specific variable from the env file when it changes on disk.
+sync_env_var_with_file() {
+    local key="$1"
+    [ -n "$key" ] || return 0
+    local env_file="${ENV_FILE:-.env}"
+    local file_value
+    file_value=$(get_kv_from_file "$env_file" "$key" || true)
+    if [ -z "$file_value" ]; then
+        return 0
+    fi
+    local current_value
+    current_value=$(printenv "$key" 2>/dev/null || true)
+    if [ "$current_value" != "$file_value" ]; then
+        print_info "Resyncing $key from $ENV_FILE to avoid stale shell overrides"
+        set_exported_env_var "$key" "$file_value"
+    fi
+}
+
 ensure_database_passwords() {
     local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
     local env_pw=""
@@ -193,6 +221,7 @@ ensure_database_passwords() {
 
             local conn="Host=postgres;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=$POSTGRES_PASSWORD"
             update_kv_file "$ENV_FILE" "ConnectionStrings__Default" "$conn"
+            set_exported_env_var "ConnectionStrings__Default" "$conn"
 
             if [ -f "$CONFIG_FILE" ]; then
                 update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
@@ -299,6 +328,7 @@ ensure_connection_string_password() {
     fi
 
     update_kv_file "$ENV_FILE" "ConnectionStrings__Default" "$rebuilt"
+    set_exported_env_var "ConnectionStrings__Default" "$rebuilt"
     print_info "ConnectionStrings__Default had no password; patched using provider credentials ($(mask_secret_short "$fallback_pw"))."
 }
 
@@ -2887,6 +2917,7 @@ EOF
     # The application reads only ConnectionStrings__Default and determines the provider
     # from the DB_PROVIDER environment variable. Provider-specific keys are not used.
     echo "ConnectionStrings__Default=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
+    set_exported_env_var "ConnectionStrings__Default" "$CONNECTION_STRING_TO_WRITE"
     
     # Generate monitoring service credentials
     GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-$(generate_random_password)}
@@ -3581,6 +3612,7 @@ deploy_containers() {
         ensure_database_passwords
         ensure_connection_string_password
         load_env_file
+        sync_env_var_with_file "ConnectionStrings__Default"
         print_info "Environment loaded successfully"
     else
         print_warning "Environment file $ENV_FILE not found; some variables may be missing"
