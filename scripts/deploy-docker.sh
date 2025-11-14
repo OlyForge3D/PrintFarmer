@@ -3876,11 +3876,10 @@ wait_for_database() {
             return 0
         fi
 
-        # As fallback, attempt a simple TCP connect to common DB ports
+        # As fallback, confirm the database is accepting connections
         if [ "${DB_PROVIDER:-postgres}" = "postgres" ]; then
-            # Port 5432 inside compose network exposed to host as 5432 by override; try localhost:5432
-            if nc -z localhost 5432 2>/dev/null; then
-                print_success "Database port 5432 reachable on localhost"
+            if postgres_readiness_check; then
+                print_success "PostgreSQL is accepting connections"
                 return 0
             fi
         elif [ "${DB_PROVIDER:-postgres}" = "sqlserver" ]; then
@@ -4896,6 +4895,14 @@ while [ $# -gt 0 ]; do
 done
 
 set -- "${_ARGS_KEEP[@]:-}"
+postgres_readiness_check() {
+    local pg_user="${POSTGRES_USER:-postgres}"
+    local pg_db="${POSTGRES_DB:-printfarmer}"
+    local pg_password="${POSTGRES_PASSWORD:-}"
+
+    dc exec -T database sh -c "PGPASSWORD='${pg_password}' pg_isready -U '${pg_user}' -d '${pg_db}' -h localhost" >/dev/null 2>&1
+}
+
 
 # Auto-detect and load auto-admin config if not explicitly provided via --auto-admin-config
 if [ -z "$AUTO_ADMIN_CONFIG_FILE" ]; then
