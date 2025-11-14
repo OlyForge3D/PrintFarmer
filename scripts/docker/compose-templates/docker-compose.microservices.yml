@@ -72,7 +72,7 @@ services:
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
     volumes:
       - printfarmer-app-data:/data
-      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-uploads}:/app/uploads
+      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
       - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
     depends_on:
@@ -159,7 +159,7 @@ networks:
 volumes:
   printfarmer-database:  # Generic database volume (PostgreSQL, SQL Server, MySQL)
   printfarmer-app-data:
-  printfarmer-model-uploads:
   printfarmer-gcode-storage:
   printfarmer-slicer-profiles:
+  printfarmer-model-storage:
   printfarmer-orcaslicer-temp:

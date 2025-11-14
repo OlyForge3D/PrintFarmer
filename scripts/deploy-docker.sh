@@ -883,7 +883,7 @@ DATA PERSISTENCE (P0 Requirement):
     During interactive deployment, you'll be prompted to configure external storage
     for critical data that must survive container recreation:
     
-    • 3D Model Uploads   - Maps to host directory (default: /var/lib/printfarmer/models)
+    • 3D Model Storage   - Maps to host directory (default: /var/lib/printfarmer/models)
     • Generated G-code   - Maps to host directory (default: /var/lib/printfarmer/gcode)
     • Slicer Profiles    - Maps to host directory (default: /var/lib/printfarmer/slicer-profiles)
     
@@ -2125,7 +2125,7 @@ DOCKEREOF
 configure_external_storage() {
     print_header "💾 External Storage Configuration (P0 Data Persistence)"
     
-    echo -e "${BLUE}Model Uploads & G-Code Files Storage${NC}"
+    echo -e "${BLUE}3D Model Storage & G-Code Library${NC}"
     echo "These critical data files should persist independently from container lifecycles."
     echo "They will only be deleted when database files are removed explicitly."
     echo
@@ -2145,9 +2145,9 @@ configure_external_storage() {
         print_success "External storage enabled - data will persist on host filesystem"
         echo
         
-        # Model uploads directory (defaults to user's home directory - no sudo needed)
+        # Model storage directory (defaults to user's home directory - no sudo needed)
         local default_models_path="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
-        prompt_with_default "Host directory for 3D model uploads:" "$default_models_path" "EXTERNAL_MODELS_PATH"
+        prompt_with_default "Host directory for 3D model storage (all uploaded models):" "$default_models_path" "EXTERNAL_MODELS_PATH"
         
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_MODELS_PATH" 2>/dev/null; then
@@ -3268,6 +3268,8 @@ DBEOF
       - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
       - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
       - DEPLOYMENT_MODE=microservices
+      - ModelStorage__Path=/app/models
+      - GCODE_LIBRARY_ROOT=/app/wwwroot/gcode-library
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
@@ -3277,7 +3279,7 @@ DBEOF
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
     volumes:
       - printfarmer-app-data:/data
-      - printfarmer-model-uploads:/app/uploads
+      - printfarmer-model-storage:/app/models
       - printfarmer-gcode-storage:/app/gcode
       - printfarmer-slicer-profiles:/app/profiles
     healthcheck:
@@ -3366,7 +3368,7 @@ volumes:
     sqlserver_data:
     mysql_data:
     printfarmer-app-data:
-    printfarmer-model-uploads:
+    printfarmer-model-storage:
     printfarmer-gcode-storage:
     printfarmer-slicer-profiles:
     printfarmer-orcaslicer-temp:

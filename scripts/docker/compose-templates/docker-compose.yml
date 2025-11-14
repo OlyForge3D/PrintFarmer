@@ -47,11 +47,10 @@ services:
       - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
     volumes:
       - printfarmer-app-data:/data
-      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-uploads}:/app/uploads
+      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
       - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
       - ./wwwroot/gcode-library:/app/wwwroot/gcode-library
-      - ./models:/app/models
 
     networks:
       - printfarmer-network
@@ -126,9 +125,9 @@ services:
 
 volumes:
   printfarmer-app-data:
-  printfarmer-model-uploads:
   printfarmer-gcode-storage:
   printfarmer-slicer-profiles:
+  printfarmer-model-storage:
   printfarmer-orcaslicer-temp:
 
 networks:
