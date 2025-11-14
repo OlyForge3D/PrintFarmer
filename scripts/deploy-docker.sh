@@ -221,6 +221,87 @@ ensure_database_passwords() {
     esac
 }
 
+mask_secret_short() {
+    local s="$1"
+    local len=${#s}
+    if [ $len -le 4 ]; then
+        printf '%s' "$s"
+        return
+    fi
+    printf '%s****%s' "${s:0:2}" "${s: -2}"
+}
+
+ensure_connection_string_password() {
+    local conn
+    conn=$(get_kv_from_file "$ENV_FILE" "ConnectionStrings__Default" || true)
+    if [ -z "$conn" ]; then
+        print_warning "ConnectionStrings__Default missing from $ENV_FILE; API will reconstruct its own default connection string at runtime."
+        return 0
+    fi
+
+    local current_password
+    current_password=$(extract_conn_setting "Password" "$conn")
+    if [ -n "$current_password" ]; then
+        return 0
+    fi
+
+    local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+    local fallback_pw=""
+    case "$provider" in
+        postgres)
+            fallback_pw=$(get_kv_from_file "$ENV_FILE" "POSTGRES_PASSWORD" || true)
+            ;;
+        sqlserver)
+            fallback_pw=$(get_kv_from_file "$ENV_FILE" "SQLSERVER_PASSWORD" || true)
+            if [ -z "$fallback_pw" ]; then
+                fallback_pw=$(get_kv_from_file "$ENV_FILE" "MSSQL_SA_PASSWORD" || true)
+            fi
+            ;;
+        mysql)
+            fallback_pw=$(get_kv_from_file "$ENV_FILE" "MYSQL_PASSWORD" || true)
+            if [ -z "$fallback_pw" ]; then
+                fallback_pw=$(get_kv_from_file "$ENV_FILE" "MYSQL_ROOT_PASSWORD" || true)
+            fi
+            ;;
+    esac
+
+    if [ -z "$fallback_pw" ]; then
+        print_error "ConnectionStrings__Default is missing Password= and no provider password could be found in $ENV_FILE."
+        print_error "Update the environment file with the correct password and rerun the deployment."
+        exit 3
+    fi
+
+    local rebuilt=""
+    local added_password=false
+    IFS=';' read -ra conn_parts <<< "$conn"
+    for part in "${conn_parts[@]}"; do
+        if [ -z "$part" ]; then
+            continue
+        fi
+        local key="${part%%=*}"
+        local value="${part#*=}"
+        local key_lower=$(echo "$key" | tr '[:upper:]' '[:lower:]')
+        if [ "$key_lower" = "password" ]; then
+            value="$fallback_pw"
+            added_password=true
+        fi
+        if [ -n "$rebuilt" ]; then
+            rebuilt+=";"
+        fi
+        rebuilt+="$key=$value"
+    done
+
+    if [ "$added_password" = false ]; then
+        if [ -n "$rebuilt" ]; then
+            rebuilt+=";"
+        fi
+        rebuilt+="Password=$fallback_pw"
+    fi
+
+    update_kv_file "$ENV_FILE" "ConnectionStrings__Default" "$rebuilt"
+    print_info "ConnectionStrings__Default had no password; patched using provider credentials ($(mask_secret_short "$fallback_pw"))."
+}
+
 # Helper: generate a random strong password for database SA user
 generate_random_password() {
     # Try openssl first for portability
@@ -3498,6 +3579,7 @@ deploy_containers() {
         print_info "Loading environment variables from $ENV_FILE"
         load_env_file
         ensure_database_passwords
+        ensure_connection_string_password
         load_env_file
         print_info "Environment loaded successfully"
     else
