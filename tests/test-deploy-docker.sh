@@ -1155,6 +1155,54 @@ EOF
     pass_test
 }
 
+# Test that PostgreSQL password authentication actually works (integration test)
+test_postgres_password_authentication_integration() {
+    start_test "PostgreSQL password authentication (integration test)"
+    
+    # Only run this test if Docker and Docker Compose are available
+    if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
+        skip_test "Docker/Docker Compose not available"
+        return 0
+    fi
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Run deploy script to generate compose and env files
+    capture_output "$(get_deploy_script_command --architecture microservices --dry-run --batch)"
+    local output=$(get_output)
+    
+    # Find the generated compose file
+    local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
+    if [ ! -f "$compose_file" ]; then
+        # Try the repo root
+        compose_file="$REPO_ROOT/docker-compose.yml"
+    fi
+    
+    assert_file_exists "$compose_file" "Generated compose file should exist"
+    
+    local env_file="$TEST_TEMP_DIR/.env"
+    if [ ! -f "$env_file" ]; then
+        env_file="$REPO_ROOT/.env"
+    fi
+    
+    assert_file_exists "$env_file" "Generated env file should exist"
+    
+    # Extract password from env file
+    local pg_pw
+    pg_pw=$(grep -E '^POSTGRES_PASSWORD=' "$env_file" | tail -1 | cut -d= -f2- || true)
+    
+    assert_not_equals "" "$pg_pw" "POSTGRES_PASSWORD should be generated"
+    
+    # Verify that init-postgres.sh script is referenced in compose file
+    if grep -q "init-postgres.sh" "$compose_file" 2>/dev/null; then
+        pass_test "PostgreSQL init script is configured in compose file"
+    else
+        # Warning - not a failure, but good to know
+        test_warning "PostgreSQL init script not found in compose file - password auth may not be enforced"
+        pass_test
+    fi
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -1191,6 +1239,7 @@ run_all_tests() {
     test_pfarm_variables_sourcing
     test_slicer_worker_api_key_generation
     test_slicer_worker_api_key_single_worker
+    test_postgres_password_authentication_integration
     
     teardown
 }

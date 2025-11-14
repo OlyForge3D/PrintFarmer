@@ -3085,6 +3085,7 @@ EOF
     - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/docker/init-postgres.sh:/docker-entrypoint-initdb.d/01-init-auth.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER} -d \${POSTGRES_DB}"]
       interval: 30s
