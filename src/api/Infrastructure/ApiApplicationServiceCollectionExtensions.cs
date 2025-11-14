@@ -58,6 +58,9 @@ public static class ApiApplicationServiceCollectionExtensions
 
     private static void RegisterCatalogAndSlicingServices(IServiceCollection services)
     {
+        // Catalog services
+        _ = services.AddScoped<Farm.Web.Api.Services.Catalog.ICatalogService, Farm.Web.Api.Services.Catalog.CatalogService>();
+
         // Filament services (API-specific)
         _ = services.AddScoped<Farm.Web.Api.Services.Filament.IFilamentTypeService, Farm.Web.Api.Services.Filament.FilamentTypeService>();
         _ = services.AddScoped<Farm.Web.Api.Repositories.Filament.IFilamentTypeRepository, Farm.Web.Api.Repositories.Filament.FilamentTypeRepository>();
