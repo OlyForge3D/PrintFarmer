@@ -123,6 +123,94 @@ remove_version_keys() {
     fi
 }
 
+# Generic helper to upsert KEY=value pairs in simple env/config files
+update_kv_file() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    local tmp
+    tmp=$(mktemp "${file}.tmp.XXXXXX" 2>/dev/null || mktemp)
+    local found=0
+
+    if [ -f "$file" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [[ "$line" == "$key="* ]]; then
+                echo "$key=$value" >> "$tmp"
+                found=1
+            else
+                echo "$line" >> "$tmp"
+            fi
+        done < "$file"
+        if [ $found -eq 0 ]; then
+            echo "$key=$value" >> "$tmp"
+        fi
+    else
+        echo "$key=$value" > "$tmp"
+    fi
+
+    mv "$tmp" "$file"
+}
+
+load_env_file() {
+    if [ -f "$ENV_FILE" ]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$ENV_FILE"
+        set +a
+    fi
+}
+
+ensure_database_passwords() {
+    local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+
+    case "$provider" in
+        postgres)
+            if [ -n "${POSTGRES_PASSWORD:-}" ]; then
+                return 0
+            fi
+
+            print_warning "Detected empty POSTGRES_PASSWORD after loading $ENV_FILE; regenerating secure password."
+            local new_pw="${DB_PASSWORD:-}"
+            if [ -z "$new_pw" ]; then
+                new_pw=$(generate_random_password)
+            fi
+
+            POSTGRES_PASSWORD="$new_pw"
+            DB_PASSWORD="$new_pw"
+
+            update_kv_file "$ENV_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+            update_kv_file "$ENV_FILE" "DB_PASSWORD" "$DB_PASSWORD"
+
+            local conn="Host=postgres;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=$POSTGRES_PASSWORD"
+            update_kv_file "$ENV_FILE" "ConnectionStrings__Default" "$conn"
+
+            if [ -f "$CONFIG_FILE" ]; then
+                update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+                update_kv_file "$CONFIG_FILE" "DB_PASSWORD" "$DB_PASSWORD"
+                local escaped_conn
+                escaped_conn=$(printf '%q' "$conn")
+                update_kv_file "$CONFIG_FILE" "CONNECTION_STRING" "$escaped_conn"
+            fi
+
+            print_success "Repaired missing PostgreSQL password (saved to $ENV_FILE)"
+            ;;
+        sqlserver)
+            if [ -n "${SQLSERVER_PASSWORD:-}${MSSQL_SA_PASSWORD:-}" ]; then
+                return 0
+            fi
+            print_error "SQL Server password is empty. Update SQLSERVER_PASSWORD in $ENV_FILE and rerun."
+            exit 3
+            ;;
+        mysql)
+            if [ -n "${MYSQL_PASSWORD:-}${MYSQL_ROOT_PASSWORD:-}" ]; then
+                return 0
+            fi
+            print_error "MySQL password is empty. Update MYSQL_PASSWORD in $ENV_FILE and rerun."
+            exit 3
+            ;;
+    esac
+}
+
 # Helper: generate a random strong password for database SA user
 generate_random_password() {
     # Try openssl first for portability
@@ -3398,10 +3486,9 @@ deploy_containers() {
     # This ensures that health check commands can access variables like MSSQL_SA_PASSWORD.
     if [ -f "$ENV_FILE" ]; then
         print_info "Loading environment variables from $ENV_FILE"
-        set -a
-        # shellcheck disable=SC1090
-        source "$ENV_FILE"
-        set +a
+        load_env_file
+        ensure_database_passwords
+        load_env_file
         print_info "Environment loaded successfully"
     else
         print_warning "Environment file $ENV_FILE not found; some variables may be missing"
