@@ -689,8 +689,12 @@ tear_down_deployment() {
     # 3. Remove all volumes
     print_info "Step 3/7: Removing all Docker volumes..."
     if docker volume ls -q | grep -q .; then
-        docker volume rm $(docker volume ls -q) 2>/dev/null || true
-        print_success "Volumes removed"
+        # Remove volumes with force flag (-f) to handle in-use volumes
+        # Also handle per-project volumes explicitly (e.g., pfarm_printfarmer-database)
+        docker volume ls -q | while read -r vol; do
+            docker volume rm -f "$vol" 2>/dev/null && echo "  • Removed $vol" || echo "  ⚠ Failed to remove $vol (may be in use)"
+        done
+        print_success "Volumes removal attempted"
     else
         print_info "No volumes to remove"
     fi
