@@ -26,7 +26,7 @@ fi
 
 # Set build options
 BUILD_LOG="/tmp/printfarmer-build.log"
-PROGRESS="plain"  # Use 'plain' for full output, 'auto' for default
+PROGRESS="${DOCKER_PROGRESS:-tty}"  # Options: auto, tty, plain (tty=pretty default, plain=verbose)
 PLATFORM="${TARGETPLATFORM:-linux/amd64}"
 
 echo -e "${BLUE}Build Configuration:${NC}"

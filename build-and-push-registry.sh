@@ -8,6 +8,9 @@ REGISTRY_HOST=${REGISTRY_HOST:-localhost:5000}
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
+# Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
+DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}
+
 echo "=== Building and Pushing OrcaSlicer Images to Local Registry ==="
 echo "Registry: $REGISTRY_HOST"
 echo "OrcaSlicer Version: $ORCASLICER_VERSION"
@@ -25,7 +28,7 @@ echo ""
 
 # Build binary layer
 echo "🔨 Building binary layer: orcaslicer-binaries:$ORCASLICER_VERSION"
-ORCA_BUILD_CMD=(docker build)
+ORCA_BUILD_CMD=(docker build --progress="${DOCKER_PROGRESS}")
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
 fi
@@ -53,7 +56,7 @@ echo ""
 
 # Build worker
 echo "🔨 Building worker: printfarmer-orcaslicer-worker"
-WORKER_CMD=(docker build)
+WORKER_CMD=(docker build --progress="${DOCKER_PROGRESS}")
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     WORKER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
 fi

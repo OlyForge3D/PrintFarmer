@@ -7,12 +7,15 @@ set -e
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
+# Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
+DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}
+
 echo "=== Building OrcaSlicer Binary Layer (Optimized Caching) ==="
 echo "Version: $ORCASLICER_VERSION"
 
 # Build the binary layer first - this will be cached and reused
 echo "Building orcaslicer-binaries:$ORCASLICER_VERSION..."
-ORCA_BIN_CMD=(docker build)
+ORCA_BIN_CMD=(docker build --progress="${DOCKER_PROGRESS}")
 ORCA_DOCKERFILE=${ORCA_DOCKERFILE:-"./scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries"}
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_BIN_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
@@ -38,7 +41,7 @@ echo ""
 echo "=== Building OrcaSlicer Worker (Using Cached Binaries) ==="
 
 # Now build the worker, which will use the cached binary layer
-WORKER_CMD=(docker build)
+WORKER_CMD=(docker build --progress="${DOCKER_PROGRESS}")
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     WORKER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
 fi

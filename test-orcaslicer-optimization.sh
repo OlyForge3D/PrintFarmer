@@ -6,6 +6,9 @@ set -e
 
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
+# Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
+DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}
+
 echo "=== OrcaSlicer Binary Layer Optimization Test ==="
 echo "This script demonstrates build time improvements"
 echo ""
@@ -36,14 +39,14 @@ if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
 fi
 
 time_command "Building binary layer (this will be slow initially)" \
-    docker build -f "./Dockerfile.orcaslicer-binaries" \
+    docker build --progress="${DOCKER_PROGRESS}" -f "./Dockerfile.orcaslicer-binaries" \
     -t orcaslicer-binaries:$ORCASLICER_VERSION \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     --build-arg ALLOW_STUB=false \
     .
 
 time_command "Building worker using cached binaries" \
-    docker build -f Dockerfile.orcaslicer \
+    docker build --progress="${DOCKER_PROGRESS}" -f Dockerfile.orcaslicer \
     -t printfarmer-orcaslicer-worker \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     .
@@ -53,7 +56,7 @@ echo "Touching a source file to simulate code change..."
 touch src/orcaslicer-worker/Program.cs
 
 time_command "Rebuilding worker after code change (should be fast)" \
-    docker build -f Dockerfile.orcaslicer \
+    docker build --progress="${DOCKER_PROGRESS}" -f Dockerfile.orcaslicer \
     -t printfarmer-orcaslicer-worker \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
     .

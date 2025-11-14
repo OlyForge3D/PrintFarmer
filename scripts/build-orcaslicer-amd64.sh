@@ -8,6 +8,9 @@ set -euo pipefail
 # Default tag: orcaslicer-worker:amd64
 TAG=${1:-orcaslicer-worker:amd64}
 
+# Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
+DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}
+
 if ! docker buildx version >/dev/null 2>&1; then
   echo "[buildx] ERROR: docker buildx not available. Install Docker Buildx before using this script." >&2
   exit 2
@@ -23,6 +26,7 @@ if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
 fi
 
 DOCKER_BUILDKIT=1 docker buildx build \
+  --progress="${DOCKER_PROGRESS}" \
   --platform linux/amd64 \
   -t "orcaslicer-binaries:${ORCA_VERSION}" \
   -f ./Dockerfile.orcaslicer-binaries \
@@ -32,6 +36,7 @@ DOCKER_BUILDKIT=1 docker buildx build \
 
 echo "[buildx] Building worker image for linux/amd64 -> ${TAG} (using cached binaries)";
 DOCKER_BUILDKIT=1 docker buildx build \
+  --progress="${DOCKER_PROGRESS}" \
   --platform linux/amd64 \
   -t "${TAG}" \
   -f Dockerfile.orcaslicer \
