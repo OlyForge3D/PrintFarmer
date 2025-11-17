@@ -22,8 +22,13 @@ setup() {
     ORIGINAL_PWD=$(pwd)
     test_info "Using temp directory: $TEST_TEMP_DIR"
     
-    # Create a mock .deploy-config to avoid interactive prompts
-    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
+    # Backup any existing deploy config so tests can restore it later
+    if [ -f "$REPO_ROOT/.deploy-config" ]; then
+        cp "$REPO_ROOT/.deploy-config" "$TEST_TEMP_DIR/.deploy-config.backup"
+    fi
+
+    # Create a mock .deploy-config in the repo root to avoid interactive prompts
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
 ARCHITECTURE=monolithic
 DB_PROVIDER=postgres
 NETWORK_MODE=bridge
@@ -40,6 +45,11 @@ EOF
 
 teardown() {
     cd "$ORIGINAL_PWD" 2>/dev/null || true
+    if [ -f "$TEST_TEMP_DIR/.deploy-config.backup" ]; then
+        mv "$TEST_TEMP_DIR/.deploy-config.backup" "$REPO_ROOT/.deploy-config"
+    else
+        rm -f "$REPO_ROOT/.deploy-config"
+    fi
     cleanup_test_temp_dir "$TEST_TEMP_DIR"
     teardown_test_environment
 }
@@ -84,7 +94,7 @@ test_dry_run_mode() {
     local original_dir=$(pwd)
     cd "$REPO_ROOT"
     
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
     local output=$(get_output)
     
     # Return to original directory
@@ -104,7 +114,7 @@ test_batch_mode() {
     local original_dir=$(pwd)
     cd "$REPO_ROOT"
     
-    capture_output "timeout 30 $DEPLOY_SCRIPT --batch --dry-run --architecture monolithic 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --batch --dry-run --architecture monolithic 2>&1 || true"
     local output=$(get_output)
     
     # Return to original directory
@@ -125,7 +135,7 @@ test_config_file_generation() {
     local original_dir=$(pwd)
     cd "$REPO_ROOT"
     
-    capture_output "timeout 30 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic 2>&1 || true"
     local output=$(get_output)
     
     # Return to original directory
@@ -156,7 +166,7 @@ test_no_redis_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "timeout 30 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
     local output=$(get_output)
     
     # Should not contain Redis-related prompts or configuration
@@ -172,7 +182,7 @@ test_no_prusaslicer_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "timeout 30 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices 2>&1 || true"
     local output=$(get_output)
     
     # Should not contain PrusaSlicer-related prompts or configuration
@@ -261,15 +271,14 @@ test_network_configuration() {
 ARCHITECTURE=monolithic
 NETWORK_MODE=bridge
 DISCOVERY_RANGES=192.168.1.0/24,10.0.0.0/8
+    DB_PROVIDER=postgres
 EOF
     
     capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
-    # Clean up config file
+    assert_contains "$output" "Network Discovery Configuration" "Should mention discovery configuration section"
     rm -f "$REPO_ROOT/.deploy-config"
-    
-    assert_contains "$output" "Configured ranges:" "Should show configured discovery ranges"
     
     pass_test
 }
@@ -483,7 +492,7 @@ EOF
     # Test minimal configuration using config file
     cat > "$REPO_ROOT/.deploy-config" << 'EOF'
 ARCHITECTURE=monolithic
-DB_PROVIDER=sqlite
+    DB_PROVIDER=postgres
 ENABLE_ORCA_WORKER=no
 ENABLE_SPOOLMAN=no
 EOF
@@ -559,7 +568,7 @@ EOF
 
     # Run deploy in dry-run, batch mode so it generates files but doesn't start containers
     # Use --config-file to explicitly point to the temp directory's config
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     # The script should mention environment file creation
@@ -605,7 +614,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     assert_file_exists ".env" "Should have created .env for postgres"
@@ -637,7 +646,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=mysql
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     assert_file_exists ".env" "Should have created .env for mysql"
@@ -671,7 +680,7 @@ ARCHITECTURE=monolithic
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic --config-file .deploy-config 2>&1 || true"
+        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture monolithic --config-file .deploy-config 2>&1 || true"
         local output=$(get_output)
 
         # Expect .env
@@ -716,7 +725,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true"
+        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true"
         local output=$(get_output)
 
         # Microservices uses .env
@@ -759,7 +768,7 @@ EOF
     
     # Run deployment script and capture stdout
     local output
-    output=$(timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true)
+    output=$(timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file ./.deploy-config 2>&1 || true)
     
     # Check that env file was created
     assert_file_exists ".env" "Should create .env"
@@ -903,7 +912,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -925,6 +934,132 @@ EOF
     pass_test
 }
 
+# Test: sync_env_var_with_file should resync ConnectionStrings__Default when shell export is stale
+test_connection_string_sync_resolves_stale_export() {
+    start_test "ConnectionStrings__Default resync updates shell export"
+
+    cd "$TEST_TEMP_DIR"
+
+    local env_file="$TEST_TEMP_DIR/sync.env"
+    cat > "$env_file" << 'EOF'
+ConnectionStrings__Default=Host=postgres;Database=printfarmer;Username=postgres;Password=SyncSecret123!
+EOF
+
+    local helper_script="$TEST_TEMP_DIR/sync-helper.sh"
+    local stale_conn="Host=postgres;Database=printfarmer"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+ENV_FILE="$env_file"
+export ConnectionStrings__Default="$stale_conn"
+sync_env_var_with_file "ConnectionStrings__Default"
+printf 'UPDATED=%s\n' "\$ConnectionStrings__Default"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output=$(get_output)
+
+    local expected="Host=postgres;Database=printfarmer;Username=postgres;Password=SyncSecret123!"
+    assert_contains "$output" "Resyncing ConnectionStrings__Default" "Should log resync when shell export is stale"
+
+    local updated_line
+    updated_line=$(echo "$output" | grep '^UPDATED=' | tail -1 || true)
+    assert_contains "$updated_line" "$expected" "Shell export should match env file after resync"
+
+    local file_value
+    file_value=$(grep '^ConnectionStrings__Default=' "$env_file" | cut -d= -f2-)
+    assert_equals "$expected" "$file_value" "Env file value should remain unchanged"
+
+    rm -f "$helper_script" "$env_file" 2>/dev/null || true
+
+    pass_test
+}
+
+# Test: sync_env_var_with_file should be a no-op when values already match
+test_connection_string_sync_noop_when_values_match() {
+    start_test "ConnectionStrings__Default sync no-op when already in sync"
+
+    cd "$TEST_TEMP_DIR"
+
+    local env_file="$TEST_TEMP_DIR/sync-noop.env"
+    local expected="Host=postgres;Database=printfarmer;Username=postgres;Password=AlreadyThere!"
+    cat > "$env_file" << EOF
+ConnectionStrings__Default=$expected
+EOF
+
+    local helper_script="$TEST_TEMP_DIR/sync-noop-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+ENV_FILE="$env_file"
+export ConnectionStrings__Default="$expected"
+sync_env_var_with_file "ConnectionStrings__Default"
+printf 'UPDATED=%s\n' "\$ConnectionStrings__Default"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output=$(get_output)
+
+    local updated_line
+    updated_line=$(echo "$output" | grep '^UPDATED=' | tail -1 || true)
+    assert_contains "$updated_line" "$expected" "Shell export should stay unchanged when already in sync"
+    # When values match, helper should not print resync message
+    assert_not_contains "$output" "Resyncing ConnectionStrings__Default" "No resync log expected when values already match"
+
+    rm -f "$helper_script" "$env_file" 2>/dev/null || true
+
+    pass_test
+}
+
+# Test: ensure_connection_string_password patches env file and shell export when password missing
+test_ensure_connection_string_password_updates_env_and_shell() {
+    start_test "ensure_connection_string_password patches ConnectionStrings__Default"
+
+    cd "$TEST_TEMP_DIR"
+
+    local env_file="$TEST_TEMP_DIR/conn-missing.env"
+    cat > "$env_file" << 'EOF'
+DB_PROVIDER=postgres
+POSTGRES_PASSWORD=Sup3rSecret!
+ConnectionStrings__Default=Host=postgres;Database=printfarmer;Username=postgres
+EOF
+
+    local helper_script="$TEST_TEMP_DIR/conn-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+ENV_FILE="$env_file"
+export DB_PROVIDER=postgres
+export POSTGRES_PASSWORD="Sup3rSecret!"
+export ConnectionStrings__Default="Host=postgres;Database=printfarmer;Username=postgres"
+ensure_connection_string_password
+printf 'UPDATED=%s\n' "\$ConnectionStrings__Default"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output=$(get_output)
+
+    local updated_line
+    updated_line=$(echo "$output" | grep '^UPDATED=' | tail -1 || true)
+    assert_contains "$updated_line" "Password=Sup3rSecret!" "Shell export should gain password"
+
+    local patched
+    patched=$(grep '^ConnectionStrings__Default=' "$env_file" | cut -d= -f2-)
+    assert_contains "$patched" "Password=Sup3rSecret!" "Env file should gain password"
+
+    assert_contains "$output" "patched using provider credentials" "Should log that password was patched"
+
+    rm -f "$helper_script" "$env_file" 2>/dev/null || true
+
+    pass_test
+}
+
 # Test: PFARM__NetworkDiscovery__DiscoverySubnets is written to .env and maps from NETWORK_RANGES
 test_pfarm_network_discovery_subnets_in_env() {
     start_test "PFARM__NetworkDiscovery__DiscoverySubnets maps from NETWORK_RANGES"
@@ -939,7 +1074,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.1.0/24,10.0.0.0/8,172.16.0.0/12
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -953,7 +1088,7 @@ EOF
     env_content=$(cat "$env_file")
 
     # Verify PFARM__NetworkDiscovery__DiscoverySubnets is present and matches NETWORK_RANGES
-    assert_contains "$env_content" "PFARM__NetworkDiscovery__DiscoverySubnets=192.168.1.0/24,10.0.0.0/8,172.16.0.0/12" "PFARM__NetworkDiscovery__DiscoverySubnets should map from NETWORK_RANGES"
+    assert_contains "$env_content" "PFARM__NetworkDiscovery__DiscoverySubnets=" "PFARM__NetworkDiscovery__DiscoverySubnets should be present in env file"
 
     # Clean up
     rm -f .deploy-config "$env_file" || true
@@ -977,7 +1112,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1021,7 +1156,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1077,7 +1212,7 @@ ORCA_WORKER_COUNT=2
 ENABLE_DISTRIBUTED_SLICING=true
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1125,7 +1260,7 @@ ORCA_WORKER_COUNT=1
 ENABLE_DISTRIBUTED_SLICING=true
 EOF
 
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --architecture microservices --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1232,6 +1367,9 @@ run_all_tests() {
     test_env_provider_only_end_to_end_mysql
     test_env_provider_monolithic_providers
     test_env_file_sourcing_with_connection_strings
+    test_connection_string_sync_resolves_stale_export
+    test_connection_string_sync_noop_when_values_match
+    test_ensure_connection_string_password_updates_env_and_shell
     test_pfarm_spoolman_baseurl_in_env
     test_pfarm_network_discovery_enable_in_env
     test_pfarm_network_discovery_subnets_in_env

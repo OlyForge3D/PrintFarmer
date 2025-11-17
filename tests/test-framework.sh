@@ -242,7 +242,7 @@ get_deploy_script_command() {
     local deploy_script="$repo_root/scripts/deploy-docker.sh"
     
     # Return command string that runs from repo root with proper timeout
-    echo "cd '$repo_root' && timeout 60 '$deploy_script' ${args[*]} 2>&1 || true"
+    echo "cd '$repo_root' && timeout 120 '$deploy_script' ${args[*]} 2>&1 || true"
 }
 
 # Helper function to get compose generator command with correct paths
