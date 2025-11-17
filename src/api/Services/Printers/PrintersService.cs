@@ -1583,7 +1583,7 @@ namespace Farm.Web.Api.Services.Printers
                     }
 
                     // Parse header
-                    var headers = headerLine.Split(',').Select(h => h.Trim().ToLowerInvariant()).ToArray();
+                    var headers = CsvImportParser.SplitCsvLine(headerLine).Select(h => h.Trim().ToLowerInvariant()).ToArray();
                     var nameIdx = Array.IndexOf(headers, "name");
                     var ipAddressIdx = Array.IndexOf(headers, "ipaddress");
                     var backendIdx = Array.IndexOf(headers, "backend");
@@ -1617,7 +1617,7 @@ namespace Farm.Web.Api.Services.Printers
 
                         try
                         {
-                            var values = line.Split(',').Select(v => v.Trim()).ToArray();
+                            var values = CsvImportParser.SplitCsvLine(line).Select(v => v.Trim()).ToArray();
 
                             if (values.Length < 3)
                             {
