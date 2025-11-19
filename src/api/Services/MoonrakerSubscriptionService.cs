@@ -162,9 +162,14 @@ public sealed class MoonrakerSubscriptionService(
 #pragma warning disable IDISP013 // Await in using
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-        // Only subscribe to Moonraker-backed printers (Backend == 0)
-        List<Printer> printers = await printersRepo.GetByBackendAsync(PrinterBackend.Moonraker, ct);
-        foreach (Printer? p in printers)
+
+        // Only subscribe to ENABLED Moonraker-backed printers
+        // Note: Only Moonraker supports real-time WebSocket subscriptions
+        // PrusaLink and SDCP are polled via HTTP on-demand, not continuously
+        List<Printer> allPrinters = await printersRepo.GetByBackendAsync(PrinterBackend.Moonraker, ct);
+        List<Printer> enabledPrinters = allPrinters.Where(p => p.IsEnabled).ToList();
+
+        foreach (Printer? p in enabledPrinters)
         {
             _ = _loops.GetOrAdd(p.Id, _ => Task.Run(() => SubscribePrinterLoopAsync(p, ct), ct));
         }
@@ -356,7 +361,7 @@ public sealed class MoonrakerSubscriptionService(
                 return false;
             }
 
-            if (current.Backend != 0)
+            if (current.Backend != (int)Farm.Web.Shared.PrinterBackend.Moonraker)
             {
                 _logger.LogInformation($"Printer {printerId} backend changed from Moonraker (Backend={current.Backend})");
                 return false;

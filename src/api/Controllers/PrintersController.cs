@@ -731,7 +731,7 @@ public class PrintersController(
         int defaultPort = dto.Backend.HasValue ?
             (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 :
              dto.Backend.Value == PrinterBackend.SDCP ? 80 : 7125) :
-            (p.Backend == 1 ? 80 : p.Backend == 2 ? 80 : 7125);
+            (p.Backend == (int)Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : p.Backend == (int)Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125);
 
         // Delegate normalization and optional hostname resolution to the PrintersService
         var backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;

@@ -631,7 +631,7 @@ export function PrintersAdminPage() {
                               />
                             </td>
                             <td className="text-pf-text-primary font-medium">{p.name}</td>
-                            <td className="text-pf-text-secondary text-xs">{p.backend || '-'}</td>
+                            <td className="text-pf-text-secondary text-xs">{p.backend !== undefined ? ['Moonraker', 'PrusaLink', 'SDCP', 'OctoPrint'][p.backend] || `Unknown (${p.backend})` : '-'}</td>
                             <td className="text-pf-text-secondary">{p.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.modelName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.ipAddress ?? p.serverUrl ?? ''}</td>

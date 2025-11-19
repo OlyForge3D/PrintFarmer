@@ -7,23 +7,24 @@ import { Alert } from '@/components/ui/Alert';
 import { Select } from '@/components/ui/Select';
 import { FormField } from '@/components/ui/FormField';
 import officialProfilesService from '@/services/officialProfilesService';
+import { PrinterBackend } from '@/types/api';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 interface PrinterListItem {
     id: string;
     name: string;
-    backend: number; // 0=Moonraker, 1=PrusaLink, 2=SDCP, 3=OctoPrint
+    backend: PrinterBackend; // Moonraker, PrusaLink, SDCP, OctoPrint
     modelId?: string;
     modelName?: string;
 }
 
-function getBackendName(backend: number | string): string {
+function getBackendName(backend: PrinterBackend | string): string {
     if (typeof backend === 'string') return backend;
     switch (backend) {
-        case 0: return 'Moonraker';
-        case 1: return 'PrusaLink';
-        case 2: return 'SDCP';
-        case 3: return 'OctoPrint';
+        case PrinterBackend.Moonraker: return 'Moonraker';
+        case PrinterBackend.PrusaLink: return 'PrusaLink';
+        case PrinterBackend.SDCP: return 'SDCP';
+        case PrinterBackend.OctoPrint: return 'OctoPrint';
         default: return `Unknown (${backend})`;
     }
 }

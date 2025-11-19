@@ -125,10 +125,11 @@ export interface PrinterFast {
 }
 
 export enum PrinterBackend {
-  Moonraker = 0,
-  PrusaLink = 1,
-  SDCP = 2,
-  OctoPrint = 3,
+  Unknown = 0,
+  Moonraker = 1,
+  PrusaLink = 2,
+  SDCP = 3,
+  OctoPrint = 4,
 }
 
 export enum MotionType {

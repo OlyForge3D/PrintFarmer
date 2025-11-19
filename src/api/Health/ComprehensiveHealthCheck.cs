@@ -319,7 +319,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
 
             foreach (Printer? printer in printers)
             {
-                if (printer.Backend == 0) // Moonraker
+                if (printer.Backend == (int)Farm.Web.Shared.PrinterBackend.Moonraker) // Moonraker
                 {
                     externalServiceCount++;
                     try

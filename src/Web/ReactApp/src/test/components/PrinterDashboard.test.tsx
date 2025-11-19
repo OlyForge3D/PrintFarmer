@@ -138,7 +138,7 @@ describe('PrinterDashboard', () => {
         state: 'printing',
         manufacturerName: 'Prusa',
         modelName: 'MK3S+',
-        backend: 0, // Moonraker
+        backend: PrinterBackend.Moonraker,
       },
       {
         id: '2',
@@ -148,7 +148,7 @@ describe('PrinterDashboard', () => {
         state: null,
         manufacturerName: 'Creality',
         modelName: 'Ender 3',
-        backend: 1, // PrusaLink
+        backend: PrinterBackend.PrusaLink,
       },
     ];
 

@@ -88,11 +88,11 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
 
             try
             {
-                _logger?.LogDebug($"Trying probe {probe.DisplayName} for {ipAddress}");
+                _logger?.LogDebug("Trying probe {ProbeName} for {IpAddress}", probe.DisplayName, ipAddress);
                 var result = await probe.ProbeAsync(ipAddress, timeoutMs, cancellationToken);
                 if (result != null)
                 {
-                    _logger?.LogDebug($"Probe {probe.DisplayName} matched for {ipAddress} with confidence {result.ConfidenceScore} ({result.Reason})");
+                    _logger?.LogDebug("Probe {ProbeName} matched for {IpAddress} with confidence {ConfidenceScore} ({Reason})", probe.DisplayName, ipAddress, result.ConfidenceScore, result.Reason);
                     results.Add(result);
                 }
             }
@@ -102,7 +102,7 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
             }
             catch (Exception ex)
             {
-                _logger?.LogDebug(ex, $"Probe {probe.DisplayName} failed for {ipAddress}");
+                _logger?.LogDebug(ex, "Probe {ProbeName} failed for {IpAddress}", probe.DisplayName, ipAddress);
             }
         }
 
@@ -114,7 +114,7 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
 
         // Select the result with the highest confidence score
         ProbeResult bestResult = results.MaxBy(r => r.ConfidenceScore)!;
-        _logger?.LogInformation($"Successfully discovered {bestResult.Printer.Backend} printer at {ipAddress} ({bestResult.Reason})");
+        _logger?.LogInformation("Successfully discovered {Backend} printer at {IpAddress} ({Reason})", bestResult.Printer.Backend, ipAddress, bestResult.Reason);
         return bestResult.Printer;
     }
 

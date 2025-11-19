@@ -19,10 +19,11 @@ namespace Farm.Web.Shared;
 [JsonConverter(typeof(Farm.Web.Shared.Json.PrinterBackendJsonConverter))]
 public enum PrinterBackend
 {
-    Moonraker = 0,
-    PrusaLink = 1,
-    SDCP = 2,
-    OctoPrint = 3
+    Unknown = 0,
+    Moonraker = 1,
+    PrusaLink = 2,
+    SDCP = 3,
+    OctoPrint = 4
 }
 
 /// <summary>

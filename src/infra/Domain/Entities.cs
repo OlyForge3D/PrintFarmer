@@ -30,7 +30,7 @@ public class Printer
     }
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
     public string? Notes { get; set; }
-    public int Backend { get; set; } // 0 = Moonraker, 1 = PrusaLink, 2 = SDCP, 3 = OctoPrint
+    public int Backend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
     public string? ApiKey { get; set; } // For PrusaLink/OctoPrint
     public string? CameraStreamUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
     public string? CameraSnapshotUrl { get; set; } // For OctoPrint/Moonraker/PrusaLink
@@ -74,7 +74,7 @@ public class PrinterModel
     public double? MaxX { get; set; }
     public double? MaxY { get; set; }
     public double? MaxZ { get; set; }
-    public int? DefaultBackend { get; set; } // Default backend for this model: 0=Moonraker, 1=PrusaLink, 2=SDCP
+    public int? DefaultBackend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
     public double? DefaultNozzleDiameter { get; set; } = 0.4; // Most common nozzle size
     public bool HasHeatedBed { get; set; } = true;
     public bool HasEnclosure { get; set; }
