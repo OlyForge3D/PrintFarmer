@@ -118,5 +118,6 @@ public static class ApiApplicationServiceCollectionExtensions
         _ = services.AddScoped<Farm.Web.Api.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Web.Api.Repositories.SchemaHealth.SchemaHealthRepository>();
         _ = services.AddScoped<Farm.Web.Api.Services.SignalR.ISignalRTestService, Farm.Web.Api.Services.SignalR.SignalRTestService>();
         _ = services.AddSingleton<Farm.Web.Api.Services.Interfaces.IStartupStatus, Farm.Web.Api.Services.StartupStatus>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.IDiscoveryProgressCache, Farm.Web.Api.Services.DiscoveryProgressCache>();
     }
 }
