@@ -81,17 +81,29 @@ public class PrintersController(
     /// This is the default GET endpoint for the printers resource.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
+    /// <param name="includeDisabled">Return disabled printers as well (admin-only)</param>
     /// <returns>A lightweight list of all printers with basic information</returns>
     /// <response code="200">Returns the list of lightweight printer data</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<PrinterFastDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetAsync(CancellationToken ct, [FromQuery] bool includeDisabled = false)
     {
         try
         {
             var dtos = await _printersService.GetAllFastDtosAsync(ct);
-            // Filter to only enabled printers for normal users (admins can use /api/printers/all or query with includeDisabled flag if implemented)
+            var isAdmin = User.IsInRole("farm_admin");
+            if (isAdmin)
+            {
+                return Ok(dtos);
+            }
+
+            if (includeDisabled)
+            {
+                return Forbid();
+            }
+
+            // Filter to only enabled printers for normal users
             var enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
             return Ok(enabledDtos);
         }

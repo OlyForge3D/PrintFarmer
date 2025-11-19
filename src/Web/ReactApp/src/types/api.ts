@@ -72,7 +72,9 @@ export interface Printer {
   isOnline: boolean;
   isReachable: boolean;
   state?: string;
+  manufacturerId?: string;
   manufacturerName?: string;
+  modelId?: string;
   modelName?: string;
   progress?: number;
   jobName?: string;
@@ -94,6 +96,7 @@ export interface Printer {
   backendPort?: number;
   frontendPort?: number;
   inMaintenance?: boolean;
+  isEnabled?: boolean;
 }
 
 export interface PrinterCameraUrls {
@@ -118,6 +121,7 @@ export interface PrinterFast {
   ipAddress?: string;
   backendPort?: number;
   frontendPort?: number;
+  isEnabled?: boolean;
 }
 
 export enum PrinterBackend {
@@ -308,6 +312,7 @@ export interface UpdatePrinterDto {
   maxPrintSpeed?: number;
   backendPort?: number;
   frontendPort?: number;
+  isEnabled?: boolean;
 }
 
 export interface ManufacturerDto {

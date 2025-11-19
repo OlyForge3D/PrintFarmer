@@ -70,10 +70,13 @@ export function usePrinters(options?: UseQueryOptions<Printer[], ApiError>) {
   });
 }
 
-export function usePrintersFast(options?: UseQueryOptions<PrinterFast[], ApiError>) {
+export function usePrintersFast(includeDisabled = false, options?: UseQueryOptions<PrinterFast[], ApiError>) {
+  const queryKey = includeDisabled
+    ? [...queryKeys.printers, 'fast', 'include-disabled']
+    : [...queryKeys.printers, 'fast'];
   return useQuery({
-    queryKey: [...queryKeys.printers, 'fast'],
-    queryFn: () => apiClient.getPrintersFast(),
+    queryKey,
+    queryFn: () => apiClient.getPrintersFast(includeDisabled),
     staleTime: 30000, // 30 seconds
     ...options,
   });
@@ -88,8 +91,8 @@ export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls
   });
 }
 
-export function usePrintersWithCameraUrls() {
-  const printersQuery = usePrintersFast();
+export function usePrintersWithCameraUrls(includeDisabled = false) {
+  const printersQuery = usePrintersFast(includeDisabled);
   const cameraUrlsQuery = usePrinterCameraUrls();
 
   return useMemo(() => {

@@ -230,15 +230,17 @@ export class ApiClient {
 
   // ============ Printer API methods ============
 
-  async getPrinters(): Promise<Printer[]> {
+  async getPrinters(includeDisabled?: boolean): Promise<Printer[]> {
     // Get lightweight list of all printers
-    const response = await this.client.get<PrinterFast[]>("/printers");
+    const params = includeDisabled ? { includeDisabled: true } : undefined;
+    const response = await this.client.get<PrinterFast[]>("/printers", { params });
     // Cast to Printer[] for compatibility; fast objects are subset of Printer
     return response.data as unknown as Printer[];
   }
 
-  async getPrintersFast(): Promise<PrinterFast[]> {
-    const response = await this.client.get<PrinterFast[]>("/printers");
+  async getPrintersFast(includeDisabled?: boolean): Promise<PrinterFast[]> {
+    const params = includeDisabled ? { includeDisabled: true } : undefined;
+    const response = await this.client.get<PrinterFast[]>("/printers", { params });
     return response.data;
   }
 

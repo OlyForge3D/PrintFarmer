@@ -3,10 +3,12 @@ import { usePrintersWithCameraUrls } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { printerHubService } from '@/services/printerHubService';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
+import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { toast } from 'sonner';
+import type { Printer } from '@/types/api';
 
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -21,7 +23,7 @@ function downloadJson(filename: string, data: unknown) {
 }
 
 export function PrintersAdminPage() {
-  const { data: printers, isLoading, error, refetch } = usePrintersWithCameraUrls();
+  const { data: printers, isLoading, error, refetch } = usePrintersWithCameraUrls(true);
   type PreviewItem = {
     __index: number;
     raw: Record<string, unknown>;
@@ -52,6 +54,9 @@ export function PrintersAdminPage() {
   const [bulkModelId, setBulkModelId] = React.useState<string>('');
   const [bulkIsEnabled, setBulkIsEnabled] = React.useState<boolean | null>(null);
   const [bulkOperating, setBulkOperating] = React.useState(false);
+  const [editPrinterId, setEditPrinterId] = React.useState<string | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = React.useState(false);
+  const [togglingEnabledId, setTogglingEnabledId] = React.useState<string | null>(null);
 
   // Check if discovery service is available
   React.useEffect(() => {
@@ -472,6 +477,47 @@ export function PrintersAdminPage() {
     }
   };
 
+  const handleEditClick = (printer: Printer) => {
+    setEditPrinterId(printer.id);
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditModalClose = () => {
+    setIsEditModalOpen(false);
+    setEditPrinterId(null);
+  };
+
+  const handleEditSuccess = async () => {
+    setIsEditModalOpen(false);
+    setEditPrinterId(null);
+    await refetch?.();
+  };
+
+  const handleToggleEnabled = async (printer: Printer) => {
+    const currentlyEnabled = printer.isEnabled ?? true;
+    setTogglingEnabledId(printer.id);
+    try {
+      await apiClient.updatePrinter(printer.id, {
+        name: printer.name,
+        serverUrl: printer.serverUrl,
+        notes: printer.notes,
+        manufacturerId: printer.manufacturerId,
+        modelId: printer.modelId,
+        backend: printer.backend,
+        apiKey: printer.apiKey,
+        originalServerUrl: printer.originalServerUrl,
+        isEnabled: !currentlyEnabled,
+      });
+      toast.success(`${printer.name || 'Printer'} ${currentlyEnabled ? 'disabled' : 'enabled'}`);
+      await refetch?.();
+    } catch (error) {
+      console.error('Failed to toggle printer enabled state', error);
+      toast.error('Failed to update printer enabled state');
+    } finally {
+      setTogglingEnabledId(null);
+    }
+  };
+
   return (
     <ProtectedRoute requiredRole="farm_admin">
       <PageTemplate title="Admin: Printers" subtitle="Import and export printers" maxWidth="max-w-4xl">
@@ -567,6 +613,7 @@ export function PrintersAdminPage() {
                           <th>Model</th>
                           <th>Server URL</th>
                           <th>Enabled</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -591,11 +638,21 @@ export function PrintersAdminPage() {
                             <td className="text-center">
                               <input
                                 type="checkbox"
-                                checked={p.isEnabled || false}
-                                disabled
-                                aria-label={`Printer ${p.name} enabled status`}
-                                title="Use bulk operations to toggle enabled status"
+                                checked={p.isEnabled ?? true}
+                                disabled={togglingEnabledId === p.id}
+                                aria-label={`Toggle ${p.name} enabled status`}
+                                onChange={() => handleToggleEnabled(p)}
+                                title={p.isEnabled ? 'Disable printer' : 'Enable printer'}
                               />
+                            </td>
+                            <td className="text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleEditClick(p)}
+                                className="btn-base btn-sm btn-secondary"
+                              >
+                                Edit
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -813,6 +870,12 @@ export function PrintersAdminPage() {
               </div>
             </div>
           )}
+          <EditPrinterModal
+            printerId={editPrinterId}
+            isOpen={isEditModalOpen}
+            onClose={handleEditModalClose}
+            onSuccess={handleEditSuccess}
+          />
         </div>
 
         <PrinterDiscoveryModal
