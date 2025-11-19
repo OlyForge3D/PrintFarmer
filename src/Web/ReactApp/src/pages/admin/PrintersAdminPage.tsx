@@ -2,6 +2,7 @@ import React from 'react';
 import { usePrintersWithCameraUrls } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { printerHubService } from '@/services/printerHubService';
+import { getPrinterBackendName } from '@/utils/enumHelpers';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -287,6 +288,10 @@ export function PrintersAdminPage() {
       // Map results for display
       setImportResults(resultsArray);
       setPreviewItems(null);
+      
+      // Refresh printers table so imported printers can be edited
+      await refetch();
+      
       toast.success(`Import complete: ${resultsArray.length} items processed`);
     } catch (err) {
       console.error('Import failed', err);
@@ -330,6 +335,9 @@ export function PrintersAdminPage() {
       const mappedResults = resp.results?.map((r, idx) => ({ ...r, index: toImport[idx].__index })) || [];
       setImportResults(mappedResults);
       // Keep previewItems so admin can review results
+      
+      // Refresh printers table so imported printers can be edited
+      await refetch();
     } catch (err) {
       console.error('Batch import failed', err);
       toast.error('Import encountered errors');
@@ -360,6 +368,10 @@ export function PrintersAdminPage() {
         const next = (prev || []).filter(r => r.index !== item.__index);
         return singleResult ? [...next, singleResult] : next;
       });
+      
+      // Refresh printers table so retried printer can be edited
+      await refetch();
+      
       if (singleResult && singleResult.status === 'Imported') {
         toast.success(`Imported ${singleResult.name}`);
       } else if (singleResult && singleResult.status === 'Skipped') {
@@ -631,7 +643,7 @@ export function PrintersAdminPage() {
                               />
                             </td>
                             <td className="text-pf-text-primary font-medium">{p.name}</td>
-                            <td className="text-pf-text-secondary text-xs">{p.backend !== undefined ? ['Moonraker', 'PrusaLink', 'SDCP', 'OctoPrint'][p.backend] || `Unknown (${p.backend})` : '-'}</td>
+                            <td className="text-pf-text-secondary text-xs">{getPrinterBackendName(p.backend) || '-'}</td>
                             <td className="text-pf-text-secondary">{p.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.modelName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.ipAddress ?? p.serverUrl ?? ''}</td>
