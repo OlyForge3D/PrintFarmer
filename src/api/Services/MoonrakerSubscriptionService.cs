@@ -909,8 +909,15 @@ public sealed class MoonrakerSubscriptionService(
         // Track successful status update time
         _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
 
-        await hub.Clients.All.SendAsync("printerupdated", update, ct);
-        _logger.LogDebug($"Sent status update for printer {printerId}");
+        try
+        {
+            await hub.Clients.All.SendAsync("printerupdated", update, ct);
+            _logger.LogDebug($"Sent status update for printer {printerId}");
+        }
+        catch (Exception sendEx)
+        {
+            _logger.LogError(sendEx, $"Failed to send status update for printer {printerId}: {sendEx.Message}");
+        }
     }
 
     private async Task SendOfflineStatusAsync(Guid printerId, CancellationToken ct)
@@ -931,9 +938,9 @@ public sealed class MoonrakerSubscriptionService(
             await hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
             _logger.LogDebug($"Sent offline status for printer {printerId}");
         }
-        catch (Exception ex)
+        catch (Exception sendEx)
         {
-            _logger.LogError($"Failed to send offline status for printer {printerId}: {ex.Message}");
+            _logger.LogError($"Failed to send offline status for printer {printerId}: {sendEx.Message}");
         }
     }
 
@@ -1090,13 +1097,20 @@ public sealed class MoonrakerSubscriptionService(
                     spoolInfo
                 );
 
-                await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
+                try
+                {
+                    await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
 
-                // Update last poll time and reset parse error count since HTTP polling succeeded
-                _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;
-                _ = _parseErrorCounts.TryRemove(printer.Id, out _);
+                    // Update last poll time and reset parse error count since HTTP polling succeeded
+                    _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;
+                    _ = _parseErrorCounts.TryRemove(printer.Id, out _);
 
-                _logger.LogDebug("HTTP polling fallback successful for printer {PrinterName}", printer.Name);
+                    _logger.LogDebug("HTTP polling fallback successful for printer {PrinterName}", printer.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "HTTP polling fallback failed to send status update for printer {PrinterName}", printer.Name);
+                }
             }
             else
             {

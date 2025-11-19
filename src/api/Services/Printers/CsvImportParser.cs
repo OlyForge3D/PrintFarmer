@@ -17,7 +17,8 @@ internal static class CsvImportParser
         var current = new StringBuilder();
         bool inQuotes = false;
 
-        for (int i = 0; i < line.Length; i++)
+        int i = 0;
+        while (i < line.Length)
         {
             char c = line[i];
 
@@ -26,21 +27,24 @@ internal static class CsvImportParser
                 if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
                 {
                     current.Append('"');
-                    i++;
+                    i += 2;
                 }
                 else
                 {
                     inQuotes = !inQuotes;
+                    i++;
                 }
             }
             else if (c == ',' && !inQuotes)
             {
                 values.Add(current.ToString());
                 current.Clear();
+                i++;
             }
             else
             {
                 current.Append(c);
+                i++;
             }
         }
 

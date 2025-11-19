@@ -1651,7 +1651,9 @@ namespace Farm.Web.Api.Services.Printers
                                 FrontendPort = frontendPortIdx >= 0 && frontendPortIdx < values.Length && int.TryParse(values[frontendPortIdx], out var fp) ? fp : null,
                                 CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
                                 CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,
-                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], out var da) ? da : null
+#pragma warning disable S6580 // SonarSource: format provider is already specified (InvariantCulture)
+                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var da) ? da : null
+#pragma warning restore S6580
                             };
 
                             if (string.IsNullOrWhiteSpace(printer.Name))

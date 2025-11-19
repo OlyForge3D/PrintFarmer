@@ -372,56 +372,59 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
     }
 
-    private async Task FinalizeUploadAsync(InternalUploadState state)
+    private Task FinalizeUploadAsync(InternalUploadState state)
     {
-        string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
-
-        // Check for collision again (rare but possible)
-        if (System.IO.File.Exists(finalPath))
+        return Task.Run(() =>
         {
-            string uniqueName = _fileManagementService.ResolveUniqueFileName(
-                state.TargetDirectoryFullPath,
-                state.FinalSafeName);
-            state.FinalSafeName = uniqueName;
-            finalPath = Path.Combine(state.TargetDirectoryFullPath, uniqueName);
-        }
+            string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
 
-        // Validate hash if provided
-        if (state.Hasher != null)
-        {
-            byte[] hashBytes = state.Hasher.GetHashAndReset();
-            string hex = _fileManagementService.ToHex(hashBytes);
-            state.FinalHash = hex;
-
-            if (state.ExpectedHash != null && !hex.Equals(state.ExpectedHash, StringComparison.OrdinalIgnoreCase))
+            // Check for collision again (rare but possible)
+            if (System.IO.File.Exists(finalPath))
             {
-                // Hash mismatch - delete temp file and fail
+                string uniqueName = _fileManagementService.ResolveUniqueFileName(
+                    state.TargetDirectoryFullPath,
+                    state.FinalSafeName);
+                state.FinalSafeName = uniqueName;
+                finalPath = Path.Combine(state.TargetDirectoryFullPath, uniqueName);
+            }
+
+            // Validate hash if provided
+            if (state.Hasher != null)
+            {
+                byte[] hashBytes = state.Hasher.GetHashAndReset();
+                string hex = _fileManagementService.ToHex(hashBytes);
+                state.FinalHash = hex;
+
+                if (state.ExpectedHash != null && !hex.Equals(state.ExpectedHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Hash mismatch - delete temp file and fail
+                    try
+                    {
+                        System.IO.File.Delete(state.TempFilePath);
+                        if (System.IO.File.Exists(state.MetaFilePath))
+                        {
+                            System.IO.File.Delete(state.MetaFilePath);
+                        }
+                    }
+                    catch { }
+
+                    throw new InvalidOperationException($"Hash mismatch: expected {state.ExpectedHash}, got {hex}");
+                }
+            }
+
+            // Move temp file to final destination
+            System.IO.File.Move(state.TempFilePath, finalPath, overwrite: false);
+
+            // Clean up metadata file
+            if (System.IO.File.Exists(state.MetaFilePath))
+            {
                 try
                 {
-                    System.IO.File.Delete(state.TempFilePath);
-                    if (System.IO.File.Exists(state.MetaFilePath))
-                    {
-                        System.IO.File.Delete(state.MetaFilePath);
-                    }
+                    System.IO.File.Delete(state.MetaFilePath);
                 }
                 catch { }
-
-                throw new InvalidOperationException($"Hash mismatch: expected {state.ExpectedHash}, got {hex}");
             }
-        }
-
-        // Move temp file to final destination
-        System.IO.File.Move(state.TempFilePath, finalPath, overwrite: false);
-
-        // Clean up metadata file
-        if (System.IO.File.Exists(state.MetaFilePath))
-        {
-            try
-            {
-                System.IO.File.Delete(state.MetaFilePath);
-            }
-            catch { }
-        }
+        });
     }
 
     private void PersistState(InternalUploadState state)

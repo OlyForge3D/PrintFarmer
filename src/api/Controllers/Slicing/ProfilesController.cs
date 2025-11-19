@@ -526,6 +526,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     /// Fetch available OrcaSlicer profiles from the OrcaSlicer worker service.
     /// Queries the running OrcaSlicer worker for profiles available in its local installation.
     /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of available OrcaSlicer profiles from worker</returns>
     /// <response code="200">Returns list of profiles from OrcaSlicer worker</response>
@@ -574,6 +575,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     /// Filters profiles by matching printer model compatibility.
     /// </summary>
     /// <param name="printerId">The ID of the registered printer</param>
+    /// <param name="db">Database context</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of available system profiles for the printer</returns>
     /// <response code="200">Returns list of compatible profiles</response>
@@ -638,7 +640,9 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     /// Only OrcaSlicer system profiles can be bulk imported.
     /// </summary>
     /// <param name="printerId">The ID of the registered printer</param>
-    /// <param name="profileIds">List of profile IDs to import</param>
+    /// <param name="request">Bulk import request containing profile IDs and options</param>
+    /// <param name="db">Database context</param>
+    /// <param name="profileRepo">Slicer profile repository</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Number of profiles imported/duplicated</returns>
     /// <response code="200">Profiles imported successfully</response>
