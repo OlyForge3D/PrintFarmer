@@ -448,6 +448,20 @@ npm run dev
 - Follow React and TypeScript best practices for frontend code
 - Run `dotnet format` for .NET code and `npm run lint` for React code before committing
 
+**JSON/API Response Format: CRITICAL CONSISTENCY REQUIREMENT**
+- **ALL API responses MUST use camelCase property names** for TypeScript/React client compatibility
+- **Configuration in Program.cs**: Controllers configured via `AddJsonOptions(options => { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })`
+- **SignalR Hub Configuration**: MUST ALSO be configured with camelCase via `.AddJsonProtocol(options => { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })`
+- **Why**: React client expects camelCase properties (e.g., `id`, `isOnline`, `hotendTemp` NOT `Id`, `IsOnline`, `HotendTemp`)
+- **Failure mode**: If SignalR/API uses PascalCase while client expects camelCase → undefined properties → callback exceptions → WebSocket closes
+- **Verification approach**: 
+  1. Check WebSocket frames in browser DevTools (Network tab, filter "hubs/printers", Messages tab)
+  2. MUST see camelCase in frame data: `{"id":"...", "isOnline":true, "state":"Idle"}` 
+  3. MUST NOT see PascalCase: `{"Id":"...", "IsOnline":true, "State":"Idle"}`
+- **All DTOs sent via API/SignalR must deserialize correctly**: PrinterStatusUpdate, DiscoveryProgressDto, JobQueueUpdateDto, CreatePrinterDto, etc.
+- **TypeScript interfaces must match camelCase**: All properties in `src/types/api.ts` MUST be camelCase
+- **Client-side JSON parsing**: React/TypeScript uses JSON.parse() which is case-sensitive - property name mismatches result in undefined values
+
 **Documentation Standards:**
 - **⚠️ CRITICAL: DO NOT create new markdown files for specific implementations or features**
 - Always integrate feature documentation into existing markdown files (README.md, docs/, etc.)
@@ -482,6 +496,12 @@ npm run dev
   - NO duplicate PascalCase listeners - standardize to lowercase everywhere
   - Lowercase prevents SignalR case-sensitivity warnings and ensures consistent behavior
   - Implementation files: `MoonrakerSubscriptionService.cs`, `NetworkDiscoveryService.cs`, `SliceJobEventService.cs`, `SignalRSlicerProgressNotifier.cs`, `printer-signalr.ts`, `slicer-signalr.ts`
+- **JSON Serialization for SignalR**: CRITICAL - SignalR MUST use camelCase JSON to match React client expectations
+  - Controllers configured: `AddJsonOptions()` in Program.cs configures camelCase
+  - **SignalR MUST be configured identically**: Use `.AddJsonProtocol(options => { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })` 
+  - **FAILURE MODE**: If SignalR uses default PascalCase while client expects camelCase, properties become undefined in callbacks → exceptions → disconnections every 5 seconds
+  - **VERIFICATION**: Monitor WebSocket frames in browser DevTools Network tab - MUST see camelCase: `{"id":"...", "isOnline":true, ...}` NOT `{"Id":"...", "IsOnline":true, ...}`
+  - **All payload types sent via SignalR MUST follow this format**: PrinterStatusUpdate, DiscoveryProgressDto, JobQueueUpdateDto, etc.
 - Background service disabled during testing environment
 - Real-time updates flow: External API → Background Service → Hub → Clients
 
