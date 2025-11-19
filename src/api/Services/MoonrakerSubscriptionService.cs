@@ -911,8 +911,19 @@ public sealed class MoonrakerSubscriptionService(
 
         try
         {
+            if (hub == null)
+            {
+                _logger.LogError($"Hub context is null, cannot send status update for printer {printerId}");
+                return;
+            }
+
             await hub.Clients.All.SendAsync("printerupdated", update, ct);
             _logger.LogDebug($"Sent status update for printer {printerId}");
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when cancellation token fires
+            _logger.LogDebug($"Status update for printer {printerId} was cancelled");
         }
         catch (Exception sendEx)
         {
@@ -924,6 +935,12 @@ public sealed class MoonrakerSubscriptionService(
     {
         try
         {
+            if (hub == null)
+            {
+                _logger.LogError($"Hub context is null, cannot send offline status for printer {printerId}");
+                return;
+            }
+
             PrinterStatusUpdate offlineUpdate = new(
                 printerId,
                 false, // IsOnline
@@ -938,9 +955,13 @@ public sealed class MoonrakerSubscriptionService(
             await hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
             _logger.LogDebug($"Sent offline status for printer {printerId}");
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug($"Offline status update for printer {printerId} was cancelled");
+        }
         catch (Exception sendEx)
         {
-            _logger.LogError($"Failed to send offline status for printer {printerId}: {sendEx.Message}");
+            _logger.LogError(sendEx, $"Failed to send offline status for printer {printerId}: {sendEx.Message}");
         }
     }
 
@@ -948,6 +969,12 @@ public sealed class MoonrakerSubscriptionService(
     {
         try
         {
+            if (hub == null)
+            {
+                _logger.LogError($"Hub context is null, cannot send shutdown status for printer {printerId}");
+                return;
+            }
+
             PrinterStatusUpdate shutdownUpdate = new(
                 printerId,
                 false, // IsOnline
@@ -962,9 +989,13 @@ public sealed class MoonrakerSubscriptionService(
             await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
             _logger.LogDebug($"Sent shutdown status for printer {printerId}");
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug($"Shutdown status update for printer {printerId} was cancelled");
+        }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to send shutdown status for printer {printerId}: {ex.Message}");
+            _logger.LogError(ex, $"Failed to send shutdown status for printer {printerId}: {ex.Message}");
         }
     }
 
@@ -1099,6 +1130,12 @@ public sealed class MoonrakerSubscriptionService(
 
                 try
                 {
+                    if (hub == null)
+                    {
+                        _logger.LogError($"Hub context is null in HTTP polling fallback for printer {printer.Name}");
+                        return;
+                    }
+
                     await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
 
                     // Update last poll time and reset parse error count since HTTP polling succeeded
@@ -1107,9 +1144,13 @@ public sealed class MoonrakerSubscriptionService(
 
                     _logger.LogDebug("HTTP polling fallback successful for printer {PrinterName}", printer.Name);
                 }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogDebug($"HTTP polling fallback status update for printer {printer.Name} was cancelled");
+                }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "HTTP polling fallback failed to send status update for printer {PrinterName}", printer.Name);
+                    _logger.LogError(ex, "HTTP polling fallback failed to send status update for printer {PrinterName}: {ExceptionMessage}", printer.Name, ex.Message);
                 }
             }
             else

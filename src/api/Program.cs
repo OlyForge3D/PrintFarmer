@@ -297,7 +297,26 @@ if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Te
 } // end skip-telemetry guard
 
 // SignalR for real-time updates
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(options =>
+{
+    // Ensure single parallel invocation to prevent race conditions
+    options.MaximumParallelInvocationsPerClient = 1;
+})
+.AddJsonProtocol(options =>
+{
+    // CRITICAL: Use SAME JSON configuration as Controllers for consistency
+    // This ensures SignalR broadcasts use camelCase property names matching client expectations
+    options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.PayloadSerializerOptions.WriteIndented = false;
+    options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+
+    // Register custom converters for complex types
+    options.PayloadSerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
+    options.PayloadSerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
+
+    // Default string enum converter
+    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 // Health checks
 builder.Services.AddHealthChecks()
