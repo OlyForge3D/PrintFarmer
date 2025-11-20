@@ -1,13 +1,10 @@
-﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Infrastructure.Filters;
 using Farm.Web.Api.Services.SlicerServices;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
-
-using Farm.Web.Api.Infrastructure.Filters;
 
 [ApiController]
 [Route("api/[controller]")]

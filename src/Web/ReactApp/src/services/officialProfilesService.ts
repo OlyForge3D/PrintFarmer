@@ -7,11 +7,32 @@ export interface BulkProfileImportRequest {
   makePublic?: boolean;
 }
 
+export interface BulkImportFromWorkerRequest {
+  profiles: Array<{
+    layerHeight: number;
+    infillPercentage: number;
+    printSpeed: number;
+    nozzleTemperature: number;
+    bedTemperature: number;
+    supports: boolean;
+    material: string;
+    quality: string;
+  }>;
+  makePublic?: boolean;
+}
+
 export interface BulkProfileImportResult {
   printerId: string;
   printerName: string;
   totalRequested: number;
   totalFound: number;
+  imported: number;
+  duplicated: number;
+}
+
+export interface BulkImportFromWorkerResult {
+  printerId: string;
+  printerName: string;
   imported: number;
   duplicated: number;
 }
@@ -75,6 +96,22 @@ export const officialProfilesService = {
       body: JSON.stringify(request),
     });
     return handle<BulkProfileImportResult>(res);
+  },
+
+  /**
+   * Bulk import profiles directly from the OrcaSlicer worker (primary workflow).
+   * Fetches profiles from worker, user selects which ones, then import them here.
+   */
+  async bulkImportFromWorker(
+    printerId: string,
+    request: BulkImportFromWorkerRequest
+  ): Promise<BulkImportFromWorkerResult> {
+    const res = await fetch(`${base}/bulk-import-from-worker/${printerId}`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(request),
+    });
+    return handle<BulkImportFromWorkerResult>(res);
   },
 };
 

@@ -1,14 +1,13 @@
 ﻿using System.Linq;
 using System.Text.Json;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers.Slicing;
 
@@ -16,12 +15,17 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
 [Authorize] // All endpoints require authentication
-public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Services.Slicing.IProfilesService profilesService) : ControllerBase
+public class ProfilesController(
+    IUnifiedLoggingService logger,
+    Farm.Web.Api.Services.Slicing.IProfilesService profilesService,
+    ISlicerProfileRepository slicerProfileRepo,
+    IPrintersRepository printersRepo) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Farm.Web.Api.Services.Slicing.IProfilesService _profilesService = profilesService;
+    private readonly ISlicerProfileRepository _slicerProfileRepo = slicerProfileRepo;
+    private readonly IPrintersRepository _printersRepo = printersRepo;
 
-    // --- Phase 6: Import new slicer profile JSON (dedup + metadata extraction) ---
     [HttpPost("import")]
     [Authorize(Policy = "farm_admin")] // Admin-only: profile import
     [ProducesResponseType(typeof(SlicerProfileExtendedDto), StatusCodes.Status201Created)]
@@ -217,13 +221,10 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     // Extended listing of profiles (user + public + system)
     [HttpGet("extended")]
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListExtendedAsync([FromServices] AppDbContext db, CancellationToken ct)
+    public async Task<IActionResult> ListExtendedAsync(CancellationToken ct)
     {
-        // Pull all profiles (simple approach; future optimization: paging & filtering)
-        var profiles = await db.SlicerProfiles
-            .AsNoTracking()
-            .OrderBy(p => p.Name)
-            .ToListAsync(ct);
+        // Pull all profiles using repository
+        var profiles = await _slicerProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
         List<SlicerProfileListItemDto> list = new(profiles.Count);
         foreach (var p in profiles)
         {
@@ -497,29 +498,25 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     [HttpGet("system/orca")]
     [Authorize(Policy = "farm_admin")] // Admin-only: system profile inspection
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListSystemOrcaProfilesAsync([FromServices] AppDbContext db, CancellationToken ct)
+    public async Task<IActionResult> ListSystemOrcaProfilesAsync(CancellationToken ct)
     {
-        var profiles = await db.SlicerProfiles
-            .AsNoTracking()
-            .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer)
-            .OrderBy(p => p.Name)
-            .Select(p => new SlicerProfileListItemDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                SlicerType = p.SlicerType.ToString(),
-                Material = p.Material,
-                Quality = p.Quality.ToString(),
-                LayerHeight = p.LayerHeight,
-                InfillPercentage = p.InfillPercentage,
-                IsDefault = p.IsDefault,
-                IsSystem = p.IsSystem,
-                IsPublic = p.IsPublic,
-                Hash = p.Hash ?? string.Empty
-            })
-            .ToListAsync(ct);
+        var profiles = await _slicerProfileRepo.GetSystemOrcaProfilesAsync(ct);
+        var dtos = profiles.Select(p => new SlicerProfileListItemDto
+        {
+            Id = p.Id,
+            Name = p.Name,
+            SlicerType = p.SlicerType.ToString(),
+            Material = p.Material,
+            Quality = p.Quality.ToString(),
+            LayerHeight = p.LayerHeight,
+            InfillPercentage = p.InfillPercentage,
+            IsDefault = p.IsDefault,
+            IsSystem = p.IsSystem,
+            IsPublic = p.IsPublic,
+            Hash = p.Hash ?? string.Empty
+        }).ToList();
 
-        return Ok(profiles);
+        return Ok(dtos);
     }
 
     /// <summary>
@@ -534,7 +531,6 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     /// - The OrcaSlicer worker returns profiles from its local installation, ensuring version-specific profiles
     /// - When OrcaSlicer is updated, re-run this endpoint to seed updated profiles
     /// </summary>
-    /// <param name="db">Database context</param>
     /// <param name="httpClient">HTTP client for worker communication</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Count of profiles imported and version information</returns>
@@ -545,7 +541,6 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> SeedSystemProfilesFromWorkerAsync(
-        [FromServices] AppDbContext db,
         [FromServices] HttpClient httpClient,
         CancellationToken ct)
     {
@@ -602,11 +597,9 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
                 // Different slicer versions will have different profiles, so they'll have different hashes
                 var profileHash = $"{profile.Material}:{profile.Quality}:{profile.LayerHeight}:{profile.InfillPercentage}";
 
-                // Check if profile already exists by hash
-                var existingProfile = await db.SlicerProfiles
-                    .FirstOrDefaultAsync(p => p.Hash == profileHash && p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer, ct);
-
-                if (existingProfile != null)
+                // Check if profile already exists by hash using repository
+                var existingProfile = await _slicerProfileRepo.GetByHashAsync(profileHash, ct);
+                if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
                 {
                     skipped++;
                     continue;
@@ -636,11 +629,9 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
                     UpdatedAt = DateTime.UtcNow
                 };
 
-                db.SlicerProfiles.Add(systemProfile);
+                await _slicerProfileRepo.AddAsync(systemProfile, ct);
                 imported++;
             }
-
-            await db.SaveChangesAsync(ct);
 
             _logger.LogInformation($"Seeded {imported} system OrcaSlicer profiles from worker ({skipped} already existed). OrcaSlicer version: {orcaVersion ?? "unknown"}.");
 
@@ -663,6 +654,131 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
         {
             _logger.LogError($"Error seeding system profiles: {ex.Message}");
             return StatusCode(500, $"Error seeding profiles: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Force reseed system OrcaSlicer profiles from the worker, clearing existing ones first.
+    /// Use this if the initial seeding failed or to update profiles after an OrcaSlicer upgrade.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Number of profiles imported</returns>
+    [HttpPost("system/orca/force-reseed-from-worker")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: system profile management
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ForceReseedSystemProfilesFromWorkerAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Delete all existing system OrcaSlicer profiles using repository
+            int deletedCount = await _slicerProfileRepo.DeleteSystemProfilesAsync(SlicerType.OrcaSlicer, ct);
+            if (deletedCount > 0)
+            {
+                _logger.LogInformation($"Deleted {deletedCount} existing system OrcaSlicer profiles for force reseed");
+            }
+
+            // Call the OrcaSlicer worker /version endpoint to get the OrcaSlicer version
+            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+
+            // First, get the OrcaSlicer version from the worker
+            string? orcaVersion = null;
+            try
+            {
+                var versionResponse = await httpClient.GetAsync($"{workerUrl}/version", ct);
+                if (versionResponse.IsSuccessStatusCode)
+                {
+                    var versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
+                    using var versionDoc = JsonDocument.Parse(versionJson);
+                    if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out var versionElem) && versionElem.ValueKind == JsonValueKind.String)
+                    {
+                        orcaVersion = versionElem.GetString();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Failed to fetch OrcaSlicer version from worker: {ex.Message}");
+                // Continue - version is optional
+            }
+
+            // Call the OrcaSlicer worker /profiles endpoint to get official profiles
+            var response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode}");
+                return StatusCode((int)response.StatusCode, "OrcaSlicer worker unavailable or returned an error");
+            }
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            var workerProfiles = JsonSerializer.Deserialize<List<SlicerProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (workerProfiles == null || workerProfiles.Count == 0)
+            {
+                return Ok(new { imported = 0, deleted = deletedCount, message = "No profiles available from worker" });
+            }
+
+            int imported = 0;
+
+            // Import each profile as a system profile
+            foreach (var profile in workerProfiles)
+            {
+                // Generate a stable hash for deduplication
+                var profileHash = $"{profile.Material}:{profile.Quality}:{profile.LayerHeight}:{profile.InfillPercentage}";
+
+                // Create new system profile
+                var systemProfile = new SlicerProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = $"{profile.Material} - {profile.Quality} ({profile.LayerHeight}mm)",
+                    Description = $"Official OrcaSlicer system profile: {profile.Material} {profile.Quality} quality at {profile.LayerHeight}mm layer height",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    Material = profile.Material ?? "PLA",
+                    Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "Standard", true, out var q) ? q : ProfileQuality.Standard,
+                    LayerHeight = profile.LayerHeight,
+                    InfillPercentage = profile.InfillPercentage,
+                    PrintSpeed = profile.PrintSpeed,
+                    NozzleTemperature = profile.NozzleTemperature,
+                    BedTemperature = profile.BedTemperature,
+                    EnableSupports = profile.Supports,
+                    IsSystem = true,
+                    IsPublic = true,
+                    IsDefault = false,
+                    Hash = profileHash,
+                    SlicerVersion = orcaVersion,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await _slicerProfileRepo.AddAsync(systemProfile, ct);
+                imported++;
+            }
+
+            _logger.LogInformation($"Force-reseeded {imported} system OrcaSlicer profiles from worker (deleted {deletedCount} old ones). OrcaSlicer version: {orcaVersion ?? "unknown"}.");
+
+            return Ok(new
+            {
+                imported,
+                deleted = deletedCount,
+                orcaslicerVersion = orcaVersion,
+                message = $"Force-reseeded {imported} system OrcaSlicer profiles from worker (deleted {deletedCount} old ones)",
+                details = "All existing system profiles were deleted and replaced with fresh ones from the worker."
+            });
+        }
+        catch (HttpRequestException ex)
+        {
+            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+            _logger.LogError($"Failed to connect to OrcaSlicer worker at {workerUrl}: {ex.Message}");
+            return StatusCode(503, $"OrcaSlicer worker unavailable at {workerUrl}. Please ensure the worker service is running.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error force-reseeding system profiles: {ex.Message}");
+            return StatusCode(500, $"Error reseeding profiles: {ex.Message}");
         }
     }
 
@@ -719,7 +835,6 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     /// Filters profiles by matching printer model compatibility.
     /// </summary>
     /// <param name="printerId">The ID of the registered printer</param>
-    /// <param name="db">Database context</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of available system profiles for the printer</returns>
     /// <response code="200">Returns list of compatible profiles</response>
@@ -730,53 +845,35 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetAvailableProfilesForPrinterAsync(
         Guid printerId,
-        [FromServices] AppDbContext db,
         CancellationToken ct)
     {
-        // Verify printer exists
-        var printer = await db.Printers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == printerId, ct);
-
+        // Verify printer exists using repository
+        var printer = await _printersRepo.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");
         }
 
-        // Get the printer's model for compatibility matching
-        var printerModel = await db.Models
-            .AsNoTracking()
-            .FirstOrDefaultAsync(m => m.Id == printer.ModelId, ct);
+        // Get all system OrcaSlicer profiles using repository
+        var profiles = await _slicerProfileRepo.GetSystemOrcaProfilesAsync(ct);
 
-        // Start with system profiles
-        var query = db.SlicerProfiles
-            .AsNoTracking()
-            .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer);
+        // Convert to DTOs
+        var dtos = profiles.Select(p => new SlicerProfileListItemDto
+        {
+            Id = p.Id,
+            Name = p.Name,
+            SlicerType = p.SlicerType.ToString(),
+            Material = p.Material,
+            Quality = p.Quality.ToString(),
+            LayerHeight = p.LayerHeight,
+            InfillPercentage = p.InfillPercentage,
+            IsDefault = p.IsDefault,
+            IsSystem = p.IsSystem,
+            IsPublic = p.IsPublic,
+            Hash = p.Hash ?? string.Empty
+        }).ToList();
 
-        // If we have a printer model, we could add model-specific filtering here (future enhancement)
-        // For now, return all system OrcaSlicer profiles
-
-        var profiles = await query
-            .OrderBy(p => p.Material)
-            .ThenBy(p => p.Quality)
-            .ThenBy(p => p.LayerHeight)
-            .Select(p => new SlicerProfileListItemDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                SlicerType = p.SlicerType.ToString(),
-                Material = p.Material,
-                Quality = p.Quality.ToString(),
-                LayerHeight = p.LayerHeight,
-                InfillPercentage = p.InfillPercentage,
-                IsDefault = p.IsDefault,
-                IsSystem = p.IsSystem,
-                IsPublic = p.IsPublic,
-                Hash = p.Hash ?? string.Empty
-            })
-            .ToListAsync(ct);
-
-        return Ok(profiles);
+        return Ok(dtos);
     }
 
     /// <summary>
@@ -785,8 +882,6 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     /// </summary>
     /// <param name="printerId">The ID of the registered printer</param>
     /// <param name="request">Bulk import request containing profile IDs and options</param>
-    /// <param name="db">Database context</param>
-    /// <param name="profileRepo">Slicer profile repository</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Number of profiles imported/duplicated</returns>
     /// <response code="200">Profiles imported successfully</response>
@@ -798,8 +893,6 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     public async Task<IActionResult> BulkImportProfilesForPrinterAsync(
         Guid printerId,
         [FromBody] BulkProfileImportRequest? request,
-        [FromServices] AppDbContext db,
-        [FromServices] ISlicerProfileRepository profileRepo,
         CancellationToken ct)
     {
         if (request is null || request.ProfileIds == null || request.ProfileIds.Count == 0)
@@ -807,21 +900,18 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
             return BadRequest("profileIds list is required and must not be empty");
         }
 
-        // Verify printer exists
-        var printer = await db.Printers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == printerId, ct);
-
+        // Verify printer exists using repository
+        var printer = await _printersRepo.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");
         }
 
-        // Get the profiles to import
-        var profilesToImport = await db.SlicerProfiles
-            .AsNoTracking()
-            .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer && request.ProfileIds.Contains(p.Id))
-            .ToListAsync(ct);
+        // Get the profiles to import - fetch system profiles by ID
+        var allSystemProfiles = await _slicerProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        var profilesToImport = allSystemProfiles
+            .Where(p => p.IsSystem && request.ProfileIds.Contains(p.Id))
+            .ToList();
 
         if (profilesToImport.Count == 0)
         {
@@ -861,7 +951,7 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
                     UpdatedAt = DateTime.UtcNow
                 };
 
-                await profileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
+                await _slicerProfileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
                 imported++;
             }
             catch (Exception ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException ||
@@ -878,6 +968,99 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
             PrinterName = printer.Name,
             TotalRequested = request.ProfileIds.Count,
             TotalFound = profilesToImport.Count,
+            Imported = imported,
+            Duplicated = duplicated
+        });
+    }
+
+    /// <summary>
+    /// Bulk import profiles directly from the OrcaSlicer worker (without pre-seeding to database).
+    /// This is the primary workflow: fetch profiles from worker, user selects which ones to import, then import directly.
+    /// Profiles are created as user-owned (IsSystem=false) in the database.
+    /// </summary>
+    /// <param name="printerId">The ID of the registered printer</param>
+    /// <param name="request">Request containing profiles from the worker and import options</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Import result with counts</returns>
+    [HttpPost("bulk-import-from-worker/{printerId}")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: profile import
+    [ProducesResponseType(typeof(BulkImportFromWorkerResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> BulkImportFromWorkerAsync(
+        Guid printerId,
+        [FromBody] BulkImportFromWorkerRequest? request,
+        CancellationToken ct)
+    {
+        if (request is null || request.Profiles == null || request.Profiles.Count == 0)
+        {
+            return BadRequest("profiles list is required and must not be empty");
+        }
+
+        // Verify printer exists using repository
+        var printer = await _printersRepo.FindByIdAsync(printerId, ct);
+        if (printer is null)
+        {
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+
+        int imported = 0;
+        int duplicated = 0;
+
+        // Import each profile from the worker
+        foreach (var workerProfile in request.Profiles)
+        {
+            try
+            {
+                // Generate a hash for deduplication
+                var profileHash = $"{workerProfile.Material}:{workerProfile.Quality}:{workerProfile.LayerHeight}:{workerProfile.InfillPercentage}";
+
+                // Check if this profile already exists (by hash) using repository
+                var existingProfile = await _slicerProfileRepo.GetByHashAsync(profileHash, ct);
+                if (existingProfile != null && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                {
+                    duplicated++;
+                    continue;
+                }
+
+                // Create a user-owned profile from the worker data
+                var userProfile = new SlicerProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = $"{workerProfile.Material} - {workerProfile.Quality} ({workerProfile.LayerHeight}mm)",
+                    Description = $"Official OrcaSlicer profile imported for {printer.Name}",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    LayerHeight = workerProfile.LayerHeight,
+                    InfillPercentage = workerProfile.InfillPercentage,
+                    PrintSpeed = workerProfile.PrintSpeed,
+                    NozzleTemperature = workerProfile.NozzleTemperature,
+                    BedTemperature = workerProfile.BedTemperature,
+                    EnableSupports = workerProfile.Supports,
+                    Material = workerProfile.Material ?? "PLA",
+                    Quality = Enum.TryParse<ProfileQuality>(workerProfile.Quality ?? "Standard", true, out var q) ? q : ProfileQuality.Standard,
+                    IsSystem = false,
+                    IsDefault = false,
+                    IsPublic = request.MakePublic ?? false,
+                    Hash = profileHash,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await _slicerProfileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
+                imported++;
+            }
+            catch (Exception ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException ||
+                                      ex.InnerException?.Message?.Contains("UNIQUE constraint failed") == true)
+            {
+                // Profile already imported (duplicate hash)
+                duplicated++;
+            }
+        }
+
+        return Ok(new BulkImportFromWorkerResultDto
+        {
+            PrinterId = printerId,
+            PrinterName = printer.Name,
             Imported = imported,
             Duplicated = duplicated
         });

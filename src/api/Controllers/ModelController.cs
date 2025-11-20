@@ -1,16 +1,15 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text; // Needed for Encoding when deriving secondary hash
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Repositories.Model;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Model;
 using Farm.Web.Api.Services.Tags;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Controllers;
@@ -31,6 +30,7 @@ public class ModelController : ControllerBase
     private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
     private readonly IFileManagementService _fileManagementService;
     private readonly ITagService _tagService;
+    private readonly IModelRepository _modelRepo;
 
     public ModelController(
         IUnifiedLoggingService logger,
@@ -41,13 +41,15 @@ public class ModelController : ControllerBase
         IThumbnailGenerationService thumbnailService,
         Farm.Web.Api.Services.IO.IFileSystem fileSystem,
         IFileManagementService fileManagementService,
-        ITagService tagService)
+        ITagService tagService,
+        IModelRepository modelRepo)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
+        _modelRepo = modelRepo ?? throw new ArgumentNullException(nameof(modelRepo));
         ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
@@ -141,21 +143,16 @@ public class ModelController : ControllerBase
     /// Get full model details including tags
     /// </summary>
     /// <param name="id">Model ID</param>
-    /// <param name="db"></param>
+    /// <param name="ct">Cancellation token</param>
     /// <returns>Detailed model information with tags</returns>
     [HttpGet("{id:guid}/details")]
     [ProducesResponseType(typeof(Model3DDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetModelDetailsAsync(Guid id, [FromServices] AppDbContext db)
+    public async Task<IActionResult> GetModelDetailsAsync(Guid id, CancellationToken ct)
     {
         try
         {
-            var model = await db.Models3D
-                .Where(m => m.Id == id)
-                .Include(m => m.TagMappings)
-                .ThenInclude(tm => tm.Tag)
-                .FirstOrDefaultAsync();
-
+            var model = await _modelRepo.GetByIdWithTagsAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
@@ -273,16 +270,16 @@ public class ModelController : ControllerBase
     /// </summary>
     /// <param name="id">Model ID</param>
     /// <param name="dto">Update request with new name</param>
-    /// <param name="db">Database context</param>
+    /// <param name="ct">Cancellation token</param>
     /// <returns>No content if successful</returns>
     [HttpPut("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModel3DDto dto, [FromServices] AppDbContext db)
+    public async Task<IActionResult> UpdateModelAsync(Guid id, [FromBody] UpdateModel3DDto dto, CancellationToken ct)
     {
         try
         {
-            var model = await db.Models3D.FirstOrDefaultAsync(m => m.Id == id);
+            var model = await _modelRepo.GetByIdAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
@@ -293,7 +290,8 @@ public class ModelController : ControllerBase
                 model.DisplayName = dto.Name.Trim();
             }
 
-            await db.SaveChangesAsync();
+            await _modelRepo.UpdateAsync(model, ct);
+            await _modelRepo.SaveChangesAsync(ct);
             return NoContent();
         }
         catch (Exception ex)
@@ -510,12 +508,12 @@ public class ModelController : ControllerBase
     /// Search and filter models with pagination
     /// </summary>
     /// <param name="request">Search parameters</param>
-    /// <param name="db"></param>
+    /// <param name="ct">Cancellation token</param>
     /// <returns>Paginated search results</returns>
     [HttpPost("search")]
     [ProducesResponseType(typeof(Model3DSearchResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> SearchModelsAsync(Model3DSearchRequestDto request, [FromServices] AppDbContext db)
+    public async Task<IActionResult> SearchModelsAsync(Model3DSearchRequestDto request, CancellationToken ct)
     {
         try
         {
@@ -529,40 +527,17 @@ public class ModelController : ControllerBase
                 request.PageSize = 20;
             }
 
-            var query = db.Models3D.AsQueryable();
+            int skip = (request.Page - 1) * request.PageSize;
+            var totalCount = await _modelRepo.CountValidAsync(ct);
 
-            // Text search
-            if (!string.IsNullOrWhiteSpace(request.Query))
-            {
-                var searchTerm = request.Query.ToLower();
-                query = query.Where(m => m.DisplayName.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
-                                        (m.Description != null && m.Description.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase)));
-            }
-
-            // Tag filtering (AND logic - must have all tags)
-            if (request.TagIds?.Length > 0)
-            {
-                foreach (var tagId in request.TagIds)
-                {
-                    query = query.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
-                }
-            }
-
-            // Sorting
-            query = (request.SortBy?.ToLower()) switch
-            {
-                "name" => request.Descending ? query.OrderByDescending(m => m.DisplayName) : query.OrderBy(m => m.DisplayName),
-                "size" => request.Descending ? query.OrderByDescending(m => m.FileSizeBytes) : query.OrderBy(m => m.FileSizeBytes),
-                _ => request.Descending ? query.OrderByDescending(m => m.UploadedAt) : query.OrderBy(m => m.UploadedAt) // default: uploadedAt
-            };
-
-            var totalCount = await query.CountAsync();
-            var models = await query
-                .Skip((request.Page - 1) * request.PageSize)
-                .Take(request.PageSize)
-                .Include(m => m.TagMappings)
-                .ThenInclude(tm => tm.Tag)
-                .ToListAsync();
+            var models = await _modelRepo.SearchAsync(
+                request.Query,
+                request.TagIds,
+                request.SortBy ?? "uploadedAt",
+                request.Descending,
+                skip,
+                request.PageSize,
+                ct);
 
             var modelDtos = models.Select(m => new Model3DDto
             {

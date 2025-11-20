@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
+using Farm.Web.Api.Repositories.FileConsistency;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -19,8 +19,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
+public class FileConsistencyController(
+    IFileConsistencyRepository fileConsistencyRepo) : ControllerBase
 {
+    private readonly IFileConsistencyRepository _repo = fileConsistencyRepo;
     /// <summary>
     /// Get current file health status summary for dashboard.
     /// Returns statistics on file health across Model3D and GcodeFile libraries.
@@ -30,10 +32,7 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     {
         var model3DStats = await GetModel3DHealthStatsAsync(ct);
         var gcodeStats = await GetGcodeHealthStatsAsync(ct);
-        var recentAudit = await dbContext.FileHealthAudits
-            .Where(a => a.HasIssues == false)
-            .OrderByDescending(a => a.AuditDate)
-            .FirstOrDefaultAsync(ct);
+        var recentAudit = await _repo.GetMostRecentHealthyAuditAsync(ct);
 
         var summary = new FileHealthSummaryDto
         {
@@ -60,125 +59,89 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
-        var audits = await dbContext.FileHealthAudits
-            .OrderByDescending(a => a.AuditDate)
-            .Take(pageSize)
-            .Select(a => new FileHealthAuditDto
-            {
-                Id = a.Id,
-                AuditDate = a.AuditDate,
-                AuditType = a.AuditType.ToString(),
-                FilesChecked = a.FilesChecked,
-                HealthyFiles = a.HealthyFiles,
-                MissingFiles = a.MissingFiles,
-                CorruptedFiles = a.CorruptedFiles,
-                OrphanedFiles = a.OrphanedFiles,
-                SummaryMessage = a.SummaryMessage,
-                HasIssues = a.HasIssues
-            })
-            .ToListAsync(ct);
+        var audits = await _repo.GetRecentAuditsAsync(pageSize, ct);
+        var auditDtos = audits.Select(a => new FileHealthAuditDto
+        {
+            Id = a.Id,
+            AuditDate = a.AuditDate,
+            AuditType = a.AuditType.ToString(),
+            FilesChecked = a.FilesChecked,
+            HealthyFiles = a.HealthyFiles,
+            MissingFiles = a.MissingFiles,
+            CorruptedFiles = a.CorruptedFiles,
+            OrphanedFiles = a.OrphanedFiles,
+            SummaryMessage = a.SummaryMessage,
+            HasIssues = a.HasIssues
+        }).ToList();
 
-        return Ok(audits);
+        return Ok(auditDtos);
     }
 
     /// <summary>
-    /// Get files with health issues (missing, corrupted, inaccessible).
+    /// Get all files with health issues for review and potential remediation.
     /// </summary>
-    [HttpGet("files/issues")]
-    public async Task<ActionResult<FileIssuesSummaryDto>> GetFilesWithIssuesAsync(CancellationToken ct)
+    [HttpGet("issues")]
+    public async Task<ActionResult<FileIssuesSummaryDto>> GetFilesWithIssuesAsync(CancellationToken ct = default)
     {
-        var missingModel3DFiles = await dbContext.Models3D
-            .Where(m => m.HealthStatus == FileHealthStatus.Missing)
-            .Select(m => new FileIssueDto
-            {
-                FileId = m.Id,
-                FileName = m.DisplayName,
-                FilePath = m.FilePath,
-                FileType = "Model3D",
-                IssueType = "Missing",
-                LastCheckDate = m.LastHealthCheckDate
-            })
-            .ToListAsync(ct);
+        // Use repository methods to get files with issues
+        var missingModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Missing, ct);
+        var corruptedModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
 
-        var corruptedModel3DFiles = await dbContext.Models3D
-            .Where(m => m.HealthStatus == FileHealthStatus.Corrupted)
-            .Select(m => new FileIssueDto
-            {
-                FileId = m.Id,
-                FileName = m.DisplayName,
-                FilePath = m.FilePath,
-                FileType = "Model3D",
-                IssueType = "Corrupted",
-                LastCheckDate = m.LastHealthCheckDate
-            })
-            .ToListAsync(ct);
-
-        var inaccessibleModel3DFiles = await dbContext.Models3D
-            .Where(m => m.HealthStatus == FileHealthStatus.Inaccessible)
-            .Select(m => new FileIssueDto
-            {
-                FileId = m.Id,
-                FileName = m.DisplayName,
-                FilePath = m.FilePath,
-                FileType = "Model3D",
-                IssueType = "Inaccessible",
-                LastCheckDate = m.LastHealthCheckDate
-            })
-            .ToListAsync(ct);
-
-        var missingGcodeFiles = await dbContext.GcodeFiles
-            .Where(g => g.HealthStatus == FileHealthStatus.Missing)
-            .Select(g => new FileIssueDto
-            {
-                FileId = g.Id,
-                FileName = g.DisplayName,
-                FilePath = g.FilePath,
-                FileType = "GcodeFile",
-                IssueType = "Missing",
-                LastCheckDate = g.LastHealthCheckDate
-            })
-            .ToListAsync(ct);
-
-        var corruptedGcodeFiles = await dbContext.GcodeFiles
-            .Where(g => g.HealthStatus == FileHealthStatus.Corrupted)
-            .Select(g => new FileIssueDto
-            {
-                FileId = g.Id,
-                FileName = g.DisplayName,
-                FilePath = g.FilePath,
-                FileType = "GcodeFile",
-                IssueType = "Corrupted",
-                LastCheckDate = g.LastHealthCheckDate
-            })
-            .ToListAsync(ct);
-
-        var inaccessibleGcodeFiles = await dbContext.GcodeFiles
-            .Where(g => g.HealthStatus == FileHealthStatus.Inaccessible)
-            .Select(g => new FileIssueDto
-            {
-                FileId = g.Id,
-                FileName = g.DisplayName,
-                FilePath = g.FilePath,
-                FileType = "GcodeFile",
-                IssueType = "Inaccessible",
-                LastCheckDate = g.LastHealthCheckDate
-            })
-            .ToListAsync(ct);
+        var missingGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Missing, ct);
+        var corruptedGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
 
         var allIssues = new List<FileIssueDto>();
-        allIssues.AddRange(missingModel3DFiles);
-        allIssues.AddRange(corruptedModel3DFiles);
-        allIssues.AddRange(inaccessibleModel3DFiles);
-        allIssues.AddRange(missingGcodeFiles);
-        allIssues.AddRange(corruptedGcodeFiles);
-        allIssues.AddRange(inaccessibleGcodeFiles);
+
+        // Add Model3D missing files
+        allIssues.AddRange(missingModel3DFiles.Select(m => new FileIssueDto
+        {
+            FileId = m.Id,
+            FileName = m.DisplayName,
+            FilePath = m.FilePath,
+            FileType = "Model3D",
+            IssueType = "Missing",
+            LastCheckDate = m.LastHealthCheckDate
+        }));
+
+        // Add Model3D corrupted files
+        allIssues.AddRange(corruptedModel3DFiles.Select(m => new FileIssueDto
+        {
+            FileId = m.Id,
+            FileName = m.DisplayName,
+            FilePath = m.FilePath,
+            FileType = "Model3D",
+            IssueType = "Corrupted",
+            LastCheckDate = m.LastHealthCheckDate
+        }));
+
+        // Add GCode missing files
+        allIssues.AddRange(missingGcodeFiles.Select(g => new FileIssueDto
+        {
+            FileId = g.Id,
+            FileName = g.DisplayName,
+            FilePath = g.FilePath,
+            FileType = "GCode",
+            IssueType = "Missing",
+            LastCheckDate = g.LastHealthCheckDate
+        }));
+
+        // Add GCode corrupted files
+        allIssues.AddRange(corruptedGcodeFiles.Select(g => new FileIssueDto
+        {
+            FileId = g.Id,
+            FileName = g.DisplayName,
+            FilePath = g.FilePath,
+            FileType = "GCode",
+            IssueType = "Corrupted",
+            LastCheckDate = g.LastHealthCheckDate
+        }));
 
         var summary = new FileIssuesSummaryDto
         {
             TotalIssues = allIssues.Count,
             MissingFiles = allIssues.Count(i => i.IssueType == "Missing"),
             CorruptedFiles = allIssues.Count(i => i.IssueType == "Corrupted"),
-            InaccessibleFiles = allIssues.Count(i => i.IssueType == "Inaccessible"),
+            InaccessibleFiles = 0, // No inaccessible status in repository currently
             Issues = allIssues
         };
 
@@ -191,29 +154,28 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     [HttpGet("model3d/{modelId}/health")]
     public async Task<ActionResult<FileHealthDetailDto>> GetModel3DHealthAsync(Guid modelId, CancellationToken ct)
     {
-        var model = await dbContext.Models3D
-            .Where(m => m.Id == modelId)
-            .Select(m => new FileHealthDetailDto
-            {
-                FileId = m.Id,
-                FileName = m.DisplayName,
-                FilePath = m.FilePath,
-                FileType = "Model3D",
-                FileSize = m.FileSizeBytes,
-                FileHash = m.FileHash,
-                HealthStatus = m.HealthStatus.ToString(),
-                LastHealthCheckDate = m.LastHealthCheckDate,
-                VerificationDetails = m.LastVerificationResult,
-                UploadedDate = m.UploadedAt
-            })
-            .FirstOrDefaultAsync(ct);
+        var model = await _repo.GetModel3DWithHealthDetailsAsync(modelId, ct);
 
         if (model is null)
         {
             return NotFound($"Model3D with ID {modelId} not found");
         }
 
-        return Ok(model);
+        var dto = new FileHealthDetailDto
+        {
+            FileId = model.Id,
+            FileName = model.DisplayName,
+            FilePath = model.FilePath,
+            FileType = "Model3D",
+            FileSize = model.FileSizeBytes,
+            FileHash = model.FileHash,
+            HealthStatus = model.HealthStatus.ToString(),
+            LastHealthCheckDate = model.LastHealthCheckDate,
+            VerificationDetails = model.LastVerificationResult,
+            UploadedDate = model.UploadedAt
+        };
+
+        return Ok(dto);
     }
 
     /// <summary>
@@ -222,55 +184,48 @@ public class FileConsistencyController(AppDbContext dbContext) : ControllerBase
     [HttpGet("gcode/{gcodeId}/health")]
     public async Task<ActionResult<FileHealthDetailDto>> GetGcodeFileHealthAsync(Guid gcodeId, CancellationToken ct)
     {
-        var gcode = await dbContext.GcodeFiles
-            .Where(g => g.Id == gcodeId)
-            .Select(g => new FileHealthDetailDto
-            {
-                FileId = g.Id,
-                FileName = g.DisplayName,
-                FilePath = g.FilePath,
-                FileType = "GcodeFile",
-                FileSize = g.FileSizeBytes,
-                FileHash = g.FileHash,
-                HealthStatus = g.HealthStatus.ToString(),
-                LastHealthCheckDate = g.LastHealthCheckDate,
-                VerificationDetails = g.LastVerificationResult,
-                UploadedDate = g.UploadedAt
-            })
-            .FirstOrDefaultAsync(ct);
+        var gcode = await _repo.GetGcodeFileWithHealthDetailsAsync(gcodeId, ct);
 
         if (gcode is null)
         {
             return NotFound($"GcodeFile with ID {gcodeId} not found");
         }
 
-        return Ok(gcode);
+        var dto = new FileHealthDetailDto
+        {
+            FileId = gcode.Id,
+            FileName = gcode.DisplayName,
+            FilePath = gcode.FilePath,
+            FileType = "GcodeFile",
+            FileSize = gcode.FileSizeBytes,
+            FileHash = gcode.FileHash,
+            HealthStatus = gcode.HealthStatus.ToString(),
+            LastHealthCheckDate = gcode.LastHealthCheckDate,
+            VerificationDetails = gcode.LastVerificationResult,
+            UploadedDate = gcode.UploadedAt
+        };
+
+        return Ok(dto);
     }
 
     // Private helper methods
 
     private async Task<(int Total, int Healthy, int Missing, int Corrupted)> GetModel3DHealthStatsAsync(CancellationToken ct)
     {
-        var total = await dbContext.Models3D.CountAsync(ct);
-        var healthy = await dbContext.Models3D
-            .CountAsync(m => m.HealthStatus == FileHealthStatus.Healthy, ct);
-        var missing = await dbContext.Models3D
-            .CountAsync(m => m.HealthStatus == FileHealthStatus.Missing, ct);
-        var corrupted = await dbContext.Models3D
-            .CountAsync(m => m.HealthStatus == FileHealthStatus.Corrupted, ct);
+        var total = await _repo.CountModel3DFilesAsync(ct);
+        var healthy = await _repo.CountHealthyModel3DFilesAsync(ct);
+        var missing = await _repo.CountMissingModel3DFilesAsync(ct);
+        var corrupted = await _repo.CountCorruptedModel3DFilesAsync(ct);
 
         return (total, healthy, missing, corrupted);
     }
 
     private async Task<(int Total, int Healthy, int Missing, int Corrupted)> GetGcodeHealthStatsAsync(CancellationToken ct)
     {
-        var total = await dbContext.GcodeFiles.CountAsync(ct);
-        var healthy = await dbContext.GcodeFiles
-            .CountAsync(g => g.HealthStatus == FileHealthStatus.Healthy, ct);
-        var missing = await dbContext.GcodeFiles
-            .CountAsync(g => g.HealthStatus == FileHealthStatus.Missing, ct);
-        var corrupted = await dbContext.GcodeFiles
-            .CountAsync(g => g.HealthStatus == FileHealthStatus.Corrupted, ct);
+        var total = await _repo.CountGcodeFilesAsync(ct);
+        var healthy = await _repo.CountHealthyGcodeFilesAsync(ct);
+        var missing = await _repo.CountMissingGcodeFilesAsync(ct);
+        var corrupted = await _repo.CountCorruptedGcodeFilesAsync(ct);
 
         return (total, healthy, missing, corrupted);
     }

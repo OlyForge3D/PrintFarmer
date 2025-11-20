@@ -78,7 +78,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
     });
 
     // Fetch available profiles for the selected printer
-    // These are system profiles available for import for the specific printer
+    // These are system profiles that were automatically seeded from the OrcaSlicer worker on registration
     const { data: officialProfiles = [], isLoading: profilesLoading, error: profilesError } = useQuery({
         queryKey: ["official-profiles-for-printer", selectedPrinterId],
         queryFn: async () => {

@@ -1,8 +1,5 @@
-﻿using Farm.Infrastructure.Data;
-using Farm.Web.Api.Services.SchemaHealth;
+﻿using Farm.Web.Api.Services.SchemaHealth;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 

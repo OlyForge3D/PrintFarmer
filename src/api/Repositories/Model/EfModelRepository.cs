@@ -33,14 +33,71 @@ namespace Farm.Web.Api.Repositories.Model
             return await _db.Models3D.FirstOrDefaultAsync(m => m.Id == id && m.IsValid, ct);
         }
 
+        public async Task<Model3D?> GetByIdWithTagsAsync(Guid id, CancellationToken ct)
+        {
+            return await _db.Models3D
+                .Where(m => m.Id == id && m.IsValid)
+                .Include(m => m.TagMappings)
+                .ThenInclude(tm => tm.Tag)
+                .FirstOrDefaultAsync(ct);
+        }
+
         public async Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct)
         {
             return await _db.Models3D.Where(m => m.IsValid).OrderByDescending(m => m.UploadedAt).ToListAsync(ct);
         }
 
+        public async Task<int> CountValidAsync(CancellationToken ct)
+        {
+            return await _db.Models3D.Where(m => m.IsValid).CountAsync(ct);
+        }
+
+        public async Task<IReadOnlyList<Model3D>> SearchAsync(string? query, Guid[]? tagIds, string sortBy, bool descending, int skip, int take, CancellationToken ct)
+        {
+            var queryable = _db.Models3D.Where(m => m.IsValid).AsQueryable();
+
+            // Text search
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var searchTerm = query.ToLower();
+                queryable = queryable.Where(m => m.DisplayName.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
+                                                (m.Description != null && m.Description.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase)));
+            }
+
+            // Tag filtering (AND logic - must have all tags)
+            if (tagIds?.Length > 0)
+            {
+                foreach (var tagId in tagIds)
+                {
+                    queryable = queryable.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
+                }
+            }
+
+            // Sorting
+            queryable = (sortBy?.ToLower()) switch
+            {
+                "name" => descending ? queryable.OrderByDescending(m => m.DisplayName) : queryable.OrderBy(m => m.DisplayName),
+                "size" => descending ? queryable.OrderByDescending(m => m.FileSizeBytes) : queryable.OrderBy(m => m.FileSizeBytes),
+                _ => descending ? queryable.OrderByDescending(m => m.UploadedAt) : queryable.OrderBy(m => m.UploadedAt)
+            };
+
+            return await queryable
+                .Skip(skip)
+                .Take(take)
+                .Include(m => m.TagMappings)
+                .ThenInclude(tm => tm.Tag)
+                .ToListAsync(ct);
+        }
+
         public async Task RemoveAsync(Model3D model, CancellationToken ct)
         {
             _ = _db.Models3D.Remove(model);
+            await Task.CompletedTask;
+        }
+
+        public async Task UpdateAsync(Model3D model, CancellationToken ct)
+        {
+            _db.Models3D.Update(model);
             await Task.CompletedTask;
         }
 

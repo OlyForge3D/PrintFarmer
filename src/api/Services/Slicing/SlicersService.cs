@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Api.Repositories.Workers;
+using Farm.Web.Shared;
 using Farm.Web.Shared.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Microsoft.AspNetCore.SignalR;
 
@@ -16,22 +18,28 @@ namespace Farm.Web.Api.Services.Slicing
     {
         private readonly ISlicersRepository _repo;
         private readonly IWorkerRepository _workerRepo;
+        private readonly ISlicerProfileRepository _profileRepo;
         private readonly IHubContext<SlicerHub> _hub;
         private readonly SlicerServiceMetrics _metrics;
+        private readonly HttpClient _httpClient;
 
         private readonly Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> _slicerSettings;
 
         public SlicersService(
             ISlicersRepository repo,
             IWorkerRepository workerRepo,
+            ISlicerProfileRepository profileRepo,
             IHubContext<SlicerHub> hub,
             SlicerServiceMetrics metrics,
+            HttpClient httpClient,
             Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> slicerSettings)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _workerRepo = workerRepo ?? throw new ArgumentNullException(nameof(workerRepo));
+            _profileRepo = profileRepo ?? throw new ArgumentNullException(nameof(profileRepo));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
             _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
+            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _slicerSettings = slicerSettings ?? throw new ArgumentNullException(nameof(slicerSettings));
 
             // Set up observable capacity metrics
@@ -149,6 +157,20 @@ namespace Farm.Web.Api.Services.Slicing
                 // Log but don't fail registration if Worker sync fails
                 // In production, you'd want proper logging here
                 System.Diagnostics.Debug.WriteLine($"Failed to sync Worker entity: {ex.Message}");
+            }
+
+            // Seed profiles from the worker (OrcaSlicer only)
+            if (svc.SlicerType == 1) // OrcaSlicer
+            {
+                try
+                {
+                    await SeedProfilesFromWorkerAsync(svc.Host ?? string.Empty, ct);
+                }
+                catch (Exception ex)
+                {
+                    // Log but don't fail registration if profile seeding fails
+                    System.Diagnostics.Debug.WriteLine($"Failed to seed profiles from worker: {ex.Message}");
+                }
             }
 
             // Record metrics
@@ -388,6 +410,97 @@ namespace Farm.Web.Api.Services.Slicing
             }
 
             return newApiKey;
+        }
+
+        /// <summary>
+        /// Seed OrcaSlicer profiles from the worker into the database on registration.
+        /// This happens automatically when an OrcaSlicer worker registers, so profiles are available immediately.
+        /// Only seeds if no system OrcaSlicer profiles exist yet (idempotent - won't reseed on subsequent registrations).
+        /// </summary>
+        private async Task SeedProfilesFromWorkerAsync(string workerHost, CancellationToken ct)
+        {
+            try
+            {
+                // Early exit: Only seed if no system profiles exist for OrcaSlicer
+                // This prevents re-seeding on every worker registration
+                var existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                if (existingSystemProfiles.Any(p => p.IsSystem))
+                {
+                    System.Diagnostics.Debug.WriteLine("System OrcaSlicer profiles already exist, skipping seed");
+                    return;
+                }
+
+                // Call the worker's /profiles endpoint
+                var workerUrl = workerHost.TrimEnd('/');
+                var response = await _httpClient.GetAsync($"{workerUrl}/profiles", ct);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Worker /profiles returned {response.StatusCode}");
+                    return;
+                }
+
+                var json = await response.Content.ReadAsStringAsync(ct);
+                var workerProfiles = JsonSerializer.Deserialize<List<SlicerProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (workerProfiles == null || workerProfiles.Count == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine("No profiles available from worker");
+                    return;
+                }
+
+                int imported = 0;
+
+                // Import each profile as a system profile
+                foreach (var profile in workerProfiles)
+                {
+                    // Generate hash for deduplication
+                    var profileHash = $"{profile.Material}:{profile.Quality}:{profile.LayerHeight}:{profile.InfillPercentage}";
+
+                    // Check if already exists using repository (defensive check)
+                    var existing = await _profileRepo.GetByHashAsync(profileHash, ct);
+                    if (existing != null)
+                    {
+                        continue;
+                    }
+
+                    // Create new system profile
+                    var systemProfile = new SlicerProfile
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = $"{profile.Material} - {profile.Quality} ({profile.LayerHeight}mm)",
+                        Description = $"Official OrcaSlicer system profile",
+                        SlicerType = SlicerType.OrcaSlicer,
+                        Material = profile.Material ?? "PLA",
+                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "Standard", true, out var q) ? q : ProfileQuality.Standard,
+                        LayerHeight = profile.LayerHeight,
+                        InfillPercentage = profile.InfillPercentage,
+                        PrintSpeed = profile.PrintSpeed,
+                        NozzleTemperature = profile.NozzleTemperature,
+                        BedTemperature = profile.BedTemperature,
+                        EnableSupports = profile.Supports,
+                        IsSystem = true,
+                        IsPublic = true,
+                        IsDefault = false,
+                        Hash = profileHash,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    await _profileRepo.AddAsync(systemProfile, ct);
+                    imported++;
+                }
+
+                if (imported > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Seeded {imported} system OrcaSlicer profiles on worker registration");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error seeding profiles: {ex.Message}");
+                // Don't throw - profile seeding is best-effort
+            }
         }
     }
 }

@@ -21,6 +21,8 @@ public interface ISlicerProfileRepository
     Task DeleteAsync(SlicerProfile profile, CancellationToken ct = default);
     Task SetDefaultAsync(SlicerProfile profile, Guid? userId, CancellationToken ct = default);
     Task<SlicerProfile> AddOrUpdateFromImportAsync(SlicerProfile imported, bool allowSystemOverride, CancellationToken ct = default);
+    Task<IReadOnlyList<SlicerProfile>> GetSystemOrcaProfilesAsync(CancellationToken ct = default);
+    Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default);
 }
 
 public class EfSlicerProfileRepository(AppDbContext db) : ISlicerProfileRepository
@@ -150,5 +152,37 @@ public class EfSlicerProfileRepository(AppDbContext db) : ISlicerProfileReposito
         existing.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return existing;
+    }
+
+    /// <summary>
+    /// Get all system OrcaSlicer profiles (ordered by Material, Quality, LayerHeight).
+    /// </summary>
+    public async Task<IReadOnlyList<SlicerProfile>> GetSystemOrcaProfilesAsync(CancellationToken ct = default) =>
+        await _db.SlicerProfiles
+            .AsNoTracking()
+            .Where(p => p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer)
+            .OrderBy(p => p.Material)
+            .ThenBy(p => p.Quality)
+            .ThenBy(p => p.LayerHeight)
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// Delete all system profiles for a given slicer engine.
+    /// Returns the count of profiles deleted.
+    /// </summary>
+    public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
+    {
+        var profilesToDelete = await _db.SlicerProfiles
+            .Where(p => p.IsSystem && p.SlicerType == engine)
+            .ToListAsync(ct);
+
+        if (profilesToDelete.Count == 0)
+        {
+            return 0;
+        }
+
+        _db.SlicerProfiles.RemoveRange(profilesToDelete);
+        await _db.SaveChangesAsync(ct);
+        return profilesToDelete.Count;
     }
 }

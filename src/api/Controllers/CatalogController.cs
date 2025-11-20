@@ -6,7 +6,6 @@ using Farm.Web.Api.Infrastructure.Exceptions;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
