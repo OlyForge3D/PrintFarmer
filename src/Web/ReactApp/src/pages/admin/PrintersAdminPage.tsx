@@ -1,5 +1,6 @@
 import React from 'react';
-import { usePrintersWithCameraUrls } from '@/hooks/useApi';
+import { usePrintersWithCameraUrls, queryKeys } from '@/hooks/useApi';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
 import { printerHubService } from '@/services/printerHubService';
 import { getPrinterBackendName } from '@/utils/enumHelpers';
@@ -24,6 +25,7 @@ function downloadJson(filename: string, data: unknown) {
 }
 
 export function PrintersAdminPage() {
+  const queryClient = useQueryClient();
   const { data: printers, isLoading, error, refetch } = usePrintersWithCameraUrls(true);
   type PreviewItem = {
     __index: number;
@@ -336,7 +338,10 @@ export function PrintersAdminPage() {
       setImportResults(mappedResults);
       // Keep previewItems so admin can review results
       
-      // Refresh printers table so imported printers can be edited
+      // Invalidate printer queries globally so all pages (admin + main printers page) see new printers immediately
+      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+      
+      // Also refetch for immediate local update
       await refetch();
     } catch (err) {
       console.error('Batch import failed', err);
@@ -369,8 +374,8 @@ export function PrintersAdminPage() {
         return singleResult ? [...next, singleResult] : next;
       });
       
-      // Refresh printers table so retried printer can be edited
-      await refetch();
+      // Invalidate printer queries globally so all pages see retried printer immediately
+      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       
       if (singleResult && singleResult.status === 'Imported') {
         toast.success(`Imported ${singleResult.name}`);
@@ -426,6 +431,9 @@ export function PrintersAdminPage() {
         return [...others, ...mapped];
       });
       toast.success(`Retried ${mapped.length} failed rows`);
+      
+      // Invalidate printer queries globally so all pages see retried printers immediately
+      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
     } catch (err) {
       console.error('Retry all failed failed', err);
       toast.error('Retry all failed encountered an error');
@@ -851,34 +859,9 @@ export function PrintersAdminPage() {
                     </select>
                   </label>
                   <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="btn-base btn-sm btn-primary disabled:opacity-50">{importing ? 'Importing...' : 'Confirm Import'}</button>
-                  <button type="button" disabled={importing} aria-label="Close import preview and review results" onClick={() => setPreviewItems(null)} className="btn-base btn-sm btn-secondary disabled:opacity-50">{importing ? 'Importing...' : 'Finish'}</button>
+                  <button type="button" disabled={importing} aria-label="Return to main printers table to see imported printers" onClick={() => { setPreviewItems(null); setImportResults(null); }} className="btn-base btn-sm btn-secondary disabled:opacity-50">{importing ? 'Importing...' : 'Close'}</button>
                   <button type="button" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" title={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'} onClick={handleRetryAllFailed} className="btn-base btn-sm btn-secondary disabled:opacity-50">Retry All</button>
                 </div>
-              </div>
-            </div>
-          )}
-          {(!previewItems || previewItems.length === 0) && importResults && importResults.length > 0 && (
-            <div className="card">
-              <div className="card-header">
-                <div className="card-header-title">Import results ({importResults.length})</div>
-              </div>
-              <div className="card-body gap-md">
-                {importResults.map(r => (
-                  <div key={r.index} className="flex justify-between items-center p-3 border border-pf-border rounded">
-                    <div>
-                      <div className="font-medium text-pf-text-primary">{r.name}</div>
-                      {r.reason && <div className="text-xs text-pf-error-text mt-1">{r.reason}</div>}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-xs">
-                        {r.status === 'Imported' ? <span className="text-pf-success-text font-semibold">Imported</span> : r.status === 'Skipped' ? <span className="text-pf-warning-text font-semibold">Skipped</span> : <span className="text-pf-error-text font-semibold">Failed</span>}
-                      </div>
-                      {r.id && (
-                        <a href={`/printers/${r.id}`} className="text-xs btn-link" target="_blank" rel="noreferrer">Open</a>
-                      )}
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           )}

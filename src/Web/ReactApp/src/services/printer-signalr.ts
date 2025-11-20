@@ -20,6 +20,7 @@ type ConnectionStateCallback = (connected: boolean) => void;
 type DiscoveryProgressCallback = (progress: DiscoveryProgressDto) => void;
 type DiscoveryPrinterFoundCallback = (found: DiscoveryPrinterFoundDto) => void;
 type DiscoveryCompletedCallback = (completed: DiscoveryCompletedDto) => void;
+type PrinterImportProgressCallback = (progress: unknown) => void;
 
 export class PrinterSignalRService {
   // Keep a local cache of last statuses for debugging
@@ -73,6 +74,21 @@ export class PrinterSignalRService {
         },
       })
       .build();
+    
+    // Suppress benign UnifiedLoggingService warnings about missing client methods
+    // These occur when the server broadcasts messages before all client handlers finish registering,
+    // or when a client method hasn't been registered yet on this connection.
+    // We use a wrapper that intercepts console.warn to filter these specific messages.
+    const originalWarn = console.warn.bind(console);
+    console.warn = (...args: Parameters<typeof console.warn>) => {
+      const messageStr = String(args?.[0] ?? '');
+      // Only suppress warnings about missing client methods; let all other warnings through
+      if (messageStr.includes('No client method with the name')) {
+        return; // Silently suppress this known harmless warning
+      }
+      originalWarn(...args);
+    };
+    
     this.setupEventHandlers();
   }
 
@@ -214,6 +230,18 @@ export class PrinterSignalRService {
     this.connection.on("discoveryprogress", handleDiscoveryProgress);
     this.connection.on("discoveryprinterfound", handleDiscoveryPrinterFound);
     this.connection.on("discoverycompleted", handleDiscoveryCompleted);
+
+    // Handler for printer import progress event
+    this.connection.on("printerimportprogress", (progress: unknown) => {
+      this.printerImportProgressCallbacks.forEach((cb) => {
+        try {
+          cb(progress);
+        } catch (e) {
+          console.error("Printer import progress cb error:", e);
+        }
+      });
+    });
+
     this.connection.onclose(() => this.notifyConnectionState(false));
     this.connection.onreconnecting(() => this.notifyConnectionState(false));
     this.connection.onreconnected(() => {
@@ -252,6 +280,7 @@ export class PrinterSignalRService {
   private discoveryProgressCallbacks: DiscoveryProgressCallback[] = [];
   private discoveryPrinterFoundCallbacks: DiscoveryPrinterFoundCallback[] = [];
   private discoveryCompletedCallbacks: DiscoveryCompletedCallback[] = [];
+  private printerImportProgressCallbacks: PrinterImportProgressCallback[] = [];
 
   constructor() {
     this.loadSettings().then(() => {
@@ -475,6 +504,14 @@ export class PrinterSignalRService {
     };
   }
 
+  onPrinterImportProgress(callback: PrinterImportProgressCallback): () => void {
+    this.printerImportProgressCallbacks.push(callback);
+    return () => {
+      const idx = this.printerImportProgressCallbacks.indexOf(callback);
+      if (idx > -1) this.printerImportProgressCallbacks.splice(idx, 1);
+    };
+  }
+
   get connectionState(): HubConnectionState {
     return this.connection?.state ?? HubConnectionState.Disconnected;
   }
@@ -491,6 +528,7 @@ export class PrinterSignalRService {
     this.discoveryProgressCallbacks = [];
     this.discoveryPrinterFoundCallbacks = [];
     this.discoveryCompletedCallbacks = [];
+    this.printerImportProgressCallbacks = [];
     if (this.connection) {
       this.connection.stop();
       this.connection = null;
