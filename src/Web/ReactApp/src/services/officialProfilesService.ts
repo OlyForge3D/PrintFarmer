@@ -113,6 +113,18 @@ export const officialProfilesService = {
     });
     return handle<BulkImportFromWorkerResult>(res);
   },
+
+  /**
+   * Force reseed system OrcaSlicer profiles from the worker.
+   * Clears existing system profiles and fetches fresh ones from OrcaSlicer worker.
+   */
+  async forceReseedSystemProfilesFromWorker(): Promise<{ imported: number }> {
+    const res = await fetch(`${base}/system/orca/force-reseed-from-worker`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
+    return handle<{ imported: number }>(res);
+  },
 };
 
 export default officialProfilesService;

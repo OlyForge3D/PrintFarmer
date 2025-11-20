@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import slicerProfilesService, { SlicerProfileListItem, ImportSlicerProfileRequest, SlicerProfileExtended, SlicerProfileExportDto } from '@/services/slicerProfilesService';
+import { officialProfilesService } from '@/services/officialProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { Settings, Download, Upload, Search, Filter } from 'lucide-react';
@@ -37,6 +38,7 @@ export const SlicerProfilesPage: React.FC = () => {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingBundle, setExportingBundle] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [isReseedingProfiles, setIsReseedingProfiles] = useState(false);
 
   // Fetch available slicers
   const { data: availableSlicers = [] } = useQuery({
@@ -232,9 +234,29 @@ export const SlicerProfilesPage: React.FC = () => {
             <Download className="w-4 h-4" />
             Export to OrcaSlicer
           </Button>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              setIsReseedingProfiles(true);
+              try {
+                const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
+                setMessage(`System profiles updated: ${result.imported} profile(s) imported from OrcaSlicer worker.`);
+                qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
+              } catch (error) {
+                setMessage(error instanceof Error ? error.message : 'Failed to reseed system profiles');
+              } finally {
+                setIsReseedingProfiles(false);
+              }
+            }}
+            loading={isReseedingProfiles}
+            className="flex items-center gap-2"
+          >
+            <Upload className="w-4 h-4" />
+            Force Reseed System Profiles
+          </Button>
           <div className="flex-1" />
           <p className="text-sm text-pf-text-muted self-center">
-            Import/export profiles directly from OrcaSlicer config bundles
+            Import/export profiles directly from OrcaSlicer config bundles or reseed system profiles
           </p>
         </div>
       </div>
