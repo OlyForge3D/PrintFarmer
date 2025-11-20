@@ -77,21 +77,24 @@ export const ImportOfficialProfilesPage: React.FC = () => {
         staleTime: 30_000
     });
 
-    // Fetch available profiles from OrcaSlicer worker
-    // These are the actual profiles from the OrcaSlicer installation,
-    // not previously imported/system profiles
+    // Fetch available profiles for the selected printer
+    // These are system profiles available for import for the specific printer
     const { data: officialProfiles = [], isLoading: profilesLoading, error: profilesError } = useQuery({
-        queryKey: ["official-profiles-from-worker"],
+        queryKey: ["official-profiles-for-printer", selectedPrinterId],
         queryFn: async () => {
+            if (!selectedPrinterId) {
+                return [];
+            }
             try {
-                const profiles = await officialProfilesService.getAvailableProfilesFromWorker();
+                const profiles = await officialProfilesService.getAvailableProfilesForPrinter(selectedPrinterId);
                 return profiles;
             } catch (error) {
-                console.error("Failed to fetch profiles from worker:", error);
+                console.error("Failed to fetch profiles for printer:", error);
                 throw error;
             }
         },
-        retry: false // Don't retry failed requests
+        retry: false, // Don't retry failed requests
+        enabled: !!selectedPrinterId // Only fetch when a printer is selected
     });
 
     // Group profiles by material and quality
