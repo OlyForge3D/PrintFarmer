@@ -240,10 +240,22 @@ export const SlicerProfilesPage: React.FC = () => {
               setIsReseedingProfiles(true);
               try {
                 const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
-                setMessage(`System profiles updated: ${result.imported} profile(s) imported from OrcaSlicer worker.`);
-                qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
+                console.log('Force reseed result:', result);
+                
+                if (result.imported === 0) {
+                  let details = result.message || 'No profiles available from worker';
+                  if (result.orcaslicerVersion) {
+                    details += ` (OrcaSlicer version: ${result.orcaslicerVersion})`;
+                  }
+                  setMessage(`⚠️ ${details}`);
+                } else {
+                  setMessage(`✅ System profiles updated: ${result.imported} profile(s) imported from OrcaSlicer worker${result.orcaslicerVersion ? ` (v${result.orcaslicerVersion})` : ''}.`);
+                  qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
+                }
               } catch (error) {
-                setMessage(error instanceof Error ? error.message : 'Failed to reseed system profiles');
+                const errorMsg = error instanceof Error ? error.message : 'Failed to reseed system profiles';
+                console.error('Force reseed error:', error);
+                setMessage(`❌ ${errorMsg}`);
               } finally {
                 setIsReseedingProfiles(false);
               }

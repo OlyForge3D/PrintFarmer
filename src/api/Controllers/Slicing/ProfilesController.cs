@@ -710,16 +710,20 @@ public class ProfilesController(
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode}");
-                return StatusCode((int)response.StatusCode, "OrcaSlicer worker unavailable or returned an error");
+                _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode} from {workerUrl}/profiles");
+                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                return StatusCode((int)response.StatusCode, $"OrcaSlicer worker unavailable or returned an error: {errorContent}");
             }
 
             var json = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogInformation($"OrcaSlicer worker response: {json}");
+            
             var workerProfiles = JsonSerializer.Deserialize<List<SlicerProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (workerProfiles == null || workerProfiles.Count == 0)
             {
-                return Ok(new { imported = 0, deleted = deletedCount, message = "No profiles available from worker" });
+                _logger.LogInformation($"No profiles available from OrcaSlicer worker at {workerUrl}. Check if OrcaSlicer is configured with profiles in ~/.config/OrcaSlicer/profiles/");
+                return Ok(new { imported = 0, deleted = deletedCount, message = "No profiles available from worker - check if OrcaSlicer is installed and configured on the worker", orcaslicerVersion = orcaVersion });
             }
 
             int imported = 0;

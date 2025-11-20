@@ -118,12 +118,12 @@ export const officialProfilesService = {
    * Force reseed system OrcaSlicer profiles from the worker.
    * Clears existing system profiles and fetches fresh ones from OrcaSlicer worker.
    */
-  async forceReseedSystemProfilesFromWorker(): Promise<{ imported: number }> {
+  async forceReseedSystemProfilesFromWorker(): Promise<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }> {
     const res = await fetch(`${base}/system/orca/force-reseed-from-worker`, {
       method: "POST",
       headers: getAuthHeaders(),
     });
-    return handle<{ imported: number }>(res);
+    return handle<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }>(res);
   },
 };
 
