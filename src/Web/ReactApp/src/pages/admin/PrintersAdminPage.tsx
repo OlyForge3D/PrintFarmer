@@ -10,6 +10,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { toast } from 'sonner';
+import { Trash2, Edit } from 'lucide-react';
 import type { Printer } from '@/types/api';
 
 function downloadJson(filename: string, data: unknown) {
@@ -513,6 +514,18 @@ export function PrintersAdminPage() {
     await refetch?.();
   };
 
+  const handleDeletePrinter = async (printer: Printer) => {
+    if (!confirm(`Are you sure you want to delete "${printer.name}"?`)) return;
+    try {
+      await apiClient.deletePrinter(printer.id);
+      toast.success(`Deleted ${printer.name}`);
+      await refetch?.();
+    } catch (error) {
+      console.error('Failed to delete printer', error);
+      toast.error('Failed to delete printer');
+    }
+  };
+
   const handleToggleEnabled = async (printer: Printer) => {
     const currentlyEnabled = printer.isEnabled ?? true;
     setTogglingEnabledId(printer.id);
@@ -665,14 +678,25 @@ export function PrintersAdminPage() {
                                 title={p.isEnabled ? 'Disable printer' : 'Enable printer'}
                               />
                             </td>
-                            <td className="text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleEditClick(p)}
-                                className="btn-base btn-sm btn-secondary"
-                              >
-                                Edit
-                              </button>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center justify-center space-x-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditClick(p)}
+                                  className="p-2 text-pf-text-tertiary hover:text-pf-accent transition-colors rounded-md hover:bg-pf-bg-2"
+                                  title="Edit printer"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeletePrinter(p)}
+                                  className="p-2 text-pf-text-tertiary hover:text-pf-error-text transition-colors rounded-md hover:bg-pf-error-bg"
+                                  title="Delete printer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
