@@ -339,22 +339,33 @@ public class SlicerProfile
     public ProfileQuality Quality { get; set; } = ProfileQuality.Standard;
     public string? AdvancedSettings { get; set; } // JSON object with additional slicer-specific settings
     /// <summary>
+    /// Version of the slicer this profile is for (e.g., "1.7.0", "2.0.0").
+    /// Extracted from the profile metadata during import.
+    /// Null indicates version information was not available in the profile.
+    /// Used to ensure profiles are only used with compatible slicer versions.
+    /// </summary>
+    public string? SlicerVersion { get; set; }
+    /// <summary>
     /// Raw slicer profile JSON as imported from OrcaSlicer / PrusaSlicer (sanitized but otherwise unchanged).
     /// </summary>
     public string? RawJson { get; set; }
     /// <summary>
-    /// Extracted metadata summary (layerHeight, nozzleDiameter, filamentMaterial, infillPercentage, slicerVersion, profileType, estimatedPrintTimeSeconds etc.)
-    /// Stored as a flat JSON object for quick querying / display.
+    /// Extracted metadata summary stored as flat JSON object for quick querying and display.
+    /// Examples: { "layerHeight": 0.2, "nozzleDiameter": 0.4, "filamentMaterial": "PLA", "slicerVersion": "1.7.0", ... }
+    /// Version information is extracted here and can be used to track which slicer version this profile is for.
     /// </summary>
     public string? MetadataJson { get; set; }
     /// <summary>
-    /// Stable hash (e.g. SHA256) of RawJson used for deduplication and quick matching on import.
+    /// Stable hash (SHA256) of RawJson used for deduplication and quick matching on import.
+    /// Different slicer versions will produce different hashes even for the same profile characteristics,
+    /// ensuring version-specific profiles are maintained separately in the database.
     /// </summary>
     public string? Hash { get; set; }
     public bool IsDefault { get; set; }
     public bool IsPublic { get; set; } = true; // Can be used by other users
     /// <summary>
     /// Indicates profile shipped by system seeding (immutable for regular users).
+    /// System profiles come from the OrcaSlicer worker service and are version-specific.
     /// </summary>
     public bool IsSystem { get; set; }
     public Guid? CreatedByUserId { get; set; }

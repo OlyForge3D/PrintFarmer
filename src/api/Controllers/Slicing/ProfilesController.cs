@@ -523,6 +523,150 @@ public class ProfilesController(IUnifiedLoggingService logger, Farm.Web.Api.Serv
     }
 
     /// <summary>
+    /// Seed system OrcaSlicer profiles from the worker service into the database.
+    /// This endpoint fetches profiles from the OrcaSlicer worker and imports them as system profiles (IsSystem=true).
+    /// Use this to bootstrap the database with official OrcaSlicer profiles.
+    /// 
+    /// VERSION HANDLING:
+    /// - Profiles are deduplicated by hash (Material:Quality:LayerHeight:Infill)
+    /// - Version information is extracted from the OrcaSlicer worker service during seeding
+    /// - Different OrcaSlicer versions will have different profiles with different characteristics
+    /// - The OrcaSlicer worker returns profiles from its local installation, ensuring version-specific profiles
+    /// - When OrcaSlicer is updated, re-run this endpoint to seed updated profiles
+    /// </summary>
+    /// <param name="db">Database context</param>
+    /// <param name="httpClient">HTTP client for worker communication</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Count of profiles imported and version information</returns>
+    /// <response code="200">Profiles seeded successfully</response>
+    /// <response code="503">OrcaSlicer worker unavailable</response>
+    [HttpPost("system/orca/seed-from-worker")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: system profile seeding
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> SeedSystemProfilesFromWorkerAsync(
+        [FromServices] AppDbContext db,
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Call the OrcaSlicer worker /version endpoint to get the OrcaSlicer version
+            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+
+            // First, get the OrcaSlicer version from the worker
+            string? orcaVersion = null;
+            try
+            {
+                var versionResponse = await httpClient.GetAsync($"{workerUrl}/version", ct);
+                if (versionResponse.IsSuccessStatusCode)
+                {
+                    var versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
+                    using var versionDoc = JsonDocument.Parse(versionJson);
+                    if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out var versionElem) && versionElem.ValueKind == JsonValueKind.String)
+                    {
+                        orcaVersion = versionElem.GetString();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Failed to fetch OrcaSlicer version from worker: {ex.Message}");
+                // Continue - version is optional
+            }
+
+            // Call the OrcaSlicer worker /profiles endpoint to get official profiles
+            var response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode}");
+                return StatusCode((int)response.StatusCode, "OrcaSlicer worker unavailable or returned an error");
+            }
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            var workerProfiles = JsonSerializer.Deserialize<List<SlicerProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (workerProfiles == null || workerProfiles.Count == 0)
+            {
+                return Ok(new { imported = 0, skipped = 0, message = "No profiles available from worker" });
+            }
+
+            int imported = 0;
+            int skipped = 0;
+
+            // Import each profile as a system profile if it doesn't already exist
+            foreach (var profile in workerProfiles)
+            {
+                // Generate a stable hash for deduplication (based on profile characteristics)
+                // Different slicer versions will have different profiles, so they'll have different hashes
+                var profileHash = $"{profile.Material}:{profile.Quality}:{profile.LayerHeight}:{profile.InfillPercentage}";
+
+                // Check if profile already exists by hash
+                var existingProfile = await db.SlicerProfiles
+                    .FirstOrDefaultAsync(p => p.Hash == profileHash && p.IsSystem && p.SlicerType == SlicerType.OrcaSlicer, ct);
+
+                if (existingProfile != null)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                // Create new system profile with OrcaSlicer version
+                var systemProfile = new SlicerProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = $"{profile.Material} - {profile.Quality} ({profile.LayerHeight}mm)",
+                    Description = $"Official OrcaSlicer system profile: {profile.Material} {profile.Quality} quality at {profile.LayerHeight}mm layer height",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    Material = profile.Material ?? "PLA",
+                    Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "Standard", true, out var q) ? q : ProfileQuality.Standard,
+                    LayerHeight = profile.LayerHeight,
+                    InfillPercentage = profile.InfillPercentage,
+                    PrintSpeed = profile.PrintSpeed,
+                    NozzleTemperature = profile.NozzleTemperature,
+                    BedTemperature = profile.BedTemperature,
+                    EnableSupports = profile.Supports,
+                    IsSystem = true,
+                    IsPublic = true,
+                    IsDefault = false,
+                    Hash = profileHash,
+                    SlicerVersion = orcaVersion,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                db.SlicerProfiles.Add(systemProfile);
+                imported++;
+            }
+
+            await db.SaveChangesAsync(ct);
+
+            _logger.LogInformation($"Seeded {imported} system OrcaSlicer profiles from worker ({skipped} already existed). OrcaSlicer version: {orcaVersion ?? "unknown"}.");
+
+            return Ok(new
+            {
+                imported,
+                skipped,
+                orcaslicerVersion = orcaVersion,
+                message = $"Seeded {imported} system OrcaSlicer profiles from worker (OrcaSlicer v{orcaVersion ?? "unknown"})",
+                details = "Profiles are version-specific based on the OrcaSlicer version in the worker. Different OrcaSlicer versions will have different profiles. Re-run this endpoint when upgrading OrcaSlicer. Query SlicerVersion field to find profiles for a specific slicer version."
+            });
+        }
+        catch (HttpRequestException ex)
+        {
+            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+            _logger.LogError($"Failed to connect to OrcaSlicer worker at {workerUrl}: {ex.Message}");
+            return StatusCode(503, $"OrcaSlicer worker unavailable at {workerUrl}. Please ensure the worker service is running.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error seeding system profiles: {ex.Message}");
+            return StatusCode(500, $"Error seeding profiles: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Fetch available OrcaSlicer profiles from the OrcaSlicer worker service.
     /// Queries the running OrcaSlicer worker for profiles available in its local installation.
     /// </summary>

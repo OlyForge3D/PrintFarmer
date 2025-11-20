@@ -112,13 +112,22 @@ public static class Program
             capabilities = WorkerConstants.Capabilities
         }));
 
+        _ = app.MapGet("/version", async (IOrcaBinaryDetector detector) =>
+        {
+            var orcaVersion = await detector.GetVersionAsync();
+            return Results.Ok(new
+            {
+                orcaslicerVersion = orcaVersion,
+                workerVersion = "1.0.0",
+                timestamp = DateTime.UtcNow
+            });
+        });
+
         _ = app.MapGet("/profiles", async (ISlicerProfilesService profileService, CancellationToken ct) =>
         {
             var profiles = await profileService.ListAvailableProfilesAsync(ct);
             return Results.Ok(profiles);
         });
-        // Endpoint: GET /profiles
-        // Returns: List of available OrcaSlicer profiles from local installation
 
         IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();
         if (!orcaDetector.IsRealBinaryPresent())
