@@ -30,25 +30,33 @@ public class FileConsistencyController(
     [HttpGet("health/summary")]
     public async Task<ActionResult<FileHealthSummaryDto>> GetHealthSummaryAsync(CancellationToken ct)
     {
-        var model3DStats = await GetModel3DHealthStatsAsync(ct);
-        var gcodeStats = await GetGcodeHealthStatsAsync(ct);
-        var recentAudit = await _repo.GetMostRecentHealthyAuditAsync(ct);
-
-        var summary = new FileHealthSummaryDto
+        try
         {
-            TotalModel3DFiles = model3DStats.Total,
-            Model3DHealthy = model3DStats.Healthy,
-            Model3DMissing = model3DStats.Missing,
-            Model3DCorrupted = model3DStats.Corrupted,
-            TotalGcodeFiles = gcodeStats.Total,
-            GcodeHealthy = gcodeStats.Healthy,
-            GcodeMissing = gcodeStats.Missing,
-            GcodeCorrupted = gcodeStats.Corrupted,
-            LastHealthyAuditDate = recentAudit?.AuditDate,
-            OverallHealthPercentage = CalculateOverallHealth(model3DStats, gcodeStats)
-        };
+            var model3DStats = await GetModel3DHealthStatsAsync(ct);
+            var gcodeStats = await GetGcodeHealthStatsAsync(ct);
+            var recentAudit = await _repo.GetMostRecentHealthyAuditAsync(ct);
 
-        return Ok(summary);
+            var summary = new FileHealthSummaryDto
+            {
+                TotalModel3DFiles = model3DStats.Total,
+                Model3DHealthy = model3DStats.Healthy,
+                Model3DMissing = model3DStats.Missing,
+                Model3DCorrupted = model3DStats.Corrupted,
+                TotalGcodeFiles = gcodeStats.Total,
+                GcodeHealthy = gcodeStats.Healthy,
+                GcodeMissing = gcodeStats.Missing,
+                GcodeCorrupted = gcodeStats.Corrupted,
+                LastHealthyAuditDate = recentAudit?.AuditDate,
+                OverallHealthPercentage = CalculateOverallHealth(model3DStats, gcodeStats)
+            };
+
+            return Ok(summary);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { error = "Failed to retrieve file health summary", details = ex.Message });
+        }
     }
 
     /// <summary>
@@ -59,22 +67,30 @@ public class FileConsistencyController(
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
-        var audits = await _repo.GetRecentAuditsAsync(pageSize, ct);
-        var auditDtos = audits.Select(a => new FileHealthAuditDto
+        try
         {
-            Id = a.Id,
-            AuditDate = a.AuditDate,
-            AuditType = a.AuditType.ToString(),
-            FilesChecked = a.FilesChecked,
-            HealthyFiles = a.HealthyFiles,
-            MissingFiles = a.MissingFiles,
-            CorruptedFiles = a.CorruptedFiles,
-            OrphanedFiles = a.OrphanedFiles,
-            SummaryMessage = a.SummaryMessage,
-            HasIssues = a.HasIssues
-        }).ToList();
+            var audits = await _repo.GetRecentAuditsAsync(pageSize, ct);
+            var auditDtos = audits.Select(a => new FileHealthAuditDto
+            {
+                Id = a.Id,
+                AuditDate = a.AuditDate,
+                AuditType = a.AuditType.ToString(),
+                FilesChecked = a.FilesChecked,
+                HealthyFiles = a.HealthyFiles,
+                MissingFiles = a.MissingFiles,
+                CorruptedFiles = a.CorruptedFiles,
+                OrphanedFiles = a.OrphanedFiles,
+                SummaryMessage = a.SummaryMessage,
+                HasIssues = a.HasIssues
+            }).ToList();
 
-        return Ok(auditDtos);
+            return Ok(auditDtos);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { error = "Failed to retrieve audit history", details = ex.Message });
+        }
     }
 
     /// <summary>
@@ -83,69 +99,77 @@ public class FileConsistencyController(
     [HttpGet("issues")]
     public async Task<ActionResult<FileIssuesSummaryDto>> GetFilesWithIssuesAsync(CancellationToken ct = default)
     {
-        // Use repository methods to get files with issues
-        var missingModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Missing, ct);
-        var corruptedModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
-
-        var missingGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Missing, ct);
-        var corruptedGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
-
-        var allIssues = new List<FileIssueDto>();
-
-        // Add Model3D missing files
-        allIssues.AddRange(missingModel3DFiles.Select(m => new FileIssueDto
+        try
         {
-            FileId = m.Id,
-            FileName = m.DisplayName,
-            FilePath = m.FilePath,
-            FileType = "Model3D",
-            IssueType = "Missing",
-            LastCheckDate = m.LastHealthCheckDate
-        }));
+            // Use repository methods to get files with issues
+            var missingModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Missing, ct);
+            var corruptedModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
 
-        // Add Model3D corrupted files
-        allIssues.AddRange(corruptedModel3DFiles.Select(m => new FileIssueDto
+            var missingGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Missing, ct);
+            var corruptedGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
+
+            var allIssues = new List<FileIssueDto>();
+
+            // Add Model3D missing files
+            allIssues.AddRange(missingModel3DFiles.Select(m => new FileIssueDto
+            {
+                FileId = m.Id,
+                FileName = m.DisplayName,
+                FilePath = m.FilePath,
+                FileType = "Model3D",
+                IssueType = "Missing",
+                LastCheckDate = m.LastHealthCheckDate
+            }));
+
+            // Add Model3D corrupted files
+            allIssues.AddRange(corruptedModel3DFiles.Select(m => new FileIssueDto
+            {
+                FileId = m.Id,
+                FileName = m.DisplayName,
+                FilePath = m.FilePath,
+                FileType = "Model3D",
+                IssueType = "Corrupted",
+                LastCheckDate = m.LastHealthCheckDate
+            }));
+
+            // Add GCode missing files
+            allIssues.AddRange(missingGcodeFiles.Select(g => new FileIssueDto
+            {
+                FileId = g.Id,
+                FileName = g.DisplayName,
+                FilePath = g.FilePath,
+                FileType = "GCode",
+                IssueType = "Missing",
+                LastCheckDate = g.LastHealthCheckDate
+            }));
+
+            // Add GCode corrupted files
+            allIssues.AddRange(corruptedGcodeFiles.Select(g => new FileIssueDto
+            {
+                FileId = g.Id,
+                FileName = g.DisplayName,
+                FilePath = g.FilePath,
+                FileType = "GCode",
+                IssueType = "Corrupted",
+                LastCheckDate = g.LastHealthCheckDate
+            }));
+
+            var summary = new FileIssuesSummaryDto
+            {
+                TotalIssues = allIssues.Count,
+                MissingFiles = allIssues.Count(i => i.IssueType == "Missing"),
+                CorruptedFiles = allIssues.Count(i => i.IssueType == "Corrupted"),
+                InaccessibleFiles = 0, // No inaccessible status in repository currently
+                Issues = allIssues
+            };
+
+            return Ok(summary);
+        }
+        catch (Exception ex)
         {
-            FileId = m.Id,
-            FileName = m.DisplayName,
-            FilePath = m.FilePath,
-            FileType = "Model3D",
-            IssueType = "Corrupted",
-            LastCheckDate = m.LastHealthCheckDate
-        }));
-
-        // Add GCode missing files
-        allIssues.AddRange(missingGcodeFiles.Select(g => new FileIssueDto
-        {
-            FileId = g.Id,
-            FileName = g.DisplayName,
-            FilePath = g.FilePath,
-            FileType = "GCode",
-            IssueType = "Missing",
-            LastCheckDate = g.LastHealthCheckDate
-        }));
-
-        // Add GCode corrupted files
-        allIssues.AddRange(corruptedGcodeFiles.Select(g => new FileIssueDto
-        {
-            FileId = g.Id,
-            FileName = g.DisplayName,
-            FilePath = g.FilePath,
-            FileType = "GCode",
-            IssueType = "Corrupted",
-            LastCheckDate = g.LastHealthCheckDate
-        }));
-
-        var summary = new FileIssuesSummaryDto
-        {
-            TotalIssues = allIssues.Count,
-            MissingFiles = allIssues.Count(i => i.IssueType == "Missing"),
-            CorruptedFiles = allIssues.Count(i => i.IssueType == "Corrupted"),
-            InaccessibleFiles = 0, // No inaccessible status in repository currently
-            Issues = allIssues
-        };
-
-        return Ok(summary);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { error = "Failed to retrieve files with issues", details = ex.Message });
+        }
     }
 
     /// <summary>

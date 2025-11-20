@@ -1211,7 +1211,7 @@ export class ApiClient {
   > {
     const response = await this.client.get<
       import("@/types/api").FileIssuesSummaryDto
-    >("/fileconsistency/files/issues");
+    >("/fileconsistency/issues");
     return response.data;
   }
 
