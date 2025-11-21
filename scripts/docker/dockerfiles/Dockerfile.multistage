@@ -209,11 +209,32 @@ RUN set -e; \
         fi; \
     fi; \
     \
+    # Extract profiles from OrcaSlicer installation if available \
+    echo "[orcaslicer-binaries] Extracting default OrcaSlicer profiles..."; \
+    if [ -d /orcaslicer-dist/opt/orcaslicer ]; then \
+        mkdir -p /orcaslicer-dist/profiles/process; \
+        # Look for profiles in common locations within the OrcaSlicer installation \
+        if [ -d "/orcaslicer-dist/opt/orcaslicer/resources/profiles" ]; then \
+            find "/orcaslicer-dist/opt/orcaslicer/resources/profiles" -name "*.json" -type f -exec cp {} /orcaslicer-dist/profiles/process/ \; 2>/dev/null || true; \
+            echo "[orcaslicer-binaries] Copied profiles from resources/profiles"; \
+        fi; \
+        if [ -d "/orcaslicer-dist/opt/orcaslicer/share/orca-slicer/profiles" ]; then \
+            find "/orcaslicer-dist/opt/orcaslicer/share/orca-slicer/profiles" -name "*.json" -type f -exec cp {} /orcaslicer-dist/profiles/process/ \; 2>/dev/null || true; \
+            echo "[orcaslicer-binaries] Copied profiles from share/orca-slicer/profiles"; \
+        fi; \
+        profile_count=$(find /orcaslicer-dist/profiles/process -name "*.json" 2>/dev/null | wc -l); \
+        echo "[orcaslicer-binaries] Found $profile_count profile files"; \
+    else \
+        echo "[orcaslicer-binaries] OrcaSlicer installation not found, skipping profile extraction"; \
+    fi; \
+    \
     # Verify what we extracted \
     echo "[orcaslicer-binaries] Extraction complete. Contents:"; \
     ls -la /orcaslicer-dist/ || true; \
     ls -la /orcaslicer-dist/opt/ 2>/dev/null || true; \
-    file /orcaslicer-dist/orcaslicer 2>/dev/null || true
+    file /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+    echo "[orcaslicer-binaries] Profiles extracted:"; \
+    ls -la /orcaslicer-dist/profiles/ 2>/dev/null || true
 
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
@@ -252,6 +273,9 @@ LABEL component="orcaslicer-worker" \
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
 
+# Copy OrcaSlicer default profiles from binary layer and set up config directory structure
+COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/profiles/process /home/appuser/.config/OrcaSlicer/profiles/process
+
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
 
@@ -260,6 +284,13 @@ RUN set -e; \
     chmod +x /usr/local/bin/orcaslicer && \
     test -f /usr/local/bin/orcaslicer && \
     test -s ./Farm.OrcaSlicer.Worker.dll && \
+    echo "OrcaSlicer worker binaries verified" && \
+    if [ -d /home/appuser/.config/OrcaSlicer/profiles/process ]; then \
+        profile_count=$(find /home/appuser/.config/OrcaSlicer/profiles/process -name "*.json" 2>/dev/null | wc -l); \
+        echo "Found $profile_count OrcaSlicer profiles in config directory"; \
+    else \
+        echo "WARNING: OrcaSlicer profiles directory not found"; \
+    fi && \
     echo "OrcaSlicer worker setup completed successfully"
 
 # Run as non-root user
