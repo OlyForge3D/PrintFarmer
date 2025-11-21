@@ -2022,17 +2022,17 @@ adjust_connection_strings_for_network_mode() {
         case "$DB_PROVIDER" in
             postgres)
                 # PostgreSQL: Change from "Host=postgres" to "Host=localhost"
-                CONNECTION_STRING="Host=localhost;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+                CONNECTION_STRING="Host=localhost;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-}"
                 print_success "PostgreSQL connection string updated for host networking"
                 ;;
             sqlserver)
                 # SQL Server: Change from "Server=sqlserver" to "Server=localhost,PORT"
-                CONNECTION_STRING="Server=localhost,${SQLSERVER_PORT:-1433};Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
+                CONNECTION_STRING="Server=localhost,${SQLSERVER_PORT:-1433};Database=${SQLSERVER_DB:-printfarmer};User Id=sa;Password=${SQLSERVER_PASSWORD:-};TrustServerCertificate=True;"
                 print_success "SQL Server connection string updated for host networking (port ${SQLSERVER_PORT:-1433})"
                 ;;
             mysql)
                 # MySQL: Change from "Server=mysql" to "Server=localhost"
-                CONNECTION_STRING="Server=localhost;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
+                CONNECTION_STRING="Server=localhost;Database=${MYSQL_DB:-printfarmer};User=${MYSQL_USER:-root};Password=${MYSQL_PASSWORD:-};"
                 print_success "MySQL connection string updated for host networking"
                 ;;
         esac
