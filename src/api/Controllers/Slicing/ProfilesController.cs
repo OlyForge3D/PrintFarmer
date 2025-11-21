@@ -4,6 +4,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Repositories.Slicing;
+using Farm.Web.Api.Repositories.Workers;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -19,12 +20,14 @@ public class ProfilesController(
     IUnifiedLoggingService logger,
     Farm.Web.Api.Services.Slicing.IProfilesService profilesService,
     ISlicerProfileRepository slicerProfileRepo,
-    IPrintersRepository printersRepo) : ControllerBase
+    IPrintersRepository printersRepo,
+    IWorkerRepository workerRepository) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly Farm.Web.Api.Services.Slicing.IProfilesService _profilesService = profilesService;
     private readonly ISlicerProfileRepository _slicerProfileRepo = slicerProfileRepo;
     private readonly IPrintersRepository _printersRepo = printersRepo;
+    private readonly IWorkerRepository _workerRepository = workerRepository;
 
     [HttpPost("import")]
     [Authorize(Policy = "farm_admin")] // Admin-only: profile import
@@ -546,8 +549,12 @@ public class ProfilesController(
     {
         try
         {
-            // Call the OrcaSlicer worker /version endpoint to get the OrcaSlicer version
-            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+            // Get OrcaSlicer worker URL from database registry
+            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
+            }
 
             // First, get the OrcaSlicer version from the worker
             string? orcaVersion = null;
@@ -644,17 +651,38 @@ public class ProfilesController(
                 details = "Profiles are version-specific based on the OrcaSlicer version in the worker. Different OrcaSlicer versions will have different profiles. Re-run this endpoint when upgrading OrcaSlicer. Query SlicerVersion field to find profiles for a specific slicer version."
             });
         }
+        });
+        }
         catch (HttpRequestException ex)
         {
-            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
-            _logger.LogError($"Failed to connect to OrcaSlicer worker at {workerUrl}: {ex.Message}");
-            return StatusCode(503, $"OrcaSlicer worker unavailable at {workerUrl}. Please ensure the worker service is running.");
+            _logger.LogError($"Failed to connect to OrcaSlicer worker: {ex.Message}");
+            return StatusCode(503, $"OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
         }
         catch (Exception ex)
         {
             _logger.LogError($"Error seeding system profiles: {ex.Message}");
             return StatusCode(500, $"Error seeding profiles: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Reseed system OrcaSlicer profiles from the worker (same as seed-from-worker but returns all profiles)</summary>
+    [HttpPost("system/orca/reseed-profiles")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: system profile seeding
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ReseedSystemOrcaProfilesAsync(
+        [FromServices] HttpClient httpClient,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Get OrcaSlicer worker URL from database registry
+            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                return Ok(new { imported = 0, skipped = 0, message = "No profiles available from worker" });
+            }
     }
 
     /// <summary>
@@ -681,8 +709,12 @@ public class ProfilesController(
                 _logger.LogInformation($"Deleted {deletedCount} existing system OrcaSlicer profiles for force reseed");
             }
 
-            // Call the OrcaSlicer worker /version endpoint to get the OrcaSlicer version
-            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+            // Get OrcaSlicer worker URL from database registry
+            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
+            }
 
             // First, get the OrcaSlicer version from the worker
             string? orcaVersion = null;
@@ -775,9 +807,8 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
-            _logger.LogError($"Failed to connect to OrcaSlicer worker at {workerUrl}: {ex.Message}");
-            return StatusCode(503, $"OrcaSlicer worker unavailable at {workerUrl}. Please ensure the worker service is running.");
+            _logger.LogError($"Failed to connect to OrcaSlicer worker: {ex.Message}");
+            return StatusCode(503, $"OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
         }
         catch (Exception ex)
         {
@@ -805,9 +836,12 @@ public class ProfilesController(
     {
         try
         {
-            // Call the OrcaSlicer worker /profiles endpoint
-            // Worker is available at http://orcaslicer-worker:8080 (in Docker) or http://localhost:8080 (locally)
-            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
+            // Get OrcaSlicer worker URL from database registry
+            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
+            if (string.IsNullOrEmpty(workerUrl))
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
+            }
             var response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
@@ -823,9 +857,8 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            var workerUrl = Environment.GetEnvironmentVariable("ORCASLICER_WORKER_URL") ?? "http://orcaslicer-worker:8080";
-            _logger.LogError($"Failed to connect to OrcaSlicer worker at {workerUrl}: {ex.Message}");
-            return StatusCode(503, $"OrcaSlicer worker unavailable at {workerUrl}. Please ensure the worker service is running.");
+            _logger.LogError($"Failed to connect to OrcaSlicer worker: {ex.Message}");
+            return StatusCode(503, $"OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
         }
         catch (Exception ex)
         {
@@ -1068,5 +1101,46 @@ public class ProfilesController(
             Imported = imported,
             Duplicated = duplicated
         });
+    }
+
+    /// <summary>
+    /// Get the OrcaSlicer worker URL from the worker registry in the database
+    /// </summary>
+    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Query for any worker with OrcaSlicer capability that is online
+            var allWorkers = await _workerRepository.GetAllAsync(limit: 100, offset: 0);
+            var orcaWorker = allWorkers.FirstOrDefault(w =>
+                w.Status == "online" &&
+                !string.IsNullOrEmpty(w.CapabilitiesJson) &&
+                w.CapabilitiesJson.Contains("orcaslicer", StringComparison.OrdinalIgnoreCase));
+
+            if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.EndpointUrl))
+            {
+                _logger.LogInformation($"Using OrcaSlicer worker from registry: {orcaWorker.Name} at {orcaWorker.EndpointUrl}");
+                return orcaWorker.EndpointUrl;
+            }
+
+            // Fallback: try to find any OrcaSlicer worker (even if offline, in case it's just between heartbeats)
+            orcaWorker = allWorkers.FirstOrDefault(w =>
+                !string.IsNullOrEmpty(w.CapabilitiesJson) &&
+                w.CapabilitiesJson.Contains("orcaslicer", StringComparison.OrdinalIgnoreCase));
+
+            if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.EndpointUrl))
+            {
+                _logger.LogWarning($"OrcaSlicer worker '{orcaWorker.Name}' is not online, but using endpoint anyway: {orcaWorker.EndpointUrl}");
+                return orcaWorker.EndpointUrl;
+            }
+
+            _logger.LogWarning("No OrcaSlicer worker found in registry");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to query worker registry: {ex.Message}");
+            return null;
+        }
     }
 }
