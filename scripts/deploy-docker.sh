@@ -261,6 +261,13 @@ mask_secret_short() {
 }
 
 ensure_connection_string_password() {
+    local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+    
+    # SQLite doesn't require a password
+    if [ "$provider" = "sqlite" ]; then
+        return 0
+    fi
+    
     local conn
     conn=$(get_kv_from_file "$ENV_FILE" "ConnectionStrings__Default" || true)
     if [ -z "$conn" ]; then
@@ -273,8 +280,6 @@ ensure_connection_string_password() {
     if [ -n "$current_password" ]; then
         return 0
     fi
-
-    local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
     local fallback_pw=""
     case "$provider" in
         postgres)
@@ -783,9 +788,15 @@ tear_down_deployment() {
         # Preferred ordered list: stop frontends and API first, then workers, then monitoring/telemetry, then database
         local ordered_services=(frontend api orcaslicer-worker orcaslicer-worker-multistage worker prometheus grafana jaeger otel-collector database registry)
 
-        # If an env file was provided, pass it to docker compose commands
+        # If an env file was provided, load its variables and pass it to docker compose commands
         local env_arg=( )
         if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
+            # Source the env file to export variables into the current shell context
+            # This prevents "variable is not set. Defaulting to a blank string" warnings from docker compose
+            set -a
+            # shellcheck source=/dev/null
+            source "$env_file"
+            set +a
             env_arg=(--env-file "$env_file")
         fi
 
@@ -849,8 +860,10 @@ tear_down_deployment() {
 
     # 1. Stop all remaining running containers (fallback)
     print_info "Step 1/7: Stopping any remaining running Docker containers..."
-    if [ -n "$(docker ps -q)" ]; then
-        docker stop $(docker ps -aq) 2>/dev/null || true
+    local running_containers
+    running_containers=$(timeout 10 docker ps -q 2>/dev/null || true)
+    if [ -n "$running_containers" ]; then
+        timeout 15 docker stop $running_containers 2>/dev/null || true
         print_success "Stopped running containers (attempted)"
     else
         print_info "No running containers found"
@@ -859,19 +872,20 @@ tear_down_deployment() {
     # 2. Remove all remaining containers (force remove any leftovers)
     print_info "Step 2/7: Removing any remaining Docker containers..."
     local all_containers
-    all_containers=$(docker ps -aq)
+    all_containers=$(timeout 10 docker ps -aq 2>/dev/null || true)
     if [ -n "$all_containers" ]; then
         # Try normal remove first, then force-remove to handle odd states
-        docker rm $all_containers 2>/dev/null || true
+        timeout 15 docker rm $all_containers 2>/dev/null || true
         # Re-query and force remove stubborn containers
-        remaining=$(docker ps -aq)
+        remaining=$(timeout 10 docker ps -aq 2>/dev/null || true)
         if [ -n "$remaining" ]; then
             print_warning "Some containers remain after normal removal. Attempting force remove..."
-            docker rm -f $remaining 2>/dev/null || true
+            timeout 15 docker rm -f $remaining 2>/dev/null || true
         fi
 
         # Final check
-        if [ -z "$(docker ps -aq)" ]; then
+        final_check=$(timeout 10 docker ps -aq 2>/dev/null || true)
+        if [ -z "$final_check" ]; then
             print_success "Containers removed"
         else
             print_warning "Some containers could not be removed. Run 'docker ps -a' to inspect and remove manually."
@@ -897,11 +911,13 @@ tear_down_deployment() {
     
     # 3. Remove all volumes
     print_info "Step 3/7: Removing all Docker volumes..."
-    if docker volume ls -q | grep -q .; then
+    local vol_list
+    vol_list=$(timeout 10 docker volume ls -q 2>/dev/null || true)
+    if [ -n "$vol_list" ]; then
         # Remove volumes with force flag (-f) to handle in-use volumes
         # Also handle per-project volumes explicitly (e.g., pfarm_printfarmer-database)
-        docker volume ls -q | while read -r vol; do
-            docker volume rm -f "$vol" 2>/dev/null && echo "  • Removed $vol" || echo "  ⚠ Failed to remove $vol (may be in use)"
+        echo "$vol_list" | while read -r vol; do
+            timeout 5 docker volume rm -f "$vol" 2>/dev/null && echo "  • Removed $vol" || echo "  ⚠ Failed to remove $vol (may be in use)"
         done
         print_success "Volumes removal attempted"
     else
@@ -1538,8 +1554,6 @@ install_dotnet_sdk() {
 
 # Choose deployment architecture
 choose_architecture() {
-    print_header "🏗️  Deployment Architecture"
-    
     # Check if architecture was specified via CLI
     if [ -n "${CLI_ARCHITECTURE:-}" ]; then
         case "$CLI_ARCHITECTURE" in
@@ -1565,6 +1579,14 @@ choose_architecture() {
                 ;;
         esac
     fi
+    
+    # In non-interactive mode, use defaults if architecture already loaded from config
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ARCHITECTURE:-}" ]; then
+        print_info "Using configured architecture: $ARCHITECTURE"
+        return 0
+    fi
+    
+    print_header "🏗️  Deployment Architecture"
     
     echo -e "${BLUE}PrintFarmer supports two deployment architectures:${NC}"
     echo
@@ -1746,6 +1768,18 @@ validate_configuration() {
 
 # Configure database settings
 configure_database() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${DB_PROVIDER:-}" ]; then
+        # Validate SQLite is only used with monolithic architecture
+        if [ "${DB_PROVIDER:-}" = "sqlite" ] && [ "$ARCHITECTURE" != "monolithic" ]; then
+            print_error "SQLite can only be used with monolithic architecture, not $ARCHITECTURE"
+            print_error "Please use postgres, sqlserver, or mysql for $ARCHITECTURE deployments"
+            exit 1
+        fi
+        print_info "Using configured database: $DB_PROVIDER"
+        return 0
+    fi
+    
     print_header "💾 Database Configuration"
     
     if [ "$ARCHITECTURE" = "monolithic" ]; then
@@ -1788,16 +1822,16 @@ configure_database() {
                         prompt_with_default "MySQL connection string:" "Server=your-mysql-host;Database=printfarmer;User=root;Password=your-password;" "CONNECTION_STRING"
                         ;;
                     *)
-                        print_warning "Unknown database type, using SQLite as fallback"
-                        DB_PROVIDER="sqlite"
-                        CONNECTION_STRING="Data Source=/data/farm.db"
+                        print_warning "Unknown database type, using PostgreSQL as fallback"
+                        DB_PROVIDER="postgres"
+                        prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
                         ;;
                 esac
                 ;;
             *)
-                print_warning "Unknown choice, using SQLite as fallback"
-                DB_PROVIDER="sqlite"
-                CONNECTION_STRING="Data Source=/data/farm.db"
+                print_warning "Unknown choice, using PostgreSQL as fallback"
+                DB_PROVIDER="postgres"
+                prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
                 ;;
         esac
     else
@@ -1931,6 +1965,12 @@ configure_database() {
 
 # Configure networking
 configure_networking() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${NETWORK_MODE:-}" ]; then
+        print_info "Using configured network mode: $NETWORK_MODE"
+        return 0
+    fi
+    
     print_header "🌐 Network Configuration"
     
     # For microservices, all services run on the docker bridge network for service discovery by hostname
@@ -2022,17 +2062,17 @@ adjust_connection_strings_for_network_mode() {
         case "$DB_PROVIDER" in
             postgres)
                 # PostgreSQL: Change from "Host=postgres" to "Host=localhost"
-                CONNECTION_STRING="Host=localhost;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+                CONNECTION_STRING="Host=localhost;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-}"
                 print_success "PostgreSQL connection string updated for host networking"
                 ;;
             sqlserver)
                 # SQL Server: Change from "Server=sqlserver" to "Server=localhost,PORT"
-                CONNECTION_STRING="Server=localhost,${SQLSERVER_PORT:-1433};Database=$SQLSERVER_DB;User Id=sa;Password=$SQLSERVER_PASSWORD;TrustServerCertificate=True;"
+                CONNECTION_STRING="Server=localhost,${SQLSERVER_PORT:-1433};Database=${SQLSERVER_DB:-printfarmer};User Id=sa;Password=${SQLSERVER_PASSWORD:-};TrustServerCertificate=True;"
                 print_success "SQL Server connection string updated for host networking (port ${SQLSERVER_PORT:-1433})"
                 ;;
             mysql)
                 # MySQL: Change from "Server=mysql" to "Server=localhost"
-                CONNECTION_STRING="Server=localhost;Database=$MYSQL_DB;User=$MYSQL_USER;Password=$MYSQL_PASSWORD;"
+                CONNECTION_STRING="Server=localhost;Database=${MYSQL_DB:-printfarmer};User=${MYSQL_USER:-root};Password=${MYSQL_PASSWORD:-};"
                 print_success "MySQL connection string updated for host networking"
                 ;;
         esac
@@ -2336,6 +2376,12 @@ DOCKEREOF
 
 # Configure additional settings
 configure_external_storage() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${USE_EXTERNAL_STORAGE:-}" ]; then
+        print_info "Using configured external storage: $USE_EXTERNAL_STORAGE"
+        return 0
+    fi
+    
     print_header "💾 External Storage Configuration (P0 Data Persistence)"
     
     echo -e "${BLUE}3D Model Storage & G-Code Library${NC}"
@@ -2418,6 +2464,12 @@ configure_external_storage() {
 }
 
 configure_additional() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENVIRONMENT:-}" ]; then
+        print_info "Using configured environment: $ENVIRONMENT"
+        return 0
+    fi
+    
     print_header "⚙️  Additional Configuration"
     
     # Initialize monitoring/observability variables with defaults if not already set
@@ -2438,7 +2490,7 @@ configure_additional() {
         ENABLE_DETAILED_LOGGING="true"
         print_info "Development mode: Swagger UI and detailed logging enabled"
     else
-        ENABLE_SWAGGER="false" 
+        ENABLE_SWAGGER="false"
         ENABLE_DETAILED_LOGGING="false"
         print_info "Production mode: Swagger UI and detailed logging disabled"
     fi
@@ -2951,12 +3003,12 @@ ORCA_HOST_PORT=$ORCA_HOST_PORT
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
 # Spoolman
-SPOOLMAN_ENABLED=$ENABLE_SPOOLMAN
-SPOOLMAN_BASE_URL=$SPOOLMAN_BASE_URL
-SPOOLMAN_PORT=$SPOOLMAN_PORT
+SPOOLMAN_ENABLED=${ENABLE_SPOOLMAN:-no}
+SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
+SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
 
 # Application Settings - PFARM Configuration
-PFARM__Spoolman__BaseUrl=$SPOOLMAN_BASE_URL
+PFARM__Spoolman__BaseUrl=${SPOOLMAN_BASE_URL:-}
 PFARM__NetworkDiscovery__EnableDiscovery=$ENABLE_DISCOVERY
 PFARM__NetworkDiscovery__DiscoverySubnets=$NETWORK_RANGES
 
@@ -3508,7 +3560,8 @@ DBEOF
   orcaslicer-worker:
     build:
       context: .
-      dockerfile: Dockerfile.orcaslicer
+      dockerfile: Dockerfile.multistage
+      target: orcaslicer-worker
     profiles:
       - orca
     image: printfarmer-orcaslicer-worker
@@ -3650,37 +3703,11 @@ deploy_containers() {
         BUILD_CTX_DIR="./.tmp_build_context"
         mkdir -p "$BUILD_CTX_DIR"
 
-        # Canonical path for orcaslicer binaries Dockerfile (keep canonical copy under scripts/docker/dockerfiles)
-        CANONICAL_ORCA_DOCKERFILE="./scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries"
-        ROOT_ORCA_DOCKERFILE="./Dockerfile.orcaslicer-binaries"
-
-        # Helper: ensure a Dockerfile.orcaslicer-binaries exists at repo root for build commands that expect it
-        ensure_root_dockerfile() {
-            if [ -f "$CANONICAL_ORCA_DOCKERFILE" ]; then
-                if [ ! -f "$ROOT_ORCA_DOCKERFILE" ]; then
-                    print_info "Creating $ROOT_ORCA_DOCKERFILE from canonical template"
-                    cp "$CANONICAL_ORCA_DOCKERFILE" "$ROOT_ORCA_DOCKERFILE" || {
-                        print_warning "Failed to copy $CANONICAL_ORCA_DOCKERFILE to root; build may fail"
-                    }
-                    # Mark that we created it so cleanup can remove it
-                    export _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
-                else
-                    # Root file already present; leave as-is
-                    export _PF_CREATED_ROOT_ORCA_DOCKERFILE=0
-                fi
-            else
-                print_warning "Canonical Dockerfile $CANONICAL_ORCA_DOCKERFILE not found; continuing without creating root copy"
-            fi
-        }
-
-        # Helper: cleanup root Dockerfile if we created it
-        cleanup_root_dockerfile() {
-            if [ "${_PF_CREATED_ROOT_ORCA_DOCKERFILE:-0}" = "1" ] && [ -f "$ROOT_ORCA_DOCKERFILE" ]; then
-                print_info "Removing temporary $ROOT_ORCA_DOCKERFILE"
-                rm -f "$ROOT_ORCA_DOCKERFILE" || print_warning "Failed to remove $ROOT_ORCA_DOCKERFILE"
-                unset _PF_CREATED_ROOT_ORCA_DOCKERFILE
-            fi
-        }
+        # Ensure Dockerfile.multistage exists at repo root (primary source for all Docker builds)
+        if [ ! -f "./Dockerfile.multistage" ]; then
+            print_error "Dockerfile.multistage not found at repository root - required for consolidated OrcaSlicer builds"
+            exit 1
+        fi
 
         if [ -n "$ORCA_ASSET_IMAGE" ]; then
             print_info "Using Orca assets image: $ORCA_ASSET_IMAGE"
@@ -3709,35 +3736,11 @@ deploy_containers() {
             print_info "Prepared temporary build_context at ./build_context"
         fi
 
-        # If the user provided an extracted Orca assets directory under build_context/orca,
-        # prefer building an assets image from those extracted files. This creates
-        # an image tag `orcaslicer-assets:ci` that will be used as the asset source
-        # for subsequent orcaslicer-binaries / worker builds.
-        if [ -d "./build_context/orca" ]; then
-            # Detect common extracted layouts (orca7z/ or orcaslicer_binary/)
-            if [ -d "./build_context/orca/orca7z" ] || [ -d "./build_context/orca/orcaslicer_dist" ] || [ -f "./build_context/orca/orcaslicer_binary/orca-slicer" ] ; then
-                print_info "Detected local extracted Orca assets in ./build_context/orca — building orcaslicer-assets:ci from extracted files"
-                platform_arg=()
-                if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
-                    platform_arg+=(--platform "${DOCKER_BUILD_PLATFORM}")
-                fi
-                # Build using the extracted-assets Dockerfile (canonical copy under dockerfiles/)
-                if docker build "${platform_arg[@]}" -f dockerfiles/Dockerfile.orca-assets-extracted -t orcaslicer-assets:ci ./build_context/orca; then
-                    docker tag orcaslicer-assets:ci orcaslicer-assets:local || true
-                    # Make subsequent logic treat this as the prebuilt asset image
-                    ORCA_ASSET_IMAGE="orcaslicer-assets:ci"
-                    export ORCA_ASSET_IMAGE
-                    print_success "Built orcaslicer-assets:ci from local extracted files"
-                else
-                    print_warning "Failed to build orcaslicer-assets:ci from ./build_context/orca — will fall back to download/build later"
-                fi
-            fi
-        fi
-
         # Build orcaslicer-binaries layer first if orca worker is enabled (optimized caching)
+        # Note: All binary downloading and extraction is now consolidated in Dockerfile.multistage orcaslicer-binaries stage
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
-            print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching)..."
+            print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching via Dockerfile.multistage)..."
             
             # Build binary layer with automatic download and extraction
             BUILD_ARGS="--build-arg ORCASLICER_VERSION=${ORCA_VERSION} --build-arg ALLOW_STUB=false"
@@ -3760,34 +3763,17 @@ deploy_containers() {
                 fi
             fi
             
-            # Ensure a root-level Dockerfile.orcaslicer-binaries exists for compatibility with existing build invocations
-            # Prefer using the dockerfile-generator utility to create a merged/generated Dockerfile for this scenario
-            if [ -x "./scripts/docker/dockerfile-generator.sh" ]; then
-                print_info "Generating $ROOT_ORCA_DOCKERFILE from configuration via dockerfile-generator"
-                ./scripts/docker/dockerfile-generator.sh --generate-config \
-                    --architecture "${CLI_ARCHITECTURE:-}" \
-                    --enable-orca-worker "${ENABLE_ORCA_WORKER:-no}" \
-                    --include-monitoring "${CLI_INCLUDE_MONITORING:-false}" \
-                    --include-telemetry "${CLI_INCLUDE_TELEMETRY:-false}" \
-                    --include-security "${CLI_INCLUDE_SECURITY:-false}" \
-                    --include-registry "${CLI_INCLUDE_REGISTRY:-false}" \
-                    --db-provider "${DB_PROVIDER:-}" --out "$ROOT_ORCA_DOCKERFILE" || {
-                    print_warning "dockerfile-generator failed; falling back to direct copy"
-                    ensure_root_dockerfile
-                }
-                # mark as created so cleanup removes it
-                if [ -f "$ROOT_ORCA_DOCKERFILE" ]; then
-                    export _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
-                fi
-            else
-                ensure_root_dockerfile
+            # Ensure a root-level Dockerfile.multistage exists for build commands
+            if [ ! -f "./Dockerfile.multistage" ]; then
+                print_error "Dockerfile.multistage not found - required for OrcaSlicer builds"
+                exit 1
             fi
 
             ORCA_BUILD_CMD=(docker build)
             if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
                 ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
             fi
-            ORCA_BUILD_CMD+=(-f Dockerfile.orcaslicer-binaries -t "orcaslicer-binaries:${ORCA_VERSION}" -t "orcaslicer-binaries:latest" $BUILD_ARGS .)
+            ORCA_BUILD_CMD+=(-f Dockerfile.multistage --target orcaslicer-binaries -t "orcaslicer-binaries:${ORCA_VERSION}" -t "orcaslicer-binaries:latest" $BUILD_ARGS .)
 
             if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ]; then
                 print_success "Skipping orcaslicer-binaries build (using prebuilt image)"
@@ -3797,30 +3783,13 @@ deploy_containers() {
                 else
                     print_error "Failed to build orcaslicer-binaries:${ORCA_VERSION} layer"
                     print_error "This layer contains the OrcaSlicer binary and will be cached for optimal build performance"
-                    cleanup_root_dockerfile
                     exit 1
                 fi
             fi
-
-            # Cleanup temporary root Dockerfile if we created one
-            cleanup_root_dockerfile
         fi
 
-        # Build slicer-base first if workers are enabled (required dependency)
-        if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            print_info "Building printfarmer-slicer-base image (required for worker containers)..."
-            SLICER_BUILD_CMD=(docker build)
-            if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
-                SLICER_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
-            fi
-            SLICER_BUILD_CMD+=(-f scripts/docker/dockerfiles/Dockerfile.slicer-base -t printfarmer-slicer-base:latest .)
-            if "${SLICER_BUILD_CMD[@]}"; then
-                print_success "printfarmer-slicer-base image built successfully"
-            else
-                print_error "Failed to build printfarmer-slicer-base image"
-                exit 1
-            fi
-        fi
+        # Note: slicer-base stage is now part of Dockerfile.multistage (orcaslicer-worker target)
+        # No separate build needed - docker compose build will handle it automatically
         
         # Now build all services
         # Support passing --platform to docker compose build when requested

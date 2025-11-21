@@ -41,12 +41,23 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfile = new SlicerProfileDto
             {
-                LayerHeight = 0.2,
-                InfillPercentage = 20,
-                PrintSpeed = 50,
-                NozzleTemperature = 210,
-                BedTemperature = 60,
-                Material = "PLA"
+                ProcessProfile = new ProcessProfileDto
+                {
+                    Name = "Test Profile",
+                    LayerHeight = 0.2,
+                    InfillPercentage = 20,
+                    PrintSpeed = 50,
+                    Supports = false,
+                    Quality = "standard"
+                },
+                FilamentProfile = new FilamentProfileDto
+                {
+                    Name = "Test Filament",
+                    Material = "PLA",
+                    NozzleTemperature = 210,
+                    BedTemperature = 60,
+                    PrintSpeed = 50
+                }
             },
             Priority = SlicingJobPriority.Normal
         };
@@ -86,7 +97,10 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
             ModelFileUrl = new Uri("https://example.com/small-test.stl"),
             ModelFileName = "small-test.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
-            SlicerProfile = new SlicerProfileDto { LayerHeight = 0.3 },
+            SlicerProfile = new SlicerProfileDto 
+            { 
+                ProcessProfile = new ProcessProfileDto { LayerHeight = 0.3, Quality = "standard", Name = "Test" }
+            },
             Priority = SlicingJobPriority.High
         };
 

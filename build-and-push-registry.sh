@@ -32,14 +32,14 @@ ORCA_BUILD_CMD=(docker build --progress="${DOCKER_PROGRESS}")
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_BUILD_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
 fi
-# Generate a merged Dockerfile for this build scenario (creates ./Dockerfile.orcaslicer-binaries)
-if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
-    echo "Generating Dockerfile.orcaslicer-binaries via dockerfile-generator.sh"
-    ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries || echo "[warning] generator failed, falling back to canonical file"
-    _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
+
+# Use Dockerfile.multistage with orcaslicer-binaries target (consolidated single source)
+if [ ! -f "./Dockerfile.multistage" ]; then
+    echo "[error] Dockerfile.multistage not found - required for consolidated OrcaSlicer builds"
+    exit 1
 fi
 
-ORCA_BUILD_CMD+=( -f ./Dockerfile.orcaslicer-binaries \
+ORCA_BUILD_CMD+=( -f ./Dockerfile.multistage --target orcaslicer-binaries \
     -t "orcaslicer-binaries:$ORCASLICER_VERSION" \
     -t "orcaslicer-binaries:latest" \
     -t "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION" \
@@ -54,13 +54,13 @@ ORCA_BUILD_CMD+=( -f ./Dockerfile.orcaslicer-binaries \
 echo "✅ Binary layer built successfully"
 echo ""
 
-# Build worker
+# Build worker using multistage target (consolidated single source)
 echo "🔨 Building worker: printfarmer-orcaslicer-worker"
 WORKER_CMD=(docker build --progress="${DOCKER_PROGRESS}")
 if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     WORKER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
 fi
-WORKER_CMD+=( -f Dockerfile.orcaslicer \
+WORKER_CMD+=( -f Dockerfile.multistage --target orcaslicer-worker \
     -t "printfarmer-orcaslicer-worker:latest" \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:latest" \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:$ORCASLICER_VERSION" \

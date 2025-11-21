@@ -7,8 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Repositories.Gcode;
-using Farm.Web.Api.Repositories.Queue;
+using Farm.Infrastructure.Repositories.Gcode;
+using Farm.Web.Api.Services.Queue;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Http;
 
@@ -17,13 +17,13 @@ namespace Farm.Web.Api.Services.Gcode
     public class GcodeLibraryService : IGcodeLibraryService
     {
         private readonly IGcodeRepository _gcodeRepo;
-        private readonly IQueueRepository _queueRepo;
+        private readonly IQueueDataService _queueDataService;
         private readonly IUnifiedLoggingService _logger;
 
-        public GcodeLibraryService(IGcodeRepository gcodeRepo, IQueueRepository queueRepo, IUnifiedLoggingService logger)
+        public GcodeLibraryService(IGcodeRepository gcodeRepo, IQueueDataService queueDataService, IUnifiedLoggingService logger)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
-            _queueRepo = queueRepo ?? throw new ArgumentNullException(nameof(queueRepo));
+            _queueDataService = queueDataService ?? throw new ArgumentNullException(nameof(queueDataService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -181,7 +181,7 @@ namespace Farm.Web.Api.Services.Gcode
                 return false;
             }
 
-            int activeJobs = await _queueRepo.CountActiveJobsUsingGcodeAsync(id, ct);
+            int activeJobs = await _queueDataService.CountActiveJobsUsingGcodeAsync(id, ct);
             if (activeJobs > 0)
             {
                 return false;

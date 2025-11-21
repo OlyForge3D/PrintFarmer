@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -14,7 +14,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 /// <summary>
 /// Service for discovering and exporting OrcaSlicer profiles from the local installation.
 /// OrcaSlicer stores profiles in:
-/// - ~/.config/OrcaSlicer/profiles/printer/ (printer profiles)
+/// - ~/.config/OrcaSlicer/profiles/printer/ (machine profiles)
 /// - ~/.config/OrcaSlicer/profiles/filament/ (filament/material profiles)
 /// - ~/.config/OrcaSlicer/profiles/process/ (process/quality profiles)
 /// </summary>
@@ -30,159 +30,230 @@ public class OrcaProfilesService : ISlicerProfilesService
         _orcaConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "OrcaSlicer");
     }
 
-    public async Task<IList<SlicerProfileDto>> ListAvailableProfilesAsync(CancellationToken ct = default)
+    public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
     {
-        var profiles = new List<SlicerProfileDto>();
+        return await LoadProfilesOfTypeAsync<MachineProfileDto>("printer", ct);
+    }
+
+    public async Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default)
+    {
+        return await LoadProfilesOfTypeAsync<FilamentProfileDto>("filament", ct);
+    }
+
+    public async Task<IList<ProcessProfileDto>> ListAvailableProcessProfilesAsync(CancellationToken ct = default)
+    {
+        return await LoadProfilesOfTypeAsync<ProcessProfileDto>("process", ct);
+    }
+
+    private async Task<IList<T>> LoadProfilesOfTypeAsync<T>(string profileType, CancellationToken ct) where T : class, new()
+    {
+        var profiles = new List<T>();
 
         try
         {
+            _logger.LogInformation($"Loading {profileType} profiles from: {_orcaConfigPath}");
+            
             if (!Directory.Exists(_orcaConfigPath))
             {
                 _logger.LogWarning($"OrcaSlicer config directory not found: {_orcaConfigPath}");
                 return profiles;
             }
 
-            // Process profiles are typically in:
-            // ~/.config/OrcaSlicer/profiles/process/*.json
-            var processPath = Path.Combine(_orcaConfigPath, "profiles", "process");
-            if (Directory.Exists(processPath))
+            var typePath = Path.Combine(_orcaConfigPath, "profiles", profileType);
+            if (!Directory.Exists(typePath))
             {
-                var processProfiles = await LoadProfilesFromDirectoryAsync(processPath, ct);
-                profiles.AddRange(processProfiles);
-                _logger.LogInformation($"Found {processProfiles.Count} process profiles in {processPath}");
-            }
-            else
-            {
-                _logger.LogDebug($"Process profiles directory not found: {processPath}");
-            }
-
-            _logger.LogInformation($"Total OrcaSlicer profiles discovered: {profiles.Count}");
-            return profiles;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Error listing OrcaSlicer profiles: {ex.Message}");
-            return profiles;
-        }
-    }
-
-    private async Task<IList<SlicerProfileDto>> LoadProfilesFromDirectoryAsync(string dirPath, CancellationToken ct)
-    {
-        var profiles = new List<SlicerProfileDto>();
-
-        try
-        {
-            if (!Directory.Exists(dirPath))
-            {
+                _logger.LogInformation($"Profile type directory not found: {typePath}");
                 return profiles;
             }
 
-            var jsonFiles = Directory.GetFiles(dirPath, "*.json", SearchOption.TopDirectoryOnly);
+            var jsonFiles = Directory.GetFiles(typePath, "*.json", SearchOption.TopDirectoryOnly);
+            _logger.LogInformation($"Found {jsonFiles.Length} JSON files in {profileType} directory");
+            
+            int successCount = 0;
+            int failureCount = 0;
+
             foreach (var filePath in jsonFiles)
             {
                 try
                 {
-                    var profile = await ParseOrcaProfileAsync(filePath, ct);
-                    if (profile != null)
+                    var profile = ParseProfile(filePath, profileType);
+                    if (profile is T typedProfile && typedProfile != null)
                     {
-                        profiles.Add(profile);
+                        profiles.Add(typedProfile);
+                        successCount++;
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Failed to parse {profileType} profile {Path.GetFileName(filePath)} into correct type");
+                        failureCount++;
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to parse OrcaSlicer profile {filePath}: {ex.Message}");
+                    _logger.LogWarning($"Exception parsing {profileType} profile {Path.GetFileName(filePath)}: {ex.Message}");
+                    failureCount++;
                 }
             }
+
+            _logger.LogInformation($"Loaded {successCount} {profileType} profiles ({failureCount} failures from {jsonFiles.Length} files)");
+            return profiles;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error loading profiles from {dirPath}: {ex.Message}");
+            _logger.LogError($"Error loading {profileType} profiles: {ex.Message}");
+            return profiles;
         }
-
-        return profiles;
     }
 
-    private async Task<SlicerProfileDto?> ParseOrcaProfileAsync(string filePath, CancellationToken ct)
+    private object? ParseProfile(string filePath, string profileType)
     {
         try
         {
-            var fileContent = await File.ReadAllTextAsync(filePath, ct);
-            using var doc = JsonDocument.Parse(fileContent);
+            var json = File.ReadAllText(filePath);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            // Extract profile metadata
-            string profileName = Path.GetFileNameWithoutExtension(filePath);
-            string material = "Unknown";
-            double layerHeight = 0.2;
-            int infillPercentage = 20;
-            int nozzleTemp = 200;
-            int bedTemp = 60;
-            string quality = "Standard";
-
-            // Try to extract from JSON structure (varies by profile type and OrcaSlicer version)
-            if (root.TryGetProperty("name", out var nameElem))
+            // Skip profiles with "instantiation": false - these are not actual profiles
+            if (root.TryGetProperty("instantiation", out var instantiationElem) && instantiationElem.ValueKind == JsonValueKind.False)
             {
-                profileName = nameElem.GetString() ?? profileName;
+                return null;
             }
 
-            if (root.TryGetProperty("filament_type", out var materialElem))
+            return profileType switch
             {
-                material = materialElem.GetString() ?? material;
-            }
-            else if (root.TryGetProperty("material", out var matElem))
-            {
-                material = matElem.GetString() ?? material;
-            }
-
-            if (root.TryGetProperty("layer_height", out var layerElem) && layerElem.TryGetDouble(out var lh))
-            {
-                layerHeight = lh;
-            }
-
-            if (root.TryGetProperty("fill_density", out var infillElem) && infillElem.TryGetInt32(out var inf))
-            {
-                infillPercentage = inf;
-            }
-
-            if (root.TryGetProperty("nozzle_temperature", out var nozzleElem) && nozzleElem.TryGetInt32(out var nt))
-            {
-                nozzleTemp = nt;
-            }
-
-            if (root.TryGetProperty("bed_temperature", out var bedElem) && bedElem.TryGetInt32(out var bt))
-            {
-                bedTemp = bt;
-            }
-
-            // Determine quality based on layer height (rough heuristic)
-            if (layerHeight <= 0.15)
-            {
-                quality = "Fine";
-            }
-            else if (layerHeight >= 0.28)
-            {
-                quality = "Draft";
-            }
-            else
-            {
-                quality = "Standard";
-            }
-
-            return new SlicerProfileDto
-            {
-                LayerHeight = layerHeight,
-                InfillPercentage = infillPercentage,
-                NozzleTemperature = nozzleTemp,
-                BedTemperature = bedTemp,
-                Material = material,
-                Quality = quality
+                "printer" => ParseMachineProfile(root, filePath),
+                "filament" => ParseFilamentProfile(root, filePath),
+                "process" => ParseProcessProfile(root, filePath),
+                _ => null
             };
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to parse OrcaSlicer profile {filePath}: {ex.Message}");
+            _logger.LogWarning($"Failed to parse {profileType} profile {filePath}: {ex.Message}");
             return null;
         }
     }
-}
 
+    private MachineProfileDto? ParseMachineProfile(JsonElement root, string filePath)
+    {
+        var profile = new MachineProfileDto();
+
+        if (root.TryGetProperty("name", out var nameElem))
+            profile.Name = nameElem.GetString() ?? string.Empty;
+
+        if (root.TryGetProperty("manufacturer", out var mfgElem))
+            profile.Manufacturer = mfgElem.GetString() ?? string.Empty;
+
+        // Store all settings as raw JSON for flexibility
+        profile.Settings = SerializeElementToDict(root);
+
+        return profile;
+    }
+
+    private FilamentProfileDto? ParseFilamentProfile(JsonElement root, string filePath)
+    {
+        var profile = new FilamentProfileDto();
+
+        if (root.TryGetProperty("name", out var nameElem))
+            profile.Name = nameElem.GetString() ?? string.Empty;
+
+        if (root.TryGetProperty("filament_type", out var typeElem))
+            profile.Material = typeElem.GetString() ?? "PLA";
+        else if (root.TryGetProperty("material", out var matElem))
+            profile.Material = matElem.GetString() ?? "PLA";
+
+        if (root.TryGetProperty("nozzle_temperature", out var nozzleElem))
+            profile.NozzleTemperature = ParseIntValue(nozzleElem) ?? 210;
+
+        if (root.TryGetProperty("bed_temperature", out var bedElem))
+            profile.BedTemperature = ParseIntValue(bedElem) ?? 60;
+
+        if (root.TryGetProperty("travel_speed", out var speedElem))
+            profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
+
+        // Store all settings as raw JSON for flexibility
+        profile.Settings = SerializeElementToDict(root);
+
+        return profile;
+    }
+
+    private ProcessProfileDto? ParseProcessProfile(JsonElement root, string filePath)
+    {
+        var profile = new ProcessProfileDto();
+
+        if (root.TryGetProperty("name", out var nameElem))
+            profile.Name = nameElem.GetString() ?? string.Empty;
+
+        if (root.TryGetProperty("layer_height", out var layerElem))
+            profile.LayerHeight = ParseDoubleValue(layerElem) ?? 0.2;
+
+        if (root.TryGetProperty("fill_density", out var infillElem))
+            profile.InfillPercentage = ParseIntValue(infillElem) ?? 20;
+
+        if (root.TryGetProperty("wall_loops", out var speedElem))
+            profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
+
+        if (root.TryGetProperty("enable_support", out var supportsElem))
+            profile.Supports = ParseBoolValue(supportsElem);
+
+        // Determine quality based on layer height
+        if (profile.LayerHeight <= 0.15)
+            profile.Quality = "fine";
+        else if (profile.LayerHeight >= 0.28)
+            profile.Quality = "draft";
+        else
+            profile.Quality = "standard";
+
+        // Store all settings as raw JSON for flexibility
+        profile.Settings = SerializeElementToDict(root);
+
+        return profile;
+    }
+
+    private int? ParseIntValue(JsonElement elem)
+    {
+        if (elem.ValueKind == JsonValueKind.Number)
+            return elem.TryGetInt32(out var val) ? val : null;
+        else if (elem.ValueKind == JsonValueKind.String)
+            return int.TryParse(elem.GetString(), out var val) ? val : null;
+        return null;
+    }
+
+    private double? ParseDoubleValue(JsonElement elem)
+    {
+        if (elem.ValueKind == JsonValueKind.Number)
+            return elem.TryGetDouble(out var val) ? val : null;
+        else if (elem.ValueKind == JsonValueKind.String)
+            return double.TryParse(elem.GetString(), out var val) ? val : null;
+        return null;
+    }
+
+    private bool ParseBoolValue(JsonElement elem)
+    {
+        if (elem.ValueKind == JsonValueKind.True)
+            return true;
+        else if (elem.ValueKind == JsonValueKind.String)
+            return elem.GetString() == "true" || elem.GetString() == "1";
+        return false;
+    }
+
+    private Dictionary<string, object> SerializeElementToDict(JsonElement elem)
+    {
+        var dict = new Dictionary<string, object>();
+        try
+        {
+            if (elem.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in elem.EnumerateObject())
+                {
+                    dict[prop.Name] = prop.Value.GetRawText();
+                }
+            }
+        }
+        catch
+        {
+            // If serialization fails, return empty dict
+        }
+        return dict;
+    }
+}

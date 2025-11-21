@@ -3,8 +3,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Hubs;
-using Farm.Web.Api.Repositories.Slicing;
-using Farm.Web.Api.Repositories.Workers;
+using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
@@ -48,6 +48,18 @@ namespace Farm.Web.Api.Tests.SlicerServices
             return mock.Object;
         }
 
+        private static HttpClient CreateMockHttpClient()
+        {
+            var handler = new System.Net.Http.HttpClientHandler();
+            return new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+        }
+
+        private static Mock<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository> CreateMockProfileRepository()
+        {
+            var mock = new Mock<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository>(MockBehavior.Loose);
+            return mock;
+        }
+
         [Fact(DisplayName = "RegisterAsync creates Worker with matching capabilities and slots")]
         public async Task RegisterAsync_Should_Create_Worker()
         {
@@ -57,7 +69,9 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var mockHub = CreateMockHub(out var clientProxy);
             var metrics = CreateMetrics();
             var settings = CreateMockSlicerSettings();
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics, settings);
+            var httpClient = CreateMockHttpClient();
+            var profileRepo = CreateMockProfileRepository();
+            var svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
 
             var dto = new RegisterSlicerDto
             {
@@ -104,7 +118,9 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var mockHub = CreateMockHub(out var clientProxy);
             var metrics = CreateMetrics();
             var settings = CreateMockSlicerSettings();
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics, settings);
+            var httpClient = CreateMockHttpClient();
+            var profileRepo = CreateMockProfileRepository();
+            var svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
 
             var dto = new RegisterSlicerDto
             {
@@ -147,7 +163,9 @@ namespace Farm.Web.Api.Tests.SlicerServices
             var mockHub = CreateMockHub(out var clientProxy);
             var metrics = CreateMetrics();
             var settings = CreateMockSlicerSettings();
-            var svc = new SlicersService(slicerRepo, workerRepo, mockHub.Object, metrics, settings);
+            var httpClient = CreateMockHttpClient();
+            var profileRepo = CreateMockProfileRepository();
+            var svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
 
             var dto = new RegisterSlicerDto
             {

@@ -8,8 +8,8 @@ namespace Farm.Web.Api.Services.Slicing
 {
     public interface IProfilesService
     {
-        Task<SlicerProfileResponseDto> CreateProfileAsync(CreateSlicerProfileDto req, CancellationToken ct);
-        Task<SlicerProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct);
+        Task<ProcessProfileResponseDto> CreateProfileAsync(CreateProcessProfileDto req, CancellationToken ct);
+        Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct);
         Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(CancellationToken ct);
         Task DeleteProfileAsync(Guid id, CancellationToken ct);
     }

@@ -21,12 +21,12 @@ namespace Farm.Web.Api.Controllers;
 public class ArtifactsController : ControllerBase
 {
     private readonly IArtifactsService _service;
-    private readonly Farm.Web.Api.Repositories.Slicing.ISliceJobRepository _jobRepository;
+    private readonly Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository _jobRepository;
 
     private readonly Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> _settings;
     public ArtifactsController(
         IArtifactsService service,
-        Farm.Web.Api.Repositories.Slicing.ISliceJobRepository jobRepository,
+        Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository jobRepository,
         Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> settings)
     {
         _service = service ?? throw new ArgumentNullException(nameof(service));

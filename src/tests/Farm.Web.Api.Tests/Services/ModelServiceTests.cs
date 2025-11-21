@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Tests.Services
             var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
-            var mockRepo = new Mock<Farm.Web.Api.Repositories.Model.IModelRepository>(MockBehavior.Strict);
+            var mockRepo = new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Strict);
             // For happy path: repository returns no existing model for the hash and will accept AddAsync
             mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Farm.Infrastructure.Domain.Model3D?)null);
@@ -78,7 +78,7 @@ namespace Farm.Web.Api.Tests.Services
                 UpdatedAt = DateTime.UtcNow
             };
 
-            var mockRepo = new Mock<Farm.Web.Api.Repositories.Model.IModelRepository>(MockBehavior.Strict);
+            var mockRepo = new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Strict);
             // For duplicate scenario: GetByHashAsync returns existing model for any hash
             mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existing);

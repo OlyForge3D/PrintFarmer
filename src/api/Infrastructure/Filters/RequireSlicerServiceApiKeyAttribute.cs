@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
-using Farm.Web.Api.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Slicing;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 

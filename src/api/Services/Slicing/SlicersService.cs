@@ -6,8 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Hubs;
-using Farm.Web.Api.Repositories.Slicing;
-using Farm.Web.Api.Repositories.Workers;
+using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Microsoft.AspNetCore.SignalR;
@@ -18,7 +18,7 @@ namespace Farm.Web.Api.Services.Slicing
     {
         private readonly ISlicersRepository _repo;
         private readonly IWorkerRepository _workerRepo;
-        private readonly ISlicerProfileRepository _profileRepo;
+        private readonly IProcessProfileRepository _profileRepo;
         private readonly IHubContext<SlicerHub> _hub;
         private readonly SlicerServiceMetrics _metrics;
         private readonly HttpClient _httpClient;
@@ -28,7 +28,7 @@ namespace Farm.Web.Api.Services.Slicing
         public SlicersService(
             ISlicersRepository repo,
             IWorkerRepository workerRepo,
-            ISlicerProfileRepository profileRepo,
+            IProcessProfileRepository profileRepo,
             IHubContext<SlicerHub> hub,
             SlicerServiceMetrics metrics,
             HttpClient httpClient,
@@ -430,7 +430,7 @@ namespace Farm.Web.Api.Services.Slicing
                     return;
                 }
 
-                // Call the worker's /profiles endpoint
+                // Call the worker's /profiles endpoint which now returns AllProfilesResponseDto with all three profile types
                 var workerUrl = workerHost.TrimEnd('/');
                 var response = await _httpClient.GetAsync($"{workerUrl}/profiles", ct);
 
@@ -441,9 +441,9 @@ namespace Farm.Web.Api.Services.Slicing
                 }
 
                 var json = await response.Content.ReadAsStringAsync(ct);
-                var workerProfiles = JsonSerializer.Deserialize<List<SlicerProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                if (workerProfiles == null || workerProfiles.Count == 0)
+                if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
                 {
                     System.Diagnostics.Debug.WriteLine("No profiles available from worker");
                     return;
@@ -451,44 +451,50 @@ namespace Farm.Web.Api.Services.Slicing
 
                 int imported = 0;
 
-                // Import each profile as a system profile
-                foreach (var profile in workerProfiles)
+                // Import process profiles from worker
+                if (allProfiles.ProcessProfiles?.Count > 0)
                 {
-                    // Generate hash for deduplication
-                    var profileHash = $"{profile.Material}:{profile.Quality}:{profile.LayerHeight}:{profile.InfillPercentage}";
-
-                    // Check if already exists using repository (defensive check)
-                    var existing = await _profileRepo.GetByHashAsync(profileHash, ct);
-                    if (existing != null)
+                    foreach (var profile in allProfiles.ProcessProfiles)
                     {
-                        continue;
+                        try
+                        {
+                            var profileJson = JsonSerializer.Serialize(profile);
+                            var profileHash = ComputeProfileHash(profileJson);
+
+                            var existing = await _profileRepo.GetByHashAsync(profileHash, ct);
+                            if (existing != null && existing.IsSystem)
+                            {
+                                continue;
+                            }
+
+                            var systemProfile = new ProcessProfile
+                            {
+                                Id = Guid.NewGuid(),
+                                Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
+                                Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
+                                SlicerType = SlicerType.OrcaSlicer,
+                                Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out var q) ? q : ProfileQuality.Standard,
+                                LayerHeight = profile.LayerHeight,
+                                InfillPercentage = profile.InfillPercentage,
+                                PrintSpeed = profile.PrintSpeed,
+                                EnableSupports = profile.Supports,
+                                IsSystem = true,
+                                IsPublic = true,
+                                IsDefault = false,
+                                Hash = profileHash,
+                                RawJson = profileJson,
+                                CreatedAt = DateTime.UtcNow,
+                                UpdatedAt = DateTime.UtcNow
+                            };
+
+                            await _profileRepo.AddAsync(systemProfile, ct);
+                            imported++;
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Failed to import process profile: {ex.Message}");
+                        }
                     }
-
-                    // Create new system profile
-                    var systemProfile = new SlicerProfile
-                    {
-                        Id = Guid.NewGuid(),
-                        Name = $"{profile.Material} - {profile.Quality} ({profile.LayerHeight}mm)",
-                        Description = $"Official OrcaSlicer system profile",
-                        SlicerType = SlicerType.OrcaSlicer,
-                        Material = profile.Material ?? "PLA",
-                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "Standard", true, out var q) ? q : ProfileQuality.Standard,
-                        LayerHeight = profile.LayerHeight,
-                        InfillPercentage = profile.InfillPercentage,
-                        PrintSpeed = profile.PrintSpeed,
-                        NozzleTemperature = profile.NozzleTemperature,
-                        BedTemperature = profile.BedTemperature,
-                        EnableSupports = profile.Supports,
-                        IsSystem = true,
-                        IsPublic = true,
-                        IsDefault = false,
-                        Hash = profileHash,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-
-                    await _profileRepo.AddAsync(systemProfile, ct);
-                    imported++;
                 }
 
                 if (imported > 0)
@@ -501,6 +507,13 @@ namespace Farm.Web.Api.Services.Slicing
                 System.Diagnostics.Debug.WriteLine($"Error seeding profiles: {ex.Message}");
                 // Don't throw - profile seeding is best-effort
             }
+        }
+
+        private static string ComputeProfileHash(string profileJson)
+        {
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var hashedBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(profileJson));
+            return Convert.ToHexString(hashedBytes);
         }
     }
 }

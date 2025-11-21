@@ -1,6 +1,6 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.Slicing;
 // ClaimJobRequest now lives in shared contracts
@@ -24,7 +24,7 @@ public class SliceJobController : ControllerBase
     private readonly ISliceJobEventService _eventService;
     private readonly ILogger<SliceJobController> _logger;
     private readonly IHostEnvironment _env;
-    private readonly ISlicerProfileRepository _profileRepository;
+    private readonly IProcessProfileRepository _profileRepository;
     private readonly IArtifactsService _artifactsService;
     private readonly Farm.Web.Api.Services.Slicing.SliceJobMetrics _metrics;
     private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService;
@@ -36,7 +36,7 @@ public class SliceJobController : ControllerBase
         ISliceJobEventService eventService,
         ILogger<SliceJobController> logger,
         IHostEnvironment env,
-        ISlicerProfileRepository profileRepository,
+        IProcessProfileRepository profileRepository,
         IArtifactsService artifactsService,
         Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
         Farm.Web.Api.Services.Slicing.SliceJobMetrics metrics,
@@ -151,7 +151,7 @@ public class SliceJobController : ControllerBase
         }
 
         // Resolve profile if provided (profile takes precedence over raw JSON string)
-        SlicerProfile? referencedProfile = null;
+        ProcessProfile? referencedProfile = null;
         if (request.SlicerProfileId.HasValue)
         {
             referencedProfile = await _profileRepository.GetByIdAsync(request.SlicerProfileId.Value, HttpContext.RequestAborted);
@@ -643,7 +643,7 @@ public class SliceJobController : ControllerBase
         // Record successful completion in circuit breaker
         if (job.WorkerId.HasValue && job.WorkerId.Value != Guid.Empty && _circuitBreaker != null)
         {
-            var workerRepo = HttpContext.RequestServices.GetRequiredService<Farm.Web.Api.Repositories.Workers.IWorkerRepository>();
+            var workerRepo = HttpContext.RequestServices.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
             await _circuitBreaker.RecordJobSuccessAsync(job.WorkerId.Value, workerRepo, HttpContext.RequestAborted);
         }
 

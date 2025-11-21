@@ -32,7 +32,7 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     {
         // Arrange - create a queued job first
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
@@ -64,7 +64,7 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     {
         // Arrange - create a queued job first
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
@@ -101,7 +101,7 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     {
         // Arrange - create a processing job
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
@@ -135,7 +135,7 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     {
         // Arrange - create a processing job
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
@@ -174,7 +174,7 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     {
         // Arrange - create a processing job with artifact
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
         var job = new Farm.Infrastructure.Domain.SliceJob
@@ -214,7 +214,7 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     {
         // Arrange - create a processing job with artifact
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
         var job = new Farm.Infrastructure.Domain.SliceJob
@@ -259,7 +259,7 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     {
         // Arrange - create a queued job
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),

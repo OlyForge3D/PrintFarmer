@@ -9,7 +9,7 @@ using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Slicing.Abstractions;
@@ -119,17 +119,33 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Printers.IPrintersRepository, Farm.Infrastructure.Repositories.Printers.EfPrintersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IProfilesRepository, Farm.Infrastructure.Repositories.Slicing.EfProfilesRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
+        _ = services.AddScoped<Farm.Web.Api.Services.Queue.IQueueDataService, Farm.Web.Api.Services.Queue.QueueDataService>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
         // Catalog repository contract moved to infra; register infra implementation
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.PrinterCapabilities.IPrinterCapabilitiesRepository, Farm.Infrastructure.Repositories.PrinterCapabilities.EfPrinterCapabilitiesRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Harvest.IHarvestRepository, Farm.Infrastructure.Repositories.Harvest.EfHarvestRepository>();
-        _ = services.AddScoped<ISlicerProfileRepository, EfSlicerProfileRepository>();
-        _ = services.AddScoped<ISlicersRepository, EfSlicersRepository>();
-        _ = services.AddScoped<IProfilesRepository, ProfilesRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileConsistencyRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileConsistencyRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.IModelTagMappingRepository, Farm.Infrastructure.Repositories.Tags.EfModelTagMappingRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Infrastructure.Repositories.PasswordPolicy.PasswordPolicyRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Infrastructure.Repositories.SchemaHealth.SchemaHealthRepository>();
+        
+        // Slicing repositories - moved to infra
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfProcessProfileRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IMachineProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfMachineProfileRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IFilamentProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfFilamentProfileRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.ISlicersRepository, Farm.Infrastructure.Repositories.Slicing.EfSlicersRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository, Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository>();
+        
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
+
+        // Profile Parsing and Import Services
+        _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileParsingService, Farm.Web.Api.Services.Slicing.ProfileParsingService>();
+        _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileImportService, Farm.Web.Api.Services.Slicing.ProfileImportService>();
 
         // Slicer Library Registration
         // Dynamically discover and register slicer library plugins using SlicerPluginAttribute.
@@ -275,7 +291,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService, Farm.Web.Api.Services.Gcode.GcodeMetadataExtractorService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeFilesService, Farm.Web.Api.Services.Gcode.GcodeFilesService>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Gcode.IGcodeRepository, Farm.Web.Api.Repositories.Gcode.EfGcodeRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Gcode.IGcodeRepository, Farm.Infrastructure.Repositories.Gcode.EfGcodeRepository>();
 
         // Gcode upload settings and quota service
         _ = services.AddSingleton<Farm.Web.Api.Services.IGcodeUploadSettings, Farm.Web.Api.Services.InMemoryGcodeUploadSettings>();
@@ -283,7 +299,7 @@ public static class ServiceCollectionExtensions
 
         // Model file management services
         // IModelRepository must be Scoped (uses EF DbContext which is scoped)
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Model.IModelRepository, Farm.Web.Api.Repositories.Model.EfModelRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Model.IModelRepository, Farm.Infrastructure.Repositories.Model.EfModelRepository>();
         // IModelService is Scoped to match repository lifetime and per-request data patterns
         _ = services.AddScoped<Farm.Web.Api.Services.Model.IModelService, Farm.Web.Api.Services.Model.ModelService>();
         // ModelAnalysisService is stateless and reusable - register as Singleton for efficiency

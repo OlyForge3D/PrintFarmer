@@ -1468,9 +1468,34 @@ public class Model3DValidationResultDto
 
 // Slicer Integration DTOs
 /// <summary>
-/// Slicer profile parameters controlling core print characteristics.
+/// Composite slicer profile that combines machine, process (quality), and filament profiles.
+/// This is the primary profile object passed when slicing a model - it contains all three
+/// profile types needed for a complete slicing operation.
 /// </summary>
 public class SlicerProfileDto
+{
+    /// <summary>
+    /// Machine/printer profile controlling hardware-specific settings (bed size, extruders, etc.)
+    /// </summary>
+    public MachineProfileDto? MachineProfile { get; set; }
+
+    /// <summary>
+    /// Process/quality profile controlling print characteristics (layer height, infill, speed, supports).
+    /// </summary>
+    public ProcessProfileDto? ProcessProfile { get; set; }
+
+    /// <summary>
+    /// Filament/material profile controlling material-specific settings (temperatures, speeds, material type).
+    /// </summary>
+    public FilamentProfileDto? FilamentProfile { get; set; }
+}
+
+/// <summary>
+/// Flat slicer profile data sent by the worker service during slicing operations.
+/// This represents the profile parameters in a flat structure as understood by the worker.
+/// Used internally for worker communication only - not exposed through the public API.
+/// </summary>
+public class WorkerSlicerProfileDto
 {
     public double LayerHeight { get; set; } = 0.2;
     public int InfillPercentage { get; set; } = 20;
@@ -1480,6 +1505,60 @@ public class SlicerProfileDto
     public bool Supports { get; set; }
     public string Material { get; set; } = "PLA";
     public string Quality { get; set; } = "standard"; // draft, standard, fine
+}
+
+/// <summary>
+/// Machine/Printer profile DTO for OrcaSlicer.
+/// Contains printer-specific configuration like bed size, extruders, etc.
+/// </summary>
+public class MachineProfileDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Manufacturer { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public Dictionary<string, object> Settings { get; set; } = new();
+}
+
+/// <summary>
+/// Filament/Material profile DTO for OrcaSlicer.
+/// Contains material-specific settings like temperature, speed, etc.
+/// </summary>
+public class FilamentProfileDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Material { get; set; } = "PLA";
+    public string? Manufacturer { get; set; }
+    public string? Description { get; set; }
+    public int NozzleTemperature { get; set; } = 210;
+    public int BedTemperature { get; set; } = 60;
+    public int PrintSpeed { get; set; } = 50;
+    public Dictionary<string, object> Settings { get; set; } = new();
+}
+
+/// <summary>
+/// Process/Quality profile DTO for OrcaSlicer.
+/// Contains quality/speed settings like layer height, infill, supports, etc.
+/// </summary>
+public class ProcessProfileDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Quality { get; set; } = "standard"; // draft, standard, fine
+    public double LayerHeight { get; set; } = 0.2;
+    public int InfillPercentage { get; set; } = 20;
+    public int PrintSpeed { get; set; } = 50;
+    public bool Supports { get; set; }
+    public string? Description { get; set; }
+    public Dictionary<string, object> Settings { get; set; } = new();
+}
+
+/// <summary>
+/// Combined response from worker /profiles endpoint containing all three profile types.
+/// </summary>
+public class AllProfilesResponseDto
+{
+    public IList<MachineProfileDto> MachineProfiles { get; set; } = new List<MachineProfileDto>();
+    public IList<FilamentProfileDto> FilamentProfiles { get; set; } = new List<FilamentProfileDto>();
+    public IList<ProcessProfileDto> ProcessProfiles { get; set; } = new List<ProcessProfileDto>();
 }
 
 /// <summary>
@@ -1506,7 +1585,7 @@ public class SliceMetadataDto
 }
 
 // Slicer Profile Management DTOs
-public class CreateSlicerProfileDto
+public class CreateProcessProfileDto
 {
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -1526,7 +1605,7 @@ public class CreateSlicerProfileDto
     public bool IsPublic { get; set; } = true;
 }
 
-public class SlicerProfileResponseDto
+public class ProcessProfileResponseDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1552,7 +1631,7 @@ public class SlicerProfileResponseDto
 }
 
 // Advanced profile import/export DTOs (Phase 6)
-public class ImportSlicerProfileDto
+public class ImportProcessProfileDto
 {
     public string RawJson { get; set; } = string.Empty; // Raw profile JSON from slicer export
     public string? Name { get; set; } // Optional override; if null we derive from profileType + layerHeight
@@ -1563,7 +1642,7 @@ public class ImportSlicerProfileDto
     public bool IsPublic { get; set; } = true; // Visibility to other users
 }
 
-public class SlicerProfileExtendedDto
+public class ProcessProfileExtendedDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1572,10 +1651,7 @@ public class SlicerProfileExtendedDto
     public double LayerHeight { get; set; }
     public int InfillPercentage { get; set; }
     public double PrintSpeed { get; set; }
-    public int NozzleTemperature { get; set; }
-    public int BedTemperature { get; set; }
     public bool EnableSupports { get; set; }
-    public string Material { get; set; } = string.Empty;
     public string Quality { get; set; } = string.Empty;
     public bool IsDefault { get; set; }
     public bool IsPublic { get; set; }
@@ -1586,7 +1662,7 @@ public class SlicerProfileExtendedDto
     public Dictionary<string, object?> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
-public class SlicerProfileExportDto
+public class ProcessProfileExportDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1601,7 +1677,6 @@ public class SlicerProfileListItemDto
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string SlicerType { get; set; } = string.Empty;
-    public string Material { get; set; } = string.Empty;
     public string Quality { get; set; } = string.Empty;
     public double LayerHeight { get; set; }
     public int InfillPercentage { get; set; }

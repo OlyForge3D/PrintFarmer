@@ -319,7 +319,13 @@ public enum FileHealthStatus
 }
 
 // Slicer Profile Management System
-public class SlicerProfile
+
+/// <summary>
+/// Process/Quality profile from OrcaSlicer.
+/// Contains quality/speed settings like layer height, infill density, print speeds, etc.
+/// Does NOT contain material or machine settings - those are stored in separate FilamentProfile and MachineProfile entities.
+/// </summary>
+public class ProcessProfile
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -332,10 +338,7 @@ public class SlicerProfile
     public double LayerHeight { get; set; } = 0.2; // in mm
     public int InfillPercentage { get; set; } = 20; // 0-100%
     public double PrintSpeed { get; set; } = 50; // mm/s
-    public int NozzleTemperature { get; set; } = 210; // °C
-    public int BedTemperature { get; set; } = 60; // °C
     public bool EnableSupports { get; set; }
-    public string Material { get; set; } = "PLA";
     public ProfileQuality Quality { get; set; } = ProfileQuality.Standard;
     public string? AdvancedSettings { get; set; } // JSON object with additional slicer-specific settings
     /// <summary>
@@ -351,7 +354,7 @@ public class SlicerProfile
     public string? RawJson { get; set; }
     /// <summary>
     /// Extracted metadata summary stored as flat JSON object for quick querying and display.
-    /// Examples: { "layerHeight": 0.2, "nozzleDiameter": 0.4, "filamentMaterial": "PLA", "slicerVersion": "1.7.0", ... }
+    /// Examples: { "layerHeight": 0.2, "infillPercentage": 20, "printSpeed": 50, "slicerVersion": "1.7.0", ... }
     /// Version information is extracted here and can be used to track which slicer version this profile is for.
     /// </summary>
     public string? MetadataJson { get; set; }
@@ -368,6 +371,58 @@ public class SlicerProfile
     /// System profiles come from the OrcaSlicer worker service and are version-specific.
     /// </summary>
     public bool IsSystem { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public User? CreatedByUser { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Machine/Printer profile from OrcaSlicer.
+/// Contains printer-specific configuration like bed size, extruders, etc.
+/// Stored separately from process and filament profiles as they have no overlap.
+/// </summary>
+public class MachineProfile
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Manufacturer { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public SlicerType SlicerType { get; set; }
+    public Guid? PrinterModelId { get; set; }
+    public PrinterModel? PrinterModel { get; set; }
+    public string? RawJson { get; set; } // Full profile JSON
+    public string? SettingsJson { get; set; } // Extracted settings as key-value pairs
+    public string? Hash { get; set; } // SHA256 for deduplication
+    public bool IsSystem { get; set; } // From OrcaSlicer system profiles
+    public string? SlicerVersion { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public User? CreatedByUser { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Filament/Material profile from OrcaSlicer.
+/// Contains material-specific settings like temperature, speed, etc.
+/// Stored separately from machine and process profiles as they have no overlap.
+/// </summary>
+public class FilamentProfile
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Material { get; set; } = "PLA";
+    public string? Manufacturer { get; set; }
+    public string? Description { get; set; }
+    public SlicerType SlicerType { get; set; }
+    public int NozzleTemperature { get; set; } = 210; // °C
+    public int BedTemperature { get; set; } = 60; // °C
+    public int PrintSpeed { get; set; } = 50; // mm/s
+    public string? RawJson { get; set; } // Full profile JSON
+    public string? SettingsJson { get; set; } // Extracted settings as key-value pairs
+    public string? Hash { get; set; } // SHA256 for deduplication
+    public bool IsSystem { get; set; } // From OrcaSlicer system profiles
+    public string? SlicerVersion { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
     public DateTime CreatedAt { get; set; }

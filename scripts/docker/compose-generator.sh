@@ -909,9 +909,17 @@ main() {
         postgres|sqlserver|mysql)
             : # Valid provider
             ;;
+        sqlite)
+            # SQLite only allowed for monolithic deployments
+            if [ "$ARCHITECTURE" != "monolithic" ]; then
+                log_error "SQLite database provider is only supported for monolithic architecture"
+                log_error "Use postgres, sqlserver, or mysql for $ARCHITECTURE deployments"
+                return 1
+            fi
+            ;;
         *)
             log_error "Invalid database provider: $DB_PROVIDER"
-            log_error "Valid options: postgres, sqlserver, mysql"
+            log_error "Valid options: postgres, sqlserver, mysql (sqlite for monolithic only)"
             return 1
             ;;
     esac

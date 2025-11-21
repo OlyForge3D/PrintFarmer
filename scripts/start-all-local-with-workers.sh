@@ -601,52 +601,41 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   warn "OrcaSlicer worker image not found. Building it with optimized binary caching..."
   cd "$ROOT_DIR"
   
-  # Build slicer-base first
-  SLICER_CMD=(docker build)
-  if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
-    SLICER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
-  fi
-  SLICER_CMD+=(-f Dockerfile.slicer-base -t printfarmer/slicer-base .)
-  "${SLICER_CMD[@]}"
-  docker tag printfarmer/slicer-base:latest slicer-base:latest
-  # Tag alternate name used by worker Dockerfiles if present
-  docker tag printfarmer/slicer-base:latest printfarmer-slicer-base:latest || true
+  # Note: slicer-base is now a stage in Dockerfile.multistage (orcaslicer-worker target)
+  # No separate build needed - docker compose or manual build will handle it automatically
   
-  # Build optimized binary layer first (cached for future builds)
+  # Build optimized binary layer first (cached for future builds) using consolidated Dockerfile.multistage
   ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
-  info "Building orcaslicer-binaries:${ORCA_VERSION} (cached binary layer)..."
+  info "Building orcaslicer-binaries:${ORCA_VERSION} (cached binary layer via Dockerfile.multistage)..."
+  
+  # Verify Dockerfile.multistage exists
+  if [ ! -f "$ROOT_DIR/Dockerfile.multistage" ]; then
+    error "Dockerfile.multistage not found - required for OrcaSlicer builds"
+    exit 1
+  fi
+  
   ORCA_BIN_CMD=(docker build)
   if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_BIN_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
   fi
-  # Generate Dockerfile.orcaslicer-binaries for local builds if generator exists
-  if [ -x "$ROOT_DIR/scripts/docker/dockerfile-generator.sh" ]; then
-    info "Generating Dockerfile.orcaslicer-binaries for local build"
-    (cd "$ROOT_DIR" && ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries) || info "Generator failed; falling back to canonical"
-    _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
-  fi
-  ORCA_DOCKERFILE=${ORCA_DOCKERFILE:-"./scripts/docker/dockerfiles/Dockerfile.orcaslicer-binaries"}
-  if [ -f "$ROOT_DIR/Dockerfile.orcaslicer-binaries" ]; then
-    ORCA_DOCKERFILE="$ROOT_DIR/Dockerfile.orcaslicer-binaries"
-  fi
-  ORCA_BIN_CMD+=(-f "$ORCA_DOCKERFILE" \
+  ORCA_BIN_CMD+=(-f "$ROOT_DIR/Dockerfile.multistage" --target orcaslicer-binaries \
     -t "orcaslicer-binaries:${ORCA_VERSION}" \
     -t "orcaslicer-binaries:latest" \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
     --build-arg ALLOW_STUB=false \
-    .)
+    "$ROOT_DIR")
   "${ORCA_BIN_CMD[@]}"
   
   # Build worker using cached binaries (fast)
-  info "Building orcaslicer-worker using cached binaries..."
+  info "Building orcaslicer-worker using cached binaries via Dockerfile.multistage..."
   ORCA_WORKER_CMD=(docker build)
   if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
     ORCA_WORKER_CMD+=(--platform "${DOCKER_BUILD_PLATFORM}")
   fi
-  ORCA_WORKER_CMD+=(-f Dockerfile.orcaslicer \
+  ORCA_WORKER_CMD+=(-f "$ROOT_DIR/Dockerfile.multistage" --target orcaslicer-worker \
     -t printfarmer/orcaslicer-worker \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
-    .)
+    "$ROOT_DIR")
   "${ORCA_WORKER_CMD[@]}"
 fi
 

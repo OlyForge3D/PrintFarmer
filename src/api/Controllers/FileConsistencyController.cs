@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
-using Farm.Web.Api.Repositories.FileConsistency;
+using Farm.Infrastructure.Repositories.FileConsistency;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

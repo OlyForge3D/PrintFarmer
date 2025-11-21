@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Slicing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -23,7 +23,7 @@ public class SliceJobTimeoutRecoveryTests
     public async Task RenewLeaseAsync_ExtendsLease()
     {
         await using var db = CreateInMemoryContext();
-        var repo = new Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository(db);
+        var repo = new Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository(db);
 
         var job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, ClaimedAt = DateTime.UtcNow, LeaseExpiresAt = DateTime.UtcNow.AddSeconds(10) };
         await repo.AddAsync(job);
@@ -43,7 +43,7 @@ public class SliceJobTimeoutRecoveryTests
     public async Task IncrementRetryAndRequeueAsync_RequeuesOrFails()
     {
         await using var db = CreateInMemoryContext();
-        var repo = new Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository(db);
+        var repo = new Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository(db);
 
         var job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, RetryCount = 0 };
         await repo.AddAsync(job);

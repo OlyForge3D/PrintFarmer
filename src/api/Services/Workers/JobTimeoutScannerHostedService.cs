@@ -3,7 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Slicing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -105,7 +105,7 @@ namespace Farm.Web.Api.Services.Workers
 
             using var scope = _sp.CreateScope();
             var repo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
-            var workerRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Workers.IWorkerRepository>();
+            var workerRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
 
             // Determine stuck jobs: jobs with expired leases OR processing longer than 15 minutes
             int longRunningSeconds = 60 * 15; // 15 minutes

@@ -5,8 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Repositories.Model;
-using Farm.Web.Api.Repositories.Tags;
+using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.Tags;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 

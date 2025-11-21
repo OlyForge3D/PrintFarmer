@@ -9,19 +9,19 @@ public class EfProfilesRepository : IProfilesRepository
     private readonly AppDbContext _db;
     public EfProfilesRepository(AppDbContext db) => _db = db;
 
-    public async Task<List<SlicerProfile>> GetAllAsync(CancellationToken ct) => await _db.SlicerProfiles.AsNoTracking().ToListAsync(ct);
+    public async Task<List<ProcessProfile>> GetAllAsync(CancellationToken ct) => await _db.ProcessProfiles.AsNoTracking().ToListAsync(ct);
 
-    public async Task<SlicerProfile?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.SlicerProfiles.FindAsync(new object?[] { id }, ct);
+    public async Task<ProcessProfile?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.ProcessProfiles.FindAsync(new object?[] { id }, ct);
 
-    public async Task AddAsync(SlicerProfile profile, CancellationToken ct)
+    public async Task AddAsync(ProcessProfile profile, CancellationToken ct)
     {
-        _ = _db.SlicerProfiles.Add(profile);
+        _ = _db.ProcessProfiles.Add(profile);
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task RemoveAsync(SlicerProfile profile, CancellationToken ct)
+    public async Task RemoveAsync(ProcessProfile profile, CancellationToken ct)
     {
-        _ = _db.SlicerProfiles.Remove(profile);
+        _ = _db.ProcessProfiles.Remove(profile);
         await _db.SaveChangesAsync(ct);
     }
 

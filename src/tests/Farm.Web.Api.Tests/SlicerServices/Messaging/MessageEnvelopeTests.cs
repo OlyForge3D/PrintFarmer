@@ -213,7 +213,9 @@ public class MessageEnvelopeTests
             ModelFileName = "test-model.stl",
             SlicerEngine = SlicerEngineType.PrusaSlicer,
             Priority = SlicingJobPriority.High,
-            SlicerProfile = new SlicerProfileDto { LayerHeight = 0.2 }
+            SlicerProfile = new SlicerProfileDto { 
+                ProcessProfile = new ProcessProfileDto { LayerHeight = 0.2, Name = "Test", Quality = "standard" }
+            }
         };
         request.Metadata["test"] = "value";
 
