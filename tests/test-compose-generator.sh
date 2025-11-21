@@ -137,11 +137,11 @@ test_host_network_generation() {
     # Check compose file content structure
     local compose_content=$(cat "$TEST_TEMP_DIR/docker-compose.yml")
     
-    # Validate host networking configuration
-    assert_contains "$compose_content" "network_mode:" "Should use host networking"
-    assert_contains "$compose_content" '"host"' "Should use host networking mode"
+    # Validate bridge networking configuration (microservices use bridge by default)
+    assert_contains "$compose_content" "printfarmer-network" "Should define printfarmer-network for bridge mode"
+    assert_contains "$compose_content" "driver: bridge" "Should use bridge network driver"
     
-    # Validate service structure for host network
+    # Validate service structure for microservices architecture
     assert_contains "$compose_content" "api:" "Should have API service"
     assert_contains "$compose_content" "database:" "Should have database service"
     
@@ -150,11 +150,10 @@ test_host_network_generation() {
     
     # Validate microservices configuration
     assert_contains "$compose_content" "DEPLOYMENT_MODE=microservices" "Should set microservices deployment mode"
-    assert_contains "$compose_content" "network_mode:" "API should use host network mode"
+    assert_contains "$compose_content" "networks:" "Should define networks for services"
     
-    # Validate networks exist for bridge network services
-    assert_contains "$compose_content" "networks:" "Should have networks for bridge network services"
-    assert_contains "$compose_content" "printfarmer-network" "Should define network for other services"
+    # Validate database and API are on the network
+    assert_contains "$compose_content" "printfarmer-network" "Services should be connected to printfarmer-network"
     
     # Validate no Redis references
     assert_not_contains "$compose_content" "redis:" "Should not contain Redis service"

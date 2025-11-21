@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Build the orcaslicer-worker image for amd64 using optimized binary layer caching.
+# Build the orcaslicer-worker image for amd64 using optimized binary layer caching via consolidated Dockerfile.multistage.
 # This script builds both the binary layer and worker for amd64 to obtain a real (non-stub) OrcaSlicer binary even on arm64 hosts.
 # Requires docker buildx with an amd64 builder configured (example: docker run --privileged --rm tonistiigi/binfmt --install all).
 # Usage:
@@ -16,20 +16,21 @@ if ! docker buildx version >/dev/null 2>&1; then
   exit 2
 fi
 
+# Verify Dockerfile.multistage exists
+if [ ! -f "./Dockerfile.multistage" ]; then
+    echo "ERROR: Dockerfile.multistage not found at repository root"
+    exit 1
+fi
+
 ORCA_VERSION="${ORCASLICER_VERSION:-2.3.1}"
 
-echo "[buildx] Building orcaslicer-binaries:${ORCA_VERSION} for linux/amd64 (cached layer)";
-if [ -x ./scripts/docker/dockerfile-generator.sh ]; then
-  echo "Generating Dockerfile.orcaslicer-binaries for buildx amd64"
-  ./scripts/docker/dockerfile-generator.sh --generate-config --enable-orca-worker yes --out ./Dockerfile.orcaslicer-binaries || echo "[warning] generator failed"
-  _PF_CREATED_ROOT_ORCA_DOCKERFILE=1
-fi
+echo "[buildx] Building orcaslicer-binaries:${ORCA_VERSION} for linux/amd64 (cached layer) using Dockerfile.multistage";
 
 DOCKER_BUILDKIT=1 docker buildx build \
   --progress="${DOCKER_PROGRESS}" \
   --platform linux/amd64 \
   -t "orcaslicer-binaries:${ORCA_VERSION}" \
-  -f ./Dockerfile.orcaslicer-binaries \
+  -f ./Dockerfile.multistage --target orcaslicer-binaries \
   --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
   --build-arg ALLOW_STUB=false \
   --load .
@@ -38,8 +39,8 @@ echo "[buildx] Building worker image for linux/amd64 -> ${TAG} (using cached bin
 DOCKER_BUILDKIT=1 docker buildx build \
   --progress="${DOCKER_PROGRESS}" \
   --platform linux/amd64 \
+  -f ./Dockerfile.multistage --target orcaslicer-worker \
   -t "${TAG}" \
-  -f Dockerfile.orcaslicer \
   --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
   --load .
 

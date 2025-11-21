@@ -48,12 +48,6 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: Build slicer-base (amd64)
-        if: steps.check.outputs.skip != 'true'
-        run: |
-          echo "Building slicer-base (platform linux/amd64) for downstream stages"
-          docker build --platform linux/amd64 -f Dockerfile.slicer-base -t printfarmer-slicer-base:latest .
-
       - name: Attempt to download preseeded Orca AppImage artifact
         if: steps.check.outputs.skip != 'true'
         id: preseed
@@ -92,20 +86,20 @@ jobs:
           fi
           RELEASE_BODY_SANITIZED=$(printf "%s" "$RELEASE_BODY" | tr '\n' ' ' | sed 's/"/'"'"'/g' | cut -c1-1000)
 
-          echo "Building OrcaSlicer worker version=${{ matrix.orca_version }} ALLOW_STUB=${{ matrix.allow_stub }}"
+          echo "Building OrcaSlicer worker version=${{ matrix.orca_version }} ALLOW_STUB=${{ matrix.allow_stub }} using Dockerfile.multistage"
           if [ "${{ steps.preseed.outputs.found }}" = "true" ] && [ -f preseed/orca.AppImage ]; then
             echo "Using preseeded orca.AppImage via buildkit secret"
             docker build --platform linux/amd64 --secret id=orca,src=preseed/orca.AppImage \
               --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
               --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
               $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
-              -f Dockerfile.orcaslicer -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+              -f Dockerfile.multistage --target orcaslicer-worker -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
           else
             echo "No preseeded AppImage available; performing normal build (will attempt remote download)"
             docker build --platform linux/amd64 --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
               --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
               $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
-              -f Dockerfile.orcaslicer -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
+              -f Dockerfile.multistage --target orcaslicer-worker -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
           fi
 
       - name: Run verification (require-real)

@@ -17,6 +17,155 @@ PrintFarmer supports two Docker deployment architectures:
 - **Better for large-scale or development team deployments**
 - **Supports distributed slicing workers** (OrcaSlicer / PrusaSlicer) with horizontal scaling
 
+## Deployment System Components
+
+PrintFarmer's Docker deployment system consists of three coordinated layers that work together to enable flexible, repeatable deployments:
+
+### 1. Orchestration Layer: `scripts/deploy-docker.sh`
+
+The main user-facing deployment script that handles interactive setup, validation, and container orchestration.
+
+**Key Responsibilities:**
+- Environment detection (OS, Docker versions)
+- Interactive configuration prompts with sensible defaults
+- Configuration validation and constraint enforcement
+- Calling the compose generator with appropriate options
+- Health checks and diagnostics after deployment
+- Safe deployment teardown
+
+**Key Features:**
+- Multiple execution modes (interactive, non-interactive, dry-run)
+- Configuration persistence (`.deploy-config` file)
+- Automatic password generation and validation
+- Database credential management
+- Port conflict detection and remapping
+- Pre/post-deployment health verification
+
+### 2. Generation Layer: `scripts/docker/compose-generator.sh`
+
+Dynamically generates `docker-compose.yml` from reusable YAML templates based on deployment options.
+
+**Key Responsibilities:**
+- Validates architecture selection (monolithic/microservices)
+- Reads common YAML anchors from `common.yml`
+- Assembles base compose file from architecture-specific templates
+- Injects optional service configurations (monitoring, telemetry, discovery)
+- Validates final YAML structure
+- Copies required Dockerfiles to output directory
+
+**Input Options:**
+- `--architecture` - monolithic | microservices
+- `--db-provider` - postgres | sqlserver | mysql | sqlite
+- `--enable-orca-worker` - yes | no (enable distributed slicing)
+- `--include-monitoring`, `--include-telemetry`, `--include-discovery` - optional services
+- `--output-dir` - where to write generated files
+
+**Output Files:**
+- `docker-compose.yml` - Generated Compose configuration
+- `docker-entrypoint-config.sh` - Database initialization script
+- `Dockerfile.multistage` - Copied from dockerfiles/ directory
+
+### 3. Build Layer: `dockerfiles/Dockerfile.multistage`
+
+Single multi-stage Dockerfile containing all build targets for all deployment modes.
+
+**Build Targets:**
+- `api-runtime` - Compiled .NET API server (used in both architectures)
+- `frontend-runtime` - React TypeScript web UI (used in microservices only)
+- `orcaslicer-worker` - Distributed slicing worker (optional microservice)
+- `slicer-base` - Common base for slicing workers
+- `printer-discovery-runtime` - Network discovery service
+- `orcaslicer-binaries` - Pre-built OrcaSlicer binaries
+
+**Advantages of Multi-Stage Design:**
+- Single source of truth for all build logic
+- Efficient layer caching across builds (faster rebuilds)
+- Unused targets don't affect deployment performance
+- Clear separation of concerns (each target is independent)
+
+### Template Structure
+
+```
+scripts/docker/compose-templates/
+├── common.yml                    # Shared YAML anchors & x- definitions
+├── monolithic.yml               # Monolithic architecture base
+├── microservices.yml            # Microservices architecture base
+├── services/
+│   ├── monitoring.yml           # Prometheus, Grafana
+│   ├── telemetry.yml            # OpenTelemetry collector
+│   ├── security.yml             # Security configurations
+│   ├── registry.yml             # Docker registry service
+│   └── discovery.yml            # Network printer discovery
+└── dockerfiles/
+    └── Dockerfile.multistage    # Single multi-stage build file
+```
+
+**common.yml** defines reusable YAML anchors for:
+- Health checks (API, database)
+- Resource limits (CPU, memory)
+- Security contexts
+- Networks
+- Restart policies
+
+Example:
+```yaml
+x-health-check-api: &health-check-api
+  test: ["CMD", "curl", "-f", "http://localhost:5245/healthz"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+```
+
+### Data Flow
+
+```
+┌─────────────────────────────────────┐
+│ User: ./scripts/deploy-docker.sh    │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ 1. Detect environment               │
+│ 2. Load/prompt configuration        │
+│ 3. Validate settings                │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ Call compose-generator.sh with:     │
+│ • --architecture <arch>             │
+│ • --db-provider <provider>          │
+│ • --enable-orca-worker <yes/no>     │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ compose-generator.sh:               │
+│ 1. Load common.yml anchors          │
+│ 2. Select architecture template     │
+│ 3. Inject optional services         │
+│ 4. Validate YAML                    │
+│ 5. Output: docker-compose.yml       │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ Docker Compose:                     │
+│ • Builds images using Dockerfile    │
+│ • Starts containers                 │
+│ • Initializes database              │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ Health checks & validation          │
+│ • API responsive                    │
+│ • Database connections work         │
+│ • Services healthy                  │
+└─────────────────────────────────────┘
+```
+
 ## Prerequisites
 
 ### Required Software

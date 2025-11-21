@@ -104,29 +104,116 @@ ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)
 ############################################################
-FROM --platform=${TARGETPLATFORM} alpine:3.19 AS orcaslicer-binaries
+FROM --platform=${TARGETPLATFORM} ubuntu:24.04 AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
 ARG ALLOW_STUB=true
+ARG GITHUB_TOKEN
 WORKDIR /tmp
 
-# Install required tools for binary downloading and extraction
-RUN apk add --no-cache curl ca-certificates jq file
+# Install extraction tools with comprehensive fallback support
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools \
+    file wget && rm -rf /var/lib/apt/lists/*
 
-# Download and prepare OrcaSlicer binary
+# Download and extract OrcaSlicer binaries with robust error handling
 RUN set -e; \
+    echo "[orcaslicer-binaries] Resolving OrcaSlicer version=${ORCASLICER_VERSION}"; \
+    mkdir -p /orcaslicer-dist/opt; \
+    \
     if [ "$ALLOW_STUB" = "true" ]; then \
-        echo "Creating OrcaSlicer stub binary"; \
-        mkdir -p /usr/local/bin; \
-        echo '#!/bin/sh\necho "OrcaSlicer stub binary - not functional"\nexit 1' > /usr/local/bin/orcaslicer; \
-        chmod +x /usr/local/bin/orcaslicer; \
+        echo "[orcaslicer-binaries] ALLOW_STUB=true, will create stub if download fails"; \
     else \
-        echo "Downloading OrcaSlicer from: $ORCASLICER_URL"; \
-        curl -L -o orcaslicer.AppImage "$ORCASLICER_URL"; \
+        echo "[orcaslicer-binaries] ALLOW_STUB=false, must download real binary"; \
+    fi; \
+    \
+    # Try to find the correct download URL dynamically \
+    dynamic_url=$(curl -H "Accept: application/vnd.github+json" \
+                      -H "User-Agent: OrcaSlicerWorker/1.0" \
+                      -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases" | \
+                  jq -r --arg ver "v${ORCASLICER_VERSION}" \
+                     '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | \
+                  head -n1 || true); \
+    \
+    if [ -n "$dynamic_url" ]; then \
+        echo "[orcaslicer-binaries] Discovered asset: $dynamic_url"; \
+        ORCASLICER_URL="$dynamic_url"; \
+    fi; \
+    \
+    # Download function with validation \
+    try_download() { \
+        url="$1"; \
+        echo "[orcaslicer-binaries] Attempting download: $url"; \
+        if curl -H "User-Agent: OrcaSlicerWorker/1.0" -fSL -o orcaslicer.AppImage.tmp "$url"; then \
+            size=$(stat -c%s orcaslicer.AppImage.tmp 2>/dev/null || echo 0); \
+            if [ "$size" -gt 5000000 ]; then \
+                mv orcaslicer.AppImage.tmp orcaslicer.AppImage; \
+                echo "[orcaslicer-binaries] Download successful (size: $size bytes)"; \
+                return 0; \
+            else \
+                echo "[orcaslicer-binaries] Download too small (size $size < 5MB), invalid"; \
+            fi; \
+        fi; \
+        rm -f orcaslicer.AppImage.tmp || true; \
+        return 1; \
+    }; \
+    \
+    # Try multiple URL patterns \
+    try_download "${ORCASLICER_URL}" \
+    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
+    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
+    || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+    \
+    # Extract AppImage if available \
+    if [ -f orcaslicer.AppImage ]; then \
         chmod +x orcaslicer.AppImage; \
-        mkdir -p /usr/local/bin; \
-        mv orcaslicer.AppImage /usr/local/bin/orcaslicer; \
-    fi
+        arch=$(uname -m); \
+        echo "[orcaslicer-binaries] File magic: $( (command -v file >/dev/null 2>&1 && file orcaslicer.AppImage) || echo 'file N/A')"; \
+        echo "[orcaslicer-binaries] Host build arch: $arch"; \
+        \
+        if [ "$arch" = "x86_64" ] || [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then \
+            echo "[orcaslicer-binaries] Attempting unsquashfs extraction"; \
+            if unsquashfs -d squashfs-root orcaslicer.AppImage >/dev/null 2>&1; then \
+                mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] unsquashfs extraction successful"; \
+            elif ./orcaslicer.AppImage --appimage-extract 2>extract.err; then \
+                mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] --appimage-extract successful"; \
+            elif command -v 7z >/dev/null 2>&1 && 7z x -y -oorca7z orcaslicer.AppImage >/dev/null 2>&1; then \
+                [ -d orca7z/squashfs-root ] && mv orca7z/squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                [ ! -d /orcaslicer-dist/opt/orcaslicer ] && mkdir -p /orcaslicer-dist/opt/orcaslicer && cp -R orca7z/* /orcaslicer-dist/opt/orcaslicer/ 2>/dev/null || true; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] 7z extraction successful"; \
+            elif command -v bsdtar >/dev/null 2>&1 && bsdtar -xf orcaslicer.AppImage 2>/dev/null && [ -d squashfs-root ]; then \
+                mv squashfs-root /orcaslicer-dist/opt/orcaslicer; \
+                cp /orcaslicer-dist/opt/orcaslicer/AppRun /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
+                echo "[orcaslicer-binaries] bsdtar extraction successful"; \
+            fi; \
+        else \
+            echo "[orcaslicer-binaries] Skipping extraction due to unsupported arch: $arch"; \
+        fi; \
+        rm -f orcaslicer.AppImage; \
+    fi; \
+    \
+    # Create stub if binary extraction failed but ALLOW_STUB is true \
+    if [ ! -f /orcaslicer-dist/orcaslicer ]; then \
+        if [ "${ALLOW_STUB}" = "true" ]; then \
+            echo "[orcaslicer-binaries] Creating stub binary"; \
+            printf '#!/bin/sh\n>&2 echo "[WARN] OrcaSlicer binary not present (version %s)"\nexit 2\n' "${ORCASLICER_VERSION}" > /orcaslicer-dist/orcaslicer; \
+            chmod +x /orcaslicer-dist/orcaslicer; \
+        else \
+            echo "[orcaslicer-binaries] ERROR: Binary missing and ALLOW_STUB=false"; \
+            exit 1; \
+        fi; \
+    fi; \
+    \
+    # Verify what we extracted \
+    echo "[orcaslicer-binaries] Extraction complete. Contents:"; \
+    ls -la /orcaslicer-dist/ || true; \
+    ls -la /orcaslicer-dist/opt/ 2>/dev/null || true; \
+    file /orcaslicer-dist/orcaslicer 2>/dev/null || true
 
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
@@ -162,7 +249,8 @@ LABEL component="orcaslicer-worker" \
       security.sandbox="true"
 
 # Copy OrcaSlicer binaries from the binary layer (as appuser)
-COPY --chown=appuser:appuser --from=orcaslicer-binaries /usr/local/bin/orcaslicer /usr/local/bin/orcaslicer
+COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
+COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
 
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
