@@ -1907,26 +1907,27 @@ test_healthcheck_properties() {
     local common_file="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.common.yml"
     local common_content=$(cat "$common_file")
     
-    # API healthcheck should have comprehensive test
-    assert_contains "$common_content" "curl -f http://localhost:5245/healthz" "API healthcheck should test /healthz endpoint"
-    assert_contains "$common_content" "curl -f http://localhost:5245/health" "API healthcheck should test /health endpoint"
-    assert_contains "$common_content" "connection-stats" "API healthcheck should test SignalR connection"
+    # API healthcheck should test /health endpoint with status check
+    assert_contains "$common_content" "curl -f http://api:5245/health" "API healthcheck should test /health endpoint"
+    assert_contains "$common_content" "grep -q 'Healthy'" "API healthcheck should verify Healthy status"
     
     # Worker healthcheck properties - verify endpoint
-    assert_contains "$common_content" "http://localhost:8080/healthz" "Worker healthcheck should test /healthz endpoint"
+    assert_contains "$common_content" "http://orcaslicer-worker:8080/healthz" "Worker healthcheck should test /healthz endpoint"
     
-    # Frontend healthcheck properties - verify it exists
+    # Frontend healthcheck properties - verify it exists and endpoint
     assert_contains "$common_content" "x-frontend-healthcheck" "Should have frontend healthcheck definition"
+    assert_contains "$common_content" "http://frontend:80/health" "Frontend healthcheck should test /health endpoint"
     
-    # Verify timing properties for API healthcheck
+    # Verify timing properties for healthchecks
     assert_contains "$common_content" "interval: 30s" "Healthchecks should have interval property"
     assert_contains "$common_content" "timeout: 15s" "API healthcheck should have 15s timeout"
+    assert_contains "$common_content" "timeout: 10s" "Worker/Frontend healthchecks should have 10s timeout"
     
     # Verify worker has longer start period for compilation
     assert_contains "$common_content" "start_period: 90s" "Worker healthcheck should have 90s start period"
     
-    # Verify API has 60s start period
-    assert_contains "$common_content" "start_period: 60s" "API healthcheck should have 60s start period"
+    # Verify API has 120s start period for initialization
+    assert_contains "$common_content" "start_period: 120s" "API healthcheck should have 120s start period"
     
     pass_test
 }
