@@ -1,4 +1,6 @@
 ﻿using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -600,9 +602,9 @@ public class ProfilesController(
             // Import each profile as a system profile if it doesn't already exist
             foreach (var profile in workerProfiles)
             {
-                // Generate a stable hash for deduplication (based on profile characteristics)
-                // Different slicer versions will have different profiles, so they'll have different hashes
-                var profileHash = $"{profile.Material}:{profile.Quality}:{profile.LayerHeight}:{profile.InfillPercentage}";
+                // Generate SHA256 hash of all profile properties for true deduplication
+                var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                var profileHash = ComputeSha256Hash(profileJson);
 
                 // Check if profile already exists by hash using repository
                 var existingProfile = await _slicerProfileRepo.GetByHashAsync(profileHash, ct);
@@ -741,35 +743,52 @@ public class ProfilesController(
             // Import each profile as a system profile
             foreach (var profile in workerProfiles)
             {
-                // Generate a stable hash for deduplication
-                var profileHash = $"{profile.Material}:{profile.Quality}:{profile.LayerHeight}:{profile.InfillPercentage}";
-
-                // Create new system profile
-                var systemProfile = new SlicerProfile
+                try
                 {
-                    Id = Guid.NewGuid(),
-                    Name = $"{profile.Material} - {profile.Quality} ({profile.LayerHeight}mm)",
-                    Description = $"Official OrcaSlicer system profile: {profile.Material} {profile.Quality} quality at {profile.LayerHeight}mm layer height",
-                    SlicerType = SlicerType.OrcaSlicer,
-                    Material = profile.Material ?? "PLA",
-                    Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "Standard", true, out var q) ? q : ProfileQuality.Standard,
-                    LayerHeight = profile.LayerHeight,
-                    InfillPercentage = profile.InfillPercentage,
-                    PrintSpeed = profile.PrintSpeed,
-                    NozzleTemperature = profile.NozzleTemperature,
-                    BedTemperature = profile.BedTemperature,
-                    EnableSupports = profile.Supports,
-                    IsSystem = true,
-                    IsPublic = true,
-                    IsDefault = false,
-                    Hash = profileHash,
-                    SlicerVersion = orcaVersion,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
+                    // Generate SHA256 hash of all profile properties for true deduplication
+                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    var profileHash = ComputeSha256Hash(profileJson);
 
-                await _slicerProfileRepo.AddAsync(systemProfile, ct);
-                imported++;
+                    // Check if profile with this hash already exists
+                    var existingProfile = await _slicerProfileRepo.GetByHashAsync(profileHash, ct);
+                    if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                    {
+                        // Profile already exists, skip it
+                        continue;
+                    }
+
+                    // Create new system profile
+                    var systemProfile = new SlicerProfile
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = $"{profile.Material} - {profile.Quality} ({profile.LayerHeight}mm)",
+                        Description = $"Official OrcaSlicer system profile: {profile.Material} {profile.Quality} quality at {profile.LayerHeight}mm layer height",
+                        SlicerType = SlicerType.OrcaSlicer,
+                        Material = profile.Material ?? "PLA",
+                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "Standard", true, out var q) ? q : ProfileQuality.Standard,
+                        LayerHeight = profile.LayerHeight,
+                        InfillPercentage = profile.InfillPercentage,
+                        PrintSpeed = profile.PrintSpeed,
+                        NozzleTemperature = profile.NozzleTemperature,
+                        BedTemperature = profile.BedTemperature,
+                        EnableSupports = profile.Supports,
+                        IsSystem = true,
+                        IsPublic = true,
+                        IsDefault = false,
+                        Hash = profileHash,
+                        SlicerVersion = orcaVersion,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    await _slicerProfileRepo.AddAsync(systemProfile, ct);
+                    imported++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to import profile {profile.Material} {profile.Quality}: {ex.Message}");
+                    // Continue with next profile
+                }
             }
 
             _logger.LogInformation($"Force-reseeded {imported} system OrcaSlicer profiles from worker (deleted {deletedCount} old ones). OrcaSlicer version: {orcaVersion ?? "unknown"}.");
@@ -1119,6 +1138,19 @@ public class ProfilesController(
         {
             _logger.LogError($"Failed to query worker registry: {ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Computes SHA256 hash of the given input string.
+    /// Used for generating unique profile fingerprints based on complete profile data.
+    /// </summary>
+    private static string ComputeSha256Hash(string input)
+    {
+        using (var sha256 = SHA256.Create())
+        {
+            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
+            return Convert.ToHexString(hashedBytes).ToLower();
         }
     }
 }
