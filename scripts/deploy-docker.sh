@@ -788,9 +788,15 @@ tear_down_deployment() {
         # Preferred ordered list: stop frontends and API first, then workers, then monitoring/telemetry, then database
         local ordered_services=(frontend api orcaslicer-worker orcaslicer-worker-multistage worker prometheus grafana jaeger otel-collector database registry)
 
-        # If an env file was provided, pass it to docker compose commands
+        # If an env file was provided, load its variables and pass it to docker compose commands
         local env_arg=( )
         if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
+            # Source the env file to export variables into the current shell context
+            # This prevents "variable is not set. Defaulting to a blank string" warnings from docker compose
+            set -a
+            # shellcheck source=/dev/null
+            source "$env_file"
+            set +a
             env_arg=(--env-file "$env_file")
         fi
 
