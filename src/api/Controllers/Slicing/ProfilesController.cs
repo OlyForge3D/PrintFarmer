@@ -651,8 +651,6 @@ public class ProfilesController(
                 details = "Profiles are version-specific based on the OrcaSlicer version in the worker. Different OrcaSlicer versions will have different profiles. Re-run this endpoint when upgrading OrcaSlicer. Query SlicerVersion field to find profiles for a specific slicer version."
             });
         }
-        });
-        }
         catch (HttpRequestException ex)
         {
             _logger.LogError($"Failed to connect to OrcaSlicer worker: {ex.Message}");
@@ -663,26 +661,6 @@ public class ProfilesController(
             _logger.LogError($"Error seeding system profiles: {ex.Message}");
             return StatusCode(500, $"Error seeding profiles: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Reseed system OrcaSlicer profiles from the worker (same as seed-from-worker but returns all profiles)</summary>
-    [HttpPost("system/orca/reseed-profiles")]
-    [Authorize(Policy = "farm_admin")] // Admin-only: system profile seeding
-    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> ReseedSystemOrcaProfilesAsync(
-        [FromServices] HttpClient httpClient,
-        CancellationToken ct)
-    {
-        try
-        {
-            // Get OrcaSlicer worker URL from database registry
-            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
-            if (string.IsNullOrEmpty(workerUrl))
-            {
-                return Ok(new { imported = 0, skipped = 0, message = "No profiles available from worker" });
-            }
     }
 
     /// <summary>
