@@ -261,6 +261,13 @@ mask_secret_short() {
 }
 
 ensure_connection_string_password() {
+    local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+    
+    # SQLite doesn't require a password
+    if [ "$provider" = "sqlite" ]; then
+        return 0
+    fi
+    
     local conn
     conn=$(get_kv_from_file "$ENV_FILE" "ConnectionStrings__Default" || true)
     if [ -z "$conn" ]; then
@@ -273,8 +280,6 @@ ensure_connection_string_password() {
     if [ -n "$current_password" ]; then
         return 0
     fi
-
-    local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
     local fallback_pw=""
     case "$provider" in
         postgres)
@@ -1759,6 +1764,12 @@ validate_configuration() {
 configure_database() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${DB_PROVIDER:-}" ]; then
+        # Validate SQLite is only used with monolithic architecture
+        if [ "${DB_PROVIDER:-}" = "sqlite" ] && [ "$ARCHITECTURE" != "monolithic" ]; then
+            print_error "SQLite can only be used with monolithic architecture, not $ARCHITECTURE"
+            print_error "Please use postgres, sqlserver, or mysql for $ARCHITECTURE deployments"
+            exit 1
+        fi
         print_info "Using configured database: $DB_PROVIDER"
         return 0
     fi
@@ -1805,16 +1816,16 @@ configure_database() {
                         prompt_with_default "MySQL connection string:" "Server=your-mysql-host;Database=printfarmer;User=root;Password=your-password;" "CONNECTION_STRING"
                         ;;
                     *)
-                        print_warning "Unknown database type, using SQLite as fallback"
-                        DB_PROVIDER="sqlite"
-                        CONNECTION_STRING="Data Source=/data/farm.db"
+                        print_warning "Unknown database type, using PostgreSQL as fallback"
+                        DB_PROVIDER="postgres"
+                        prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
                         ;;
                 esac
                 ;;
             *)
-                print_warning "Unknown choice, using SQLite as fallback"
-                DB_PROVIDER="sqlite"
-                CONNECTION_STRING="Data Source=/data/farm.db"
+                print_warning "Unknown choice, using PostgreSQL as fallback"
+                DB_PROVIDER="postgres"
+                prompt_with_default "PostgreSQL connection string:" "Host=your-postgres-host;Database=printfarmer;Username=postgres;Password=your-password" "CONNECTION_STRING"
                 ;;
         esac
     else
