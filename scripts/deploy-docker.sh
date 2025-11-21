@@ -1538,8 +1538,6 @@ install_dotnet_sdk() {
 
 # Choose deployment architecture
 choose_architecture() {
-    print_header "🏗️  Deployment Architecture"
-    
     # Check if architecture was specified via CLI
     if [ -n "${CLI_ARCHITECTURE:-}" ]; then
         case "$CLI_ARCHITECTURE" in
@@ -1565,6 +1563,14 @@ choose_architecture() {
                 ;;
         esac
     fi
+    
+    # In non-interactive mode, use defaults if architecture already loaded from config
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ARCHITECTURE:-}" ]; then
+        print_info "Using configured architecture: $ARCHITECTURE"
+        return 0
+    fi
+    
+    print_header "🏗️  Deployment Architecture"
     
     echo -e "${BLUE}PrintFarmer supports two deployment architectures:${NC}"
     echo
@@ -1746,6 +1752,12 @@ validate_configuration() {
 
 # Configure database settings
 configure_database() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${DB_PROVIDER:-}" ]; then
+        print_info "Using configured database: $DB_PROVIDER"
+        return 0
+    fi
+    
     print_header "💾 Database Configuration"
     
     if [ "$ARCHITECTURE" = "monolithic" ]; then
@@ -1931,6 +1943,12 @@ configure_database() {
 
 # Configure networking
 configure_networking() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${NETWORK_MODE:-}" ]; then
+        print_info "Using configured network mode: $NETWORK_MODE"
+        return 0
+    fi
+    
     print_header "🌐 Network Configuration"
     
     # For microservices, all services run on the docker bridge network for service discovery by hostname
@@ -2336,6 +2354,12 @@ DOCKEREOF
 
 # Configure additional settings
 configure_external_storage() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${USE_EXTERNAL_STORAGE:-}" ]; then
+        print_info "Using configured external storage: $USE_EXTERNAL_STORAGE"
+        return 0
+    fi
+    
     print_header "💾 External Storage Configuration (P0 Data Persistence)"
     
     echo -e "${BLUE}3D Model Storage & G-Code Library${NC}"
@@ -2418,6 +2442,12 @@ configure_external_storage() {
 }
 
 configure_additional() {
+    # In non-interactive mode, use pre-loaded config if available
+    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENVIRONMENT:-}" ]; then
+        print_info "Using configured environment: $ENVIRONMENT"
+        return 0
+    fi
+    
     print_header "⚙️  Additional Configuration"
     
     # Initialize monitoring/observability variables with defaults if not already set
@@ -2438,7 +2468,7 @@ configure_additional() {
         ENABLE_DETAILED_LOGGING="true"
         print_info "Development mode: Swagger UI and detailed logging enabled"
     else
-        ENABLE_SWAGGER="false" 
+        ENABLE_SWAGGER="false"
         ENABLE_DETAILED_LOGGING="false"
         print_info "Production mode: Swagger UI and detailed logging disabled"
     fi
@@ -2951,12 +2981,12 @@ ORCA_HOST_PORT=$ORCA_HOST_PORT
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
 # Spoolman
-SPOOLMAN_ENABLED=$ENABLE_SPOOLMAN
-SPOOLMAN_BASE_URL=$SPOOLMAN_BASE_URL
-SPOOLMAN_PORT=$SPOOLMAN_PORT
+SPOOLMAN_ENABLED=${ENABLE_SPOOLMAN:-no}
+SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
+SPOOLMAN_PORT=${SPOOLMAN_PORT:-7912}
 
 # Application Settings - PFARM Configuration
-PFARM__Spoolman__BaseUrl=$SPOOLMAN_BASE_URL
+PFARM__Spoolman__BaseUrl=${SPOOLMAN_BASE_URL:-}
 PFARM__NetworkDiscovery__EnableDiscovery=$ENABLE_DISCOVERY
 PFARM__NetworkDiscovery__DiscoverySubnets=$NETWORK_RANGES
 
