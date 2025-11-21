@@ -223,17 +223,20 @@ public class ProfilesController(
         return NoContent();
     }
 
-    // Extended listing of profiles (user + public + system)
+    // Extended listing of all profile types (process, filament, machine) - user + public + system
     [HttpGet("extended")]
-    [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ExtendedProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListExtendedAsync(CancellationToken ct)
     {
-        // Pull all profiles using repository
-        var profiles = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        List<SlicerProfileListItemDto> list = new(profiles.Count);
-        foreach (var p in profiles)
+        var processProfiles = new List<ProcessProfileListItemDto>();
+        var filamentProfiles = new List<FilamentProfileListItemDto>();
+        var machineProfiles = new List<MachineProfileListItemDto>();
+
+        // Get process profiles
+        var processProfileEntities = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        foreach (var p in processProfileEntities)
         {
-            list.Add(new SlicerProfileListItemDto
+            processProfiles.Add(new ProcessProfileListItemDto
             {
                 Id = p.Id,
                 Name = p.Name,
@@ -247,7 +250,52 @@ public class ProfilesController(
                 Hash = p.Hash ?? string.Empty
             });
         }
-        return Ok(list);
+
+        // Get filament profiles
+        var filamentProfileEntities = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        foreach (var p in filamentProfileEntities)
+        {
+            filamentProfiles.Add(new FilamentProfileListItemDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                SlicerType = p.SlicerType.ToString(),
+                Material = p.Material ?? string.Empty,
+                NozzleTemperature = p.NozzleTemperature,
+                BedTemperature = p.BedTemperature,
+                PrintSpeed = p.PrintSpeed,
+                IsDefault = p.IsDefault,
+                IsSystem = p.IsSystem,
+                IsPublic = p.IsPublic,
+                Hash = p.Hash ?? string.Empty
+            });
+        }
+
+        // Get machine profiles
+        var machineProfileEntities = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        foreach (var p in machineProfileEntities)
+        {
+            machineProfiles.Add(new MachineProfileListItemDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                SlicerType = p.SlicerType.ToString(),
+                Manufacturer = p.Manufacturer ?? string.Empty,
+                IsDefault = p.IsDefault,
+                IsSystem = p.IsSystem,
+                IsPublic = p.IsPublic,
+                Hash = p.Hash ?? string.Empty
+            });
+        }
+
+        var response = new ExtendedProfilesResponseDto
+        {
+            ProcessProfiles = processProfiles,
+            FilamentProfiles = filamentProfiles,
+            MachineProfiles = machineProfiles
+        };
+
+        return Ok(response);
     }
 
     [HttpPost]
@@ -783,6 +831,16 @@ public class ProfilesController(
                 _logger.LogInformation($"Deleted {deletedCount} existing system OrcaSlicer profiles ({deletedProcessCount} process, {deletedFilamentCount} filament, {deletedMachineCount} machine) for force reseed");
             }
 
+            // Get all printers in the system and extract unique nozzle sizes
+            var allPrinters = await _printersRepo.GetAllAsync(ct);
+            var systemNozzleSizes = allPrinters
+                .Where(p => p.Model?.DefaultNozzleDiameter.HasValue ?? false)
+                .Select(p => p.Model!.DefaultNozzleDiameter!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            _logger.LogInformation($"System has {allPrinters.Count} printers with {systemNozzleSizes.Count} unique nozzle sizes: {string.Join(", ", systemNozzleSizes.OrderBy(x => x).Select(x => $"{x}mm"))}");
+
             // Get OrcaSlicer worker URL from database registry
             var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
             if (string.IsNullOrEmpty(workerUrl))
@@ -831,14 +889,65 @@ public class ProfilesController(
             if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
             {
                 _logger.LogInformation($"No profiles available from OrcaSlicer worker at {workerUrl}. Check if OrcaSlicer is configured with profiles in ~/.config/OrcaSlicer/profiles/");
-                return Ok(new { imported = 0, deleted = deletedCount, message = "No profiles available from worker - check if OrcaSlicer is installed and configured on the worker", orcaslicerVersion = orcaVersion });
+                return Ok(new { imported = 0, deleted = deletedCount, message = "No profiles available from worker - check if OrcaSlicer is installed and configured on the worker", orcaslicerVersion = orcaVersion, systemPrinters = allPrinters.Count, systemNozzleSizes = systemNozzleSizes.Count });
             }
 
             int imported = 0;
+            int skipped = 0;
 
-            // Import process profiles
+            // Import machine profiles - only those matching system nozzle sizes
+            var machineProfiles = allProfiles.MachineProfiles ?? new List<MachineProfileDto>();
+            _logger.LogInformation($"Force-reseeding machine profiles: checking {machineProfiles.Count} profiles against {systemNozzleSizes.Count} system nozzle sizes");
+            int machineImported = 0;
+            var importedMachineNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var profile in machineProfiles)
+            {
+                try
+                {
+                    // Skip if nozzle diameter not found or doesn't match system nozzles
+                    if (!profile.NozzleDiameter.HasValue || !systemNozzleSizes.Contains(profile.NozzleDiameter.Value))
+                    {
+                        _logger.LogDebug($"Skipping machine profile '{profile.Name}' - nozzle diameter {profile.NozzleDiameter}mm not in system ({string.Join(", ", systemNozzleSizes.OrderBy(x => x).Select(x => $"{x}mm"))})");
+                        skipped++;
+                        continue;
+                    }
+
+                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    var profileHash = ComputeSha256Hash(profileJson);
+
+                    var systemProfile = new MachineProfile
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = profile.Name ?? string.Empty,
+                        Manufacturer = profile.Manufacturer ?? string.Empty,
+                        Description = $"OrcaSlicer machine profile",
+                        SlicerType = SlicerType.OrcaSlicer,
+                        IsSystem = true,
+                        Hash = profileHash,
+                        RawJson = profileJson,
+                        SettingsJson = profileJson,
+                        SlicerVersion = orcaVersion,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    await _machineProfileRepo.AddAsync(systemProfile, ct);
+                    machineImported++;
+                    imported++;
+                    importedMachineNames.Add(profile.Name ?? string.Empty);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to import machine profile '{profile.Name}': {ex.Message}");
+                    skipped++;
+                }
+            }
+
+            // Import all process profiles (they're not machine-specific in OrcaSlicer)
             var processProfiles = allProfiles.ProcessProfiles ?? new List<ProcessProfileDto>();
             _logger.LogInformation($"Force-reseeding {processProfiles.Count} process profiles");
+            int processImported = 0;
             foreach (var profile in processProfiles)
             {
                 try
@@ -868,15 +977,17 @@ public class ProfilesController(
                     };
 
                     await _processProfileRepo.AddAsync(systemProfile, ct);
+                    processImported++;
                     imported++;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to import process profile: {ex.Message}");
+                    _logger.LogWarning($"Failed to import process profile '{profile.Name}': {ex.Message}");
+                    skipped++;
                 }
             }
 
-            // Import filament profiles
+            // Import all filament profiles (they're not machine-specific in OrcaSlicer)
             var filamentProfiles = allProfiles.FilamentProfiles ?? new List<FilamentProfileDto>();
             _logger.LogInformation($"Force-reseeding {filamentProfiles.Count} filament profiles");
             int filamentImported = 0;
@@ -910,58 +1021,25 @@ public class ProfilesController(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to import filament profile: {ex.Message}");
+                    _logger.LogWarning($"Failed to import filament profile '{profile.Name}': {ex.Message}");
+                    skipped++;
                 }
             }
 
-            // Import machine profiles
-            var machineProfiles = allProfiles.MachineProfiles ?? new List<MachineProfileDto>();
-            _logger.LogInformation($"Force-reseeding {machineProfiles.Count} machine profiles");
-            int machineImported = 0;
-            foreach (var profile in machineProfiles)
-            {
-                try
-                {
-                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    var profileHash = ComputeSha256Hash(profileJson);
-
-                    var systemProfile = new MachineProfile
-                    {
-                        Id = Guid.NewGuid(),
-                        Name = profile.Name ?? string.Empty,
-                        Manufacturer = profile.Manufacturer ?? string.Empty,
-                        Description = $"OrcaSlicer machine profile",
-                        SlicerType = SlicerType.OrcaSlicer,
-                        IsSystem = true,
-                        Hash = profileHash,
-                        RawJson = profileJson,
-                        SettingsJson = profileJson,
-                        SlicerVersion = orcaVersion,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-
-                    await _machineProfileRepo.AddAsync(systemProfile, ct);
-                    machineImported++;
-                    imported++;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"Failed to import machine profile: {ex.Message}");
-                }
-            }
-
-            _logger.LogInformation($"Force-reseeded {imported} OrcaSlicer profiles ({processProfiles.Count} process, {filamentImported} filament, {machineImported} machine). Deleted {deletedCount} old profiles. OrcaSlicer v{orcaVersion ?? "unknown"}");
+            _logger.LogInformation($"Force-reseeded {imported} OrcaSlicer profiles: {machineImported} machine (matching {systemNozzleSizes.Count} system nozzle sizes), {processImported} process, {filamentImported} filament. Deleted {deletedCount} old profiles. Skipped {skipped}. OrcaSlicer v{orcaVersion ?? "unknown"}");
 
             return Ok(new
             {
                 imported,
                 deleted = deletedCount,
-                processProfiles = processProfiles.Count,
+                skipped,
+                processProfiles = processImported,
                 filamentProfiles = filamentImported,
                 machineProfiles = machineImported,
                 orcaslicerVersion = orcaVersion,
-                message = $"Force-reseeded {imported} system OrcaSlicer profiles from worker (deleted {deletedCount} old ones)"
+                systemPrinters = allPrinters.Count,
+                systemNozzleSizes = systemNozzleSizes.Count,
+                message = $"Force-reseeded {imported} system OrcaSlicer profiles from worker (deleted {deletedCount} old, skipped {skipped} - only imported machines matching {systemNozzleSizes.Count} system nozzle sizes)"
             });
         }
         catch (HttpRequestException ex)

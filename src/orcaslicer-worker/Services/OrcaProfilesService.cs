@@ -12,100 +12,282 @@ using Farm.Web.Shared;
 namespace Farm.OrcaSlicer.Worker.Services;
 
 /// <summary>
-/// Service for discovering and exporting OrcaSlicer profiles from the local installation.
-/// OrcaSlicer stores profiles in:
-/// - ~/.config/OrcaSlicer/profiles/printer/ (machine profiles)
-/// - ~/.config/OrcaSlicer/profiles/filament/ (filament/material profiles)
-/// - ~/.config/OrcaSlicer/profiles/process/ (process/quality profiles)
+/// Service for discovering and loading OrcaSlicer profiles from the local installation.
+/// 
+/// OrcaSlicer stores profiles organized by manufacturer:
+/// - ~/.config/OrcaSlicer/profiles/{manufacturer}.json - Bundle file listing all profiles for that manufacturer
+/// - ~/.config/OrcaSlicer/profiles/{manufacturer}/ - Directory containing actual profile JSON files
+///   - machine/ - Machine/printer profiles
+///   - filament/ - Filament/material profiles
+///   - process/ - Process/quality profiles
+/// 
+/// This service parses manufacturer bundles and follows sub_path references to load profiles.
 /// </summary>
 public class OrcaProfilesService : ISlicerProfilesService
 {
     private readonly IUnifiedLoggingService _logger;
     private readonly string _orcaConfigPath;
+    private readonly string _orcaProfilesPath;
 
     public OrcaProfilesService(IUnifiedLoggingService logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         // OrcaSlicer config path: ~/.config/OrcaSlicer/
         _orcaConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "OrcaSlicer");
+        _orcaProfilesPath = Path.Combine(_orcaConfigPath, "profiles");
     }
 
     public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
     {
-        return await LoadProfilesOfTypeAsync<MachineProfileDto>("printer", ct);
-    }
-
-    public async Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default)
-    {
-        return await LoadProfilesOfTypeAsync<FilamentProfileDto>("filament", ct);
-    }
-
-    public async Task<IList<ProcessProfileDto>> ListAvailableProcessProfilesAsync(CancellationToken ct = default)
-    {
-        return await LoadProfilesOfTypeAsync<ProcessProfileDto>("process", ct);
-    }
-
-    private async Task<IList<T>> LoadProfilesOfTypeAsync<T>(string profileType, CancellationToken ct) where T : class, new()
-    {
-        var profiles = new List<T>();
-
+        var profiles = new List<MachineProfileDto>();
+        
         try
         {
-            _logger.LogInformation($"Loading {profileType} profiles from: {_orcaConfigPath}");
+            _logger.LogInformation($"Loading OrcaSlicer machine profiles from bundles in: {_orcaProfilesPath}");
             
-            if (!Directory.Exists(_orcaConfigPath))
+            if (!Directory.Exists(_orcaProfilesPath))
             {
-                _logger.LogWarning($"OrcaSlicer config directory not found: {_orcaConfigPath}");
+                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
                 return profiles;
             }
 
-            var typePath = Path.Combine(_orcaConfigPath, "profiles", profileType);
-            if (!Directory.Exists(typePath))
-            {
-                _logger.LogInformation($"Profile type directory not found: {typePath}");
-                return profiles;
-            }
+            // Find all manufacturer bundle JSON files (e.g., Prusa.json, Voron.json, etc.)
+            var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+                .Where(f => !Path.GetFileName(f).StartsWith(".")) // Skip hidden files
+                .ToList();
 
-            var jsonFiles = Directory.GetFiles(typePath, "*.json", SearchOption.TopDirectoryOnly);
-            _logger.LogInformation($"Found {jsonFiles.Length} JSON files in {profileType} directory");
-            
+            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
+
             int successCount = 0;
             int failureCount = 0;
 
-            foreach (var filePath in jsonFiles)
+            foreach (var bundleFile in bundleFiles)
             {
                 try
                 {
-                    var profile = ParseProfile(filePath, profileType);
-                    if (profile is T typedProfile && typedProfile != null)
+                    var bundle = ParseManufacturerBundle(bundleFile);
+                    if (bundle?.MachineModelList != null)
                     {
-                        profiles.Add(typedProfile);
-                        successCount++;
-                    }
-                    else
-                    {
-                        _logger.LogWarning($"Failed to parse {profileType} profile {Path.GetFileName(filePath)} into correct type");
-                        failureCount++;
+                        foreach (var entry in bundle.MachineModelList)
+                        {
+                            try
+                            {
+                                var profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                if (!File.Exists(profilePath))
+                                {
+                                    _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
+                                    failureCount++;
+                                    continue;
+                                }
+
+                                var profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
+                                if (profile != null)
+                                {
+                                    profiles.Add(profile);
+                                    successCount++;
+                                }
+                                else
+                                {
+                                    failureCount++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to load machine profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                failureCount++;
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Exception parsing {profileType} profile {Path.GetFileName(filePath)}: {ex.Message}");
+                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
                     failureCount++;
                 }
             }
 
-            _logger.LogInformation($"Loaded {successCount} {profileType} profiles ({failureCount} failures from {jsonFiles.Length} files)");
+            _logger.LogInformation($"Loaded {successCount} machine profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
             return profiles;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error loading {profileType} profiles: {ex.Message}");
+            _logger.LogError($"Error loading machine profiles: {ex.Message}");
             return profiles;
         }
     }
 
-    private object? ParseProfile(string filePath, string profileType)
+    public async Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default)
+    {
+        var profiles = new List<FilamentProfileDto>();
+        
+        try
+        {
+            _logger.LogInformation($"Loading OrcaSlicer filament profiles from bundles in: {_orcaProfilesPath}");
+            
+            if (!Directory.Exists(_orcaProfilesPath))
+            {
+                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                return profiles;
+            }
+
+            var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+                .Where(f => !Path.GetFileName(f).StartsWith("."))
+                .ToList();
+
+            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
+
+            int successCount = 0;
+            int failureCount = 0;
+
+            foreach (var bundleFile in bundleFiles)
+            {
+                try
+                {
+                    var bundle = ParseManufacturerBundle(bundleFile);
+                    if (bundle?.FilamentList != null)
+                    {
+                        foreach (var entry in bundle.FilamentList)
+                        {
+                            try
+                            {
+                                var profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                if (!File.Exists(profilePath))
+                                {
+                                    _logger.LogWarning($"Filament profile referenced in bundle not found: {profilePath}");
+                                    failureCount++;
+                                    continue;
+                                }
+
+                                var profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
+                                if (profile != null)
+                                {
+                                    profiles.Add(profile);
+                                    successCount++;
+                                }
+                                else
+                                {
+                                    failureCount++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to load filament profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                failureCount++;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    failureCount++;
+                }
+            }
+
+            _logger.LogInformation($"Loaded {successCount} filament profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            return profiles;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error loading filament profiles: {ex.Message}");
+            return profiles;
+        }
+    }
+
+    public async Task<IList<ProcessProfileDto>> ListAvailableProcessProfilesAsync(CancellationToken ct = default)
+    {
+        var profiles = new List<ProcessProfileDto>();
+        
+        try
+        {
+            _logger.LogInformation($"Loading OrcaSlicer process profiles from bundles in: {_orcaProfilesPath}");
+            
+            if (!Directory.Exists(_orcaProfilesPath))
+            {
+                _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
+                return profiles;
+            }
+
+            var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+                .Where(f => !Path.GetFileName(f).StartsWith("."))
+                .ToList();
+
+            _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
+
+            int successCount = 0;
+            int failureCount = 0;
+
+            foreach (var bundleFile in bundleFiles)
+            {
+                try
+                {
+                    var bundle = ParseManufacturerBundle(bundleFile);
+                    if (bundle?.ProcessList != null)
+                    {
+                        foreach (var entry in bundle.ProcessList)
+                        {
+                            try
+                            {
+                                var profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                if (!File.Exists(profilePath))
+                                {
+                                    _logger.LogWarning($"Process profile referenced in bundle not found: {profilePath}");
+                                    failureCount++;
+                                    continue;
+                                }
+
+                                var profile = LoadProfileFromFile<ProcessProfileDto>(profilePath);
+                                if (profile != null)
+                                {
+                                    profiles.Add(profile);
+                                    successCount++;
+                                }
+                                else
+                                {
+                                    failureCount++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to load process profile '{entry.Name}' from bundle '{bundle.Name}': {ex.Message}");
+                                failureCount++;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to parse manufacturer bundle '{Path.GetFileName(bundleFile)}': {ex.Message}");
+                    failureCount++;
+                }
+            }
+
+            _logger.LogInformation($"Loaded {successCount} process profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            return profiles;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error loading process profiles: {ex.Message}");
+            return profiles;
+        }
+    }
+
+    private ManufacturerBundleDto? ParseManufacturerBundle(string bundleFilePath)
+    {
+        try
+        {
+            var json = File.ReadAllText(bundleFilePath);
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            return JsonSerializer.Deserialize<ManufacturerBundleDto>(json, options);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Failed to parse manufacturer bundle {Path.GetFileName(bundleFilePath)}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private T? LoadProfileFromFile<T>(string filePath) where T : class, new()
     {
         try
         {
@@ -119,17 +301,17 @@ public class OrcaProfilesService : ISlicerProfilesService
                 return null;
             }
 
-            return profileType switch
+            return typeof(T).Name switch
             {
-                "printer" => ParseMachineProfile(root, filePath),
-                "filament" => ParseFilamentProfile(root, filePath),
-                "process" => ParseProcessProfile(root, filePath),
+                nameof(MachineProfileDto) => ParseMachineProfile(root, filePath) as T,
+                nameof(FilamentProfileDto) => ParseFilamentProfile(root, filePath) as T,
+                nameof(ProcessProfileDto) => ParseProcessProfile(root, filePath) as T,
                 _ => null
             };
         }
         catch (Exception ex)
         {
-            _logger.LogWarning($"Failed to parse {profileType} profile {filePath}: {ex.Message}");
+            _logger.LogWarning($"Failed to load profile from {filePath}: {ex.Message}");
             return null;
         }
     }
@@ -143,6 +325,26 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         if (root.TryGetProperty("manufacturer", out var mfgElem))
             profile.Manufacturer = mfgElem.GetString() ?? string.Empty;
+
+        // Extract nozzle diameter from settings - REQUIRED property
+        // nozzle_diameter is typically an array like ["0.4"], get the first value
+        if (root.TryGetProperty("nozzle_diameter", out var nozzleElem))
+        {
+            if (nozzleElem.ValueKind == JsonValueKind.Array)
+            {
+                var nozzleArray = nozzleElem.EnumerateArray().FirstOrDefault();
+                profile.NozzleDiameter = ParseDoubleValue(nozzleArray);
+            }
+            else
+            {
+                profile.NozzleDiameter = ParseDoubleValue(nozzleElem);
+            }
+        }
+        else
+        {
+            _logger.LogWarning($"Machine profile '{profile.Name}' missing required 'nozzle_diameter' property in {filePath}");
+            return null; // Reject profiles without nozzle_diameter
+        }
 
         // Store all settings as raw JSON for flexibility
         profile.Settings = SerializeElementToDict(root);

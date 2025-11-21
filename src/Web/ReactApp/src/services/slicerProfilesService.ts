@@ -3,18 +3,50 @@
 
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
-export interface SlicerProfileListItem {
+// Base interface for all profile types
+export interface IProfileListItem {
   id: string;
   name: string;
   slicerType: string;
-  material: string;
-  quality: string;
-  layerHeight: number;
-  infillPercentage: number;
   isDefault: boolean;
   isSystem: boolean;
   isPublic: boolean;
   hash: string;
+  profileType: 'process' | 'filament' | 'machine';
+}
+
+// Process profile list item
+export interface ProcessProfileListItem extends IProfileListItem {
+  profileType: 'process';
+  quality: string;
+  layerHeight: number;
+  infillPercentage: number;
+}
+
+// Filament profile list item
+export interface FilamentProfileListItem extends IProfileListItem {
+  profileType: 'filament';
+  material: string;
+  nozzleTemperature?: number;
+  bedTemperature?: number;
+  printSpeed: number;
+}
+
+// Machine profile list item
+export interface MachineProfileListItem extends IProfileListItem {
+  profileType: 'machine';
+  manufacturer: string;
+  nozzleDiameter?: number;
+}
+
+// Union type for all profile types
+export type SlicerProfileListItem = ProcessProfileListItem | FilamentProfileListItem | MachineProfileListItem;
+
+// Response structure with profiles organized by type
+export interface ExtendedProfilesResponse {
+  processProfiles: ProcessProfileListItem[];
+  filamentProfiles: FilamentProfileListItem[];
+  machineProfiles: MachineProfileListItem[];
 }
 
 export interface ImportSlicerProfileRequest {
@@ -80,11 +112,11 @@ function getAuthHeaders(): HeadersInit {
 }
 
 export const slicerProfilesService = {
-  async listExtended(): Promise<SlicerProfileListItem[]> {
+  async listExtended(): Promise<ExtendedProfilesResponse> {
     const res = await fetch(`${base}/extended`, {
       headers: getAuthHeaders()
     });
-    return handle<SlicerProfileListItem[]>(res);
+    return handle<ExtendedProfilesResponse>(res);
   },
   async importProfile(req: ImportSlicerProfileRequest): Promise<SlicerProfileExtended> {
     const res = await fetch(`${base}/import`, {

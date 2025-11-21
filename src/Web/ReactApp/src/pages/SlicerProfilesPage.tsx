@@ -1,7 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import slicerProfilesService, { SlicerProfileListItem, ImportSlicerProfileRequest, SlicerProfileExtended, SlicerProfileExportDto } from '@/services/slicerProfilesService';
+import slicerProfilesService, { 
+  SlicerProfileListItem, 
+  ExtendedProfilesResponse,
+  ProcessProfileListItem, 
+  FilamentProfileListItem,
+  MachineProfileListItem,
+  ImportSlicerProfileRequest, 
+  SlicerProfileExtended, 
+  SlicerProfileExportDto 
+} from '@/services/slicerProfilesService';
 import { officialProfilesService } from '@/services/officialProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
@@ -26,10 +35,13 @@ export const SlicerProfilesPage: React.FC = () => {
   const [setDefault, setSetDefault] = useState(false);
   const [isPublic, setIsPublic] = useState(true);
 
+  // Tab state - 'all', 'machines', 'filaments', 'processes'
+  const [activeTab, setActiveTab] = useState<'all' | 'machines' | 'filaments' | 'processes'>('all');
+
   // Filtering and search state
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedMachine, setSelectedMachine] = useState<string>('');
   const [filterEngine, setFilterEngine] = useState<string>('all');
-  const [filterQuality, setFilterQuality] = useState<string>('all');
   const [filterSource, setFilterSource] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
 
@@ -63,11 +75,21 @@ export const SlicerProfilesPage: React.FC = () => {
     }
   }, [slicerNames, slicerType]);
 
-  const { data: profiles, isLoading, error } = useQuery<SlicerProfileListItem[], Error>({
+  const { data: profilesData, isLoading, error } = useQuery<ExtendedProfilesResponse, Error>({
     queryKey: ['slicerProfilesExtended'],
     queryFn: async () => slicerProfilesService.listExtended(),
     staleTime: 10_000
   });
+
+  // Flatten all profiles for certain operations
+  const allProfiles = useMemo(() => {
+    if (!profilesData) return [];
+    return [
+      ...profilesData.processProfiles,
+      ...profilesData.filamentProfiles,
+      ...profilesData.machineProfiles
+    ];
+  }, [profilesData]);
 
   const importMutation = useMutation<SlicerProfileExtended, Error, ImportSlicerProfileRequest>({
     mutationFn: async (payload) => {
@@ -140,30 +162,57 @@ export const SlicerProfilesPage: React.FC = () => {
     }
   };
 
-  // Filtered and searched profiles
-  const filteredProfiles = useMemo(() => {
-    if (!profiles) return [];
+  // Apply filters to process profiles
+  const filteredProcessProfiles = useMemo(() => {
+    if (!profilesData?.processProfiles) return [];
 
-    return profiles.filter(p => {
+    return profilesData.processProfiles.filter(p => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        const matchesSearch =
-          p.name.toLowerCase().includes(query) ||
-          p.material?.toLowerCase().includes(query) ||
-          p.slicerType.toLowerCase().includes(query);
-        if (!matchesSearch) return false;
+        if (!p.name.toLowerCase().includes(query) && !p.quality.toLowerCase().includes(query)) {
+          return false;
+        }
       }
 
       // Engine filter
-      if (filterEngine !== 'all' && filterEngine !== '' && p.slicerType !== filterEngine) {
-        return false;
+      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
+
+      // Source filter
+      if (filterSource !== 'all' && filterSource !== '') {
+        if (filterSource === 'default' && !p.isDefault) return false;
+        if (filterSource === 'system' && !p.isSystem) return false;
+        if (filterSource === 'public' && !p.isPublic) return false;
+        if (filterSource === 'imported' && p.isSystem) return false;
       }
 
-      // Quality filter
-      if (filterQuality !== 'all' && filterQuality !== '' && p.quality.toLowerCase() !== filterQuality.toLowerCase()) {
-        return false;
+      // Machine filter (for process profiles)
+      if (selectedMachine && p.nozzleDiameter !== undefined) {
+        const selectedMachineProfile = profilesData.machineProfiles.find(m => m.id === selectedMachine);
+        if (selectedMachineProfile && selectedMachineProfile.nozzleDiameter !== p.nozzleDiameter) {
+          return false;
+        }
       }
+
+      return true;
+    });
+  }, [profilesData, searchQuery, filterEngine, filterSource, selectedMachine]);
+
+  // Apply filters to filament profiles
+  const filteredFilamentProfiles = useMemo(() => {
+    if (!profilesData?.filamentProfiles) return [];
+
+    return profilesData.filamentProfiles.filter(p => {
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(query) && !p.material.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+
+      // Engine filter
+      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
 
       // Source filter
       if (filterSource !== 'all' && filterSource !== '') {
@@ -175,7 +224,138 @@ export const SlicerProfilesPage: React.FC = () => {
 
       return true;
     });
-  }, [profiles, searchQuery, filterEngine, filterQuality, filterSource]);
+  }, [profilesData, searchQuery, filterEngine, filterSource]);
+
+  // Apply filters to machine profiles
+  const filteredMachineProfiles = useMemo(() => {
+    if (!profilesData?.machineProfiles) return [];
+
+    return profilesData.machineProfiles.filter(p => {
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(query) && !p.manufacturer.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+
+      // Engine filter
+      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
+
+      // Source filter
+      if (filterSource !== 'all' && filterSource !== '') {
+        if (filterSource === 'default' && !p.isDefault) return false;
+        if (filterSource === 'system' && !p.isSystem) return false;
+        if (filterSource === 'public' && !p.isPublic) return false;
+        if (filterSource === 'imported' && p.isSystem) return false;
+      }
+
+      return true;
+    });
+  }, [profilesData, searchQuery, filterEngine, filterSource]);
+
+  const onImport = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rawJson.trim()) {
+      setImportError('Raw profile JSON is required');
+      return;
+    }
+    importMutation.mutate({
+      rawJson: rawJson,
+      name: name || undefined,
+      description: description || undefined,
+      slicerType,
+      allowSystemOverride,
+      setDefault,
+      isPublic
+    });
+  };
+
+  const renderProfileRow = (p: SlicerProfileListItem) => (
+    <tr key={p.id} className="border-t border-pf-border hover:bg-pf-bg-1">
+      <td className="p-2 font-medium">{p.name}</td>
+      <td className="p-2">{p.slicerType}</td>
+      <td className="p-2">{p.profileType === 'filament' ? (p as FilamentProfileListItem).material : p.profileType === 'machine' ? (p as MachineProfileListItem).manufacturer : '-'}</td>
+      <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).quality : '-'}</td>
+      <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).layerHeight.toFixed(2) + 'mm' : (p.profileType === 'machine' && (p as MachineProfileListItem).nozzleDiameter) ? (p as MachineProfileListItem).nozzleDiameter + 'mm' : '-'}</td>
+      <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).infillPercentage + '%' : '-'}</td>
+      <td className="p-2">
+        <div className="flex flex-col text-xs gap-1">
+          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded">Default</span>}
+          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded">System</span>}
+          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded">Public</span>}
+        </div>
+      </td>
+      <td className="p-2">
+        <div className="flex gap-2">
+          <Button
+            onClick={() => setDefaultMutation.mutate(p.id)}
+            loading={setDefaultMutation.isPending}
+            size="sm"
+            variant="primary"
+          >Set Default</Button>
+          <Button
+            onClick={() => exportProfile(p.id)}
+            loading={exportingId === p.id}
+            size="sm"
+            variant="secondary"
+          >{exportingId === p.id ? 'Exporting...' : 'Export'}</Button>
+        </div>
+      </td>
+    </tr>
+  );
+
+  const getTotalCount = () => {
+    if (!profilesData) return 0;
+    return (profilesData.machineProfiles?.length || 0) + (profilesData.filamentProfiles?.length || 0) + (profilesData.processProfiles?.length || 0);
+  };
+
+  const getFilteredCount = () => {
+    return filteredMachineProfiles.length + filteredFilamentProfiles.length + filteredProcessProfiles.length;
+  };
+    setExportingId(id);
+    try {
+      const data: SlicerProfileExportDto = await slicerProfilesService.exportProfile(id);
+      const blob = new Blob([data.rawJson], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${data.name.replace(/\s+/g, '_')}_${data.hash.substring(0, 8)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage('Profile exported.');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const exportOrcaBundle = async () => {
+    setExportingBundle(true);
+    try {
+      const bundleJson = await orcaProfilesService.exportBundle({
+        includeProcessProfiles: true,
+        includeMetadata: true
+      });
+
+      const blob = new Blob([bundleJson], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().split('T')[0];
+      a.download = `printfarmer_orca_bundle_${timestamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage('OrcaSlicer bundle exported successfully.');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Bundle export failed');
+    } finally {
+      setExportingBundle(false);
+    }
+  };
+
+
 
   const onImport = (e: React.FormEvent) => {
     e.preventDefault();
@@ -338,7 +518,7 @@ export const SlicerProfilesPage: React.FC = () => {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-muted" />
                   <input
                     type="text"
-                    placeholder="Search profiles by name, material, or slicer..."
+                    placeholder="Search profiles by name, material, or manufacturer..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 bg-pf-background border border-pf-border rounded-lg focus:ring-2 focus:ring-pf-primary focus:border-transparent"
@@ -370,19 +550,6 @@ export const SlicerProfilesPage: React.FC = () => {
                     </Select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">Quality</label>
-                    <Select
-                      value={filterQuality}
-                      onChange={(e) => setFilterQuality(e.target.value)}
-                      aria-label="Filter by quality"
-                    >
-                      <option value="all">All Qualities</option>
-                      <option value="draft">Draft</option>
-                      <option value="standard">Standard</option>
-                      <option value="fine">Fine</option>
-                    </Select>
-                  </div>
-                  <div>
                     <label className="block text-sm font-medium mb-1">Source</label>
                     <Select
                       value={filterSource}
@@ -396,24 +563,37 @@ export const SlicerProfilesPage: React.FC = () => {
                       <option value="imported">Imported</option>
                     </Select>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Machine (for Process profiles)</label>
+                    <Select
+                      value={selectedMachine}
+                      onChange={(e) => setSelectedMachine(e.target.value)}
+                      aria-label="Filter process profiles by machine"
+                    >
+                      <option value="">All Machines</option>
+                      {filteredMachineProfiles.map(m => (
+                        <option key={m.id} value={m.id}>{m.name} ({m.nozzleDiameter}mm)</option>
+                      ))}
+                    </Select>
+                  </div>
                 </div>
               )}
 
-              {/* Active Filter Summary */}
+              {/* Active Filter Summary and Tabs */}
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-4">
                   <p className="text-sm text-pf-text-muted">
-                    Showing {filteredProfiles.length} of {profiles?.length || 0} profiles
+                    Showing {getFilteredCount()} of {getTotalCount()} profiles
                   </p>
                   <Button variant="secondary" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] })}>Refresh</Button>
                 </div>
-                {(searchQuery || filterEngine !== 'all' || filterQuality !== 'all' || filterSource !== 'all') && (
+                {(searchQuery || filterEngine !== 'all' || filterSource !== 'all' || selectedMachine) && (
                   <button
                     onClick={() => {
                       setSearchQuery('');
                       setFilterEngine('all');
-                      setFilterQuality('all');
                       setFilterSource('all');
+                      setSelectedMachine('');
                     }}
                     className="text-sm text-pf-primary hover:underline"
                   >
@@ -421,65 +601,86 @@ export const SlicerProfilesPage: React.FC = () => {
                   </button>
                 )}
               </div>
+
+              {/* Profile Type Tabs */}
+              <div className="flex gap-2 mt-4 border-b border-pf-border">
+                <button
+                  onClick={() => setActiveTab('all')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'all'
+                      ? 'border-pf-primary text-pf-text-primary'
+                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
+                  }`}
+                >
+                  All ({getTotalCount()})
+                </button>
+                <button
+                  onClick={() => setActiveTab('machines')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'machines'
+                      ? 'border-pf-primary text-pf-text-primary'
+                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
+                  }`}
+                >
+                  Machines ({filteredMachineProfiles.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('filaments')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'filaments'
+                      ? 'border-pf-primary text-pf-text-primary'
+                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
+                  }`}
+                >
+                  Filaments ({filteredFilamentProfiles.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('processes')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'processes'
+                      ? 'border-pf-primary text-pf-text-primary'
+                      : 'border-transparent text-pf-text-muted hover:text-pf-text-primary'
+                  }`}
+                >
+                  Processes ({filteredProcessProfiles.length})
+                </button>
+              </div>
             </div>
 
             {/* Profiles Table */}
             <div className="p-4">
               {error && <Alert type="error">{error.message}</Alert>}
               {isLoading && <div>Loading profiles...</div>}
-              {!isLoading && filteredProfiles.length === 0 && profiles && profiles.length > 0 && (
+              {!isLoading && getTotalCount() === 0 && <div className="text-pf-text-muted text-sm">No profiles imported yet.</div>}
+              {!isLoading && getTotalCount() > 0 && getFilteredCount() === 0 && (
                 <div className="text-pf-text-muted text-sm">No profiles match your filters.</div>
               )}
-              {!isLoading && profiles && profiles.length === 0 && <div className="text-pf-text-muted text-sm">No profiles imported yet.</div>}
-              {!isLoading && filteredProfiles.length > 0 && (
+              {!isLoading && getFilteredCount() > 0 && (
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="bg-pf-bg-1 text-left">
                         <th className="p-2">Name</th>
                         <th className="p-2">Engine</th>
-                        <th className="p-2">Material</th>
-                        <th className="p-2">Quality</th>
-                        <th className="p-2">Layer</th>
+                        <th className="p-2">Material/Manufacturer</th>
+                        <th className="p-2">Quality/Type</th>
+                        <th className="p-2">Layer/Nozzle</th>
                         <th className="p-2">Infill</th>
                         <th className="p-2">Flags</th>
                         <th className="p-2">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredProfiles.map(p => (
-                        <tr key={p.id} className="border-t border-pf-border hover:bg-pf-bg-1">
-                          <td className="p-2 font-medium">{p.name}</td>
-                          <td className="p-2">{p.slicerType}</td>
-                          <td className="p-2">{p.material}</td>
-                          <td className="p-2">{p.quality}</td>
-                          <td className="p-2">{p.layerHeight.toFixed(2)}mm</td>
-                          <td className="p-2">{p.infillPercentage}%</td>
-                          <td className="p-2">
-                            <div className="flex flex-col text-xs gap-1">
-                              {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded">Default</span>}
-                              {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded">System</span>}
-                              {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded">Public</span>}
-                            </div>
-                          </td>
-                          <td className="p-2">
-                            <div className="flex gap-2">
-                              <Button
-                                onClick={() => setDefaultMutation.mutate(p.id)}
-                                loading={setDefaultMutation.isPending}
-                                size="sm"
-                                variant="primary"
-                              >Set Default</Button>
-                              <Button
-                                onClick={() => exportProfile(p.id)}
-                                loading={exportingId === p.id}
-                                size="sm"
-                                variant="secondary"
-                              >{exportingId === p.id ? 'Exporting...' : 'Export'}</Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                      {activeTab === 'all' && (
+                        <>
+                          {filteredMachineProfiles.map(p => renderProfileRow(p))}
+                          {filteredFilamentProfiles.map(p => renderProfileRow(p))}
+                          {filteredProcessProfiles.map(p => renderProfileRow(p))}
+                        </>
+                      )}
+                      {activeTab === 'machines' && filteredMachineProfiles.map(p => renderProfileRow(p))}
+                      {activeTab === 'filaments' && filteredFilamentProfiles.map(p => renderProfileRow(p))}
+                      {activeTab === 'processes' && filteredProcessProfiles.map(p => renderProfileRow(p))}
                     </tbody>
                   </table>
                 </div>

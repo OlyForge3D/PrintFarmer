@@ -1516,6 +1516,7 @@ public class MachineProfileDto
     public string Name { get; set; } = string.Empty;
     public string Manufacturer { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public double? NozzleDiameter { get; set; } // e.g., 0.4, 0.6, 0.8 mm
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -1559,6 +1560,30 @@ public class AllProfilesResponseDto
     public IList<MachineProfileDto> MachineProfiles { get; set; } = new List<MachineProfileDto>();
     public IList<FilamentProfileDto> FilamentProfiles { get; set; } = new List<FilamentProfileDto>();
     public IList<ProcessProfileDto> ProcessProfiles { get; set; } = new List<ProcessProfileDto>();
+}
+
+/// <summary>
+/// OrcaSlicer manufacturer bundle entry that points to a profile JSON file.
+/// Used in {manufacturer}.json bundle files to reference profiles.
+/// </summary>
+public class ManufacturerBundleProfileEntry
+{
+    public string Name { get; set; } = string.Empty;
+    public string SubPath { get; set; } = string.Empty; // Relative path like "machine/Prusa MK4S.json"
+}
+
+/// <summary>
+/// OrcaSlicer manufacturer bundle structure.
+/// Contains lists of machine, process, and filament profiles for a manufacturer.
+/// </summary>
+public class ManufacturerBundleDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public IList<ManufacturerBundleProfileEntry> MachineModelList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+    public IList<ManufacturerBundleProfileEntry> ProcessList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+    public IList<ManufacturerBundleProfileEntry> FilamentList { get; set; } = new List<ManufacturerBundleProfileEntry>();
 }
 
 /// <summary>
@@ -1672,7 +1697,25 @@ public class ProcessProfileExportDto
     public Dictionary<string, object?> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
-public class SlicerProfileListItemDto
+/// <summary>
+/// Base interface for profile list items
+/// </summary>
+public interface IProfileListItem
+{
+    Guid Id { get; }
+    string Name { get; }
+    string SlicerType { get; }
+    bool IsDefault { get; }
+    bool IsSystem { get; }
+    bool IsPublic { get; }
+    string Hash { get; }
+    string ProfileType { get; }
+}
+
+/// <summary>
+/// Process profile list item DTO
+/// </summary>
+public class ProcessProfileListItemDto : IProfileListItem
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -1684,6 +1727,55 @@ public class SlicerProfileListItemDto
     public bool IsSystem { get; set; }
     public bool IsPublic { get; set; }
     public string Hash { get; set; } = string.Empty;
+    public string ProfileType => "process";
+}
+
+/// <summary>
+/// Filament profile list item DTO
+/// </summary>
+public class FilamentProfileListItemDto : IProfileListItem
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string SlicerType { get; set; } = string.Empty;
+    public string Material { get; set; } = string.Empty;
+    public int? NozzleTemperature { get; set; }
+    public int? BedTemperature { get; set; }
+    public int PrintSpeed { get; set; }
+    public bool IsDefault { get; set; }
+    public bool IsSystem { get; set; }
+    public bool IsPublic { get; set; }
+    public string Hash { get; set; } = string.Empty;
+    public string ProfileType => "filament";
+}
+
+/// <summary>
+/// Machine profile list item DTO
+/// </summary>
+public class MachineProfileListItemDto : IProfileListItem
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string SlicerType { get; set; } = string.Empty;
+    public string Manufacturer { get; set; } = string.Empty;
+    public bool IsDefault { get; set; }
+    public bool IsSystem { get; set; }
+    public bool IsPublic { get; set; }
+    public string Hash { get; set; } = string.Empty;
+    public string ProfileType => "machine";
+}
+
+// Backwards compatibility alias
+public class SlicerProfileListItemDto : ProcessProfileListItemDto { }
+
+/// <summary>
+/// Response containing all profile types organized separately
+/// </summary>
+public class ExtendedProfilesResponseDto
+{
+    public IList<ProcessProfileListItemDto> ProcessProfiles { get; set; } = new List<ProcessProfileListItemDto>();
+    public IList<FilamentProfileListItemDto> FilamentProfiles { get; set; } = new List<FilamentProfileListItemDto>();
+    public IList<MachineProfileListItemDto> MachineProfiles { get; set; } = new List<MachineProfileListItemDto>();
 }
 
 public class BulkProfileImportRequest

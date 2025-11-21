@@ -395,6 +395,8 @@ public class MachineProfile
     public string? SettingsJson { get; set; } // Extracted settings as key-value pairs
     public string? Hash { get; set; } // SHA256 for deduplication
     public bool IsSystem { get; set; } // From OrcaSlicer system profiles
+    public bool IsDefault { get; set; } // Can be set as default machine
+    public bool IsPublic { get; set; } = true; // Can be used by other users
     public string? SlicerVersion { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
@@ -422,6 +424,8 @@ public class FilamentProfile
     public string? SettingsJson { get; set; } // Extracted settings as key-value pairs
     public string? Hash { get; set; } // SHA256 for deduplication
     public bool IsSystem { get; set; } // From OrcaSlicer system profiles
+    public bool IsDefault { get; set; } // Can be set as default filament
+    public bool IsPublic { get; set; } = true; // Can be used by other users
     public string? SlicerVersion { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public User? CreatedByUser { get; set; }
