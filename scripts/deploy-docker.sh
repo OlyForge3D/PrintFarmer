@@ -849,8 +849,10 @@ tear_down_deployment() {
 
     # 1. Stop all remaining running containers (fallback)
     print_info "Step 1/7: Stopping any remaining running Docker containers..."
-    if [ -n "$(docker ps -q)" ]; then
-        docker stop $(docker ps -aq) 2>/dev/null || true
+    local running_containers
+    running_containers=$(timeout 10 docker ps -q 2>/dev/null || true)
+    if [ -n "$running_containers" ]; then
+        timeout 15 docker stop $running_containers 2>/dev/null || true
         print_success "Stopped running containers (attempted)"
     else
         print_info "No running containers found"
@@ -859,19 +861,20 @@ tear_down_deployment() {
     # 2. Remove all remaining containers (force remove any leftovers)
     print_info "Step 2/7: Removing any remaining Docker containers..."
     local all_containers
-    all_containers=$(docker ps -aq)
+    all_containers=$(timeout 10 docker ps -aq 2>/dev/null || true)
     if [ -n "$all_containers" ]; then
         # Try normal remove first, then force-remove to handle odd states
-        docker rm $all_containers 2>/dev/null || true
+        timeout 15 docker rm $all_containers 2>/dev/null || true
         # Re-query and force remove stubborn containers
-        remaining=$(docker ps -aq)
+        remaining=$(timeout 10 docker ps -aq 2>/dev/null || true)
         if [ -n "$remaining" ]; then
             print_warning "Some containers remain after normal removal. Attempting force remove..."
-            docker rm -f $remaining 2>/dev/null || true
+            timeout 15 docker rm -f $remaining 2>/dev/null || true
         fi
 
         # Final check
-        if [ -z "$(docker ps -aq)" ]; then
+        final_check=$(timeout 10 docker ps -aq 2>/dev/null || true)
+        if [ -z "$final_check" ]; then
             print_success "Containers removed"
         else
             print_warning "Some containers could not be removed. Run 'docker ps -a' to inspect and remove manually."
@@ -897,11 +900,13 @@ tear_down_deployment() {
     
     # 3. Remove all volumes
     print_info "Step 3/7: Removing all Docker volumes..."
-    if docker volume ls -q | grep -q .; then
+    local vol_list
+    vol_list=$(timeout 10 docker volume ls -q 2>/dev/null || true)
+    if [ -n "$vol_list" ]; then
         # Remove volumes with force flag (-f) to handle in-use volumes
         # Also handle per-project volumes explicitly (e.g., pfarm_printfarmer-database)
-        docker volume ls -q | while read -r vol; do
-            docker volume rm -f "$vol" 2>/dev/null && echo "  • Removed $vol" || echo "  ⚠ Failed to remove $vol (may be in use)"
+        echo "$vol_list" | while read -r vol; do
+            timeout 5 docker volume rm -f "$vol" 2>/dev/null && echo "  • Removed $vol" || echo "  ⚠ Failed to remove $vol (may be in use)"
         done
         print_success "Volumes removal attempted"
     else
