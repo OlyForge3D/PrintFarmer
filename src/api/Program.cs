@@ -81,9 +81,6 @@ builder.Services.AddApiApplicationServices(builder.Configuration, builder.Enviro
 // Register database with multi-provider support
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
 
-// Unit of Work (scoped per-request) to share AppDbContext across repositories
-builder.Services.AddScoped<Farm.Web.Api.Infrastructure.UnitOfWork.IUnitOfWork, Farm.Web.Api.Infrastructure.UnitOfWork.AppUnitOfWork>();
-
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.
 // This ensures POCOs like DatabaseSettings are configured from env/config without needing AppDbContext.
@@ -799,7 +796,9 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
         [nameof(db.GcodeHarvestOperations)] = await db.GcodeHarvestOperations.CountAsync(ct),
         [nameof(db.HarvestDiscoveredFiles)] = await db.HarvestDiscoveredFiles.CountAsync(ct),
         [nameof(db.Models3D)] = await db.Models3D.CountAsync(ct),
-        [nameof(db.SlicerProfiles)] = await db.SlicerProfiles.CountAsync(ct),
+        [nameof(db.ProcessProfiles)] = await db.ProcessProfiles.CountAsync(ct),
+        [nameof(db.MachineProfiles)] = await db.MachineProfiles.CountAsync(ct),
+        [nameof(db.FilamentProfiles)] = await db.FilamentProfiles.CountAsync(ct),
         [nameof(db.Users)] = await db.Users.CountAsync(ct),
         [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
         [nameof(db.Resources)] = await db.Resources.CountAsync(ct),

@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Repositories.SchemaHealth;
+﻿using Farm.Infrastructure.Repositories.SchemaHealth;
 
 namespace Farm.Web.Api.Services.SchemaHealth;
 

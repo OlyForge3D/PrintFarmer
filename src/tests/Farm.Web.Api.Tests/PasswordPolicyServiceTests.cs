@@ -12,7 +12,7 @@ public class PasswordPolicyServiceTests
     [Fact]
     public async Task GetAsync_Returns_DefaultDto_WhenRepositoryEmpty()
     {
-        var repo = new Mock<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
+        var repo = new Mock<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
         repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.PasswordPolicyEntity?)null);
         var svc = new PasswordPolicyService(repo.Object);
 
@@ -27,10 +27,10 @@ public class PasswordPolicyServiceTests
     [Fact]
     public async Task UpdateAsync_CreatesOrUpdates_AndReturnsDto()
     {
-        var repo = new Mock<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
+        var repo = new Mock<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository>();
         // repository initially returns null -> service creates new entity and calls SaveAsync
         Farm.Infrastructure.Domain.PasswordPolicyEntity? savedEntity = null;
-        repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).Returns((CancellationToken ct) => Task.FromResult(savedEntity));
+        repo.Setup(r => r.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(savedEntity);
         repo.Setup(r => r.SaveAsync(It.IsAny<Farm.Infrastructure.Domain.PasswordPolicyEntity>(), It.IsAny<CancellationToken>()))
             .Callback<Farm.Infrastructure.Domain.PasswordPolicyEntity, CancellationToken>((p, ct) => savedEntity = p)
             .Returns(Task.CompletedTask)

@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Repositories.Gcode;
+using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Http;
 

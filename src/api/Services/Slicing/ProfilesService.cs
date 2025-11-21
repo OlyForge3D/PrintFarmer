@@ -4,12 +4,16 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Repositories.Slicing;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Slicing
 {
+    /// <summary>
+    /// Service for managing slicer profiles with consolidated mapping and validation logic.
+    /// Handles CRUD operations for SlicerProfile entities with proper error handling and logging.
+    /// </summary>
     public class ProfilesService : IProfilesService
     {
         private readonly IProfilesRepository _repo;
@@ -21,34 +25,68 @@ namespace Farm.Web.Api.Services.Slicing
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<SlicerProfileResponseDto> CreateProfileAsync(CreateSlicerProfileDto req, CancellationToken ct)
+        public async Task<ProcessProfileResponseDto> CreateProfileAsync(CreateProcessProfileDto req, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(req);
-            var profile = new SlicerProfile
+
+            var (slicerType, quality) = ValidateAndParseEnums(req.SlicerType, req.Quality);
+
+            var profile = new ProcessProfile
             {
                 Id = Guid.NewGuid(),
-                Name = req.Name ?? string.Empty,
+                Name = NormalizeString(req.Name, "Untitled Profile"),
                 Description = req.Description,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
-                AdvancedSettings = req.AdvancedSettings,
-                SlicerType = Enum.TryParse<SlicerType>(req.SlicerType, true, out var st) ? st : SlicerType.PrusaSlicer,
+                RawJson = req.AdvancedSettings ?? "{}",
+                SlicerType = slicerType,
                 LayerHeight = req.LayerHeight,
                 InfillPercentage = req.InfillPercentage,
                 PrintSpeed = req.PrintSpeed,
-                NozzleTemperature = req.NozzleTemperature,
-                BedTemperature = req.BedTemperature,
                 EnableSupports = req.EnableSupports,
-                Material = req.Material ?? "PLA",
-                Quality = Enum.TryParse<ProfileQuality>(req.Quality, true, out var q) ? q : ProfileQuality.Standard,
+                Quality = quality,
                 IsDefault = req.IsDefault,
                 IsPublic = req.IsPublic
             };
 
             await _repo.AddAsync(profile, ct);
-            await _repo.SaveChangesAsync(ct);
 
-            return new SlicerProfileResponseDto
+            _logger.LogInformation($"Profile created: {profile.Id} - {profile.Name} ({profile.SlicerType})");
+
+            return ToResponseDto(profile);
+        }
+
+        public async Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct)
+        {
+            var profile = await _repo.FindByIdAsync(id, ct);
+            return profile is null ? null : ToResponseDto(profile);
+        }
+
+        public async Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(CancellationToken ct)
+        {
+            var profiles = await _repo.GetAllAsync(ct);
+            return profiles.OrderBy(p => p.Name).Select(ToSummaryDto).ToList();
+        }
+
+        public async Task DeleteProfileAsync(Guid id, CancellationToken ct)
+        {
+            var profile = await _repo.FindByIdAsync(id, ct);
+            if (profile is null)
+            {
+                throw new KeyNotFoundException($"Profile with ID {id} not found");
+            }
+
+            await _repo.RemoveAsync(profile, ct);
+
+            _logger.LogInformation($"Profile deleted: {id} - {profile.Name}");
+        }
+
+        /// <summary>
+        /// Maps ProcessProfile to ProcessProfileResponseDto with full details including timestamps.
+        /// </summary>
+        private static ProcessProfileResponseDto ToResponseDto(ProcessProfile profile)
+        {
+            return new ProcessProfileResponseDto
             {
                 Id = profile.Id,
                 Name = profile.Name,
@@ -57,71 +95,65 @@ namespace Farm.Web.Api.Services.Slicing
                 LayerHeight = profile.LayerHeight,
                 InfillPercentage = profile.InfillPercentage,
                 PrintSpeed = (int)profile.PrintSpeed,
-                NozzleTemperature = profile.NozzleTemperature,
-                BedTemperature = profile.BedTemperature,
                 EnableSupports = profile.EnableSupports,
-                Material = profile.Material,
                 Quality = profile.Quality.ToString(),
                 IsDefault = profile.IsDefault,
-                IsPublic = profile.IsPublic
+                IsPublic = profile.IsPublic,
+                CreatedAt = profile.CreatedAt,
+                UpdatedAt = profile.UpdatedAt
             };
         }
 
-        public async Task<SlicerProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct)
+        /// <summary>
+        /// Maps ProcessProfile to SlicerProfileDto (summary view without timestamps).
+        /// Used for list operations where minimal data is needed.
+        /// </summary>
+        private static SlicerProfileDto ToSummaryDto(ProcessProfile profile)
         {
-            var p = await _repo.GetByIdAsync(id, ct);
-            if (p == null)
+            return new SlicerProfileDto
             {
-                return null;
-            }
-            return new SlicerProfileResponseDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                Description = p.Description,
-                SlicerType = p.SlicerType.ToString(),
-                LayerHeight = p.LayerHeight,
-                InfillPercentage = p.InfillPercentage,
-                PrintSpeed = (int)p.PrintSpeed,
-                NozzleTemperature = p.NozzleTemperature,
-                BedTemperature = p.BedTemperature,
-                EnableSupports = p.EnableSupports,
-                Material = p.Material,
-                Quality = p.Quality.ToString(),
-                IsDefault = p.IsDefault,
-                IsPublic = p.IsPublic,
-                CreatedAt = p.CreatedAt,
-                UpdatedAt = p.UpdatedAt
+                ProcessProfile = new ProcessProfileDto
+                {
+                    Name = profile.Name,
+                    LayerHeight = profile.LayerHeight,
+                    InfillPercentage = profile.InfillPercentage,
+                    PrintSpeed = (int)profile.PrintSpeed,
+                    Supports = profile.EnableSupports,
+                    Quality = profile.Quality.ToString(),
+                    Description = profile.Description,
+                    Settings = string.IsNullOrEmpty(profile.AdvancedSettings) 
+                        ? new Dictionary<string, object>() 
+                        : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(profile.AdvancedSettings) ?? new Dictionary<string, object>()
+                }
             };
         }
 
-        public async Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(CancellationToken ct)
+        /// <summary>
+        /// Validates and safely parses SlicerType and ProfileQuality enums.
+        /// Returns sensible defaults (PrusaSlicer, Standard) on parse failure.
+        /// </summary>
+        /// <returns>Tuple of (SlicerType, ProfileQuality)</returns>
+        private static (SlicerType SlicerType, ProfileQuality Quality) ValidateAndParseEnums(
+            string? slicerTypeStr,
+            string? qualityStr)
         {
-            var list = await _repo.ListAsync(ct);
-            return list.Select(p => new SlicerProfileDto
-            {
-                LayerHeight = p.LayerHeight,
-                InfillPercentage = p.InfillPercentage,
-                PrintSpeed = (int)p.PrintSpeed,
-                NozzleTemperature = p.NozzleTemperature,
-                BedTemperature = p.BedTemperature,
-                Supports = p.EnableSupports,
-                Material = p.Material,
-                Quality = p.Quality.ToString()
-            }).ToList();
+            var slicerType = Enum.TryParse<SlicerType>(slicerTypeStr, ignoreCase: true, out var st)
+                ? st
+                : SlicerType.PrusaSlicer;
+
+            var quality = Enum.TryParse<ProfileQuality>(qualityStr, ignoreCase: true, out var q)
+                ? q
+                : ProfileQuality.Standard;
+
+            return (slicerType, quality);
         }
 
-        public async Task DeleteProfileAsync(Guid id, CancellationToken ct)
+        /// <summary>
+        /// Normalizes string input: trims whitespace and returns fallback if null or empty.
+        /// </summary>
+        private static string NormalizeString(string? input, string fallback = "")
         {
-            var p = await _repo.GetByIdAsync(id, ct);
-            if (p == null)
-            {
-                throw new KeyNotFoundException("Profile not found");
-            }
-            await _repo.RemoveAsync(p, ct);
-            await _repo.SaveChangesAsync(ct);
+            return string.IsNullOrWhiteSpace(input) ? fallback : input.Trim();
         }
-
-        // mapping helpers intentionally omitted (inline mapping used)
     }
 }

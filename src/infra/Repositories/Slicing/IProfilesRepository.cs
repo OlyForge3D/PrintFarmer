@@ -4,9 +4,9 @@ namespace Farm.Infrastructure.Repositories.Slicing;
 
 public interface IProfilesRepository
 {
-    Task<List<SlicerProfile>> GetAllAsync(CancellationToken ct);
-    Task<SlicerProfile?> FindByIdAsync(Guid id, CancellationToken ct);
-    Task AddAsync(SlicerProfile profile, CancellationToken ct);
-    Task RemoveAsync(SlicerProfile profile, CancellationToken ct);
+    Task<List<ProcessProfile>> GetAllAsync(CancellationToken ct);
+    Task<ProcessProfile?> FindByIdAsync(Guid id, CancellationToken ct);
+    Task AddAsync(ProcessProfile profile, CancellationToken ct);
+    Task RemoveAsync(ProcessProfile profile, CancellationToken ct);
     Task SaveChangesAsync(CancellationToken ct);
 }

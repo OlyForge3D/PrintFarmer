@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Repositories.Filament;
+using Farm.Infrastructure.Repositories.Filament;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;

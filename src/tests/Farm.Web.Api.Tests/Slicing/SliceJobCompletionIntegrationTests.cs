@@ -28,7 +28,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
         // 1. Create processing job
@@ -82,7 +82,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
     public async Task SliceJob_Completion_MultiArtifact_Summary()
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
         var job = new Farm.Infrastructure.Domain.SliceJob

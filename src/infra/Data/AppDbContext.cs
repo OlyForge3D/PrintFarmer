@@ -34,7 +34,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Model3D> Models3D => Set<Model3D>();
     public DbSet<Model3DTag> Model3DTags => Set<Model3DTag>();
     public DbSet<Model3DTagMapping> Model3DTagMappings => Set<Model3DTagMapping>();
-    public DbSet<SlicerProfile> SlicerProfiles => Set<SlicerProfile>();
+    public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
+    public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
+    public DbSet<FilamentProfile> FilamentProfiles => Set<FilamentProfile>();
     public DbSet<SlicerSettings> SlicerSettings => Set<SlicerSettings>();
     public DbSet<SlicerService> SlicerServices => Set<SlicerService>();
     public DbSet<SliceJob> SliceJobs => Set<SliceJob>();
@@ -639,15 +641,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(tm => tm.TagId);
         });
 
-        // SlicerProfile Entity Configuration
-        modelBuilder.Entity<SlicerProfile>(b =>
+        // ProcessProfile Entity Configuration
+        modelBuilder.Entity<ProcessProfile>(b =>
         {
             b.HasKey(p => p.Id);
             b.Property(p => p.Name).IsRequired().HasMaxLength(255);
             b.Property(p => p.Description).HasMaxLength(1000);
             b.Property(p => p.SlicerType).HasConversion<int>();
             b.Property(p => p.Quality).HasConversion<int>();
-            b.Property(p => p.Material).IsRequired().HasMaxLength(64);
             b.Property(p => p.AdvancedSettings).HasColumnType("TEXT");
             b.Property(p => p.RawJson).HasColumnType("TEXT");
             b.Property(p => p.MetadataJson).HasColumnType("TEXT");
@@ -679,6 +680,68 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(p => p.CreatedByUserId);
             b.HasIndex(p => p.Hash).IsUnique();
             b.HasIndex(p => p.IsSystem);
+        });
+
+        // MachineProfile Entity Configuration
+        modelBuilder.Entity<MachineProfile>(b =>
+        {
+            b.HasKey(p => p.Id);
+            b.Property(p => p.Name).IsRequired().HasMaxLength(255);
+            b.Property(p => p.Manufacturer).IsRequired().HasMaxLength(255);
+            b.Property(p => p.Description).HasMaxLength(1000);
+            b.Property(p => p.SlicerType).HasConversion<int>();
+            b.Property(p => p.RawJson).HasColumnType("TEXT");
+            b.Property(p => p.SettingsJson).HasColumnType("TEXT");
+            b.Property(p => p.Hash).HasMaxLength(64);
+            b.Property(p => p.IsSystem).HasDefaultValue(false);
+
+            // Foreign Keys
+            b.HasOne(p => p.PrinterModel)
+                .WithMany()
+                .HasForeignKey(p => p.PrinterModelId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(p => p.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(p => p.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes
+            b.HasIndex(p => new { p.Name, p.SlicerType }).IsUnique();
+            b.HasIndex(p => p.SlicerType);
+            b.HasIndex(p => p.Manufacturer);
+            b.HasIndex(p => p.Hash).IsUnique();
+            b.HasIndex(p => p.IsSystem);
+            b.HasIndex(p => p.CreatedByUserId);
+        });
+
+        // FilamentProfile Entity Configuration
+        modelBuilder.Entity<FilamentProfile>(b =>
+        {
+            b.HasKey(p => p.Id);
+            b.Property(p => p.Name).IsRequired().HasMaxLength(255);
+            b.Property(p => p.Material).IsRequired().HasMaxLength(64);
+            b.Property(p => p.Manufacturer).HasMaxLength(255);
+            b.Property(p => p.Description).HasMaxLength(1000);
+            b.Property(p => p.SlicerType).HasConversion<int>();
+            b.Property(p => p.RawJson).HasColumnType("TEXT");
+            b.Property(p => p.SettingsJson).HasColumnType("TEXT");
+            b.Property(p => p.Hash).HasMaxLength(64);
+            b.Property(p => p.IsSystem).HasDefaultValue(false);
+
+            // Foreign Keys
+            b.HasOne(p => p.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(p => p.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes
+            b.HasIndex(p => new { p.Material, p.SlicerType }).IsUnique();
+            b.HasIndex(p => p.SlicerType);
+            b.HasIndex(p => p.Material);
+            b.HasIndex(p => p.Hash).IsUnique();
+            b.HasIndex(p => p.IsSystem);
+            b.HasIndex(p => p.CreatedByUserId);
         });
 
         // Slicer Service (Registry) Entity Configuration

@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Repositories.Workers;
+using Farm.Infrastructure.Repositories.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 

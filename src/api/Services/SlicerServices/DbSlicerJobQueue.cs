@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.SlicerServices

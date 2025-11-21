@@ -20,7 +20,7 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
     public async Task SliceJob_E2E_Completion_Flow_With_Authorization()
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
         var userId = Guid.NewGuid();

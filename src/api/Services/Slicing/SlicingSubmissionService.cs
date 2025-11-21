@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Slicing;
-using Farm.Web.Api.Repositories.Model;
+using Farm.Infrastructure.Repositories.Model;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -83,7 +83,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
                     SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase)
                         ? "PrusaSlicer 2.7.0"
                         : "OrcaSlicer 1.8.0",
-                    ProfileUsed = profile.Quality + " - " + profile.Material,
+                    ProfileUsed = (profile?.ProcessProfile?.Quality ?? "Unknown") + " - " + (profile?.FilamentProfile?.Material ?? "Unknown"),
                     EstimatedCost = 0
                 }
             };
@@ -181,7 +181,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
                     SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase)
                         ? "PrusaSlicer 2.7.0"
                         : "OrcaSlicer 1.8.0",
-                    ProfileUsed = profile.Quality + " - " + profile.Material,
+                    ProfileUsed = (profile?.ProcessProfile?.Quality ?? "Unknown") + " - " + (profile?.FilamentProfile?.Material ?? "Unknown"),
                     EstimatedCost = 0
                 }
             };

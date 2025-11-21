@@ -2,6 +2,7 @@
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
+using Farm.Web.Shared; // For AllProfilesResponseDto
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -125,8 +126,18 @@ public static class Program
 
         _ = app.MapGet("/profiles", async (ISlicerProfilesService profileService, CancellationToken ct) =>
         {
-            var profiles = await profileService.ListAvailableProfilesAsync(ct);
-            return Results.Ok(profiles);
+            var machineProfiles = await profileService.ListAvailableMachineProfilesAsync(ct);
+            var filamentProfiles = await profileService.ListAvailableFilamentProfilesAsync(ct);
+            var processProfiles = await profileService.ListAvailableProcessProfilesAsync(ct);
+            
+            var response = new AllProfilesResponseDto
+            {
+                MachineProfiles = machineProfiles,
+                FilamentProfiles = filamentProfiles,
+                ProcessProfiles = processProfiles
+            };
+            
+            return Results.Ok(response);
         });
 
         IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();

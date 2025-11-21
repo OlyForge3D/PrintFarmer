@@ -235,8 +235,8 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
 
     private async Task<List<Dictionary<string, object>>> ExportProcessPresetsAsync()
     {
-        // Export SlicerProfile entities as process presets
-        var profiles = await _db.SlicerProfiles
+        // Export ProcessProfile entities as process presets
+        var profiles = await _db.ProcessProfiles
             .Include(p => p.PrinterModel)
             .ThenInclude(m => m!.Manufacturer)
             .AsNoTracking()
@@ -272,15 +272,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
             }
 
             // Temperature settings
-            if (profile.NozzleTemperature > 0)
-            {
-                preset["nozzle_temperature"] = profile.NozzleTemperature;
-            }
 
-            if (profile.BedTemperature > 0)
-            {
-                preset["bed_temperature"] = profile.BedTemperature;
-            }
 
             // Wall/layer settings
             preset["wall_loops"] = 3; // Default perimeters

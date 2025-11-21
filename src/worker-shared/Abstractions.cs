@@ -90,9 +90,17 @@ public static class WorkerIdentity
 public interface ISlicerProfilesService
 {
     /// <summary>
-    /// Discover and list all available profiles from the slicer's local installation.
+    /// Discover and list all available machine profiles from the slicer's local installation.
     /// </summary>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>List of discovered profiles as DTOs</returns>
-    Task<IList<SlicerProfileDto>> ListAvailableProfilesAsync(CancellationToken ct = default);
+    Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Discover and list all available filament profiles from the slicer's local installation.
+    /// </summary>
+    Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Discover and list all available process profiles from the slicer's local installation.
+    /// </summary>
+    Task<IList<ProcessProfileDto>> ListAvailableProcessProfilesAsync(CancellationToken ct = default);
 }

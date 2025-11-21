@@ -6,7 +6,7 @@ using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
-using Farm.Web.Api.Repositories.Gcode;
+using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Repositories.Workers;
+using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Services.Workers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

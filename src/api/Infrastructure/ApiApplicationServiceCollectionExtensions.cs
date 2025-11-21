@@ -48,7 +48,7 @@ public static class ApiApplicationServiceCollectionExtensions
     private static void RegisterAuthenticationAndSecurityServices(IServiceCollection services)
     {
         _ = services.AddScoped<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService, Farm.Web.Api.Services.PasswordPolicy.PasswordPolicyService>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Web.Api.Repositories.PasswordPolicy.PasswordPolicyRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Infrastructure.Repositories.PasswordPolicy.PasswordPolicyRepository>();
         _ = services.AddScoped<Farm.Web.Api.Services.Authentication.IAccountLockoutService, Farm.Web.Api.Services.Authentication.AccountLockoutService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Authentication.IAuthAuditService, Farm.Web.Api.Services.Authentication.AuthAuditService>();
         _ = services.AddScoped<Farm.Web.Api.Services.Authentication.ITokenRevocationService, Farm.Web.Api.Services.Authentication.TokenRevocationService>();
@@ -63,7 +63,7 @@ public static class ApiApplicationServiceCollectionExtensions
 
         // Filament services (API-specific)
         _ = services.AddScoped<Farm.Web.Api.Services.Filament.IFilamentTypeService, Farm.Web.Api.Services.Filament.FilamentTypeService>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Filament.IFilamentTypeRepository, Farm.Web.Api.Repositories.Filament.FilamentTypeRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
 
         // Slicing-specific services
         _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileParsingService, Farm.Web.Api.Services.Slicing.ProfileParsingService>();
@@ -74,10 +74,10 @@ public static class ApiApplicationServiceCollectionExtensions
         _ = services.AddScoped<Farm.Web.Shared.ISlicerJobQueue, Farm.Web.Api.Services.SlicerServices.DbSlicerJobQueue>();
         _ = services.AddSingleton<Farm.Web.Shared.ISlicerProgressNotifier, Farm.Web.Api.Services.SlicerServices.SignalRSlicerProgressNotifier>();
         _ = services.AddScoped<Farm.Web.Shared.ISlicerOrchestrator, Farm.Web.Api.Services.SlicerServices.SlicerOrchestrator>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository, Farm.Web.Api.Repositories.Slicing.EfSliceJobRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository, Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository>();
         _ = services.AddScoped<Farm.Web.Api.Services.Slicing.ISliceJobEventService, Farm.Web.Api.Services.Slicing.SliceJobEventService>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Workers.IWorkerRepository, Farm.Web.Api.Repositories.Workers.EfWorkerRepository>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Queue.IQueueRepository, Farm.Web.Api.Repositories.Queue.EfQueueRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Workers.IWorkerRepository, Farm.Infrastructure.Repositories.Workers.EfWorkerRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
         _ = services.AddScoped<Farm.Web.Api.Services.Queue.IJobQueueService, Farm.Web.Api.Services.Queue.JobQueueService>();
         _ = services.AddScoped<Farm.Web.Api.Services.JobDispatch.IJobDispatcherService, Farm.Web.Api.Services.JobDispatch.JobDispatcherService>();
         _ = services.AddSingleton(sp =>
@@ -95,8 +95,8 @@ public static class ApiApplicationServiceCollectionExtensions
     private static void RegisterModelAndGcodeServices(IServiceCollection services)
     {
         // Tag services and repositories (API-specific)
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Tags.ITagRepository, Farm.Web.Api.Repositories.Tags.EfTagRepository>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.Tags.IModelTagMappingRepository, Farm.Web.Api.Repositories.Tags.EfModelTagMappingRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.IModelTagMappingRepository, Farm.Infrastructure.Repositories.Tags.EfModelTagMappingRepository>();
         _ = services.AddScoped<Farm.Web.Api.Services.Tags.ITagService, Farm.Web.Api.Services.Tags.TagService>();
 
         // SystemLogs service (API-specific)
@@ -115,7 +115,7 @@ public static class ApiApplicationServiceCollectionExtensions
     private static void RegisterSchemaAndSignalRServices(IServiceCollection services)
     {
         _ = services.AddScoped<Farm.Web.Api.Services.SchemaHealth.ISchemaHealthService, Farm.Web.Api.Services.SchemaHealth.SchemaHealthService>();
-        _ = services.AddScoped<Farm.Web.Api.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Web.Api.Repositories.SchemaHealth.SchemaHealthRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Infrastructure.Repositories.SchemaHealth.SchemaHealthRepository>();
         _ = services.AddScoped<Farm.Web.Api.Services.SignalR.ISignalRTestService, Farm.Web.Api.Services.SignalR.SignalRTestService>();
         _ = services.AddSingleton<Farm.Web.Api.Services.Interfaces.IStartupStatus, Farm.Web.Api.Services.StartupStatus>();
         _ = services.AddSingleton<Farm.Web.Api.Services.IDiscoveryProgressCache, Farm.Web.Api.Services.DiscoveryProgressCache>();

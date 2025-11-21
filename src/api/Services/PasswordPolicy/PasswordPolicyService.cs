@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Repositories.PasswordPolicy;
+﻿using Farm.Infrastructure.Repositories.PasswordPolicy;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.PasswordPolicy;

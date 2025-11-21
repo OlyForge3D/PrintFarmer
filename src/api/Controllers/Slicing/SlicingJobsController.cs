@@ -55,6 +55,10 @@ public class SlicingJobsController : ControllerBase
             return NotFound();
         }
         SlicingJobDto j = job;
+        // Extract profile information from composite SlicerProfileDto
+        var profileQuality = j.Profile?.ProcessProfile?.Quality ?? "Unknown";
+        var profileMaterial = j.Profile?.FilamentProfile?.Material ?? "Unknown";
+        
         return Ok(new SliceResultDto
         {
             JobId = j.JobId,
@@ -68,7 +72,7 @@ public class SlicingJobsController : ControllerBase
             Metadata = new SliceMetadataDto
             {
                 SlicerVersion = j.SlicerEngine == "prusaslicer" ? "PrusaSlicer 2.7.0" : "OrcaSlicer 1.8.0",
-                ProfileUsed = $"{j.Profile?.Quality} - {j.Profile?.Material}",
+                ProfileUsed = $"{profileQuality} - {profileMaterial}",
                 EstimatedCost = 0
             }
         });

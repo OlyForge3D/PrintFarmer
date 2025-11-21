@@ -1,8 +1,8 @@
 ﻿using System.Security.Cryptography;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Repositories.Gcode;
-using Farm.Web.Api.Repositories.Queue;
+using Farm.Infrastructure.Repositories.Gcode;
+using Farm.Infrastructure.Repositories.Queue;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 

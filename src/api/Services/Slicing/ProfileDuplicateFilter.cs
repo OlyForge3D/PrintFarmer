@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Services.Slicing
 {
     public interface IProfileDuplicateFilter
     {
-        Task<IReadOnlyList<SlicerProfile>> FilterAsync(IEnumerable<SlicerProfile> candidates, CancellationToken ct = default);
+        Task<IReadOnlyList<ProcessProfile>> FilterAsync(IEnumerable<ProcessProfile> candidates, CancellationToken ct = default);
     }
 
     /// <summary>
@@ -33,19 +33,19 @@ namespace Farm.Web.Api.Services.Slicing
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<IReadOnlyList<SlicerProfile>> FilterAsync(IEnumerable<SlicerProfile> candidates, CancellationToken ct = default)
+        public async Task<IReadOnlyList<ProcessProfile>> FilterAsync(IEnumerable<ProcessProfile> candidates, CancellationToken ct = default)
         {
-            List<SlicerProfile> list = candidates.Where(p => p != null).ToList();
+            List<ProcessProfile> list = candidates.Where(p => p != null).ToList();
             if (list.Count == 0)
             {
-                return Array.Empty<SlicerProfile>();
+                return Array.Empty<ProcessProfile>();
             }
 
             // Preload existing uniqueness keys
-            var existingKeyTuples = await _db.SlicerProfiles
+            var existingKeyTuples = await _db.ProcessProfiles
                 .Select(p => new { p.Name, p.SlicerType, p.PrinterModelId })
                 .ToListAsync(ct);
-            var existingHashSet = (await _db.SlicerProfiles
+            var existingHashSet = (await _db.ProcessProfiles
                 .Where(p => !string.IsNullOrWhiteSpace(p.Hash))
                 .Select(p => p.Hash!)
                 .ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -58,7 +58,7 @@ namespace Farm.Web.Api.Services.Slicing
             HashSet<(string? Name, SlicerType SlicerType, Guid? PrinterModelId)> candidateKeys = new();
             HashSet<string> candidateHashes = new(StringComparer.OrdinalIgnoreCase);
 
-            List<SlicerProfile> filtered = new();
+            List<ProcessProfile> filtered = new();
             int skipped = 0;
 
             foreach (var profile in list)

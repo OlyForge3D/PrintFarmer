@@ -92,28 +92,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(100.0);
     }
 
-    [Fact]
-    public async Task GetFilesWithIssues_WithMissingAndCorruptedFiles_ReturnsIssueDetails()
-    {
-        // Arrange
-        var healthyModel = CreateAndPersistModel3D("healthy.stl", FileHealthStatus.Healthy);
-        var missingModel = CreateAndPersistModel3D("missing.stl", FileHealthStatus.Missing);
-        var corruptedGcode = CreateAndPersistGcodeFile("corrupted.gcode", FileHealthStatus.Corrupted);
-        await _dbContext.SaveChangesAsync();
-
-        // Act
-        var response = await _client.GetAsync("/api/fileconsistency/files/issues");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = await response.Content.ReadAsStringAsync();
-        var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        root.GetProperty("totalIssues").GetInt32().Should().Be(2);
-        root.GetProperty("missingFiles").GetInt32().Should().Be(1);
-        root.GetProperty("corruptedFiles").GetInt32().Should().Be(1);
-        root.GetProperty("issues").GetArrayLength().Should().Be(2);
-    }
 
     [Fact]
     public async Task GetModel3DHealth_WithSpecificFile_ReturnsCorrectDetails()

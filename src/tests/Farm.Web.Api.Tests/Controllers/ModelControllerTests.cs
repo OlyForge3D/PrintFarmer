@@ -28,6 +28,12 @@ namespace Farm.Web.Api.Tests.Controllers
         {
             return new Mock<Farm.Web.Api.Services.Tags.ITagService>(MockBehavior.Loose);
         }
+
+        private Mock<Farm.Infrastructure.Repositories.Model.IModelRepository> CreateMockModelRepository()
+        {
+            return new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Loose);
+        }
+
         [Fact]
         public async Task ListModelsAsync_DelegatesToService()
         {
@@ -37,13 +43,13 @@ namespace Farm.Web.Api.Tests.Controllers
             var mockVirus = new Mock<Farm.Web.Api.Services.Interfaces.IVirusScanner>();
             var mockThumb = new Mock<Farm.Web.Api.Services.Interfaces.IThumbnailGenerationService>();
             var mockFileManagement = CreateMockFileManagementService();
-            var mockTagService = CreateMockTagService();
             var mockConfig = new Mock<IConfiguration>();
             mockConfig.Setup(c => c[It.IsAny<string>()]).Returns((string?)null);
             var expected = new List<Shared.Model3DDto> { new Shared.Model3DDto { Id = Guid.NewGuid(), Name = "TestModel" } };
             mockService.Setup(s => s.ListModelsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockTagService.Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
             var result = await controller.ListModelsAsync();
 
@@ -68,7 +74,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             mockService.Setup(s => s.GetModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Shared.Model3DDto?)null);
 
-            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
             var result = await controller.GetModelAsync(Guid.NewGuid());
 
@@ -91,7 +98,8 @@ namespace Farm.Web.Api.Tests.Controllers
             var uploadResult = new Shared.Model3DUploadResultDto { Id = Guid.NewGuid(), FileName = "model.stl", FileType = "stl" };
             mockService.Setup(s => s.UploadModelAsync(It.IsAny<Microsoft.AspNetCore.Http.IFormFile>(), It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
-            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
             var fakeFile = new Microsoft.AspNetCore.Http.FormFile(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
 
@@ -118,7 +126,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
             var result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -140,7 +149,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ThrowsAsync(new KeyNotFoundException());
 
-            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
             var result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -162,7 +172,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             mockService.Setup(s => s.GetModelFilePathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
-            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
             var result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -184,7 +195,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
-            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
             var result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 
@@ -206,7 +218,7 @@ namespace Farm.Web.Api.Tests.Controllers
 
             string tmpFile = Path.Combine(modelPath, $"model-{Guid.NewGuid()}.stl");
 
-            var mockRepo = new Mock<Farm.Web.Api.Repositories.Model.IModelRepository>(MockBehavior.Strict);
+            var mockRepo = new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Strict);
             mockRepo.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new Farm.Infrastructure.Domain.Model3D
             {
                 Id = Guid.NewGuid(),
@@ -221,7 +233,7 @@ namespace Farm.Web.Api.Tests.Controllers
 
             var modelService = new Farm.Web.Api.Services.Model.ModelService(mockRepo.Object, mockLogger.Object, configReal, testFs, mockFileManagement.Object, mockAnalysis.Object);
 
-            var controller = new ModelController(mockLogger.Object, modelService, configReal, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, testFs, mockFileManagement.Object, CreateMockTagService().Object);
+            var controller = new ModelController(mockLogger.Object, modelService, configReal, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockRepo.Object);
 
             var result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -239,18 +251,19 @@ namespace Farm.Web.Api.Tests.Controllers
             var mockVirus = new Mock<Farm.Web.Api.Services.Interfaces.IVirusScanner>();
             var mockThumb = new Mock<Farm.Web.Api.Services.Interfaces.IThumbnailGenerationService>();
 
-            string modelPath2 = Path.Combine(Directory.GetCurrentDirectory(), "models");
-            var configReal2 = new ConfigurationBuilder().AddInMemoryCollection(new[] { new KeyValuePair<string, string?>("ModelStorage:Path", modelPath2) }).Build();
+            string modelPath = Path.Combine(Directory.GetCurrentDirectory(), "models");
+            var configReal = new ConfigurationBuilder().AddInMemoryCollection(new[] { new KeyValuePair<string, string?>("ModelStorage:Path", modelPath) }).Build();
 
-            string tmpFileThumb = Path.Combine(modelPath2, $"thumb-{Guid.NewGuid()}.png");
+            string tmpFileThumb = Path.Combine(modelPath, $"thumb-{Guid.NewGuid()}.png");
             mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(tmpFileThumb);
 
-            var testFs2 = TestFileSystemFactory.WithThumbnail(tmpFileThumb, System.Text.Encoding.UTF8.GetBytes("pngcontent"));
+            var testFs = TestFileSystemFactory.WithThumbnail(tmpFileThumb, System.Text.Encoding.UTF8.GetBytes("pngcontent"));
             var mockFileManagement = CreateMockFileManagementService();
 
-            var controller2 = new ModelController(mockLogger.Object, mockService.Object, configReal2, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, testFs2, mockFileManagement.Object, CreateMockTagService().Object);
+            var mockModelRepo = CreateMockModelRepository();
+            var controller = new ModelController(mockLogger.Object, mockService.Object, configReal, mockAnalysis.Object, mockVirus.Object, mockThumb.Object, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
 
-            var result = await controller2.GetModelThumbnailAsync(Guid.NewGuid());
+            var result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 
             var physical = Assert.IsType<PhysicalFileResult>(result);
             Assert.Equal("image/png", physical.ContentType);

@@ -26,7 +26,7 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISliceJobRepository>();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
         var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
         // Manually construct controller (controllers aren't added to root service provider in this test host)
         var repo = jobRepo;
@@ -34,7 +34,7 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
         var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
         ILogger<Farm.Web.Api.Controllers.Slicing.SliceJobController> logger = loggerFactory.CreateLogger<Farm.Web.Api.Controllers.Slicing.SliceJobController>();
         var hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
-        var profileRepo = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Repositories.Slicing.ISlicerProfileRepository>();
+        var profileRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository>();
         var rateLimit = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.RateLimiting.IRateLimitService>();
         var metrics = new Farm.Web.Api.Services.Slicing.SliceJobMetrics();
         var workerAuth = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Workers.IWorkerAuthService>();

@@ -2,7 +2,7 @@
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.Repositories.Model;
+using Farm.Infrastructure.Repositories.Model;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
