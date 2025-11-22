@@ -1,0 +1,16 @@
+# Dockerfile for pre-caching upgraded Ubuntu base image
+# Usage: docker build -f Dockerfile.base-ubuntu -t ubuntu:24.04-upgraded .
+# Then: docker save -o ubuntu-24.04-upgraded.tar ubuntu:24.04-upgraded
+# This image is used as base for orcaslicer-binaries stage
+
+FROM ubuntu:24.04
+
+# Update and upgrade all packages, then clean cache
+# This creates a fully-patched base image that can be cached offline
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Set a label to identify this as a pre-cached image
+LABEL prebuild="true" purpose="base-image" updated="true"

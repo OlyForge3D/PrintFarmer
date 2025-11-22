@@ -112,7 +112,8 @@ ARG GITHUB_TOKEN
 WORKDIR /tmp
 
 # Install extraction tools with comprehensive fallback support
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools \
     file wget && rm -rf /var/lib/apt/lists/*
 
@@ -246,7 +247,8 @@ WORKDIR /app
 # dependencies. Keep the list conservative to improve cross-distro compatibility
 # (some hosts/providers may not have exact versioned package names like libicu74).
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     curl wget ca-certificates \
     libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 xvfb fuse \
     squashfs-tools file p7zip-full && rm -rf /var/lib/apt/lists/*
@@ -313,7 +315,7 @@ ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 ############################################################
 # React Frontend Build Stage
 ############################################################
-FROM --platform=${TARGETPLATFORM} node:20-alpine AS frontend-build
+FROM --platform=${TARGETPLATFORM} node:22-alpine AS frontend-build
 WORKDIR /app
 
 # Accept build arguments for frontend configuration
