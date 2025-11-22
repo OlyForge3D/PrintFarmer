@@ -144,12 +144,111 @@ try {
     # Combine: common first (for anchors), then base content
     $CombinedContent = $CommonContent + "`n" + $BaseContent
     
+    # CRITICAL: Convert relative volume mount paths to absolute paths for Windows Docker compatibility
+    # Docker on Windows needs absolute paths for volume mounts or they won't resolve correctly
+    # Replace patterns like ./scripts/docker/init-postgres.sh with full absolute path
+    $RepoRoot = $OutputDir | Resolve-Path | Select-Object -ExpandProperty Path
+    # Convert backslashes to forward slashes for Docker
+    $RepoRoot = $RepoRoot -replace '\\', '/'
+    
+    # Line-by-line replacement to handle Docker volume mounts correctly
+    $lines = $CombinedContent -split "`n"
+    $fixedLines = @()
+    foreach ($line in $lines) {
+        if ($line -match '\./scripts/docker/([^:]+):') {
+            $fileName = $matches[1]
+            $newLine = $line -replace '\./scripts/docker/[^:]+:', "$RepoRoot/scripts/docker/$fileName`:"
+            Write-Verbose "Converting volume mount: ./scripts/docker/$fileName -> $RepoRoot/scripts/docker/$fileName"
+            $fixedLines += $newLine
+        } else {
+            $fixedLines += $line
+        }
+    }
+    $CombinedContent = $fixedLines -join "`n"
+    
     # Write to output file
     Set-Content -Path $ComposeFile -Value $CombinedContent
-    Write-Info "Generated docker-compose.yml with common anchors"
+    Write-Info "Generated docker-compose.yml with common anchors and absolute paths"
 } catch {
     Write-ErrorMsg "Failed to generate compose file: $_"
     exit 1
+}
+
+# CRITICAL: Remove environment variables for unselected database providers
+# This prevents Docker warnings about unused variables (e.g., MYSQL_ROOT_PASSWORD when using PostgreSQL)
+if ($Architecture -eq "microservices" -and $DbProvider -ne "sqlite") {
+    Write-Info "Removing environment variables for unselected database providers..."
+    
+    $ComposeContent = Get-Content -Path $ComposeFile -Raw
+    $lines = $ComposeContent -split "`n"
+    $filteredLines = @()
+    $inDatabaseService = $false
+    $inEnvironment = $false
+    $skipNextLines = 0
+    
+    foreach ($line in $lines) {
+        # Track when we're in the database service section
+        if ($line -match '^\s*database:\s*$') {
+            $inDatabaseService = $true
+            $filteredLines += $line
+            continue
+        }
+        
+        # Track when we exit the database service (next service starts)
+        if ($inDatabaseService -and $line -match '^\s*[a-z\-]+:\s*$' -and $line -notmatch '^\s*database:\s*$') {
+            $inDatabaseService = $false
+        }
+        
+        # When in database service, filter out unwanted provider variables
+        if ($inDatabaseService) {
+            # Detect environment section
+            if ($line -match '^\s*environment:\s*$') {
+                $inEnvironment = $true
+                $filteredLines += $line
+                continue
+            }
+            
+            # Exit environment section when indentation decreases
+            if ($inEnvironment -and $line -match '^\s+\w+:' -and $line -notmatch '^\s+[A-Z_]+:') {
+                $inEnvironment = $false
+            }
+            
+            # Filter based on provider
+            if ($inEnvironment) {
+                $shouldSkip = $false
+                
+                if ($DbProvider -eq "postgres") {
+                    # When using PostgreSQL, skip MySQL and MSSQL variables
+                    if ($line -match 'MYSQL_|MSSQL_|ACCEPT_EULA') {
+                        $shouldSkip = $true
+                    }
+                } elseif ($DbProvider -eq "sqlserver") {
+                    # When using SQL Server, skip MySQL and PostgreSQL variables
+                    if ($line -match 'MYSQL_|POSTGRES_') {
+                        $shouldSkip = $true
+                    }
+                } elseif ($DbProvider -eq "mysql") {
+                    # When using MySQL, skip PostgreSQL and MSSQL variables
+                    if ($line -match 'POSTGRES_|MSSQL_|ACCEPT_EULA') {
+                        $shouldSkip = $true
+                    }
+                }
+                
+                if (-not $shouldSkip) {
+                    $filteredLines += $line
+                }
+            } else {
+                $filteredLines += $line
+            }
+        } else {
+            $filteredLines += $line
+        }
+    }
+    
+    # Write filtered content back
+    $FilteredContent = $filteredLines -join "`n"
+    Set-Content -Path $ComposeFile -Value $FilteredContent
+    Write-Info "Removed database provider variables for: PostgreSQL, MySQL, MSSQL (kept only $DbProvider)"
 }
 
 # For microservices, we need to handle database configuration

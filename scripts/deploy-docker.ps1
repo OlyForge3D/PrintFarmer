@@ -17,6 +17,8 @@ param(
     [switch]$LoadImages,
     [switch]$CacheOrcaSlicer,
     [switch]$LoadCachedOrcaSlicer,
+    [switch]$PrepareOffline,
+    [switch]$DeployOffline,
     [string]$ImagesDir = "./docker-images",
     [string]$Architecture = "",
     [string]$EnvFile = "",
@@ -87,19 +89,20 @@ function Show-Help {
     Write-Host "    * NO arguments needed - searches the same cache locations as Docker images"
     Write-Host "    * Automatically searches: ./docker-images/orcaslicer, ~/docker-images/orcaslicer, etc."
     Write-Host ""
-    Write-Host "OFFLINE DEPLOYMENT WORKFLOW:"
-    Write-Host "    Step 1: Download and save images on machine with internet"
-    Write-Host "        pwsh .\scripts\deploy-docker.ps1 -PullImages -SaveImages"
+    Write-Host "SIMPLIFIED OFFLINE DEPLOYMENT (RECOMMENDED):"
+    Write-Host "    Single command prepares ALL offline materials (images + OrcaSlicer):"
+    Write-Host "    "
+    Write-Host "    On machine WITH internet:"
+    Write-Host "        pwsh .\scripts\deploy-docker.ps1 -PrepareOffline"
+    Write-Host "    "
+    Write-Host "    Transfer ./docker-images folder to offline machine, then:"
+    Write-Host "    "
+    Write-Host "    On machine WITHOUT internet:"
+    Write-Host "        pwsh .\scripts\deploy-docker.ps1 -DeployOffline"
     Write-Host ""
-    Write-Host "    Step 2: Cache OrcaSlicer AppImage (optional, for distributed slicing)"
-    Write-Host "        pwsh .\scripts\deploy-docker.ps1 -CacheOrcaSlicer"
-    Write-Host ""
-    Write-Host "    Step 3: Transfer ./docker-images folder to offline machine"
-    Write-Host ""
-    Write-Host "    Step 4: Deploy on offline machine - images auto-load automatically!"
-    Write-Host "        pwsh .\scripts\deploy-docker.ps1"
-    Write-Host ""
-    Write-Host "MANUAL IMAGE MANAGEMENT OPTIONS:"
+    Write-Host "MANUAL IMAGE MANAGEMENT OPTIONS (Advanced):"
+    Write-Host "    -PrepareOffline            Comprehensive prep: downloads images, exports TAR, caches OrcaSlicer"
+    Write-Host "    -DeployOffline             Load cached images and proceed with deployment"
     Write-Host "    -BuildBaseImages           Build pre-upgraded base images for offline deployment"
     Write-Host "    -PullImages                Download all base container images from registry"
     Write-Host "    -SaveImages                Export downloaded images to TAR files for offline use"
@@ -223,13 +226,26 @@ function Find-CachedImagesDir {
     )
     
     foreach ($path in $searchPaths) {
-        $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
-        if (Test-Path $resolvedPath) {
-            $tarFiles = Get-ChildItem -Path $resolvedPath -Filter "*.tar" -ErrorAction SilentlyContinue
-            if ($tarFiles.Count -gt 0) {
-                Write-Info "Found cached images at: $resolvedPath"
-                return $resolvedPath
+        try {
+            # For absolute paths with drive letters, check if drive exists first
+            if ($path -match '^[A-Z]:') {
+                $drive = $path.Substring(0, 2)
+                if (-not (Test-Path "$drive\")) {
+                    continue  # Skip if drive doesn't exist
+                }
             }
+            
+            $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+            if (Test-Path $resolvedPath -ErrorAction SilentlyContinue) {
+                $tarFiles = Get-ChildItem -Path $resolvedPath -Filter "*.tar" -ErrorAction SilentlyContinue
+                if ($tarFiles.Count -gt 0) {
+                    Write-Info "Found cached images at: $resolvedPath"
+                    return $resolvedPath
+                }
+            }
+        } catch {
+            # Silently skip paths that cause errors (missing drives, etc.)
+            continue
         }
     }
     
@@ -321,22 +337,35 @@ function Find-CachedOrcaSlicerDir {
     }
     
     foreach ($path in $SearchPaths) {
-        $expandedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
-        
-        # Try glob expansion for media mounts
-        if ($path -like "/media/*") {
-            $globPaths = @(Get-ChildItem -Path "/media/" -Directory -ErrorAction SilentlyContinue)
-            foreach ($mediaDir in $globPaths) {
-                $testPath = Join-Path $mediaDir.FullName "docker-images/orcaslicer"
-                if ((Test-Path $testPath) -and (Get-ChildItem $testPath -Filter "*.AppImage" -ErrorAction SilentlyContinue).Count -gt 0) {
-                    return $testPath
+        try {
+            # For absolute paths with drive letters, check if drive exists first
+            if ($path -match '^[A-Z]:') {
+                $drive = $path.Substring(0, 2)
+                if (-not (Test-Path "$drive\" -ErrorAction SilentlyContinue)) {
+                    continue  # Skip if drive doesn't exist
                 }
             }
+            
+            $expandedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+            
+            # Try glob expansion for media mounts
+            if ($path -like "/media/*") {
+                $globPaths = @(Get-ChildItem -Path "/media/" -Directory -ErrorAction SilentlyContinue)
+                foreach ($mediaDir in $globPaths) {
+                    $testPath = Join-Path $mediaDir.FullName "docker-images/orcaslicer"
+                    if ((Test-Path $testPath) -and (Get-ChildItem $testPath -Filter "*.AppImage" -ErrorAction SilentlyContinue).Count -gt 0) {
+                        return $testPath
+                    }
+                }
+                continue
+            }
+            
+            if ((Test-Path $expandedPath) -and (Get-ChildItem $expandedPath -Filter "*.AppImage" -ErrorAction SilentlyContinue).Count -gt 0) {
+                return $expandedPath
+            }
+        } catch {
+            # Silently skip paths that cause errors (missing drives, etc.)
             continue
-        }
-        
-        if ((Test-Path $expandedPath) -and (Get-ChildItem $expandedPath -Filter "*.AppImage" -ErrorAction SilentlyContinue).Count -gt 0) {
-            return $expandedPath
         }
     }
     
@@ -407,7 +436,9 @@ function Generate-EnvFile {
     
     $Architecture = $Config['ARCHITECTURE']
     $DbProvider = $Config['DB_PROVIDER']
-    $Environment = "Production"
+    # Set deployment environment (Development uses EnsureCreated, Production uses migrations)
+    # TODO: Once migrations are set up, add user choice between Development and Production
+    $Environment = "Development"
     $HttpPort = 80
     $ApiPort = 5245
     
@@ -701,6 +732,199 @@ function Load-ImagesFromTar {
     Write-Info "Images are now available in local Docker daemon"
     
     return $true
+}
+
+# ============================================================================
+# Offline Deployment Preparation & Deployment
+# ============================================================================
+
+# Save only upgraded images to TAR (for offline deployment)
+function Save-UpgradedImagesToTar {
+    param([string]$TargetDir = "./docker-images")
+    
+    Write-Header "Exporting Pre-Upgraded Images to TAR Files"
+    
+    if (-not (Test-Path $TargetDir)) {
+        New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+        Write-Info "Created directory: $TargetDir"
+    }
+    
+    # Get all Docker images and filter for -upgraded tagged ones
+    $allImages = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null
+    $upgradedImages = $allImages | Where-Object { $_ -like "*-upgraded" }
+    
+    if ($upgradedImages.Count -eq 0) {
+        Write-ErrorMsg "No pre-upgraded images found in Docker"
+        Write-Info "Run with -BuildBaseImages first to create pre-upgraded images"
+        return $false
+    }
+    
+    $successCount = 0
+    $failCount = 0
+    $totalSize = 0
+    
+    foreach ($image in $upgradedImages) {
+        $safeName = $image -replace '[:/]', '-'
+        $tarFile = Join-Path $TargetDir "$safeName.tar"
+        
+        Write-Info "Exporting $image to $tarFile..."
+        try {
+            docker save -o $tarFile $image
+            
+            $fileSize = (Get-Item $tarFile).Length
+            $fileSizeMB = [math]::Round($fileSize / 1MB, 2)
+            $totalSize += $fileSize
+            
+            Write-Success "Exported: $image - Size: $fileSizeMB MB"
+            $successCount++
+        } catch {
+            Write-Warning "Failed to export $image : $_"
+            $failCount++
+        }
+    }
+    
+    $totalSizeMB = [math]::Round($totalSize / 1MB, 2)
+    $totalSizeGB = [math]::Round($totalSize / 1GB, 2)
+    
+    Write-Header "Upgraded Images Export Summary"
+    Write-Host "Successfully exported: $successCount pre-upgraded images" -ForegroundColor Green
+    Write-Host "Total size: $totalSizeGB GB - $totalSizeMB MB" -ForegroundColor Cyan
+    
+    if ($failCount -gt 0) {
+        Write-Warning "Failed to export: $failCount images"
+        return $false
+    }
+    
+    Write-Success "All pre-upgraded images exported successfully!"
+    Write-Info "TAR files location: $TargetDir"
+    
+    # Save upgraded images manifest
+    $manifestPath = Join-Path $TargetDir "manifest-upgraded.txt"
+    $upgradedImages | Set-Content $manifestPath
+    Write-Info "Created upgraded images manifest: $manifestPath"
+    
+    return $true
+}
+
+# Comprehensive offline preparation - builds pre-upgraded base images, exports to TAR, and caches OrcaSlicer
+function Prepare-OfflineDeployment {
+    param([string]$TargetDir = "./docker-images")
+    
+    Write-Header "OFFLINE DEPLOYMENT PREPARATION"
+    Write-Info "This process prepares all materials needed for offline deployment:"
+    Write-Info "  1. Build pre-upgraded base images (450-700MB)"
+    Write-Info "  2. Export upgraded images to TAR files for transport"
+    Write-Info "  3. Download and cache OrcaSlicer AppImage (250-400MB)"
+    Write-Info ""
+    Write-Info "Total time: ~15-25 minutes (depends on internet speed and system performance)"
+    Write-Host ""
+    
+    $startTime = Get-Date
+    $succeeded = $true
+    
+    try {
+        # Step 1: Build pre-upgraded base images
+        Write-Header "STEP 1/3: Building Pre-Upgraded Base Images"
+        if (-not (Test-Path "scripts/docker/build-base-images.ps1")) {
+            Write-ErrorMsg "Build script not found: scripts/docker/build-base-images.ps1"
+            $succeeded = $false
+        } else {
+            & "scripts/docker/build-base-images.ps1" -CacheDir $TargetDir
+            if ($LASTEXITCODE -ne 0) {
+                Write-ErrorMsg "Failed to build pre-upgraded base images"
+                $succeeded = $false
+            }
+        }
+        
+        if ($succeeded) {
+            Write-Host ""
+            Write-Header "STEP 2/3: Exporting Pre-Upgraded Images to TAR Files"
+            if (-not (Save-UpgradedImagesToTar -TargetDir $TargetDir)) {
+                Write-ErrorMsg "Failed to export pre-upgraded images to TAR"
+                $succeeded = $false
+            }
+        }
+        
+        if ($succeeded) {
+            Write-Host ""
+            Write-Header "STEP 3/3: Caching OrcaSlicer AppImage"
+            if (-not (Cache-OrcaSlicer -TargetDir "$TargetDir/orcaslicer" -Version "latest")) {
+                Write-ErrorMsg "Failed to cache OrcaSlicer AppImage"
+                $succeeded = $false
+            }
+        }
+    } catch {
+        Write-ErrorMsg "Unexpected error during offline preparation: $_"
+        $succeeded = $false
+    }
+    
+    $elapsed = (Get-Date) - $startTime
+    Write-Host ""
+    Write-Header "OFFLINE PREPARATION SUMMARY"
+    
+    if ($succeeded) {
+        Write-Success "✓ Offline deployment materials prepared successfully!"
+        Write-Info "Location: $TargetDir"
+        Write-Info "Contents:"
+        Write-Info "  - Pre-upgraded base images (TAR files with -upgraded suffix)"
+        Write-Info "  - OrcaSlicer AppImage for distributed slicing"
+        Write-Info "  - Manifest files for offline loading"
+        Write-Info "Total time: $([math]::Round($elapsed.TotalMinutes, 1)) minutes"
+        Write-Host ""
+        Write-Info "Next steps:"
+        Write-Info "  1. Transfer the '$TargetDir' folder to your offline machine"
+        Write-Info "  2. Run: .\scripts\deploy-docker.ps1 -ImagesDir <path-to-images-folder>"
+        Write-Info "     (The script will auto-detect and load cached images)"
+        Write-Host ""
+        return $true
+    } else {
+        Write-ErrorMsg "✗ Offline preparation failed. Check errors above and retry."
+        Write-Info "Total time: $([math]::Round($elapsed.TotalMinutes, 1)) minutes"
+        return $false
+    }
+}
+
+# Deploy using cached offline materials
+function Deploy-OfflineMode {
+    param([string]$SourceDir = "./docker-images")
+    
+    Write-Header "OFFLINE DEPLOYMENT MODE"
+    Write-Info "Loading pre-cached container images and preparing deployment"
+    Write-Host ""
+    
+    try {
+        # Check if images directory exists
+        if (-not (Test-Path $SourceDir)) {
+            Write-ErrorMsg "Images directory not found: $SourceDir"
+            Write-Info "Run with -PrepareOffline first to download and cache all materials"
+            return $false
+        }
+        
+        # Load cached images from TAR files
+        Write-Header "STEP 1/2: Loading Cached Container Images"
+        if (-not (Load-ImagesFromTar -SourceDir $SourceDir)) {
+            Write-ErrorMsg "Failed to load cached images"
+            return $false
+        }
+        
+        # Auto-load OrcaSlicer if available
+        Write-Host ""
+        Write-Header "STEP 2/2: Loading OrcaSlicer AppImage (Optional)"
+        $orcaDir = Join-Path $SourceDir "orcaslicer"
+        if (Test-Path $orcaDir) {
+            Load-CachedOrcaSlicer -SourceDir $orcaDir
+        } else {
+            Write-Info "OrcaSlicer cache not found - distributed slicing will be disabled"
+        }
+        
+        Write-Host ""
+        Write-Success "✓ Offline images loaded successfully!"
+        Write-Info "Proceeding with deployment configuration..."
+        return $true
+    } catch {
+        Write-ErrorMsg "Unexpected error during offline deployment setup: $_"
+        return $false
+    }
 }
 
 # Download OrcaSlicer Linux AppImage for offline deployments
@@ -1497,6 +1721,27 @@ if ($Redeploy) {
 
 Write-Header "PrintFarmer Docker Deployment - Windows Edition"
 
+# Handle comprehensive offline deployment workflow
+if ($PrepareOffline) {
+    if (Prepare-OfflineDeployment -TargetDir $ImagesDir) {
+        Write-Success "All offline materials prepared. You can now transfer the folder to your offline machine."
+        exit 0
+    } else {
+        Write-ErrorMsg "Failed to prepare offline deployment materials"
+        exit 1
+    }
+}
+
+if ($DeployOffline) {
+    if (Deploy-OfflineMode -SourceDir $ImagesDir) {
+        Write-Info "Continuing with interactive deployment configuration..."
+        # Fall through to normal deployment flow below
+    } else {
+        Write-ErrorMsg "Failed to load offline deployment materials"
+        exit 1
+    }
+}
+
 # Handle image management options (these exit early if used)
 if ($BuildBaseImages) {
     Write-Info "Building pre-upgraded base images for offline deployment..."
@@ -1571,6 +1816,12 @@ Write-Host ""
 
 # Load previous configuration (if it exists)
 $config = Load-DeploymentConfig -ConfigPath "./.deploy-config"
+
+# Use previously configured ImagesDir if not explicitly specified
+if ($config['IMAGES_DIR'] -and $ImagesDir -eq "./docker-images") {
+    $ImagesDir = $config['IMAGES_DIR']
+    Write-Info "Using previously configured images directory: $ImagesDir"
+}
 
 # Choose architecture
 $architecture = Choose-Architecture -Config $config -Quiet:$NonInteractive
@@ -1685,11 +1936,20 @@ if ($DryRun) {
     exit 0
 }
 
+# Save images directory for future use
+$config['IMAGES_DIR'] = $ImagesDir
+
 # Save configuration for future use
 Save-DeploymentConfig -Config $config -ConfigPath "./.deploy-config"
 
 # Build docker-compose configuration
 Write-Header "Generating Docker Compose Configuration"
+
+# Remove old compose file to force regeneration with current settings
+if (Test-Path "docker-compose.yml") {
+    Write-Info "Removing old docker-compose.yml for regeneration..."
+    Remove-Item "docker-compose.yml" -Force
+}
 
 Write-Info "Generating docker-compose.yml using PowerShell generator..."
 
@@ -1752,6 +2012,31 @@ if (-not (Test-Path "docker-compose.yml")) {
     exit 1
 }
 
+# CRITICAL: Fix Windows Docker volume mount paths
+# On Windows, Docker needs absolute paths for volume mounts or they won't resolve
+# Convert any remaining relative paths to absolute paths with forward slashes
+Write-Info "Fixing volume mount paths for Windows Docker compatibility..."
+$composeContent = Get-Content "docker-compose.yml" -Raw
+$repoRoot = (Get-Location).Path -replace '\\', '/'
+
+# Line-by-line replacement to handle Docker volume mounts correctly
+$lines = $composeContent -split "`n"
+$fixedLines = @()
+foreach ($line in $lines) {
+    if ($line -match '\./scripts/docker/([^:]+):') {
+        $fileName = $matches[1]
+        $newLine = $line -replace '\./scripts/docker/[^:]+:', "$repoRoot/scripts/docker/$fileName`:"
+        Write-Verbose "Converting volume mount: ./scripts/docker/$fileName -> $repoRoot/scripts/docker/$fileName"
+        $fixedLines += $newLine
+    } else {
+        $fixedLines += $line
+    }
+}
+$composeContent = $fixedLines -join "`n"
+
+Set-Content "docker-compose.yml" -Value $composeContent
+Write-Info "Volume mount paths fixed for Windows Docker"
+
 Write-Success "Docker-compose.yml ready for deployment"
 
 # Generate .env file with database credentials and configuration
@@ -1763,6 +2048,12 @@ if (-not (Generate-EnvFile -Config $config -OutputPath ".env")) {
 # Deploy
 Write-Header "Starting Deployment"
 
+# Ensure we're in the repository root for volume mounts to resolve correctly
+# (docker compose uses relative paths for volume mounts like ./scripts/docker/init-postgres.sh)
+$repoRoot = (Get-Item $PSScriptRoot).Parent.FullName
+Write-Info "Ensuring deployment runs from repository root: $repoRoot"
+Push-Location $repoRoot
+
 try {
     docker image prune -f 2>&1 | Out-Null
 } catch {
@@ -1772,14 +2063,134 @@ try {
 Write-Info "Starting Docker containers..."
 Write-Info "This may take a few moments on first run..."
 try {
-    # Use --pull=missing to pull base images only if not found locally
-    # This leverages cached layers while ensuring missing images are pulled from registry
-    docker compose --env-file .env -f docker-compose.yml up -d --pull=missing
-    Write-Success "Containers started successfully"
+    # Start ONLY the database container first to ensure it initializes properly
+    # If we start all containers with -d, they all start in parallel and API fails
+    # trying to connect to a database that hasn't finished initializing
+    Write-Info "Step 1/3: Starting database container..."
+    docker compose --env-file .env -f docker-compose.yml up -d database
+    Write-Success "Database container started"
+    
+    # Wait for database to be healthy (max 120 seconds)
+    Write-Info "Step 2/3: Waiting for database to become healthy..."
+    $dbHealthy = $false
+    $maxAttempts = 24  # 24 * 5 seconds = 120 seconds
+    $attempt = 0
+    
+    while (-not $dbHealthy -and $attempt -lt $maxAttempts) {
+        Start-Sleep -Seconds 5
+        $attempt++
+        
+        $psOutput = docker compose --env-file .env -f docker-compose.yml ps database 2>&1
+        if ($psOutput -match "healthy|Up.*\(healthy\)") {
+            $dbHealthy = $true
+            Write-Success "Database is healthy"
+        } else {
+            $status = if ($psOutput -match "(Up|Exited|Created)") { $matches[1] } else { "Unknown" }
+            $healthStatus = if ($psOutput -match "\(([^)]+)\)") { $matches[1] } else { "no health status" }
+            Write-Info "Waiting for database... (attempt $attempt/$maxAttempts) Status: $status ($healthStatus)"
+            
+            # If exited, show logs immediately
+            if ($psOutput -match "Exited") {
+                Write-Warning "Database container exited! Showing logs:"
+                docker compose --env-file .env -f docker-compose.yml logs database 2>&1 | Select-Object -Last 20
+                Pop-Location
+                exit 1
+            }
+        }
+    }
+    
+    if (-not $dbHealthy) {
+        Write-ErrorMsg "Database failed to become healthy after 120 seconds"
+        Write-Info "Final database status:"
+        docker compose --env-file .env -f docker-compose.yml ps database
+        Write-Info "Database logs (last 30 lines):"
+        docker compose --env-file .env -f docker-compose.yml logs database 2>&1 | Select-Object -Last 30
+        Pop-Location
+        exit 1
+    }
+    
+    # Now start the rest of the containers (they can now connect to database)
+    Write-Info "Step 3/3: Starting remaining containers..."
+    Write-Info "Verifying database is accepting connections before starting dependent services..."
+    
+    # Do a more direct test - try to connect to the database
+    $maxConnectionAttempts = 12
+    $connectionAttempt = 0
+    $dbConnected = $false
+    
+    while (-not $dbConnected -and $connectionAttempt -lt $maxConnectionAttempts) {
+        $connectionAttempt++
+        try {
+            # Try to run a simple query in the database container
+            $testQuery = docker exec printfarmer-database psql -U printfarmer -d printfarmer -c "SELECT 1" 2>&1
+            if ($testQuery -match "1" -or $testQuery -match "row") {
+                Write-Success "Database is accepting connections"
+                $dbConnected = $true
+            } else {
+                Write-Info "Database connection test (attempt $connectionAttempt/$maxConnectionAttempts): $testQuery"
+                Start-Sleep -Seconds 5
+            }
+        } catch {
+            if ($connectionAttempt -lt $maxConnectionAttempts) {
+                Write-Info "Database connection attempt $connectionAttempt/$maxConnectionAttempts failed, retrying..."
+                Start-Sleep -Seconds 5
+            }
+        }
+    }
+    
+    if (-not $dbConnected) {
+        Write-Warning "Could not verify database connection after $maxConnectionAttempts attempts, but continuing anyway..."
+        Write-Info "Waiting an extra 10 seconds for database to fully initialize..."
+        Start-Sleep -Seconds 10
+    } else {
+        Write-Info "Waiting 3 seconds before starting dependent services..."
+        Start-Sleep -Seconds 3
+    }
+    
+    docker compose --env-file .env -f docker-compose.yml up -d api orcaslicer-worker frontend nginx-proxy --pull=missing
+    Write-Success "All containers started successfully"
 } catch {
     Write-ErrorMsg "Failed to start containers: $_"
+    Pop-Location
     exit 1
 }
+
+Write-Host ""
+
+# Give containers time to start
+Write-Info "Waiting for containers to initialize..."
+Start-Sleep -Seconds 5
+
+# Check if containers actually started (before verification)
+Write-Info "Checking container status..."
+$psOutput = docker compose --env-file .env -f docker-compose.yml ps 2>&1
+$runningCount = ($psOutput | Select-String "Up" | Measure-Object).Count
+$exitedCount = ($psOutput | Select-String "Exited" | Measure-Object).Count
+
+if ($exitedCount -gt 0) {
+    Write-ErrorMsg "✗ Some containers failed to start!"
+    Write-Host ""
+    Write-Info "Container status:"
+    $psOutput | ForEach-Object { Write-Host "  $_" }
+    Write-Host ""
+    Write-Info "Showing container logs for failed containers..."
+    docker compose --env-file .env -f docker-compose.yml logs
+    Write-ErrorMsg "Container startup failed. Check logs above for details."
+    Pop-Location
+    exit 1
+}
+
+if ($runningCount -eq 0) {
+    Write-ErrorMsg "✗ No containers are running!"
+    Write-Info "Container status:"
+    $psOutput | ForEach-Object { Write-Host "  $_" }
+    Write-Host ""
+    Write-Info "Run 'docker compose logs' to see what went wrong"
+    Pop-Location
+    exit 1
+}
+
+Write-Success "All containers started successfully"
 
 Write-Host ""
 
@@ -1815,3 +2226,6 @@ Write-Host "For detailed information, see:" -ForegroundColor Cyan
 Write-Host "  README.md" -ForegroundColor White
 Write-Host "  DEPLOYMENT_OVERVIEW.md" -ForegroundColor White
 Write-Host ""
+
+# Restore original directory
+Pop-Location
