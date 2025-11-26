@@ -1,0 +1,16 @@
+# Dockerfile for pre-caching upgraded Nginx Alpine base image
+# Usage: docker build -f Dockerfile.base-nginx -t nginx:alpine-upgraded .
+# Then: docker save -o nginx-alpine-upgraded.tar nginx:alpine-upgraded
+# This image is used as the reverse proxy service in docker-compose
+
+FROM nginx:alpine
+
+# Update and upgrade all packages, then clean cache
+# This creates a fully-patched base image that can be cached offline
+RUN apk update && \
+    apk upgrade && \
+    apk cache clean && \
+    rm -rf /tmp/* /var/tmp/*
+
+# Set a label to identify this as a pre-cached image
+LABEL prebuild="true" purpose="base-image" updated="true"

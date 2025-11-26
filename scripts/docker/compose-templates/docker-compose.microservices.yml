@@ -30,7 +30,6 @@ services:
           - postgres
     volumes:
       - printfarmer-database:/var/lib/postgresql/data  # Default path, override in production
-      - ./scripts/docker/init-postgres.sh:/docker-entrypoint-initdb.d/01-init-auth.sh:ro
     healthcheck:
       test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]}
       interval: 10s

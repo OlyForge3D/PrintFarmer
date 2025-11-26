@@ -112,8 +112,15 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                     catch (Microsoft.Data.Sqlite.SqliteException sqlEx) when (sqlEx.Message?.Contains("no such table", StringComparison.OrdinalIgnoreCase) == true && seedAttempt < seedMaxAttempts)
                     {
                         seedAttempt++;
-                        _logger.LogWarning(sqlEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing table; retrying in 1s...");
-                        await Task.Delay(TimeSpan.FromSeconds(1));
+                        _logger.LogWarning(sqlEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing table (SQLite); retrying in 2s...");
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                    }
+                    catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P01" && seedAttempt < seedMaxAttempts)
+                    {
+                        // PostgreSQL error 42P01 = relation does not exist (table/view not found)
+                        seedAttempt++;
+                        _logger.LogWarning(pgEx, $"[DB] Seed attempt {seedAttempt}/{seedMaxAttempts} failed due to missing relation (PostgreSQL); retrying in 2s...");
+                        await Task.Delay(TimeSpan.FromSeconds(2));
                     }
                 }
                 _logger.LogInformation("[DB] Database initialization completed successfully");

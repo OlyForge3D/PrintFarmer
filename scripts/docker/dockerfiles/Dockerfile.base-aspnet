@@ -1,0 +1,16 @@
+# Dockerfile for pre-caching upgraded .NET Aspnet base image
+# Usage: docker build -f Dockerfile.base-aspnet -t mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded .
+# Then: docker save -o aspnet-9.0-bookworm-slim-upgraded.tar mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded
+# This image is used as base for api-runtime and slicer-base stages
+
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim
+
+# Update and upgrade all packages, then clean cache
+# This creates a fully-patched base image that can be cached offline
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Set a label to identify this as a pre-cached image
+LABEL prebuild="true" purpose="base-image" updated="true"

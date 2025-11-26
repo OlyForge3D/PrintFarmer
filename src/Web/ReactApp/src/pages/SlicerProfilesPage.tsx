@@ -313,67 +313,8 @@ export const SlicerProfilesPage: React.FC = () => {
   const getFilteredCount = () => {
     return filteredMachineProfiles.length + filteredFilamentProfiles.length + filteredProcessProfiles.length;
   };
-    setExportingId(id);
-    try {
-      const data: SlicerProfileExportDto = await slicerProfilesService.exportProfile(id);
-      const blob = new Blob([data.rawJson], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${data.name.replace(/\s+/g, '_')}_${data.hash.substring(0, 8)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setMessage('Profile exported.');
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Export failed');
-    } finally {
-      setExportingId(null);
-    }
-  };
-
-  const exportOrcaBundle = async () => {
-    setExportingBundle(true);
-    try {
-      const bundleJson = await orcaProfilesService.exportBundle({
-        includeProcessProfiles: true,
-        includeMetadata: true
-      });
-
-      const blob = new Blob([bundleJson], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const timestamp = new Date().toISOString().split('T')[0];
-      a.download = `printfarmer_orca_bundle_${timestamp}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setMessage('OrcaSlicer bundle exported successfully.');
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Bundle export failed');
-    } finally {
-      setExportingBundle(false);
-    }
-  };
 
 
-
-  const onImport = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rawJson.trim()) {
-      setImportError('Raw profile JSON is required');
-      return;
-    }
-    importMutation.mutate({
-      rawJson: rawJson,
-      name: name || undefined,
-      description: description || undefined,
-      slicerType,
-      allowSystemOverride,
-      setDefault,
-      isPublic
-    });
-    // Mutation handles pending state; removed local importing flag
-  };
 
   return (
     <PageTemplate
