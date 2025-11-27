@@ -2,8 +2,8 @@
 using System.Numerics;
 using Assimp;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;

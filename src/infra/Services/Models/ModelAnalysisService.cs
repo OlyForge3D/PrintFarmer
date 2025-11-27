@@ -1,8 +1,7 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
-using Farm.Web.Api.Services.Interfaces;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.Models;
 
 /// <summary>
 /// Best-effort model analysis implementation. Currently supports basic analysis for STL files

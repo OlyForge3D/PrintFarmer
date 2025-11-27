@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.Thumbnails;
 
 /// <summary>
 /// Service for generating thumbnails from 3D model files

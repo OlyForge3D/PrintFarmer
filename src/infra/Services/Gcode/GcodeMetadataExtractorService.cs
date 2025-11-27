@@ -1,32 +1,7 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Gcode;
-
-/// <summary>
-/// Extracts metadata from G-code files as a fallback when printer API doesn't provide complete info.
-/// Parses common comment patterns to extract slicer info, material, nozzle diameter, print time, filament length, etc.
-/// </summary>
-public interface IGcodeMetadataExtractorService
-{
-    /// <summary>
-    /// Extract metadata from G-code content.
-    /// </summary>
-    Task<GcodeMetadataExtracted> ExtractMetadataAsync(string gcodeContent);
-}
-
-public class GcodeMetadataExtracted
-{
-    public string? SlicerName { get; set; }
-    public string? SlicerVersion { get; set; }
-    public double? EstimatedPrintTimeMinutes { get; set; }
-    public double? FilamentLengthMm { get; set; }
-    public double? FilamentWeightGrams { get; set; }
-    public double? NozzleDiameter { get; set; }
-    public string? Material { get; set; }
-    public double? LayerHeight { get; set; }
-    public byte[]? ThumbnailData { get; set; } // PNG image data extracted from gcode
-}
+namespace Farm.Infrastructure.Services.Gcode;
 
 public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
 {
@@ -105,7 +80,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         }
     }
 
-    private void ExtractMaterial(List<string> lines, GcodeMetadataExtracted metadata)
+    private static void ExtractMaterial(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; filament_type = PLA" or "; MATERIAL = PLA"
         string? materialLine = lines.FirstOrDefault(l =>
@@ -124,7 +99,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         }
     }
 
-    private void ExtractNozzleDiameter(List<string> lines, GcodeMetadataExtracted metadata)
+    private static void ExtractNozzleDiameter(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; nozzle_diameter = 0.4"
         string? nozzleLine = lines.FirstOrDefault(l => l.Contains("nozzle_diameter", StringComparison.OrdinalIgnoreCase));
@@ -138,7 +113,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         }
     }
 
-    private void ExtractLayerHeight(List<string> lines, GcodeMetadataExtracted metadata)
+    private static void ExtractLayerHeight(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; layer_height = 0.2"
         string? layerLine = lines.FirstOrDefault(l => l.Contains("layer_height", StringComparison.OrdinalIgnoreCase));
@@ -152,7 +127,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         }
     }
 
-    private void ExtractPrintTime(List<string> lines, GcodeMetadataExtracted metadata)
+    private static void ExtractPrintTime(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // Multiple formats:
         // PrusaSlicer: "; estimated printing time (normal mode) = 1h 23m 45s"
@@ -188,7 +163,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         }
     }
 
-    private void ExtractFilamentInfo(List<string> lines, GcodeMetadataExtracted metadata)
+    private static void ExtractFilamentInfo(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; filament_mm3 = 123.45" (mm³) or "; filament_length = 12345" (mm)
         // Cura: "; Filament used: 12.34m" or similar

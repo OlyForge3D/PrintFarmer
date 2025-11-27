@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Services.Models;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;

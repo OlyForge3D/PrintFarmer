@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.Models;
 
 public record ModelAnalysisResult(double? DimensionX, double? DimensionY, double? DimensionZ, int? TriangleCount, double? VolumeMm3);
 

@@ -5,6 +5,9 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Caching;
@@ -294,7 +297,7 @@ public static class ServiceCollectionExtensions
         // IHarvestQueue must be Singleton because it's used by background tasks that outlive HTTP request scopes
         _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
-        _ = services.AddScoped<Services.Gcode.IGcodeMetadataExtractorService, Services.Gcode.GcodeMetadataExtractorService>();
+        _ = services.AddScoped<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Gcode.IGcodeRepository, Farm.Infrastructure.Repositories.Gcode.EfGcodeRepository>();
 

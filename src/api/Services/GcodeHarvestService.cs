@@ -10,6 +10,7 @@ using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Resilience;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
@@ -37,7 +38,7 @@ public partial class GcodeHarvestService(
     IServiceScopeFactory serviceScopeFactory,
     IHarvestQueue harvestQueue,
     IHubContext<HarvestHub> harvestHub,
-    Gcode.IGcodeMetadataExtractorService metadataExtractor,
+    IGcodeMetadataExtractorService metadataExtractor,
     StorageManagement.IStoragePathService storagePathService,
     IOptions<GcodeHarvestSettings> harvestOptions) : IGcodeHarvestService
 {
@@ -118,7 +119,7 @@ public partial class GcodeHarvestService(
     private readonly IHarvestQueue _harvestQueue = harvestQueue;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
     private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
-    private readonly Gcode.IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor;
+    private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor;
     private readonly StorageManagement.IStoragePathService _storagePathService = storagePathService;
     private readonly GcodeHarvestSettings _harvestSettings = harvestOptions.Value;
 
@@ -733,7 +734,7 @@ public partial class GcodeHarvestService(
                     .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
 
                 // Extract metadata from gcode as fallback for incomplete API data
-                Gcode.GcodeMetadataExtracted? extractedMetadata = null;
+                GcodeMetadataExtracted? extractedMetadata = null;
                 string? thumbnailPath = null;
                 if (gcodeContent.Length > 0)
                 {
