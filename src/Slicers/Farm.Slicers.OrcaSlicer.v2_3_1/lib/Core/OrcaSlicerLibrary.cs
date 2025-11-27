@@ -5,7 +5,7 @@ namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 /// <summary>
 /// OrcaSlicer v2.3.1 slicer library implementation.
 /// </summary>
-public class OrcaSlicerLibrary_V2_3_1 : IOrcaSlicerLibrary
+public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
 {
     private readonly ISlicerProfilesProvider _profilesProvider;
     private readonly ISlicerAssetRegistry _assetRegistry;

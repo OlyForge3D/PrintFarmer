@@ -50,10 +50,8 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry
         return GetEmbeddedResourceStream($"cover-images/{manufacturerName}/{modelName}_cover.png");
     }
 
-#pragma warning disable S1172 // Unused parameters are allowed in private methods
     private async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
-#pragma warning restore S1172
         if (_initialized)
         {
             return;

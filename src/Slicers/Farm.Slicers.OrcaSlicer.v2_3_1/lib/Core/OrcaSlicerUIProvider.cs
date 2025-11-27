@@ -6,7 +6,7 @@ namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 /// OrcaSlicer v2.3.1 UI provider.
 /// Exposes UI capabilities and metadata for this slicer version.
 /// </summary>
-public class OrcaSlicerUiProvider_V2_3_1 : IOrcaSlicerUIProvider
+public class OrcaSlicerUIProvider_v2_3_1 : ISlicerUIProvider
 {
     public string SlicerName => "OrcaSlicer";
     public string SlicerVersion => "2.3.1";
@@ -18,5 +18,5 @@ public class OrcaSlicerUiProvider_V2_3_1 : IOrcaSlicerUIProvider
     public Type ProfileConfigType => typeof(object);
     public Type SettingsType => typeof(object);
 
-    public string Description => "OrcaSlicer v2.3.1 - Supports bundle import/export, custom assets, and engine-specific settings.";
+    public string GetDescription() => "OrcaSlicer v2.3.1 - Supports bundle import/export, custom assets, and engine-specific settings.";
 }
