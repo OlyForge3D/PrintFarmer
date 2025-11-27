@@ -1,9 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Network;
 
 /// <summary>
 /// Helper for expanding network ranges (CIDR, IP range, single IP) into individual IP addresses.

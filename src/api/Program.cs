@@ -10,6 +10,7 @@ using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -708,7 +709,7 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 // (Legacy endpoints removed - use unified controller instead)
 app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettings body) =>
 {
-    NetworkValidationResult validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
+    NetworkValidationResult validation = NetworkValidationService.ValidateSettings(body);
     return Results.Ok(new
     {
         isValid = validation.IsValid,

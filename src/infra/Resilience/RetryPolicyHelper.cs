@@ -1,5 +1,6 @@
-﻿using Farm.Infrastructure.Telemetry;
-namespace Farm.Web.Api.Services;
+using Farm.Infrastructure.Telemetry;
+
+namespace Farm.Infrastructure.Resilience;
 
 /// <summary>
 /// Helper for implementing retry policies with exponential backoff

@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Security;
 
 public enum VirusScanResult
 {

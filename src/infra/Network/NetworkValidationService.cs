@@ -1,10 +1,8 @@
-﻿using System.Collections.ObjectModel;
 using System.Net;
 using System.Net.Sockets;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Shared;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Network;
 
 /// <summary>
 /// Service for validating network discovery settings including CIDR validation and overlap detection.

@@ -44,6 +44,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
     <ProjectReference Include="..\..\shared\Farm.Web.Shared.csproj" />
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
   </ItemGroup>
 
   <!-- Exclude Docker integration tests moved to Farm.Web.IntegrationTests -->
