@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 
 namespace Farm.Web.Api.Services;
 
@@ -894,7 +895,7 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
     /// <summary>
     /// Get directory information with optional filtering
     /// </summary>
-    public async Task<DirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default)
+    public async Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default)
     {
         try
         {
@@ -911,7 +912,7 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             {
                 try
                 {
-                    MoonrakerResponse<DirectoryInfo>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<DirectoryInfo>>(cancellationToken: cts.Token);
+                    MoonrakerResponse<MoonrakerDirectoryInfo>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<MoonrakerDirectoryInfo>>(cancellationToken: cts.Token);
                     if (response?.Result != null)
                     {
                         return response.Result;
@@ -997,9 +998,9 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
                     return null;
                 }
 
-                // Deserialize the result to DirectoryInfo
+                // Deserialize the result to MoonrakerDirectoryInfo
                 string? resultJson = jsonRpcResponse.Result.ToString();
-                DirectoryInfo? directoryInfo = JsonSerializer.Deserialize<DirectoryInfo>(resultJson ?? "{}");
+                MoonrakerDirectoryInfo? directoryInfo = JsonSerializer.Deserialize<MoonrakerDirectoryInfo>(resultJson ?? "{}");
                 return directoryInfo;
             }
             catch (JsonException jex)

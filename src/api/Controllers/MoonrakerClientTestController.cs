@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -39,7 +40,7 @@ public class MoonrakerClientTestController(
         {
             _logger.LogInformation($"Testing MoonrakerClient.GetDirectoryAsync with serverUrl={serverUrl}, path={path}, extended={extended}");
 
-            Services.DirectoryInfo? directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
+            MoonrakerDirectoryInfo? directoryInfo = await _moonrakerClient.GetDirectoryAsync(serverUrl, path, extended, ct);
 
             if (directoryInfo == null)
             {

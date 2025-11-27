@@ -1,8 +1,7 @@
-﻿// Re-export PrusaLink models from shared project for backward compatibility
-// New code should import from Farm.Web.Shared.Contracts.Printers.PrusaLink directly
-global using Farm.Web.Shared.Contracts.Printers.PrusaLink;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Web.Shared.Contracts.Printers.PrusaLink;
 
 // Version Information
 public class VersionInfo
@@ -181,7 +180,7 @@ public abstract class FileInfoBase
     public string? DisplayName { get; set; }
 }
 
-public class FileInfo : FileInfoBase
+public class PrusaLinkFileInfo : FileInfoBase
 {
     public FileRefs? Refs { get; set; }
 }

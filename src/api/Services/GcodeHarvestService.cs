@@ -15,8 +15,10 @@ using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
+using MoonrakerDir = Farm.Web.Shared.Contracts.Printers.Moonraker.MoonrakerDirectoryInfo;
 
 namespace Farm.Web.Api.Services;
 
@@ -1099,7 +1101,7 @@ public partial class GcodeHarvestService(
 
             // Get the gcodes directory listing with retry
             log.LogInformation("Calling GetDirectoryAsync for gcodes directory with retry");
-            DirectoryInfo? directoryInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
+            MoonrakerDir? directoryInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
                 () => client.GetDirectoryAsync(serverUrl, "gcodes", extended: true),
                 logger: null,
                 operationName: $"GetDirectoryAsync for gcodes directory at {serverUrl}");
@@ -1127,7 +1129,7 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private static async Task CollectFilesRecursivelyWithRetryAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient client, IUnifiedLoggingService log)
+    private static async Task CollectFilesRecursivelyWithRetryAsync(List<PrinterFileInfo> files, MoonrakerDir directory, string basePath, string serverUrl, IMoonrakerClient client, IUnifiedLoggingService log)
     {
         log.LogInformation("🔍 CollectFilesRecursivelyWithRetryAsync called for {BasePath}, starting with {CurrentFileCount} files", basePath, files.Count);
 
@@ -1203,7 +1205,7 @@ public partial class GcodeHarvestService(
         if (directory.Dirs != null && directory.Dirs.Length > 0)
         {
             log.LogInformation($"📁 Processing {directory.Dirs.Length} subdirectories in {basePath}");
-            foreach (DirectoryInfo subDir in directory.Dirs)
+            foreach (MoonrakerDir subDir in directory.Dirs)
             {
                 try
                 {
@@ -1213,7 +1215,7 @@ public partial class GcodeHarvestService(
                     log.LogInformation("🔍 Processing subdirectory {DirName} -> {SubDirPath}", dirName, subDirPath);
 
                     // Get subdirectory info with retry
-                    DirectoryInfo? subDirInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
+                    MoonrakerDir? subDirInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
                         () => client.GetDirectoryAsync(serverUrl, subDirPath, extended: true),
                         logger: null,
                         operationName: $"GetDirectoryAsync for subdirectory {subDirPath}");
@@ -1243,7 +1245,7 @@ public partial class GcodeHarvestService(
     }
 
     // Simple overload kept adjacent for analyzer friendliness
-    private async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl)
+    private async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, MoonrakerDir directory, string basePath, string serverUrl)
     {
         // Add files from current directory
         if (directory.Files != null)
@@ -1263,12 +1265,12 @@ public partial class GcodeHarvestService(
         // Recursively process subdirectories
         if (directory.Dirs != null)
         {
-            foreach (DirectoryInfo subDir in directory.Dirs)
+            foreach (MoonrakerDir subDir in directory.Dirs)
             {
                 try
                 {
                     string subDirPath = $"{basePath}/{subDir.Path}";
-                    DirectoryInfo? subDirectoryInfo = await _moonraker.GetDirectoryAsync(serverUrl, subDirPath, extended: true);
+                    MoonrakerDir? subDirectoryInfo = await _moonraker.GetDirectoryAsync(serverUrl, subDirPath, extended: true);
                     if (subDirectoryInfo != null)
                     {
                         await CollectFilesRecursivelyAsync(files, subDirectoryInfo, subDirPath, serverUrl);
@@ -1282,7 +1284,7 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private static async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, DirectoryInfo directory, string basePath, string serverUrl, IMoonrakerClient moonraker, IUnifiedLoggingService logger)
+    private static async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, MoonrakerDir directory, string basePath, string serverUrl, IMoonrakerClient moonraker, IUnifiedLoggingService logger)
     {
         // Add files from current directory
         if (directory.Files != null)
@@ -1302,12 +1304,12 @@ public partial class GcodeHarvestService(
         // Recursively process subdirectories
         if (directory.Dirs != null)
         {
-            foreach (DirectoryInfo subDir in directory.Dirs)
+            foreach (MoonrakerDir subDir in directory.Dirs)
             {
                 try
                 {
                     string subDirPath = $"{basePath}/{subDir.Path}";
-                    DirectoryInfo? subDirectoryInfo = await moonraker.GetDirectoryAsync(serverUrl, subDirPath, extended: true);
+                    MoonrakerDir? subDirectoryInfo = await moonraker.GetDirectoryAsync(serverUrl, subDirPath, extended: true);
                     if (subDirectoryInfo != null)
                     {
                         await CollectFilesRecursivelyAsync(files, subDirectoryInfo, subDirPath, serverUrl, moonraker, logger);

@@ -1,4 +1,5 @@
 ﻿using System.Threading.Tasks;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
@@ -6,7 +7,7 @@ public interface IMoonrakerDiagnosticsService
 {
     Task<FileRoot[]?> GetFileRootsAsync(string url);
 
-    Task<DirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes");
+    Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes");
 
     Task<MoonrakerFileInfo[]?> GetDetailedFileListAsync(string url, string root = "gcodes", string? path = null);
 }

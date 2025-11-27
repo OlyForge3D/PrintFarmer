@@ -4,6 +4,7 @@ using System.Text.Json;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Tests.TestUtils;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 using FluentAssertions.Specialized;
 using Moq;
 using Moq.Protected;
@@ -117,10 +118,10 @@ public class MoonrakerClientRetryTests
         });
 
         int attempts = 0;
-        Api.Services.DirectoryInfo dir = await RetryPolicyHelper.ExecuteWithRetryAsync(async () =>
+        MoonrakerDirectoryInfo dir = await RetryPolicyHelper.ExecuteWithRetryAsync(async () =>
         {
             attempts++;
-            Api.Services.DirectoryInfo? d = await client.GetDirectoryAsync(Base, "gcodes");
+            MoonrakerDirectoryInfo? d = await client.GetDirectoryAsync(Base, "gcodes");
             if (d is null)
             {
                 throw new HttpRequestException("dir null");

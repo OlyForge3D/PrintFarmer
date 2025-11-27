@@ -5,6 +5,8 @@ using System.Text.Json;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Tests;
+using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -356,7 +358,7 @@ public class MoonrakerClientTests
             return Json(new { result = new { path = "gcodes", dirs = Array.Empty<object>(), files = Array.Empty<object>(), size = 0, modified = 0 } });
         });
 
-        Api.Services.DirectoryInfo? dir = await client.GetDirectoryAsync(Base, "gcodes");
+        MoonrakerDirectoryInfo? dir = await client.GetDirectoryAsync(Base, "gcodes");
         _ = dir.Should().NotBeNull();
         _ = dir!.Path.Should().Be("gcodes");
     }

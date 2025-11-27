@@ -8,6 +8,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services;

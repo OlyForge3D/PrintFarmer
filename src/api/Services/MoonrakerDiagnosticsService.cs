@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 
 namespace Farm.Web.Api.Services;
 
@@ -52,7 +53,7 @@ public class MoonrakerDiagnosticsService : IMoonrakerDiagnosticsService
         return ExecuteWithRetriesAsync(() => _moonrakerClient.GetFileRootsAsync(url));
     }
 
-    public Task<DirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes")
+    public Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes")
     {
         return ExecuteWithRetriesAsync(() => _moonrakerClient.GetDirectoryAsync(url, path, extended: true));
     }

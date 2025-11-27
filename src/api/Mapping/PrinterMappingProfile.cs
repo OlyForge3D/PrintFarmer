@@ -1,5 +1,7 @@
 ﻿using AutoMapper;
 using Farm.Web.Api.Services;
+using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 using SharedModels = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Mapping
@@ -30,7 +32,7 @@ namespace Farm.Web.Api.Mapping
                 .ForMember(dest => dest.AuxiliaryTotals, opt => opt.MapFrom(src => src.AuxiliaryTotals));
 
             _ = CreateMap<JobTotals, SharedModels.JobTotals>()
-                .ForMember(dest => dest.TotalJobs, opt => opt.MapFrom(src => (int)src.TotalJobs))
+                .ForMember(dest => dest.TotalJobs, opt => opt.MapFrom(src => src.TotalJobs))
                 .ForMember(dest => dest.TotalTime, opt => opt.MapFrom(src => src.TotalTime))
                 .ForMember(dest => dest.TotalPrintTime, opt => opt.MapFrom(src => src.TotalPrintTime))
                 .ForMember(dest => dest.TotalFilamentUsed, opt => opt.MapFrom(src => src.TotalFilamentUsed))

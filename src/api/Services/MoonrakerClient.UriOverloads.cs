@@ -1,4 +1,6 @@
 ﻿using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 
 namespace Farm.Web.Api.Services;
 
@@ -118,7 +120,7 @@ public partial class MoonrakerClient : IMoonrakerClient
         return GetFileRootsAsync(baseUrl.ToString(), ct);
     }
 
-    public Task<DirectoryInfo?> GetDirectoryAsync(Uri baseUrl, string path, bool extended = false, CancellationToken ct = default)
+    public Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(Uri baseUrl, string path, bool extended = false, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         ArgumentNullException.ThrowIfNull(path);

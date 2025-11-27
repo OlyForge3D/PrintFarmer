@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
@@ -259,8 +260,8 @@ public interface IMoonrakerClient
     /// <param name="extended">Whether to include extended file information</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing directory information, or null if the directory doesn't exist</returns>
-    Task<DirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default);
-    Task<DirectoryInfo?> GetDirectoryAsync(Uri baseUrl, string path, bool extended = false, CancellationToken ct = default);
+    Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(string baseUrl, string path, bool extended = false, CancellationToken ct = default);
+    Task<MoonrakerDirectoryInfo?> GetDirectoryAsync(Uri baseUrl, string path, bool extended = false, CancellationToken ct = default);
 
     /// <summary>
     /// Creates a new directory at the specified path.

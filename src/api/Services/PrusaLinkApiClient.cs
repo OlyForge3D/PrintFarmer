@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Shared.Contracts.Printers.PrusaLink;
 
 namespace Farm.Web.Api.Services;
 
@@ -300,10 +301,10 @@ public class PrusaLinkApiClient
                 "PRINT_FILE" => JsonSerializer.Deserialize<PrintFileInfo>(json, _jsonOptions)!,
                 "FIRMWARE" => JsonSerializer.Deserialize<FirmwareFileInfo>(json, _jsonOptions)!,
                 "FOLDER" => JsonSerializer.Deserialize<FolderInfo>(json, _jsonOptions)!,
-                _ => JsonSerializer.Deserialize<FileInfo>(json, _jsonOptions)!
+                _ => JsonSerializer.Deserialize<PrusaLinkFileInfo>(json, _jsonOptions)!
             };
         }
-        return JsonSerializer.Deserialize<FileInfo>(json, _jsonOptions)!;
+        return JsonSerializer.Deserialize<PrusaLinkFileInfo>(json, _jsonOptions)!;
     }
 
     public async Task<bool> UploadFileAsync(string baseUrl, string storagePath, string filePath, Stream fileStream,

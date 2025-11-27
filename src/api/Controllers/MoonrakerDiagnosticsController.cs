@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared.Contracts.Printers.Moonraker;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -62,10 +63,10 @@ public class MoonrakerDiagnosticsController(
     /// Test endpoint to invoke GetDirectoryAsync directly
     /// </summary>
     [HttpGet("directory")]
-    [ProducesResponseType(typeof(Services.DirectoryInfo), 200)]
+    [ProducesResponseType(typeof(MoonrakerDirectoryInfo), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Services.DirectoryInfo>> GetDirectoryAsync(string url, string path = "gcodes")
+    public async Task<ActionResult<MoonrakerDirectoryInfo>> GetDirectoryAsync(string url, string path = "gcodes")
     {
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -76,7 +77,7 @@ public class MoonrakerDiagnosticsController(
         try
         {
             // Delegate to diagnostics service (which encapsulates retry logic)
-            Services.DirectoryInfo? directory = await _diagnosticsService.GetDirectoryAsync(url, path);
+            MoonrakerDirectoryInfo? directory = await _diagnosticsService.GetDirectoryAsync(url, path);
             if (directory is null)
             {
                 return Problem($"GetDirectoryAsync failed after retries", statusCode: 500);
