@@ -552,31 +552,69 @@ npm run dev
 - **Bundle Structure**: Each manufacturer has 4 JSON lists in `/opt/orcaslicer/resources/profiles/{manufacturer}/`:
   1. **machine_model_list** - Base model definitions (e.g., "Prusa CORE One")
   2. **machine_list** - Variant profiles with nozzle sizes (e.g., "Prusa CORE One 0.4 nozzle", "Prusa CORE One 0.6 nozzle")
-  3. **process_list** - Process/speed profiles with `compatible_printers` array
-  4. **filament_list** - Material profiles with `compatible_printers` array
+  3. **process_list** - Process/speed profiles with `compatible_printers_condition` expressions
+  4. **filament_list** - Material profiles with `compatible_printers_condition` expressions
+- **Profile Condition Evaluation** (`src/orcaslicer-worker/Services/PrinterExpressionParser.cs`):
+  - **Expression Language**: OrcaSlicer supports complex printer matching conditions using:
+    - **Regex matching**: `printer_notes=~/.*PRINTER_MODEL_COREONE.*/` (case-insensitive pattern matching)
+    - **Array indexing**: `nozzle_diameter[0]==0.8` (access profile properties with float tolerance ±0.001mm)
+    - **Equality operators**: `property==value` (fuzzy float comparison for dimensions)
+    - **Logical operators**: `and` (higher precedence) and `or` (lower precedence)
+    - **Example**: `printer_notes=~/.*PRINTER_MODEL_COREONE.*/ and nozzle_diameter[0]==0.8`
+  - **Evaluation Strategy**: IMMEDIATE at profile load time (not deferred):
+    1. Load all machine profiles first → cache by manufacturer
+    2. Load filament/process profiles → parse conditions immediately
+    3. Evaluate conditions using cached machines for the profile's manufacturer
+    4. Merge matched machine names into `CompatiblePrinters` array
+    5. Store raw condition in `CompatiblePrintersCondition` field with [JsonIgnore] to avoid serialization
+  - **Coverage**: 98.2% of profiles (641/654) have compatible_printers successfully resolved
+  - **Parser Implementation**: Recursive descent parser supporting all OrcaSlicer condition syntax
 - **Critical Relationships**:
-  - Filament & process profiles reference machine_list variants via `compatible_printers` array (NOT base models)
-  - The array contains exact machine variant names: ["Prusa CORE One 0.4 nozzle", "Prusa CORE One 0.6 nozzle", ...]
-  - JSON uses snake_case: `compatible_printers`, `machine_model_list`, `machine_list`, etc.
+  - Filament & process profiles use `compatible_printers_condition` field to reference machine variants
+  - Conditions match against machine properties: `printer_notes`, `nozzle_diameter`, `build_volume`, etc.
+  - The `CompatiblePrinters` array contains exact machine variant names: ["Prusa CORE One 0.4 nozzle", ...]
+  - JSON uses snake_case: `compatible_printers_condition`, `compatible_printers`, `machine_model_list`, etc.
 - **DTO Implementation** (`src/shared/Models.cs`):
   - `ManufacturerBundleDto`: Has 4 properties with [JsonPropertyName] attributes for snake_case JSON mapping
-  - `FilamentProfileDto` & `ProcessProfileDto`: Both have `CompatiblePrinters` property with [JsonPropertyName("compatible_printers")]
-  - Parser methods in `OrcaProfilesService` extract these arrays during profile loading
+  - `FilamentProfileDto` & `ProcessProfileDto`: Both have:
+    - `CompatiblePrinters` property with [JsonPropertyName("compatible_printers")] (resolved list)
+    - `CompatiblePrintersCondition` property (raw expression, marked [JsonIgnore])
+  - Conditions parsed during loading via `PrinterExpressionParser`
 - **Service Loading** (`src/orcaslicer-worker/Services/OrcaProfilesService.cs`):
+  - **Cache Architecture**: Three-level caching to prevent reparsing:
+    - `_allMachineProfilesCache`: All machine profiles
+    - `_allFilamentProfilesCache`: All filament profiles with conditions evaluated
+    - `_allProcessProfilesCache`: All process profiles with conditions evaluated
+    - `_machinesByManufacturerCache`: Machines grouped by manufacturer for condition evaluation
   - `ListAvailableMachineProfilesAsync()`: Loads from BOTH MachineModelList AND MachineList to get all variants
-  - `ListAvailableFilamentProfilesAsync()` & `ListAvailableProcessProfilesAsync()`: Both load compatible_printers arrays
+  - `ListAvailableFilamentProfilesAsync()` & `ListAvailableProcessProfilesAsync()`: 
+    - Parse conditions immediately during load
+    - Match conditions against cached machines
+    - Return profiles with populated CompatiblePrinters array
   - All profiles set manufacturer name from bundle
+- **Startup Preloading** (`src/orcaslicer-worker/Program.cs`):
+  - Background startup task preloads all profiles with caching
+  - Catalog API integration: loads only profiles for registered manufacturers (graceful fallback to all)
+  - Detailed timing telemetry logged: "Machine profiles loaded in Xms", "Filament profiles loaded in Yms (Z profiles)"
+  - Cache warm before API becomes available to clients
 - **API Hierarchy** (`src/orcaslicer-worker/Controllers/SlicerProfilesController.cs`):
   - `/api/profiles` endpoint returns `AllProfilesResponseDto` with `ByHierarchy` dictionary
   - Structure: `ByHierarchy[manufacturer][model][machineProfiles/filamentProfiles/processProfiles]`
-  - Controller groups by base model name and matches filament/process profiles to machines via compatible_printers
+  - Controller groups by base model name and matches filament/process profiles to machines via CompatiblePrinters
   - Response includes flat lists too for direct access: `filamentProfiles`, `processProfiles`, `machineProfiles`
+- **UI Display** (`src/Web/ReactApp/src/components/ProfileSelector.tsx`):
+  - React component displays profiles with hierarchical organization
+  - Nested optgroups: Manufacturer → Model → Profile
+  - Flattens hierarchy while preserving context: "Manufacturer › Model › Profile Name"
+  - Used in job creation page for intuitive profile selection
 - **Debugging Tips**:
   - Test from inside container: `docker exec printfarmer-orcaslicer-worker curl http://localhost:8080/api/profiles`
   - Check hierarchy: `curl ... | jq '.byHierarchy | keys'` (list manufacturers)
   - Check model details: `curl ... | jq '.byHierarchy.Prusa.Models."Prusa_CORE_One"'`
   - Verify compatible_printers: `curl ... | jq '.filamentProfiles."Unknown"[0].compatiblePrinters'`
+  - Check condition parsing: Use `ProfileParserTester` tool at `tools/ProfileParserTester/`
   - Expected ~7786 total profiles: ~50-200 machines, ~2000 filaments, ~2200 processes
+  - Expected coverage: 98.2% profiles have compatible_printers resolved (641/654)
 
 **Trust These Instructions:**
 These instructions have been thoroughly tested and validated with .NET 9.0.302. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.

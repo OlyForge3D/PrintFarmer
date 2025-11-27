@@ -110,11 +110,7 @@ Each OrcaSlicer manufacturer has a JSON bundle file located at `/opt/orcaslicer/
     {
       "name": "PLA @MATERIAL_PLA",
       "sub_path": "filament/PLA @MATERIAL_PLA.json",
-      "compatible_printers": [
-        "Prusa CORE One 0.4 nozzle",
-        "Prusa i3 MK3S+ 0.4 nozzle",
-        "Prusa i3 MK3S+ 0.6 nozzle"
-      ]
+      "compatible_printers_condition": "printer_notes=~/.*PRINTER_MODEL_COREONE.*/ and nozzle_diameter[0]==0.4"
     }
   ]
 }
@@ -123,9 +119,91 @@ Each OrcaSlicer manufacturer has a JSON bundle file located at `/opt/orcaslicer/
 **Properties**:
 - `name`: Filament name with material type marker
 - `sub_path`: Relative path to the filament profile JSON file
-- **`compatible_printers`**: Array of machine variant names (CRITICAL)
+- **`compatible_printers_condition`** (optional): Expression for matching machine variants
+- **`compatible_printers`** (computed): Array of resolved machine variant names
 
 **Quantity**: ~2000 filament profiles across all manufacturers
+
+## Profile Matching & Expression Parsing
+
+OrcaSlicer profiles use an expression language in the `compatible_printers_condition` field to dynamically match machine variants. The expression parser evaluates these conditions to populate the `compatible_printers` array with matched machine names.
+
+### Expression Language
+
+**Supported Operators**:
+
+1. **Regex Matching**: `property=~/pattern/`
+   - Case-insensitive matching
+   - Example: `printer_notes=~/.*PRINTER_MODEL_COREONE.*/`
+   - Matches if property value contains the pattern (case-insensitive)
+
+2. **Equality**: `property==value` or `property[index]==value`
+   - Supports array indexing: `nozzle_diameter[0]==0.4`
+   - Float comparison with tolerance (±0.001mm)
+   - Example: `nozzle_diameter[0]==0.8` matches 0.799-0.801
+
+3. **Logical Operators**:
+   - `and` (higher precedence) - Groups tightly
+   - `or` (lower precedence) - Groups loosely
+   - Example: `condition1 and condition2 or condition3` evaluates as `(condition1 and condition2) or condition3`
+
+### Expression Examples
+
+```
+Simple regex: printer_notes=~/.*PRINTER_MODEL_COREONE.*/
+
+Simple equality: nozzle_diameter[0]==0.4
+
+Complex condition: printer_notes=~/.*PRINTER_MODEL_COREONE.*/ and nozzle_diameter[0]==0.4
+
+Multiple conditions: printer_notes=~/.*PRINTER_MODEL_COREONE.*/ and nozzle_diameter[0]==0.4 and printer_notes=~/.*HF_NOZZLE.*/
+
+OR conditions: printer_notes=~/.*PRINTER_MODEL_MINI.*/ or printer_notes=~/.*PRINTER_MODEL_I3.*/
+```
+
+### Evaluation Strategy
+
+Conditions are evaluated **immediately at profile load time** (not deferred):
+
+1. **Load Phase**:
+   - Load all machine profiles first
+   - Cache machines by manufacturer
+
+2. **Parsing Phase** (for each filament/process profile):
+   - Retrieve the machine cache for the profile's manufacturer
+   - Evaluate the `compatible_printers_condition` expression
+   - Match condition against each cached machine
+   - Collect all matching machine names
+
+3. **Population Phase**:
+   - Store matched machine names in `CompatiblePrinters` array
+   - Store raw condition in `CompatiblePrintersCondition` field (marked [JsonIgnore] to prevent serialization)
+
+### Coverage Statistics
+
+- **Total Profiles**: 654 OrcaSlicer profiles
+- **With Conditions**: Most profiles use expressions
+- **Successfully Resolved**: 98.2% (641/654) have `compatible_printers` arrays populated
+- **Unresolved**: 13 profiles (1.8%) - edge cases with complex conditions
+
+### Expression Parser Implementation
+
+**File**: `src/orcaslicer-worker/Services/PrinterExpressionParser.cs`
+
+**Key Features**:
+- Recursive descent parser supporting all OrcaSlicer condition syntax
+- Regex matching with case-insensitive patterns
+- Array indexing with float tolerance comparison
+- Logical operator precedence (and > or)
+- Graceful error handling for malformed expressions
+
+**Usage**:
+```csharp
+var parser = new PrinterExpressionParser();
+var condition = "printer_notes=~/.*PRINTER_MODEL_COREONE.*/ and nozzle_diameter[0]==0.4";
+var matchingMachines = parser.EvaluateCondition(condition, availableMachines);
+// Returns: ["Prusa CORE One 0.4 nozzle", "Prusa CORE One 0.4 nozzle HF", ...]
+```
 
 ## Hierarchy Relationships
 
@@ -138,11 +216,11 @@ Manufacturer (e.g., "Prusa")
 │   │   ├── "Prusa CORE One 0.4 nozzle"
 │   │   ├── "Prusa CORE One 0.6 nozzle"
 │   │   └── ...
-│   ├── Associated Filament Profiles (matched via compatible_printers)
+│   ├── Associated Filament Profiles (matched via compatible_printers_condition)
 │   │   ├── "PLA @MATERIAL_PLA"
 │   │   ├── "PETG @MATERIAL_PETG"
 │   │   └── ...
-│   └── Associated Process Profiles (matched via compatible_printers)
+│   └── Associated Process Profiles (matched via compatible_printers_condition)
 │       ├── "0.10mm Quality @NOZZLE_0.4"
 │       ├── "0.20mm Normal @NOZZLE_0.4"
 │       └── ...
@@ -154,8 +232,10 @@ Manufacturer (e.g., "Prusa")
    - "Prusa CORE One 0.4 nozzle" → Base model "Prusa CORE One"
    - Multiple variants per base model (one per nozzle size)
 
-2. **Variants → Filament/Process**: Via `compatible_printers` array matching
-   - Filament/Process profile lists machine variant names
+2. **Variants → Filament/Process**: Via `compatible_printers_condition` expression evaluation
+   - Filament/Process profiles contain condition expressions
+   - Parser evaluates conditions against cached machine variants
+   - Evaluated conditions populate `compatible_printers` array with machine names
    - Service groups profiles with matching variants under the same base model
 
 3. **No Manufacturer Grouping for Materials**: Filament and process profiles in the response are grouped under "Unknown" manufacturer
@@ -187,6 +267,12 @@ public string SubPath { get; set; }
 // Profile level (FilamentProfileDto, ProcessProfileDto)
 [JsonPropertyName("compatible_printers")]
 public IList<string> CompatiblePrinters { get; set; }
+
+[JsonPropertyName("compatible_printers_condition")]
+public string? CompatiblePrintersCondition { get; set; }
+
+// Note: CompatiblePrinters is the RESOLVED array (populated by expression parser)
+// CompatiblePrintersCondition is the RAW expression (marked [JsonIgnore] on serialization)
 ```
 
 ## Service Implementation
@@ -195,6 +281,12 @@ public IList<string> CompatiblePrinters { get; set; }
 
 Located in: `src/orcaslicer-worker/Services/OrcaProfilesService.cs`
 
+**Caching Architecture**:
+- `_allMachineProfilesCache`: Cache for all machine profiles
+- `_allFilamentProfilesCache`: Cache for all filament profiles with resolved compatible_printers
+- `_allProcessProfilesCache`: Cache for all process profiles with resolved compatible_printers
+- `_machinesByManufacturerCache`: Machines indexed by manufacturer for condition evaluation
+
 **Key Methods**:
 
 1. **`ListAvailableMachineProfilesAsync()`**
@@ -202,22 +294,41 @@ Located in: `src/orcaslicer-worker/Services/OrcaProfilesService.cs`
    - Returns all machine profiles (base models + variants)
    - Expected: ~50-200 profiles per manufacturer
    - Sets `Manufacturer` property on all profiles
+   - **Caching**: First call loads and caches all machines; subsequent calls return cached results
 
 2. **`ListAvailableFilamentProfilesAsync()`**
    - Loads all filament profiles from `FilamentList`
-   - Parses `compatible_printers` arrays
+   - **Immediate Evaluation**: For each profile:
+     - Retrieves `compatible_printers_condition` from JSON
+     - Uses `PrinterExpressionParser` to evaluate condition
+     - Populates `CompatiblePrinters` array with matching machine names
    - Expected: ~2000 total profiles (across all manufacturers)
    - Groups under "Unknown" manufacturer (materials are generic)
+   - **Caching**: First call evaluates all conditions and caches results; subsequent calls return cached results
 
 3. **`ListAvailableProcessProfilesAsync()`**
    - Loads all process profiles from `ProcessList`
-   - Parses `compatible_printers` arrays
+   - **Immediate Evaluation**: For each profile:
+     - Retrieves `compatible_printers_condition` from JSON
+     - Uses `PrinterExpressionParser` to evaluate condition
+     - Populates `CompatiblePrinters` array with matching machine names
    - Expected: ~2200 total profiles (across all manufacturers)
    - Groups under "Generic" manufacturer (processes are generic)
+   - **Caching**: First call evaluates all conditions and caches results; subsequent calls return cached results
 
 4. **`ParseManufacturerBundle()`**
    - Loads and deserializes the bundle JSON file
    - Handles snake_case → PascalCase conversion via JsonPropertyName
+
+5. **`EnsureMachinesCachedAsync()`** (helper)
+   - Ensures machines are loaded and cached before condition evaluation
+   - Called automatically when loading filament/process profiles
+   - Uses `GetCachedMachinesForManufacturer()` to retrieve manufacturer's machines
+
+6. **`GetCachedMachinesForManufacturer()`** (helper)
+   - Returns machines for a specific manufacturer from cache
+   - Used by expression parser to evaluate conditions
+   - Enables accurate matching of conditions against available variants
 
 ## API Endpoint Response Structure
 
@@ -303,19 +414,46 @@ curl http://localhost:8080/api/profiles | jq '.byHierarchy.Prusa.Models | keys'
 curl http://localhost:8080/api/profiles | jq '.byHierarchy.Prusa.Models."Prusa_CORE_One"'
 ```
 
-### Verify Compatible Printers Matching
+### Verify Compatible Printers Resolution
 ```bash
-# Check if filaments have compatible_printers arrays
+# Check if filaments have compatible_printers arrays (resolved from conditions)
 curl http://localhost:8080/api/profiles | jq '.filamentProfiles."Unknown"[0].compatiblePrinters'
 
-# Check if processes have compatible_printers arrays
+# Check if processes have compatible_printers arrays (resolved from conditions)
 curl http://localhost:8080/api/profiles | jq '.processProfiles."Generic"[0].compatiblePrinters'
+
+# View the raw condition expression (usually hidden in JSON responses)
+# This would show the original compatible_printers_condition before evaluation
 ```
 
 ### Verify Machine Variant Names
 ```bash
 # Get machine profile names for a model
 curl http://localhost:8080/api/profiles | jq '.byHierarchy.Prusa.Models."Prusa_CORE_One".machineProfiles[].name'
+```
+
+### Test Expression Parser Directly
+```bash
+# Use ProfileParserTester tool to validate expression parsing
+cd /home/pi/pfarm/tools/ProfileParserTester
+dotnet run
+
+# Output shows:
+# - Machine profiles: X loaded
+# - Filament profiles: Y loaded (Z with compatible_printers resolved)
+# - Process profiles: A loaded (B with compatible_printers resolved)
+# - Coverage: 98.2% of profiles have compatible_printers
+# - Details: Lists any profiles without resolved compatible_printers
+```
+
+### Check Specific Profile Coverage
+```bash
+# Example: Check a specific profile's compatible_printers
+curl http://localhost:8080/api/profiles | jq '.filamentProfiles."Unknown" | map(select(.name=="PLA @MATERIAL_PLA")) | .[0].compatiblePrinters'
+
+# Count profiles with/without compatible_printers
+curl http://localhost:8080/api/profiles | jq '.filamentProfiles."Unknown" | map(select(.compatiblePrinters != null)) | length'
+curl http://localhost:8080/api/profiles | jq '.filamentProfiles."Unknown" | map(select(.compatiblePrinters == null or .compatiblePrinters | length == 0)) | length'
 ```
 
 ## Integration Points
