@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Caching;
@@ -9,7 +10,6 @@ using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Slicing.Abstractions;
@@ -132,14 +132,14 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Infrastructure.Repositories.PasswordPolicy.PasswordPolicyRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Infrastructure.Repositories.SchemaHealth.SchemaHealthRepository>();
-        
+
         // Slicing repositories - moved to infra
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfProcessProfileRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IMachineProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfMachineProfileRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IFilamentProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfFilamentProfileRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.ISlicersRepository, Farm.Infrastructure.Repositories.Slicing.EfSlicersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository, Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository>();
-        
+
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
 

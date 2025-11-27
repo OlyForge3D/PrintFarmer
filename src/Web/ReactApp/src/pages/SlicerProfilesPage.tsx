@@ -81,15 +81,7 @@ export const SlicerProfilesPage: React.FC = () => {
     staleTime: 10_000
   });
 
-  // Flatten all profiles for certain operations
-  const allProfiles = useMemo(() => {
-    if (!profilesData) return [];
-    return [
-      ...profilesData.processProfiles,
-      ...profilesData.filamentProfiles,
-      ...profilesData.machineProfiles
-    ];
-  }, [profilesData]);
+  // Note: Individual profile lists accessed from profilesData for filtered views
 
   const importMutation = useMutation<SlicerProfileExtended, Error, ImportSlicerProfileRequest>({
     mutationFn: async (payload) => {

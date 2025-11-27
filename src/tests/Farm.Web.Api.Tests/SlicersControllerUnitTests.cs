@@ -2,10 +2,10 @@
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Hubs;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;

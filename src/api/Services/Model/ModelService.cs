@@ -4,8 +4,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Interfaces; // for ModelAnalysisResult and IThumbnailGenerationService
 using Microsoft.AspNetCore.Http;

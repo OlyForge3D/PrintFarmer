@@ -2,9 +2,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Hubs;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;

@@ -4,9 +4,9 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -625,15 +625,15 @@ public class ProfilesController(
 
             var json = await response.Content.ReadAsStringAsync(ct);
             _logger.LogInformation($"Raw OrcaSlicer worker /profiles response: {json[..Math.Min(1000, json.Length)]}");
-            
+
             // Deserialize the new AllProfilesResponseDto with three profile types grouped by manufacturer
             var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            
+
             // Flatten the grouped profiles for importing
             var totalProcessCount = allProfiles?.ProcessProfiles?.Values.Sum(list => list.Count) ?? 0;
             var totalFilamentCount = allProfiles?.FilamentProfiles?.Values.Sum(list => list.Count) ?? 0;
             var totalMachineCount = allProfiles?.MachineProfiles?.Values.Sum(list => list.Count) ?? 0;
-            
+
             _logger.LogInformation($"Deserialized {totalProcessCount} process + {totalFilamentCount} filament + {totalMachineCount} machine profiles from worker");
 
             if (allProfiles == null || (totalProcessCount == 0 && totalFilamentCount == 0 && totalMachineCount == 0))
@@ -650,7 +650,7 @@ public class ProfilesController(
             var machineProfiles = (allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<MachineProfileDto>()).ToList();
 
             _logger.LogInformation($"Seeding {processProfiles.Count} process, {filamentProfiles.Count} filament, {machineProfiles.Count} machine profiles");
-            
+
             // Import process profiles
             foreach (var profile in processProfiles)
             {
@@ -831,7 +831,7 @@ public class ProfilesController(
             int deletedFilamentCount = await _filamentProfileRepo.DeleteSystemProfilesAsync(SlicerType.OrcaSlicer, ct);
             int deletedMachineCount = await _machineProfileRepo.DeleteSystemProfilesAsync(SlicerType.OrcaSlicer, ct);
             int deletedCount = deletedProcessCount + deletedFilamentCount + deletedMachineCount;
-            
+
             if (deletedCount > 0)
             {
                 _logger.LogInformation($"Deleted {deletedCount} existing system OrcaSlicer profiles ({deletedProcessCount} process, {deletedFilamentCount} filament, {deletedMachineCount} machine) for force reseed");
@@ -887,7 +887,7 @@ public class ProfilesController(
 
             var json = await response.Content.ReadAsStringAsync(ct);
             _logger.LogInformation($"Raw OrcaSlicer worker /profiles response (force-reseed): {json[..Math.Min(1000, json.Length)]}");
-            
+
             // Deserialize the new AllProfilesResponseDto with three profile types
             var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             _logger.LogInformation($"Deserialized {allProfiles?.ProcessProfiles?.Count ?? 0} process + {allProfiles?.FilamentProfiles?.Count ?? 0} filament + {allProfiles?.MachineProfiles?.Count ?? 0} machine profiles from worker response (force-reseed)");
@@ -1288,7 +1288,7 @@ public class ProfilesController(
                 // Extract properties from composite SlicerProfileDto
                 var processProfile = workerProfile.ProcessProfile;
                 var filamentProfile = workerProfile.FilamentProfile;
-                
+
                 // Skip if we don't have essential profile data
                 if (processProfile == null)
                 {
@@ -1301,7 +1301,7 @@ public class ProfilesController(
                 var infill = processProfile.InfillPercentage.ToString();
                 var material = filamentProfile?.Material ?? "Unknown";
                 var quality = processProfile.Quality ?? "Standard";
-                
+
                 var profileHash = $"{material}:{quality}:{layerHeight}:{infill}";
 
                 // Check if this profile already exists (by hash) using repository
@@ -1355,7 +1355,7 @@ public class ProfilesController(
     /// <summary>
     /// Get the OrcaSlicer worker URL from the worker registry in the database
     /// </summary>
-    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(CancellationToken ct)
+    private async Task<string?> GetOrcaSlicerWorkerUrlAsync()
     {
         try
         {

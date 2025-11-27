@@ -97,8 +97,8 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
             ModelFileUrl = new Uri("https://example.com/small-test.stl"),
             ModelFileName = "small-test.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
-            SlicerProfile = new SlicerProfileDto 
-            { 
+            SlicerProfile = new SlicerProfileDto
+            {
                 ProcessProfile = new ProcessProfileDto { LayerHeight = 0.3, Quality = "standard", Name = "Test" }
             },
             Priority = SlicingJobPriority.High

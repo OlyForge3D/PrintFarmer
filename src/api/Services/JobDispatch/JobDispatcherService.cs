@@ -1,8 +1,8 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Slicing;
 
 namespace Farm.Web.Api.Services.JobDispatch;

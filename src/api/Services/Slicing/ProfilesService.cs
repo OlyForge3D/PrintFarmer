@@ -121,8 +121,8 @@ namespace Farm.Web.Api.Services.Slicing
                     Supports = profile.EnableSupports,
                     Quality = profile.Quality.ToString(),
                     Description = profile.Description,
-                    Settings = string.IsNullOrEmpty(profile.AdvancedSettings) 
-                        ? new Dictionary<string, object>() 
+                    Settings = string.IsNullOrEmpty(profile.AdvancedSettings)
+                        ? new Dictionary<string, object>()
                         : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(profile.AdvancedSettings) ?? new Dictionary<string, object>()
                 }
             };

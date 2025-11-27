@@ -40,14 +40,14 @@ public class ProfilesController : ControllerBase
         try
         {
             _logger.LogInformation("Fetching all OrcaSlicer profiles organized by manufacturer and model hierarchy");
-            
+
             var machineProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
             var filamentProfiles = await _profileService.ListAvailableFilamentProfilesAsync(ct);
             var processProfiles = await _profileService.ListAvailableProcessProfilesAsync(ct);
 
             // Build the hierarchy organized by manufacturer and model
             var byHierarchy = new Dictionary<string, ManufacturerProfilesDto>();
-            
+
             // Group machine profiles by manufacturer
             var machinesByManufacturer = machineProfiles
                 .GroupBy(p => p.Manufacturer ?? "Unknown")
@@ -66,7 +66,10 @@ public class ProfilesController : ControllerBase
                 {
                     var modelName = ExtractModelName(machine.Name ?? "");
                     if (!machinesByModelName.ContainsKey(modelName))
+                    {
                         machinesByModelName[modelName] = new List<MachineProfileDto>();
+                    }
+
                     machinesByModelName[modelName].Add(machine);
                 }
 
@@ -81,11 +84,11 @@ public class ProfilesController : ControllerBase
                     };
 
                     // Add all machine profiles for this model
-                    modelProfiles.MachineProfiles = modelMachines.Cast<MachineProfileDto>().ToList();
+                    modelProfiles.MachineProfiles = modelMachines.ToList();
 
                     // Find filament and process profiles compatible with any machine in this model
                     var machineProfileNames = modelMachines.Select(m => m.Name ?? "").ToList();
-                    
+
                     // Filter filament profiles: include if compatible_printers contains any machine in this model
                     modelProfiles.FilamentProfiles = filamentProfiles
                         .Where(f => f.CompatiblePrinters != null && f.CompatiblePrinters.Any(cp => machineProfileNames.Contains(cp)))
@@ -107,7 +110,7 @@ public class ProfilesController : ControllerBase
             var response = new AllProfilesResponseDto
             {
                 ByHierarchy = byHierarchy,
-                
+
                 MachineProfiles = machineProfiles
                     .GroupBy(p => p.Manufacturer ?? "Unknown")
                     .ToDictionary(g => g.Key, g => (IList<MachineProfileDto>)g.ToList()),
@@ -146,7 +149,7 @@ public class ProfilesController : ControllerBase
             var grouped = profiles
                 .GroupBy(p => p.Manufacturer ?? "Unknown")
                 .ToDictionary(g => g.Key, g => (IList<MachineProfileDto>)g.ToList());
-            
+
             return Ok(grouped);
         }
         catch (Exception ex)
@@ -171,7 +174,7 @@ public class ProfilesController : ControllerBase
             var grouped = profiles
                 .GroupBy(p => p.Manufacturer ?? "Unknown")
                 .ToDictionary(g => g.Key, g => (IList<FilamentProfileDto>)g.ToList());
-            
+
             return Ok(grouped);
         }
         catch (Exception ex)

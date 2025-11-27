@@ -97,7 +97,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(SlicerProfileDto? profile, string workDir, CancellationToken cancellationToken)
     {
         if (profile == null)
+        {
             throw new ArgumentNullException(nameof(profile), "Profile is required for slicing");
+        }
 
         var machineJsonPath = Path.Combine(workDir, "machine.json");
         var processJsonPath = Path.Combine(workDir, "process.json");
@@ -124,7 +126,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     {
         var gcodeOutputDir = Path.Combine(workDir, "output");
         Directory.CreateDirectory(gcodeOutputDir);
-        
+
         var gcodeFilePath = Path.Combine(gcodeOutputDir, Path.GetFileNameWithoutExtension(job.ModelFileName) + ".gcode");
         if (!File.Exists(_orcaSlicerBinaryPath))
         {
@@ -133,14 +135,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         // Generate the three JSON profile files
         var profilePaths = await GenerateProfileJsonFilesAsync(job.Profile, workDir, cancellationToken);
-        
+
         var machineJson = profilePaths["machine"];
         var processJson = profilePaths["process"];
         var filamentJson = profilePaths["filament"];
 
         // Build command line: --slice 0 --load-settings "machine.json;process.json" --load-filaments "filament.json" --allow-newer-file --outputdir "/tmp/slice-XYZ/output" /tmp/slice-XYZ/input/uploaded-file.stl
         var arguments = $"--slice 0 --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\" \"{stlPath}\"";
-        
+
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo

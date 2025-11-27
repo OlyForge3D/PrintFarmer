@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -28,7 +28,9 @@ public static class PrinterExpressionParser
     public static List<string>? EvaluateCondition(string condition, List<MachineProfileDto> availableMachines)
     {
         if (string.IsNullOrWhiteSpace(condition))
+        {
             return null;
+        }
 
         try
         {
@@ -85,7 +87,10 @@ public static class PrinterExpressionParser
             var result = ParseOr();
             SkipWhitespace();
             if (_position < _expression.Length)
+            {
                 throw new FormatException($"Unexpected characters at position {_position}");
+            }
+
             return result;
         }
 
@@ -125,7 +130,7 @@ public static class PrinterExpressionParser
 
             // Parse property with optional index: property or property[index]
             var (property, index) = ParseProperty();
-            
+
             SkipWhitespace();
 
             // Check for regex match: =~
@@ -185,7 +190,7 @@ public static class PrinterExpressionParser
         private string ParseValue()
         {
             SkipWhitespace();
-            
+
             // Handle quoted strings
             if (Peek('"'))
             {
@@ -223,8 +228,10 @@ public static class PrinterExpressionParser
         {
             var num = "";
             if (Peek('-'))
+            {
                 num += _expression[_position++];
-            
+            }
+
             while (_position < _expression.Length && (char.IsDigit(_expression[_position]) || _expression[_position] == '.'))
             {
                 num += _expression[_position++];
@@ -258,7 +265,9 @@ public static class PrinterExpressionParser
         private bool PeekKeyword(string keyword)
         {
             if (!Peek(keyword))
+            {
                 return false;
+            }
 
             // Ensure it's a whole word (not part of another identifier)
             var endPos = _position + keyword.Length;
@@ -274,14 +283,20 @@ public static class PrinterExpressionParser
         private void Consume(char ch)
         {
             if (!Peek(ch))
+            {
                 throw new FormatException($"Expected '{ch}' at position {_position}");
+            }
+
             _position++;
         }
 
         private void ConsumeKeyword(string keyword)
         {
             if (!Peek(keyword))
+            {
                 throw new FormatException($"Expected '{keyword}' at position {_position}");
+            }
+
             _position += keyword.Length;
         }
 
@@ -289,7 +304,9 @@ public static class PrinterExpressionParser
         {
             var value = GetPropertyValue(property);
             if (value == null)
+            {
                 return false;
+            }
 
             try
             {
@@ -305,7 +322,9 @@ public static class PrinterExpressionParser
         {
             var value = GetPropertyValue(property, index);
             if (value == null)
+            {
                 return false;
+            }
 
             // Numeric comparison with tolerance
             if (double.TryParse(value, out var numValue) && double.TryParse(expectedValue, out var expectedNum))
@@ -333,7 +352,9 @@ public static class PrinterExpressionParser
             if (property.Equals("nozzle_diameter", StringComparison.OrdinalIgnoreCase))
             {
                 if (!index.HasValue || index < 0)
+                {
                     return null;
+                }
 
                 // Try dedicated property first
                 if (index == 0 && _machine.NozzleDiameter.HasValue)
@@ -345,7 +366,9 @@ public static class PrinterExpressionParser
                 if (_machine.Settings != null && _machine.Settings.TryGetValue("nozzle_diameter", out var nozzle))
                 {
                     if (index == 0 && nozzle != null)
+                    {
                         return nozzle.ToString();
+                    }
                 }
 
                 // Try extracting from name as fallback
@@ -371,7 +394,9 @@ public static class PrinterExpressionParser
         private static string? ExtractNozzleDiameterFromName(string? machineName)
         {
             if (string.IsNullOrEmpty(machineName))
+            {
                 return null;
+            }
 
             // Look for pattern: space + number + optional decimal + space/end/nozzle
             // e.g., "Prusa MK4S 0.25 nozzle" → "0.25"

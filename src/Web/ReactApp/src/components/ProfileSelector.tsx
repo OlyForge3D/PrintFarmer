@@ -1,8 +1,5 @@
 import React, { useMemo } from 'react';
-import slicerProfilesService, { 
-  HierarchicalProfilesResponse, 
-  ProcessProfileListItem 
-} from '@/services/slicerProfilesService';
+import { HierarchicalProfilesResponse } from '@/services/slicerProfilesService';
 
 interface ProfileSelectorProps {
   hierarchyData?: HierarchicalProfilesResponse;
@@ -36,7 +33,7 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({
 
     // Walk through manufacturer → model → profiles hierarchy
     for (const [manufacturer, mfgData] of Object.entries(hierarchyData.byHierarchy)) {
-      for (const [modelId, modelData] of Object.entries(mfgData.models)) {
+      for (const modelData of Object.values(mfgData.models)) {
         for (const profile of modelData.processProfiles) {
           options.push({
             id: profile.id,

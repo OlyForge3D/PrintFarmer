@@ -146,12 +146,12 @@ public static class Program
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
                 var profileService = app.Services.GetRequiredService<ISlicerProfilesService>();
-                
+
                 // First load all machines to get the list of available manufacturers
                 var machineStart = System.Diagnostics.Stopwatch.StartNew();
                 var machines = await profileService.ListAvailableMachineProfilesAsync();
                 machineStart.Stop();
-                
+
                 // Get the set of manufacturers available in OrcaSlicer profiles
                 var availableManufacturers = machines
                     .Where(m => !string.IsNullOrEmpty(m.Manufacturer))
@@ -164,7 +164,7 @@ public static class Program
                 // Load catalog manufacturers via HTTP (call the API)
                 var httpClient = app.Services.GetRequiredService<IHttpClientFactory>().CreateClient();
                 var catalogUrl = Environment.GetEnvironmentVariable("CATALOG_API_URL") ?? "http://localhost:5245";
-                
+
                 try
                 {
                     var response = await httpClient.GetAsync($"{catalogUrl}/api/catalog/manufacturers");
@@ -172,10 +172,10 @@ public static class Program
                     {
                         var content = await response.Content.ReadAsStringAsync();
                         var manufacturerDtos = System.Text.Json.JsonSerializer.Deserialize<List<ManufacturerDto>>(
-                            content, 
+                            content,
                             new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
                         );
-                        
+
                         var catalogManufacturers = manufacturerDtos?
                             .Select(m => m.Name)
                             .ToHashSet() ?? new HashSet<string>();
@@ -189,7 +189,7 @@ public static class Program
                             .Where(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer))
                             .Count();
                         filamentStart.Stop();
-                        
+
                         var processStart = System.Diagnostics.Stopwatch.StartNew();
                         var processes = await profileService.ListAvailableProcessProfilesAsync();
                         processStart.Stop();
@@ -211,12 +211,12 @@ public static class Program
                 catch (Exception ex)
                 {
                     app.Logger.LogWarning($"Error fetching catalog manufacturers: {ex.Message}. Loading all profiles instead.");
-                    
+
                     // Fallback: load all profiles if catalog API is unavailable
                     var filamentStart = System.Diagnostics.Stopwatch.StartNew();
                     var filaments = await profileService.ListAvailableFilamentProfilesAsync();
                     filamentStart.Stop();
-                    
+
                     var processStart = System.Diagnostics.Stopwatch.StartNew();
                     var processes = await profileService.ListAvailableProcessProfilesAsync();
                     processStart.Stop();

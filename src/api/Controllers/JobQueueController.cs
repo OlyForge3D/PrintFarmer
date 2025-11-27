@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 

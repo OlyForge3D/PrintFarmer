@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
 
 namespace Farm.Slicers.OrcaSlicer.v2_3_1;

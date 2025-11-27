@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -31,7 +31,7 @@ public class EfFilamentProfileRepository(AppDbContext db) : IFilamentProfileRepo
     public async Task<IReadOnlyList<FilamentProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default)
     {
         IQueryable<FilamentProfile> query = _db.FilamentProfiles.AsNoTracking().Where(p => p.SlicerType == engine);
-        
+
         if (!includeSystem)
         {
             query = query.Where(p => !p.IsSystem);
@@ -71,7 +71,7 @@ public class EfFilamentProfileRepository(AppDbContext db) : IFilamentProfileRepo
         var profiles = await _db.FilamentProfiles
             .Where(p => p.IsSystem && p.SlicerType == engine)
             .ToListAsync(ct);
-        
+
         _db.FilamentProfiles.RemoveRange(profiles);
         await _db.SaveChangesAsync(ct);
         return profiles.Count;

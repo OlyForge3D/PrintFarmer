@@ -58,7 +58,7 @@ public class SlicingJobsController : ControllerBase
         // Extract profile information from composite SlicerProfileDto
         var profileQuality = j.Profile?.ProcessProfile?.Quality ?? "Unknown";
         var profileMaterial = j.Profile?.FilamentProfile?.Material ?? "Unknown";
-        
+
         return Ok(new SliceResultDto
         {
             JobId = j.JobId,

@@ -27,16 +27,16 @@ public class OrcaProfilesService : ISlicerProfilesService
 {
     private readonly IUnifiedLoggingService _logger;
     private readonly string _orcaProfilesPath;
-    
+
     // Cache for loaded profile JSON as strings to minimize disk I/O
     // Key: full file path, Value: JSON string
     private readonly Dictionary<string, string> _profileJsonCache = new();
     private readonly object _cacheLock = new();
-    
+
     // Cache for machines by manufacturer to support compatible_printers_condition evaluation
     private Dictionary<string, List<MachineProfileDto>>? _machinesByManufacturerCache;
     private readonly object _machineCacheLock = new();
-    
+
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
     private IList<MachineProfileDto>? _allMachineProfilesCache;
     private IList<FilamentProfileDto>? _allFilamentProfilesCache;
@@ -73,11 +73,11 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         var profiles = new List<MachineProfileDto>();
-        
+
         try
         {
             _logger.LogInformation($"Loading OrcaSlicer machine profiles from bundles in: {_orcaProfilesPath}");
-            
+
             if (!Directory.Exists(_orcaProfilesPath))
             {
                 _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
@@ -86,7 +86,7 @@ public class OrcaProfilesService : ISlicerProfilesService
 
             // Find all manufacturer bundle JSON files (e.g., Prusa.json, Voron.json, etc.)
             var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
-                .Where(f => !Path.GetFileName(f).StartsWith(".")) // Skip hidden files
+                .Where(f => !Path.GetFileName(f).StartsWith('.')) // Skip hidden files
                 .ToList();
 
             _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
@@ -102,13 +102,18 @@ public class OrcaProfilesService : ISlicerProfilesService
                     if (bundle != null)
                     {
                         string manufacturerName = bundle.Name; // Extract from bundle
-                        
+
                         // Load from both machine_model_list and machine_list
                         var allMachineEntries = new List<ManufacturerBundleProfileEntry>();
                         if (bundle.MachineModelList != null)
+                        {
                             allMachineEntries.AddRange(bundle.MachineModelList);
+                        }
+
                         if (bundle.MachineList != null)
+                        {
                             allMachineEntries.AddRange(bundle.MachineList);
+                        }
 
                         foreach (var entry in allMachineEntries)
                         {
@@ -151,13 +156,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             _logger.LogInformation($"Loaded {successCount} machine profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
-            
+
             // Cache the results
             lock (_profilesCacheLock)
             {
                 _allMachineProfilesCache = profiles;
             }
-            
+
             return profiles;
         }
         catch (Exception ex)
@@ -180,11 +185,11 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         var profiles = new List<FilamentProfileDto>();
-        
+
         try
         {
             _logger.LogInformation($"Loading OrcaSlicer filament profiles from bundles in: {_orcaProfilesPath}");
-            
+
             if (!Directory.Exists(_orcaProfilesPath))
             {
                 _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
@@ -195,7 +200,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             await EnsureMachinesCachedAsync();
 
             var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
-                .Where(f => !Path.GetFileName(f).StartsWith("."))
+                .Where(f => !Path.GetFileName(f).StartsWith('.'))
                 .ToList();
 
             _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
@@ -229,21 +234,21 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 if (profile != null)
                                 {
                                     profile.Manufacturer = bundle.Name;
-                                    
+
                                     // If no explicit compatible_printers, try to evaluate the condition
                                     if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
                                         !string.IsNullOrEmpty(profile.CompatiblePrintersCondition) &&
                                         manufacturerMachines?.Count > 0)
                                     {
                                         var matchedMachines = PrinterExpressionParser.EvaluateCondition(
-                                            profile.CompatiblePrintersCondition, 
+                                            profile.CompatiblePrintersCondition,
                                             manufacturerMachines);
                                         if (matchedMachines?.Count > 0)
                                         {
                                             profile.CompatiblePrinters = matchedMachines;
                                         }
                                     }
-                                    
+
                                     profiles.Add(profile);
                                     successCount++;
                                 }
@@ -268,13 +273,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             _logger.LogInformation($"Loaded {successCount} filament profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
-            
+
             // Cache the results
             lock (_profilesCacheLock)
             {
                 _allFilamentProfilesCache = profiles;
             }
-            
+
             return profiles;
         }
         catch (Exception ex)
@@ -297,11 +302,11 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         var profiles = new List<ProcessProfileDto>();
-        
+
         try
         {
             _logger.LogInformation($"Loading OrcaSlicer process profiles from bundles in: {_orcaProfilesPath}");
-            
+
             if (!Directory.Exists(_orcaProfilesPath))
             {
                 _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
@@ -312,7 +317,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             await EnsureMachinesCachedAsync();
 
             var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
-                .Where(f => !Path.GetFileName(f).StartsWith("."))
+                .Where(f => !Path.GetFileName(f).StartsWith('.'))
                 .ToList();
 
             _logger.LogInformation($"Found {bundleFiles.Count} manufacturer bundle files");
@@ -346,21 +351,21 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 if (profile != null)
                                 {
                                     profile.Manufacturer = bundle.Name;
-                                    
+
                                     // If no explicit compatible_printers, try to evaluate the condition
                                     if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
                                         !string.IsNullOrEmpty(profile.CompatiblePrintersCondition) &&
                                         manufacturerMachines?.Count > 0)
                                     {
                                         var matchedMachines = PrinterExpressionParser.EvaluateCondition(
-                                            profile.CompatiblePrintersCondition, 
+                                            profile.CompatiblePrintersCondition,
                                             manufacturerMachines);
                                         if (matchedMachines?.Count > 0)
                                         {
                                             profile.CompatiblePrinters = matchedMachines;
                                         }
                                     }
-                                    
+
                                     profiles.Add(profile);
                                     successCount++;
                                 }
@@ -385,13 +390,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             _logger.LogInformation($"Loaded {successCount} process profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
-            
+
             // Cache the results
             lock (_profilesCacheLock)
             {
                 _allProcessProfilesCache = profiles;
             }
-            
+
             return profiles;
         }
         catch (Exception ex)
@@ -434,9 +439,9 @@ public class OrcaProfilesService : ISlicerProfilesService
             // Check instantiation AFTER resolving (in case it's inherited)
             if (resolvedProfile.TryGetProperty("instantiation", out var instantiationElem))
             {
-                bool isInstantiatable = instantiationElem.ValueKind == JsonValueKind.True || 
+                bool isInstantiatable = instantiationElem.ValueKind == JsonValueKind.True ||
                     (instantiationElem.ValueKind == JsonValueKind.String && instantiationElem.GetString() == "true");
-                
+
                 if (!isInstantiatable)
                 {
                     return null;
@@ -469,7 +474,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             // Collect all profiles in the inheritance chain (parent -> child order)
             var inheritanceChain = new List<string>();
             var visited = new HashSet<string>();
-            
+
             if (!CollectInheritanceChainAsJson(filePath, inheritanceChain, visited))
             {
                 return null;
@@ -493,13 +498,18 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         // Prevent infinite loops
         if (visited.Contains(filePath))
+        {
             return true;
+        }
+
         visited.Add(filePath);
 
         // Load this profile JSON (from cache or disk)
         var profileJson = LoadProfileJsonFromDisk(filePath);
         if (profileJson == null)
+        {
             return false;
+        }
 
         // Parse to check for inherits property
         try
@@ -508,7 +518,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             var root = doc.RootElement;
 
             // Check if this profile has a parent (inherits property)
-            if (root.TryGetProperty("inherits", out var inheritsElem) && 
+            if (root.TryGetProperty("inherits", out var inheritsElem) &&
                 inheritsElem.ValueKind == JsonValueKind.String)
             {
                 var inheritedProfileName = inheritsElem.GetString();
@@ -517,7 +527,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                     // Find the parent profile in the same directory
                     var profileDir = Path.GetDirectoryName(filePath);
                     var parentProfilePath = Path.Combine(profileDir ?? "", $"{inheritedProfileName}.json");
-                    
+
                     if (File.Exists(parentProfilePath))
                     {
                         // Recursively load parent chain first (so parents are added before children)
@@ -547,7 +557,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     private string? LoadProfileJsonFromDisk(string filePath)
     {
         string? cachedJson = null;
-        
+
         lock (_cacheLock)
         {
             // Check cache first
@@ -563,7 +573,9 @@ public class OrcaProfilesService : ISlicerProfilesService
             try
             {
                 if (!File.Exists(filePath))
+                {
                     return null;
+                }
 
                 cachedJson = File.ReadAllText(filePath);
 
@@ -590,10 +602,14 @@ public class OrcaProfilesService : ISlicerProfilesService
     private string? MergeProfilesJson(List<string> profileJsons)
     {
         if (profileJsons.Count == 0)
+        {
             return null;
+        }
 
         if (profileJsons.Count == 1)
+        {
             return profileJsons[0];
+        }
 
         try
         {
@@ -606,7 +622,9 @@ public class OrcaProfilesService : ISlicerProfilesService
                 var root = doc.RootElement;
 
                 if (root.ValueKind != JsonValueKind.Object)
+                {
                     continue;
+                }
 
                 foreach (var prop in root.EnumerateObject())
                 {
@@ -620,7 +638,11 @@ public class OrcaProfilesService : ISlicerProfilesService
             bool first = true;
             foreach (var kvp in allProps.OrderBy(x => x.Key)) // Order for consistency
             {
-                if (!first) sb.Append(",");
+                if (!first)
+                {
+                    sb.Append(",");
+                }
+
                 sb.Append("\"").Append(EscapeJsonKey(kvp.Key)).Append("\":");
                 sb.Append(kvp.Value);
                 first = false;
@@ -648,10 +670,14 @@ public class OrcaProfilesService : ISlicerProfilesService
         var profile = new MachineProfileDto();
 
         if (root.TryGetProperty("name", out var nameElem))
+        {
             profile.Name = nameElem.GetString() ?? string.Empty;
+        }
 
         if (root.TryGetProperty("manufacturer", out var mfgElem))
+        {
             profile.Manufacturer = mfgElem.GetString() ?? string.Empty;
+        }
 
         // Extract nozzle diameter from settings - REQUIRED property
         // nozzle_diameter is typically an array like ["0.4"], get the first value
@@ -684,28 +710,40 @@ public class OrcaProfilesService : ISlicerProfilesService
         var profile = new FilamentProfileDto();
 
         if (root.TryGetProperty("name", out var nameElem))
+        {
             profile.Name = nameElem.GetString() ?? string.Empty;
+        }
 
         if (root.TryGetProperty("filament_type", out var typeElem))
+        {
             profile.Material = typeElem.GetString() ?? "PLA";
+        }
         else if (root.TryGetProperty("material", out var matElem))
+        {
             profile.Material = matElem.GetString() ?? "PLA";
+        }
 
         if (root.TryGetProperty("nozzle_temperature", out var nozzleElem))
+        {
             profile.NozzleTemperature = ParseIntValue(nozzleElem) ?? 210;
+        }
 
         if (root.TryGetProperty("bed_temperature", out var bedElem))
+        {
             profile.BedTemperature = ParseIntValue(bedElem) ?? 60;
+        }
 
         if (root.TryGetProperty("travel_speed", out var speedElem))
+        {
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
+        }
 
         // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out var compatibleElem))
         {
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
         }
-        
+
         // Store compatible_printers_condition for later evaluation
         if (root.TryGetProperty("compatible_printers_condition", out var conditionElem))
         {
@@ -727,26 +765,36 @@ public class OrcaProfilesService : ISlicerProfilesService
         var profile = new ProcessProfileDto();
 
         if (root.TryGetProperty("name", out var nameElem))
+        {
             profile.Name = nameElem.GetString() ?? string.Empty;
+        }
 
         if (root.TryGetProperty("layer_height", out var layerElem))
+        {
             profile.LayerHeight = ParseDoubleValue(layerElem) ?? 0.2;
+        }
 
         if (root.TryGetProperty("fill_density", out var infillElem))
+        {
             profile.InfillPercentage = ParseIntValue(infillElem) ?? 20;
+        }
 
         if (root.TryGetProperty("wall_loops", out var speedElem))
+        {
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
+        }
 
         if (root.TryGetProperty("enable_support", out var supportsElem))
+        {
             profile.Supports = ParseBoolValue(supportsElem);
+        }
 
         // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out var compatibleElem))
         {
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
         }
-        
+
         // Store compatible_printers_condition for later evaluation
         if (root.TryGetProperty("compatible_printers_condition", out var conditionElem))
         {
@@ -759,11 +807,17 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         // Determine quality based on layer height
         if (profile.LayerHeight <= 0.15)
+        {
             profile.Quality = "fine";
+        }
         else if (profile.LayerHeight >= 0.28)
+        {
             profile.Quality = "draft";
+        }
         else
+        {
             profile.Quality = "standard";
+        }
 
         // Store all settings as raw JSON for flexibility
         profile.Settings = SerializeElementToDict(root);
@@ -774,27 +828,42 @@ public class OrcaProfilesService : ISlicerProfilesService
     private int? ParseIntValue(JsonElement elem)
     {
         if (elem.ValueKind == JsonValueKind.Number)
+        {
             return elem.TryGetInt32(out var val) ? val : null;
+        }
         else if (elem.ValueKind == JsonValueKind.String)
+        {
             return int.TryParse(elem.GetString(), out var val) ? val : null;
+        }
+
         return null;
     }
 
     private double? ParseDoubleValue(JsonElement elem)
     {
         if (elem.ValueKind == JsonValueKind.Number)
+        {
             return elem.TryGetDouble(out var val) ? val : null;
+        }
         else if (elem.ValueKind == JsonValueKind.String)
+        {
             return double.TryParse(elem.GetString(), out var val) ? val : null;
+        }
+
         return null;
     }
 
     private bool ParseBoolValue(JsonElement elem)
     {
         if (elem.ValueKind == JsonValueKind.True)
+        {
             return true;
+        }
         else if (elem.ValueKind == JsonValueKind.String)
+        {
             return elem.GetString() == "true" || elem.GetString() == "1";
+        }
+
         return false;
     }
 
@@ -829,7 +898,9 @@ public class OrcaProfilesService : ISlicerProfilesService
                 {
                     var printerName = printer.GetString() ?? "";
                     if (!string.IsNullOrWhiteSpace(printerName))
+                    {
                         targetList.Add(printerName);
+                    }
                 }
             }
         }
@@ -851,7 +922,9 @@ public class OrcaProfilesService : ISlicerProfilesService
                             {
                                 var printerName = item.GetString() ?? "";
                                 if (!string.IsNullOrWhiteSpace(printerName))
+                                {
                                     targetList.Add(printerName);
+                                }
                             }
                         }
                     }
@@ -873,7 +946,9 @@ public class OrcaProfilesService : ISlicerProfilesService
         lock (_machineCacheLock)
         {
             if (_machinesByManufacturerCache != null)
+            {
                 return;
+            }
         }
 
         // Load all machines and group by manufacturer

@@ -4,9 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Tags;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 
