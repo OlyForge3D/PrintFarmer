@@ -626,11 +626,17 @@ public class ProfilesController(
             var json = await response.Content.ReadAsStringAsync(ct);
             _logger.LogInformation($"Raw OrcaSlicer worker /profiles response: {json[..Math.Min(1000, json.Length)]}");
             
-            // Deserialize the new AllProfilesResponseDto with three profile types
+            // Deserialize the new AllProfilesResponseDto with three profile types grouped by manufacturer
             var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            _logger.LogInformation($"Deserialized {allProfiles?.ProcessProfiles?.Count ?? 0} process + {allProfiles?.FilamentProfiles?.Count ?? 0} filament + {allProfiles?.MachineProfiles?.Count ?? 0} machine profiles from worker");
+            
+            // Flatten the grouped profiles for importing
+            var totalProcessCount = allProfiles?.ProcessProfiles?.Values.Sum(list => list.Count) ?? 0;
+            var totalFilamentCount = allProfiles?.FilamentProfiles?.Values.Sum(list => list.Count) ?? 0;
+            var totalMachineCount = allProfiles?.MachineProfiles?.Values.Sum(list => list.Count) ?? 0;
+            
+            _logger.LogInformation($"Deserialized {totalProcessCount} process + {totalFilamentCount} filament + {totalMachineCount} machine profiles from worker");
 
-            if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
+            if (allProfiles == null || (totalProcessCount == 0 && totalFilamentCount == 0 && totalMachineCount == 0))
             {
                 return Ok(new { imported = 0, skipped = 0, message = "No profiles available from worker" });
             }
@@ -638,10 +644,10 @@ public class ProfilesController(
             int imported = 0;
             int skipped = 0;
 
-            // Import all three profile types from worker response
-            var processProfiles = allProfiles.ProcessProfiles ?? new List<ProcessProfileDto>();
-            var filamentProfiles = allProfiles.FilamentProfiles ?? new List<FilamentProfileDto>();
-            var machineProfiles = allProfiles.MachineProfiles ?? new List<MachineProfileDto>();
+            // Flatten all profiles from the grouped dictionaries
+            var processProfiles = (allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<ProcessProfileDto>()).ToList();
+            var filamentProfiles = (allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<FilamentProfileDto>()).ToList();
+            var machineProfiles = (allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<MachineProfileDto>()).ToList();
 
             _logger.LogInformation($"Seeding {processProfiles.Count} process, {filamentProfiles.Count} filament, {machineProfiles.Count} machine profiles");
             
@@ -896,12 +902,12 @@ public class ProfilesController(
             int skipped = 0;
 
             // Import machine profiles - only those matching system nozzle sizes
-            var machineProfiles = allProfiles.MachineProfiles ?? new List<MachineProfileDto>();
-            _logger.LogInformation($"Force-reseeding machine profiles: checking {machineProfiles.Count} profiles against {systemNozzleSizes.Count} system nozzle sizes");
+            var flattenedMachineProfiles = allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<MachineProfileDto>();
+            _logger.LogInformation($"Force-reseeding machine profiles: checking {flattenedMachineProfiles.Count} profiles against {systemNozzleSizes.Count} system nozzle sizes");
             int machineImported = 0;
             var importedMachineNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var profile in machineProfiles)
+            foreach (var profile in flattenedMachineProfiles)
             {
                 try
                 {
@@ -945,10 +951,10 @@ public class ProfilesController(
             }
 
             // Import all process profiles (they're not machine-specific in OrcaSlicer)
-            var processProfiles = allProfiles.ProcessProfiles ?? new List<ProcessProfileDto>();
-            _logger.LogInformation($"Force-reseeding {processProfiles.Count} process profiles");
+            var flattenedProcessProfiles = allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
+            _logger.LogInformation($"Force-reseeding {flattenedProcessProfiles.Count} process profiles");
             int processImported = 0;
-            foreach (var profile in processProfiles)
+            foreach (var profile in flattenedProcessProfiles)
             {
                 try
                 {
@@ -988,10 +994,10 @@ public class ProfilesController(
             }
 
             // Import all filament profiles (they're not machine-specific in OrcaSlicer)
-            var filamentProfiles = allProfiles.FilamentProfiles ?? new List<FilamentProfileDto>();
-            _logger.LogInformation($"Force-reseeding {filamentProfiles.Count} filament profiles");
+            var flattenedFilamentProfiles = allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
+            _logger.LogInformation($"Force-reseeding {flattenedFilamentProfiles.Count} filament profiles");
             int filamentImported = 0;
-            foreach (var profile in filamentProfiles)
+            foreach (var profile in flattenedFilamentProfiles)
             {
                 try
                 {
@@ -1091,9 +1097,9 @@ public class ProfilesController(
             // Deserialize the new AllProfilesResponseDto with three profile types
             var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            // Return only process profiles for backward compatibility
-            var processProfiles = allProfiles?.ProcessProfiles ?? new List<ProcessProfileDto>();
-            return Ok(processProfiles);
+            // Return only process profiles for backward compatibility - flatten from grouped dictionary
+            var flattenedProcessProfiles = allProfiles?.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
+            return Ok(flattenedProcessProfiles);
         }
         catch (HttpRequestException ex)
         {

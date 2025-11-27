@@ -210,32 +210,14 @@ RUN set -e; \
         fi; \
     fi; \
     \
-    # Extract profiles from OrcaSlicer installation if available \
-    echo "[orcaslicer-binaries] Extracting default OrcaSlicer profiles..."; \
-    if [ -d /orcaslicer-dist/opt/orcaslicer ]; then \
-        mkdir -p /orcaslicer-dist/profiles/process; \
-        # Look for profiles in common locations within the OrcaSlicer installation \
-        if [ -d "/orcaslicer-dist/opt/orcaslicer/resources/profiles" ]; then \
-            find "/orcaslicer-dist/opt/orcaslicer/resources/profiles" -name "*.json" -type f -exec cp {} /orcaslicer-dist/profiles/process/ \; 2>/dev/null || true; \
-            echo "[orcaslicer-binaries] Copied profiles from resources/profiles"; \
-        fi; \
-        if [ -d "/orcaslicer-dist/opt/orcaslicer/share/orca-slicer/profiles" ]; then \
-            find "/orcaslicer-dist/opt/orcaslicer/share/orca-slicer/profiles" -name "*.json" -type f -exec cp {} /orcaslicer-dist/profiles/process/ \; 2>/dev/null || true; \
-            echo "[orcaslicer-binaries] Copied profiles from share/orca-slicer/profiles"; \
-        fi; \
-        profile_count=$(find /orcaslicer-dist/profiles/process -name "*.json" 2>/dev/null | wc -l); \
-        echo "[orcaslicer-binaries] Found $profile_count profile files"; \
+    # OrcaSlicer profiles are already in /opt/orcaslicer/resources/profiles \
+    echo "[orcaslicer-binaries] OrcaSlicer profiles available at /opt/orcaslicer/resources/profiles"; \
+    if [ -d /orcaslicer-dist/opt/orcaslicer/resources/profiles ]; then \
+        echo "[orcaslicer-binaries] Verified: profiles directory present"; \
+        ls /orcaslicer-dist/opt/orcaslicer/resources/profiles/*.json 2>/dev/null | head -5 || true; \
     else \
-        echo "[orcaslicer-binaries] OrcaSlicer installation not found, skipping profile extraction"; \
-    fi; \
-    \
-    # Verify what we extracted \
-    echo "[orcaslicer-binaries] Extraction complete. Contents:"; \
-    ls -la /orcaslicer-dist/ || true; \
-    ls -la /orcaslicer-dist/opt/ 2>/dev/null || true; \
-    file /orcaslicer-dist/orcaslicer 2>/dev/null || true; \
-    echo "[orcaslicer-binaries] Profiles extracted:"; \
-    ls -la /orcaslicer-dist/profiles/ 2>/dev/null || true
+        echo "[orcaslicer-binaries] Warning: OrcaSlicer profiles not found in extracted AppImage"; \
+    fi
 
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
@@ -275,23 +257,25 @@ LABEL component="orcaslicer-worker" \
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
 
-# Copy OrcaSlicer default profiles from binary layer and set up config directory structure
-COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/profiles/process /home/appuser/.config/OrcaSlicer/profiles/process
-
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
 
-# Verify binary installation and set executable permissions
+# Verify binary installation and set up permissions
 RUN set -e; \
     chmod +x /usr/local/bin/orcaslicer && \
     test -f /usr/local/bin/orcaslicer && \
     test -s ./Farm.OrcaSlicer.Worker.dll && \
     echo "OrcaSlicer worker binaries verified" && \
-    if [ -d /home/appuser/.config/OrcaSlicer/profiles/process ]; then \
-        profile_count=$(find /home/appuser/.config/OrcaSlicer/profiles/process -name "*.json" 2>/dev/null | wc -l); \
-        echo "Found $profile_count OrcaSlicer profiles in config directory"; \
+    # Verify profile directories exist \
+    PROFILES_DIR="/opt/orcaslicer/resources/profiles"; \
+    if [ -d "$PROFILES_DIR" ]; then \
+        echo "Profile directory structure:"; \
+        find "$PROFILES_DIR" -maxdepth 2 -type d | sort | head -15; \
+        profile_count=$(find "$PROFILES_DIR" -name "*.json" 2>/dev/null | wc -l); \
+        echo "Total JSON profiles: $profile_count"; \
     else \
-        echo "WARNING: OrcaSlicer profiles directory not found"; \
+        echo "ERROR: Profile directory not found at $PROFILES_DIR"; \
+        exit 1; \
     fi && \
     echo "OrcaSlicer worker setup completed successfully"
 

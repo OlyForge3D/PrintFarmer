@@ -1533,6 +1533,8 @@ public class FilamentProfileDto
     public int NozzleTemperature { get; set; } = 210;
     public int BedTemperature { get; set; } = 60;
     public int PrintSpeed { get; set; } = 50;
+    [JsonPropertyName("compatible_printers")]
+    public IList<string> CompatiblePrinters { get; set; } = new List<string>();
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -1549,17 +1551,115 @@ public class ProcessProfileDto
     public int PrintSpeed { get; set; } = 50;
     public bool Supports { get; set; }
     public string? Description { get; set; }
+    [JsonPropertyName("compatible_printers")]
+    public IList<string> CompatiblePrinters { get; set; } = new List<string>();
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
 /// <summary>
 /// Combined response from worker /profiles endpoint containing all three profile types.
+/// Profiles are organized by manufacturer bundle to maintain hierarchy.
 /// </summary>
 public class AllProfilesResponseDto
 {
+    /// <summary>
+    /// Profiles organized by manufacturer and model hierarchy.
+    /// Structure: Manufacturer -> Model -> (Machine Profile + Associated Filament/Process Profiles)
+    /// </summary>
+    public Dictionary<string, ManufacturerProfilesDto> ByHierarchy { get; set; } = new();
+
+    /// <summary>
+    /// Legacy flat structure for backward compatibility.
+    /// Machine profiles grouped by manufacturer name.
+    /// </summary>
+    public Dictionary<string, IList<MachineProfileDto>> MachineProfiles { get; set; } = new();
+
+    /// <summary>
+    /// Legacy flat structure for backward compatibility.
+    /// Filament profiles grouped by manufacturer name.
+    /// </summary>
+    public Dictionary<string, IList<FilamentProfileDto>> FilamentProfiles { get; set; } = new();
+
+    /// <summary>
+    /// Legacy flat structure for backward compatibility.
+    /// Process profiles grouped by manufacturer name.
+    /// </summary>
+    public Dictionary<string, IList<ProcessProfileDto>> ProcessProfiles { get; set; } = new();
+}
+
+/// <summary>
+/// Represents all profile models for a single manufacturer.
+/// Maps model identifiers to their machine profile and associated filament/process profiles.
+/// </summary>
+public class ManufacturerProfilesDto
+{
+    /// <summary>
+    /// Manufacturer name (e.g., "Prusa", "Creality")
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Models for this manufacturer, keyed by model_id (e.g., "Prusa_CORE_One", "Prusa_MK4S")
+    /// Value contains the machine profile and associated filament/process profiles
+    /// </summary>
+    public Dictionary<string, PrinterModelProfilesDto> Models { get; set; } = new();
+}
+
+/// <summary>
+/// Represents all profiles for a single printer model.
+/// A model has one machine profile and multiple filament/process profiles.
+/// </summary>
+public class PrinterModelProfilesDto
+{
+    /// <summary>
+    /// Human-readable model name (e.g., "Prusa CORE One", "Creality Ender 3 V2")
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Model identifier from the machine profile (e.g., "Prusa_CORE_One")
+    /// </summary>
+    public string ModelId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Machine profiles for this model (multiple per model: one per nozzle size variant)
+    /// </summary>
     public IList<MachineProfileDto> MachineProfiles { get; set; } = new List<MachineProfileDto>();
+
+    /// <summary>
+    /// Filament profiles applicable to this model.
+    /// Multiple profiles per model (e.g., PLA, PETG, ABS variants)
+    /// </summary>
     public IList<FilamentProfileDto> FilamentProfiles { get; set; } = new List<FilamentProfileDto>();
+
+    /// <summary>
+    /// Process/print profiles applicable to this model.
+    /// Multiple profiles per model (e.g., draft, normal, quality variants)
+    /// </summary>
     public IList<ProcessProfileDto> ProcessProfiles { get; set; } = new List<ProcessProfileDto>();
+}
+
+/// <summary>
+/// Legacy: Machine profiles grouped by manufacturer name (from bundle file name).
+/// Example: { "Prusa": [machine1, machine2, ...], "Creality": [...], ... }
+/// </summary>
+public class AllProfilesResponseDto_Deprecated
+{
+    /// <summary>
+    /// Machine profiles grouped by manufacturer name (from bundle file name).
+    /// Example: { "Prusa": [machine1, machine2, ...], "Creality": [...], ... }
+    /// </summary>
+    public Dictionary<string, IList<MachineProfileDto>> MachineProfiles { get; set; } = new();
+
+    /// <summary>
+    /// Filament profiles grouped by manufacturer name.
+    /// </summary>
+    public Dictionary<string, IList<FilamentProfileDto>> FilamentProfiles { get; set; } = new();
+
+    /// <summary>
+    /// Process profiles grouped by manufacturer name.
+    /// </summary>
+    public Dictionary<string, IList<ProcessProfileDto>> ProcessProfiles { get; set; } = new();
 }
 
 /// <summary>
@@ -1568,7 +1668,10 @@ public class AllProfilesResponseDto
 /// </summary>
 public class ManufacturerBundleProfileEntry
 {
+    [System.Text.Json.Serialization.JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("sub_path")]
     public string SubPath { get; set; } = string.Empty; // Relative path like "machine/Prusa MK4S.json"
 }
 
@@ -1578,11 +1681,25 @@ public class ManufacturerBundleProfileEntry
 /// </summary>
 public class ManufacturerBundleDto
 {
+    [System.Text.Json.Serialization.JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("version")]
     public string Version { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonPropertyName("machine_model_list")]
     public IList<ManufacturerBundleProfileEntry> MachineModelList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+
+    [System.Text.Json.Serialization.JsonPropertyName("machine_list")]
+    public IList<ManufacturerBundleProfileEntry> MachineList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+
+    [System.Text.Json.Serialization.JsonPropertyName("process_list")]
     public IList<ManufacturerBundleProfileEntry> ProcessList { get; set; } = new List<ManufacturerBundleProfileEntry>();
+
+    [System.Text.Json.Serialization.JsonPropertyName("filament_list")]
     public IList<ManufacturerBundleProfileEntry> FilamentList { get; set; } = new List<ManufacturerBundleProfileEntry>();
 }
 

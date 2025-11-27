@@ -22,6 +22,9 @@ public static class Program
         _ = builder.Logging.ClearProviders();
         _ = builder.Logging.AddConsole();
 
+        // Add controllers support
+        _ = builder.Services.AddControllers();
+
         // HTTP clients (for API communication, artifact upload, and slicing pipeline)
         _ = builder.Services.AddHttpClient(); // Required for HttpJobPollerService
         _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
@@ -58,6 +61,10 @@ public static class Program
         {
             _ = app.UseDeveloperExceptionPage();
         }
+
+        // Enable routing and controller mapping
+        _ = app.UseRouting();
+        _ = app.MapControllers();
 
         _ = app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
@@ -122,22 +129,6 @@ public static class Program
                 workerVersion = "1.0.0",
                 timestamp = DateTime.UtcNow
             });
-        });
-
-        _ = app.MapGet("/profiles", async (ISlicerProfilesService profileService, CancellationToken ct) =>
-        {
-            var machineProfiles = await profileService.ListAvailableMachineProfilesAsync(ct);
-            var filamentProfiles = await profileService.ListAvailableFilamentProfilesAsync(ct);
-            var processProfiles = await profileService.ListAvailableProcessProfilesAsync(ct);
-            
-            var response = new AllProfilesResponseDto
-            {
-                MachineProfiles = machineProfiles,
-                FilamentProfiles = filamentProfiles,
-                ProcessProfiles = processProfiles
-            };
-            
-            return Results.Ok(response);
         });
 
         IOrcaBinaryDetector orcaDetector = app.Services.GetRequiredService<IOrcaBinaryDetector>();

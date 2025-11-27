@@ -26,15 +26,28 @@ namespace Farm.OrcaSlicer.Worker.Services;
 public class OrcaProfilesService : ISlicerProfilesService
 {
     private readonly IUnifiedLoggingService _logger;
-    private readonly string _orcaConfigPath;
     private readonly string _orcaProfilesPath;
+    
+    // Cache for loaded profile JSON as strings to minimize disk I/O
+    // Key: full file path, Value: JSON string
+    private readonly Dictionary<string, string> _profileJsonCache = new();
+    private readonly object _cacheLock = new();
 
     public OrcaProfilesService(IUnifiedLoggingService logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        // OrcaSlicer config path: ~/.config/OrcaSlicer/
-        _orcaConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "OrcaSlicer");
-        _orcaProfilesPath = Path.Combine(_orcaConfigPath, "profiles");
+        // Check for environment variable override (useful for testing with sample profiles)
+        var envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
+        if (!string.IsNullOrWhiteSpace(envPath) && Directory.Exists(envPath))
+        {
+            _orcaProfilesPath = envPath;
+        }
+        else
+        {
+            // In container environment, use the system installation profiles directly
+            // OrcaSlicer AppImage extracts to /opt/orcaslicer/resources/profiles
+            _orcaProfilesPath = "/opt/orcaslicer/resources/profiles";
+        }
     }
 
     public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
@@ -66,9 +79,18 @@ public class OrcaProfilesService : ISlicerProfilesService
                 try
                 {
                     var bundle = ParseManufacturerBundle(bundleFile);
-                    if (bundle?.MachineModelList != null)
+                    if (bundle != null)
                     {
-                        foreach (var entry in bundle.MachineModelList)
+                        string manufacturerName = bundle.Name; // Extract from bundle
+                        
+                        // Load from both machine_model_list and machine_list
+                        var allMachineEntries = new List<ManufacturerBundleProfileEntry>();
+                        if (bundle.MachineModelList != null)
+                            allMachineEntries.AddRange(bundle.MachineModelList);
+                        if (bundle.MachineList != null)
+                            allMachineEntries.AddRange(bundle.MachineList);
+
+                        foreach (var entry in allMachineEntries)
                         {
                             try
                             {
@@ -83,6 +105,8 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 var profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
                                 if (profile != null)
                                 {
+                                    // Ensure manufacturer name is set from bundle
+                                    profile.Manufacturer = manufacturerName;
                                     profiles.Add(profile);
                                     successCount++;
                                 }
@@ -291,21 +315,34 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         try
         {
-            var json = File.ReadAllText(filePath);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            // Skip profiles with "instantiation": false - these are not actual profiles
-            if (root.TryGetProperty("instantiation", out var instantiationElem) && instantiationElem.ValueKind == JsonValueKind.False)
+            // Build the fully resolved profile JSON by loading and merging the entire inheritance chain
+            var resolvedProfileJson = BuildResolvedProfileJson(filePath);
+            if (resolvedProfileJson == null)
             {
                 return null;
             }
 
+            // Parse the resolved profile
+            using var doc = JsonDocument.Parse(resolvedProfileJson);
+            var resolvedProfile = doc.RootElement;
+
+            // Check instantiation AFTER resolving (in case it's inherited)
+            if (resolvedProfile.TryGetProperty("instantiation", out var instantiationElem))
+            {
+                bool isInstantiatable = instantiationElem.ValueKind == JsonValueKind.True || 
+                    (instantiationElem.ValueKind == JsonValueKind.String && instantiationElem.GetString() == "true");
+                
+                if (!isInstantiatable)
+                {
+                    return null;
+                }
+            }
+
             return typeof(T).Name switch
             {
-                nameof(MachineProfileDto) => ParseMachineProfile(root, filePath) as T,
-                nameof(FilamentProfileDto) => ParseFilamentProfile(root, filePath) as T,
-                nameof(ProcessProfileDto) => ParseProcessProfile(root, filePath) as T,
+                nameof(MachineProfileDto) => ParseMachineProfile(resolvedProfile, filePath) as T,
+                nameof(FilamentProfileDto) => ParseFilamentProfile(resolvedProfile, filePath) as T,
+                nameof(ProcessProfileDto) => ParseProcessProfile(resolvedProfile, filePath) as T,
                 _ => null
             };
         }
@@ -314,6 +351,191 @@ public class OrcaProfilesService : ISlicerProfilesService
             _logger.LogWarning($"Failed to load profile from {filePath}: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Build a fully resolved profile by loading and merging all profiles in the inheritance chain.
+    /// Returns the merged profile JSON string with all inherited properties + overrides from the current profile.
+    /// </summary>
+    private string? BuildResolvedProfileJson(string filePath)
+    {
+        try
+        {
+            // Collect all profiles in the inheritance chain (parent -> child order)
+            var inheritanceChain = new List<string>();
+            var visited = new HashSet<string>();
+            
+            if (!CollectInheritanceChainAsJson(filePath, inheritanceChain, visited))
+            {
+                return null;
+            }
+
+            // Now merge all profiles in the chain
+            return MergeProfilesJson(inheritanceChain);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Failed to build resolved profile for {filePath}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Collect all profiles in the inheritance chain from top-level parent to the current profile.
+    /// Returns false if profile can't be loaded.
+    /// </summary>
+    private bool CollectInheritanceChainAsJson(string filePath, List<string> chain, HashSet<string> visited)
+    {
+        // Prevent infinite loops
+        if (visited.Contains(filePath))
+            return true;
+        visited.Add(filePath);
+
+        // Load this profile JSON (from cache or disk)
+        var profileJson = LoadProfileJsonFromDisk(filePath);
+        if (profileJson == null)
+            return false;
+
+        // Parse to check for inherits property
+        try
+        {
+            using var doc = JsonDocument.Parse(profileJson);
+            var root = doc.RootElement;
+
+            // Check if this profile has a parent (inherits property)
+            if (root.TryGetProperty("inherits", out var inheritsElem) && 
+                inheritsElem.ValueKind == JsonValueKind.String)
+            {
+                var inheritedProfileName = inheritsElem.GetString();
+                if (!string.IsNullOrWhiteSpace(inheritedProfileName))
+                {
+                    // Find the parent profile in the same directory
+                    var profileDir = Path.GetDirectoryName(filePath);
+                    var parentProfilePath = Path.Combine(profileDir ?? "", $"{inheritedProfileName}.json");
+                    
+                    if (File.Exists(parentProfilePath))
+                    {
+                        // Recursively load parent chain first (so parents are added before children)
+                        if (!CollectInheritanceChainAsJson(parentProfilePath, chain, visited))
+                        {
+                            _logger.LogWarning($"Failed to load parent profile '{inheritedProfileName}' for '{filePath}'");
+                            // Don't fail - continue with what we have
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Failed to parse profile {filePath}: {ex.Message}");
+            return false;
+        }
+
+        // Add this profile JSON to the chain (after parents, so it can override)
+        chain.Add(profileJson);
+        return true;
+    }
+
+    /// <summary>
+    /// Load a single profile JSON from disk or cache. Returns null if file doesn't exist or can't be read.
+    /// </summary>
+    private string? LoadProfileJsonFromDisk(string filePath)
+    {
+        string? cachedJson = null;
+        
+        lock (_cacheLock)
+        {
+            // Check cache first
+            if (_profileJsonCache.TryGetValue(filePath, out var cached))
+            {
+                cachedJson = cached;
+            }
+        }
+
+        // Not in cache - load from disk
+        if (cachedJson == null)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                    return null;
+
+                cachedJson = File.ReadAllText(filePath);
+
+                // Store in cache
+                lock (_cacheLock)
+                {
+                    _profileJsonCache[filePath] = cachedJson;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Failed to load profile from disk {filePath}: {ex.Message}");
+                return null;
+            }
+        }
+
+        return cachedJson;
+    }
+
+    /// <summary>
+    /// Merge a list of profile JSON strings (from parent to child order) into a single resolved profile JSON.
+    /// Child profiles override parent properties.
+    /// </summary>
+    private string? MergeProfilesJson(List<string> profileJsons)
+    {
+        if (profileJsons.Count == 0)
+            return null;
+
+        if (profileJsons.Count == 1)
+            return profileJsons[0];
+
+        try
+        {
+            // Accumulate all properties from all profiles
+            var allProps = new Dictionary<string, string>();
+
+            foreach (var profileJson in profileJsons)
+            {
+                using var doc = JsonDocument.Parse(profileJson);
+                var root = doc.RootElement;
+
+                if (root.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                foreach (var prop in root.EnumerateObject())
+                {
+                    // Store all properties as raw JSON text (will override previous values)
+                    allProps[prop.Name] = prop.Value.GetRawText();
+                }
+            }
+
+            // Reconstruct as JSON string
+            var sb = new System.Text.StringBuilder("{");
+            bool first = true;
+            foreach (var kvp in allProps.OrderBy(x => x.Key)) // Order for consistency
+            {
+                if (!first) sb.Append(",");
+                sb.Append("\"").Append(EscapeJsonKey(kvp.Key)).Append("\":");
+                sb.Append(kvp.Value);
+                first = false;
+            }
+            sb.Append("}");
+
+            // Validate by parsing
+            using var validationDoc = JsonDocument.Parse(sb.ToString());
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Failed to merge profile JSONs: {ex.Message}");
+            return null;
+        }
+    }
+
+    private string EscapeJsonKey(string key)
+    {
+        return key.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 
     private MachineProfileDto? ParseMachineProfile(JsonElement root, string filePath)
@@ -373,6 +595,12 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (root.TryGetProperty("travel_speed", out var speedElem))
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
 
+        // Profile is now fully resolved - compatible_printers should be directly in the profile
+        if (root.TryGetProperty("compatible_printers", out var compatibleElem))
+        {
+            ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
+        }
+
         // Store all settings as raw JSON for flexibility
         profile.Settings = SerializeElementToDict(root);
 
@@ -397,6 +625,12 @@ public class OrcaProfilesService : ISlicerProfilesService
 
         if (root.TryGetProperty("enable_support", out var supportsElem))
             profile.Supports = ParseBoolValue(supportsElem);
+
+        // Profile is now fully resolved - compatible_printers should be directly in the profile
+        if (root.TryGetProperty("compatible_printers", out var compatibleElem))
+        {
+            ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
+        }
 
         // Determine quality based on layer height
         if (profile.LayerHeight <= 0.15)
@@ -457,5 +691,51 @@ public class OrcaProfilesService : ISlicerProfilesService
             // If serialization fails, return empty dict
         }
         return dict;
+    }
+
+    private void ParseCompatiblePrinters(JsonElement compatibleElem, IList<string> targetList)
+    {
+        if (compatibleElem.ValueKind == JsonValueKind.Array)
+        {
+            // Direct array format
+            foreach (var printer in compatibleElem.EnumerateArray())
+            {
+                if (printer.ValueKind == JsonValueKind.String)
+                {
+                    var printerName = printer.GetString() ?? "";
+                    if (!string.IsNullOrWhiteSpace(printerName))
+                        targetList.Add(printerName);
+                }
+            }
+        }
+        else if (compatibleElem.ValueKind == JsonValueKind.String)
+        {
+            // String format - need to parse as JSON array
+            var jsonString = compatibleElem.GetString();
+            if (!string.IsNullOrWhiteSpace(jsonString))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(jsonString);
+                    var root = doc.RootElement;
+                    if (root.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in root.EnumerateArray())
+                        {
+                            if (item.ValueKind == JsonValueKind.String)
+                            {
+                                var printerName = item.GetString() ?? "";
+                                if (!string.IsNullOrWhiteSpace(printerName))
+                                    targetList.Add(printerName);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // If parsing fails, skip
+                }
+            }
+        }
     }
 }

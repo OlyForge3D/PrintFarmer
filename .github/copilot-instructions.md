@@ -548,6 +548,36 @@ npm run dev
 - `GET /health` - Comprehensive health check with detailed status
 - SignalR Hub: `/hubs/printers` - Real-time printer status updates
 
+**OrcaSlicer Profiles Architecture** ⚠️ **IMPORTANT**:
+- **Bundle Structure**: Each manufacturer has 4 JSON lists in `/opt/orcaslicer/resources/profiles/{manufacturer}/`:
+  1. **machine_model_list** - Base model definitions (e.g., "Prusa CORE One")
+  2. **machine_list** - Variant profiles with nozzle sizes (e.g., "Prusa CORE One 0.4 nozzle", "Prusa CORE One 0.6 nozzle")
+  3. **process_list** - Process/speed profiles with `compatible_printers` array
+  4. **filament_list** - Material profiles with `compatible_printers` array
+- **Critical Relationships**:
+  - Filament & process profiles reference machine_list variants via `compatible_printers` array (NOT base models)
+  - The array contains exact machine variant names: ["Prusa CORE One 0.4 nozzle", "Prusa CORE One 0.6 nozzle", ...]
+  - JSON uses snake_case: `compatible_printers`, `machine_model_list`, `machine_list`, etc.
+- **DTO Implementation** (`src/shared/Models.cs`):
+  - `ManufacturerBundleDto`: Has 4 properties with [JsonPropertyName] attributes for snake_case JSON mapping
+  - `FilamentProfileDto` & `ProcessProfileDto`: Both have `CompatiblePrinters` property with [JsonPropertyName("compatible_printers")]
+  - Parser methods in `OrcaProfilesService` extract these arrays during profile loading
+- **Service Loading** (`src/orcaslicer-worker/Services/OrcaProfilesService.cs`):
+  - `ListAvailableMachineProfilesAsync()`: Loads from BOTH MachineModelList AND MachineList to get all variants
+  - `ListAvailableFilamentProfilesAsync()` & `ListAvailableProcessProfilesAsync()`: Both load compatible_printers arrays
+  - All profiles set manufacturer name from bundle
+- **API Hierarchy** (`src/orcaslicer-worker/Controllers/SlicerProfilesController.cs`):
+  - `/api/profiles` endpoint returns `AllProfilesResponseDto` with `ByHierarchy` dictionary
+  - Structure: `ByHierarchy[manufacturer][model][machineProfiles/filamentProfiles/processProfiles]`
+  - Controller groups by base model name and matches filament/process profiles to machines via compatible_printers
+  - Response includes flat lists too for direct access: `filamentProfiles`, `processProfiles`, `machineProfiles`
+- **Debugging Tips**:
+  - Test from inside container: `docker exec printfarmer-orcaslicer-worker curl http://localhost:8080/api/profiles`
+  - Check hierarchy: `curl ... | jq '.byHierarchy | keys'` (list manufacturers)
+  - Check model details: `curl ... | jq '.byHierarchy.Prusa.Models."Prusa_CORE_One"'`
+  - Verify compatible_printers: `curl ... | jq '.filamentProfiles."Unknown"[0].compatiblePrinters'`
+  - Expected ~7786 total profiles: ~50-200 machines, ~2000 filaments, ~2200 processes
+
 **Trust These Instructions:**
 These instructions have been thoroughly tested and validated with .NET 9.0.302. Only search for additional information if these instructions are incomplete or you encounter errors not covered here. The build process, test execution, and development workflow have all been verified to work correctly.
 

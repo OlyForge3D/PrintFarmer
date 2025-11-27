@@ -77,15 +77,15 @@ class ProfileParserTester
             // Display process profiles
             if (processProfiles.Count > 0)
             {
-                Console.WriteLine("⚙️  Process Profiles:");
-                Console.WriteLine(new string('-', 80));
-                foreach (var profile in processProfiles.Take(10))
+                var withCompatible = processProfiles.Count(p => p.CompatiblePrinters?.Count > 0);
+                Console.WriteLine($"Process Profiles: {processProfiles.Count} total, {withCompatible} with compatiblePrinters");
+                
+                // Show first few profiles
+                foreach (var profile in processProfiles.Take(3))
                 {
-                    Console.WriteLine($"  • {profile.Name,-50} (Quality: {profile.Quality}, Layer: {profile.LayerHeight}mm, Infill: {profile.InfillPercentage}%)");
+                    var compatibleCount = profile.CompatiblePrinters?.Count ?? 0;
+                    Console.WriteLine($"  - {profile.Name}: {compatibleCount} compatible printers");
                 }
-                if (processProfiles.Count > 10)
-                    Console.WriteLine($"  ... and {processProfiles.Count - 10} more");
-                Console.WriteLine();
             }
 
             // Test parsing specific profile if path provided

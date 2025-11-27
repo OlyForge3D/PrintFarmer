@@ -451,10 +451,14 @@ namespace Farm.Web.Api.Services.Slicing
 
                 int imported = 0;
 
+                // Flatten profiles from the grouped dictionaries
+                var flattenedProcessProfiles = allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
+                var flattenedFilamentProfiles = allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
+
                 // Import process profiles from worker
-                if (allProfiles.ProcessProfiles?.Count > 0)
+                if (flattenedProcessProfiles.Count > 0)
                 {
-                    foreach (var profile in allProfiles.ProcessProfiles)
+                    foreach (var profile in flattenedProcessProfiles)
                     {
                         try
                         {
