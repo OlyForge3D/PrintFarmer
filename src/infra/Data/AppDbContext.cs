@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -64,853 +65,853 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // AppSettingsEntity Entity Configuration
-        modelBuilder.Entity<AppSettingsEntity>(b =>
+        _ = modelBuilder.Entity<AppSettingsEntity>(b =>
         {
-            b.HasKey(a => a.Id);
-            b.Property(a => a.Key).IsRequired().HasMaxLength(128);
-            b.Property(a => a.SettingsJson).IsRequired().HasColumnType("TEXT");
-            b.Property(a => a.UpdatedAt).IsRequired();
-            b.HasIndex(a => a.Key).IsUnique();
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.Key).IsRequired().HasMaxLength(128);
+            _ = b.Property(a => a.SettingsJson).IsRequired().HasColumnType("TEXT");
+            _ = b.Property(a => a.UpdatedAt).IsRequired();
+            _ = b.HasIndex(a => a.Key).IsUnique();
         });
 
         // SystemLog Entity Configuration
-        modelBuilder.Entity<SystemLog>(b =>
+        _ = modelBuilder.Entity<SystemLog>(b =>
         {
-            b.HasKey(l => l.Id);
-            b.Property(l => l.CorrelationId).HasMaxLength(64);
-            b.Property(l => l.Exception).HasColumnType("TEXT");
-            b.Property(l => l.Level).IsRequired().HasMaxLength(32);
-            b.Property(l => l.Message).IsRequired().HasMaxLength(1024);
-            b.Property(l => l.Metadata).HasColumnType("TEXT");
-            b.Property(l => l.Source).HasMaxLength(128);
-            b.Property(l => l.Timestamp).IsRequired();
-            b.HasIndex(l => l.Timestamp);
-            b.HasIndex(l => l.Level);
+            _ = b.HasKey(l => l.Id);
+            _ = b.Property(l => l.CorrelationId).HasMaxLength(64);
+            _ = b.Property(l => l.Exception).HasColumnType("TEXT");
+            _ = b.Property(l => l.Level).IsRequired().HasMaxLength(32);
+            _ = b.Property(l => l.Message).IsRequired().HasMaxLength(1024);
+            _ = b.Property(l => l.Metadata).HasColumnType("TEXT");
+            _ = b.Property(l => l.Source).HasMaxLength(128);
+            _ = b.Property(l => l.Timestamp).IsRequired();
+            _ = b.HasIndex(l => l.Timestamp);
+            _ = b.HasIndex(l => l.Level);
         });
         ArgumentNullException.ThrowIfNull(modelBuilder);
-        modelBuilder.Entity<Printer>(b =>
+        _ = modelBuilder.Entity<Printer>(b =>
         {
-            b.HasKey(p => p.Id);
-            b.Property(p => p.Name).IsRequired().HasMaxLength(128);
-            b.Property(p => p.ServerUrl).IsRequired().HasMaxLength(256);
-            b.Property(p => p.OriginalServerUrl).HasMaxLength(256);
-            b.Property(p => p.IpAddress).HasMaxLength(64);
-            b.Property(p => p.Backend).HasDefaultValue(0);
-            b.Property(p => p.ApiKey);
-            b.HasOne(p => p.Manufacturer)
+            _ = b.HasKey(p => p.Id);
+            _ = b.Property(p => p.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(p => p.ServerUrl).IsRequired().HasMaxLength(256);
+            _ = b.Property(p => p.OriginalServerUrl).HasMaxLength(256);
+            _ = b.Property(p => p.IpAddress).HasMaxLength(64);
+            _ = b.Property(p => p.Backend).HasDefaultValue(0);
+            _ = b.Property(p => p.ApiKey);
+            _ = b.HasOne(p => p.Manufacturer)
              .WithMany()
              .HasForeignKey(p => p.ManufacturerId)
              .OnDelete(DeleteBehavior.Restrict); // Changed from SetNull - ManufacturerId is not nullable
-            b.HasOne(p => p.Model)
+            _ = b.HasOne(p => p.Model)
              .WithMany()
              .HasForeignKey(p => p.ModelId)
              .OnDelete(DeleteBehavior.Restrict); // Changed from SetNull - ModelId is not nullable
-            b.Property(p => p.DateAcquired);
+            _ = b.Property(p => p.DateAcquired);
         });
 
-        modelBuilder.Entity<Manufacturer>(b =>
+        _ = modelBuilder.Entity<Manufacturer>(b =>
         {
-            b.HasKey(m => m.Id);
+            _ = b.HasKey(m => m.Id);
             bool isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
             PropertyBuilder<string> nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
             if (isSqlite)
             {
-                nameProp.UseCollation("NOCASE");
+                _ = nameProp.UseCollation("NOCASE");
             }
             // Persisted shadow column for cross-provider case-insensitive uniqueness.
             // We populate this in SaveChanges overrides (lower-invariant) to avoid provider-specific computed syntax.
-            b.Property<string>("NameLowered")
+            _ = b.Property<string>("NameLowered")
                 .HasColumnName("NameLowered")
                 .HasMaxLength(128)
                 .IsRequired();
-            b.HasIndex("NameLowered").IsUnique();
+            _ = b.HasIndex("NameLowered").IsUnique();
         });
 
-        modelBuilder.Entity<PrinterModel>(b =>
+        _ = modelBuilder.Entity<PrinterModel>(b =>
         {
-            b.HasKey(m => m.Id);
+            _ = b.HasKey(m => m.Id);
             bool isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
             PropertyBuilder<string> nameProp = b.Property(m => m.Name).IsRequired().HasMaxLength(128);
             if (isSqlite)
             {
-                nameProp.UseCollation("NOCASE");
+                _ = nameProp.UseCollation("NOCASE");
             }
-            b.HasOne(m => m.Manufacturer)
+            _ = b.HasOne(m => m.Manufacturer)
              .WithMany(x => x.Models)
              .HasForeignKey(m => m.ManufacturerId)
              .OnDelete(DeleteBehavior.NoAction); // Changed from Cascade to NoAction to prevent multiple cascade paths
             // Persisted shadow column for cross-provider case-insensitive uniqueness inside a manufacturer.
-            b.Property<string>("NameLowered")
+            _ = b.Property<string>("NameLowered")
                 .HasColumnName("NameLowered")
                 .HasMaxLength(128)
                 .IsRequired();
-            b.HasIndex(nameof(PrinterModel.ManufacturerId), "NameLowered").IsUnique();
+            _ = b.HasIndex(nameof(PrinterModel.ManufacturerId), "NameLowered").IsUnique();
 
             // Basic properties
-            b.Property(m => m.MotionType); // MotionType enum stored as int
-            b.Property(m => m.MaxX);
-            b.Property(m => m.MaxY);
-            b.Property(m => m.MaxZ);
-            b.Property(m => m.DefaultBackend);
+            _ = b.Property(m => m.MotionType); // MotionType enum stored as int
+            _ = b.Property(m => m.MaxX);
+            _ = b.Property(m => m.MaxY);
+            _ = b.Property(m => m.MaxZ);
+            _ = b.Property(m => m.DefaultBackend);
 
             // Capability defaults
-            b.Property(m => m.DefaultNozzleDiameter).HasDefaultValue(0.4);
-            b.Property(m => m.HasHeatedBed).HasDefaultValue(true);
-            b.Property(m => m.HasEnclosure).HasDefaultValue(false);
-            b.Property(m => m.MultiMaterial).HasDefaultValue(false);
-            b.Property(m => m.NumberOfExtruders).HasDefaultValue(1);
-            b.Property(m => m.SupportsAutoLeveling).HasDefaultValue(false);
-            b.Property(m => m.MinHotendTemp).HasDefaultValue(0);
-            b.Property(m => m.MaxHotendTemp).HasDefaultValue(300);
-            b.Property(m => m.MinBedTemp).HasDefaultValue(0);
-            b.Property(m => m.MaxBedTemp).HasDefaultValue(120);
-            b.Property(m => m.MaxPrintSpeed).HasDefaultValue(150);
+            _ = b.Property(m => m.DefaultNozzleDiameter).HasDefaultValue(0.4);
+            _ = b.Property(m => m.HasHeatedBed).HasDefaultValue(true);
+            _ = b.Property(m => m.HasEnclosure).HasDefaultValue(false);
+            _ = b.Property(m => m.MultiMaterial).HasDefaultValue(false);
+            _ = b.Property(m => m.NumberOfExtruders).HasDefaultValue(1);
+            _ = b.Property(m => m.SupportsAutoLeveling).HasDefaultValue(false);
+            _ = b.Property(m => m.MinHotendTemp).HasDefaultValue(0);
+            _ = b.Property(m => m.MaxHotendTemp).HasDefaultValue(300);
+            _ = b.Property(m => m.MinBedTemp).HasDefaultValue(0);
+            _ = b.Property(m => m.MaxBedTemp).HasDefaultValue(120);
+            _ = b.Property(m => m.MaxPrintSpeed).HasDefaultValue(150);
         });
 
-        modelBuilder.Entity<FilamentType>(b =>
+        _ = modelBuilder.Entity<FilamentType>(b =>
         {
-            b.HasKey(f => f.Id);
+            _ = b.HasKey(f => f.Id);
             bool isSqlite = Database.ProviderName != null && Database.ProviderName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
             PropertyBuilder<string> nameProp = b.Property(f => f.Name).IsRequired().HasMaxLength(64);
             if (isSqlite)
             {
-                nameProp.UseCollation("NOCASE");
+                _ = nameProp.UseCollation("NOCASE");
             }
-            b.HasIndex(f => f.Name).IsUnique();
-            b.Property(f => f.DefaultHotendTemp);
-            b.Property(f => f.DefaultBedTemp);
-            b.Property(f => f.CreatedAt).IsRequired();
+            _ = b.HasIndex(f => f.Name).IsUnique();
+            _ = b.Property(f => f.DefaultHotendTemp);
+            _ = b.Property(f => f.DefaultBedTemp);
+            _ = b.Property(f => f.CreatedAt).IsRequired();
         });
 
-        modelBuilder.Entity<PrinterModelFilamentType>(b =>
+        _ = modelBuilder.Entity<PrinterModelFilamentType>(b =>
         {
-            b.HasKey(pf => new { pf.PrinterModelId, pf.FilamentTypeId });
-            b.HasOne(pf => pf.PrinterModel)
+            _ = b.HasKey(pf => new { pf.PrinterModelId, pf.FilamentTypeId });
+            _ = b.HasOne(pf => pf.PrinterModel)
              .WithMany(p => p.SupportedFilamentTypes)
              .HasForeignKey(pf => pf.PrinterModelId)
              .OnDelete(DeleteBehavior.Cascade);
-            b.HasOne(pf => pf.FilamentType)
+            _ = b.HasOne(pf => pf.FilamentType)
              .WithMany(f => f.PrinterModels)
              .HasForeignKey(pf => pf.FilamentTypeId)
              .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<Spool>(b =>
+        _ = modelBuilder.Entity<Spool>(b =>
         {
-            b.HasKey(s => s.Id);
-            b.Property(s => s.Material).IsRequired().HasMaxLength(64);
-            b.Property(s => s.ColorHex).IsRequired().HasMaxLength(16);
-            b.HasOne<Printer>()
+            _ = b.HasKey(s => s.Id);
+            _ = b.Property(s => s.Material).IsRequired().HasMaxLength(64);
+            _ = b.Property(s => s.ColorHex).IsRequired().HasMaxLength(16);
+            _ = b.HasOne<Printer>()
              .WithMany()
              .HasForeignKey(s => s.AssignedPrinterId)
              .OnDelete(DeleteBehavior.SetNull);
         });
 
-        modelBuilder.Entity<SpoolmanConfig>(b =>
+        _ = modelBuilder.Entity<SpoolmanConfig>(b =>
         {
-            b.HasKey(c => c.Id);
-            b.Property(c => c.BaseUrl).IsRequired().HasMaxLength(256);
+            _ = b.HasKey(c => c.Id);
+            _ = b.Property(c => c.BaseUrl).IsRequired().HasMaxLength(256);
         });
 
         // G-code File Entity Configuration
-        modelBuilder.Entity<GcodeFile>(b =>
+        _ = modelBuilder.Entity<GcodeFile>(b =>
         {
-            b.HasKey(g => g.Id);
-            b.Property(g => g.OriginalFileName).IsRequired().HasMaxLength(255);
-            b.Property(g => g.DisplayName).IsRequired().HasMaxLength(255);
-            b.Property(g => g.FileHash).IsRequired().HasMaxLength(64);
-            b.Property(g => g.FileSizeBytes).IsRequired();
-            b.Property(g => g.FilePath).IsRequired().HasMaxLength(512);
-            b.Property(g => g.SlicerName).HasMaxLength(128);
-            b.Property(g => g.SlicerVersion).HasMaxLength(64);
-            b.Property(g => g.RequiredMaterial).HasMaxLength(64);
-            b.Property(g => g.SlicerSettings).HasColumnType("TEXT");
-            b.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
-            b.Property(g => g.LastVerificationResult).HasColumnType("TEXT");
+            _ = b.HasKey(g => g.Id);
+            _ = b.Property(g => g.OriginalFileName).IsRequired().HasMaxLength(255);
+            _ = b.Property(g => g.DisplayName).IsRequired().HasMaxLength(255);
+            _ = b.Property(g => g.FileHash).IsRequired().HasMaxLength(64);
+            _ = b.Property(g => g.FileSizeBytes).IsRequired();
+            _ = b.Property(g => g.FilePath).IsRequired().HasMaxLength(512);
+            _ = b.Property(g => g.SlicerName).HasMaxLength(128);
+            _ = b.Property(g => g.SlicerVersion).HasMaxLength(64);
+            _ = b.Property(g => g.RequiredMaterial).HasMaxLength(64);
+            _ = b.Property(g => g.SlicerSettings).HasColumnType("TEXT");
+            _ = b.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
+            _ = b.Property(g => g.LastVerificationResult).HasColumnType("TEXT");
 
             // JSON array properties
-            b.Property(g => g.CompatibleMaterials)
+            _ = b.Property(g => g.CompatibleMaterials)
                 .HasConversion(
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<string[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
-            b.Property(g => g.PrintTemperatures)
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
+            _ = b.Property(g => g.PrintTemperatures)
                 .HasConversion(
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<double[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
-            b.Property(g => g.TargetPrinterModels)
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<double[]>(v, (JsonSerializerOptions?)null));
+            _ = b.Property(g => g.TargetPrinterModels)
                 .HasConversion(
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<string[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
 
             // Foreign Keys - Use NoAction to avoid cascade conflicts in SQL Server
-            b.HasOne(g => g.SourcePrinter)
+            _ = b.HasOne(g => g.SourcePrinter)
                 .WithMany()
                 .HasForeignKey(g => g.SourcePrinterId)
                 .OnDelete(DeleteBehavior.NoAction);
-            b.HasOne(g => g.TargetPrinter)
+            _ = b.HasOne(g => g.TargetPrinter)
                 .WithMany()
                 .HasForeignKey(g => g.TargetPrinterId)
                 .OnDelete(DeleteBehavior.NoAction);
-            b.HasOne(g => g.TargetModel)
+            _ = b.HasOne(g => g.TargetModel)
                 .WithMany()
                 .HasForeignKey(g => g.TargetModelId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             // Indexes
-            b.HasIndex(g => g.FileHash).IsUnique();
-            b.HasIndex(g => g.UploadedAt);
-            b.HasIndex(g => g.RequiredNozzleDiameter);
-            b.HasIndex(g => g.RequiredMaterial);
-            b.HasIndex(g => g.TargetPrinterId);
-            b.HasIndex(g => g.SourcePrinterId);
-            b.HasIndex(g => g.HealthStatus); // Index for dashboard queries
-            b.HasIndex(g => g.LastHealthCheckDate); // Index for recent health checks
+            _ = b.HasIndex(g => g.FileHash).IsUnique();
+            _ = b.HasIndex(g => g.UploadedAt);
+            _ = b.HasIndex(g => g.RequiredNozzleDiameter);
+            _ = b.HasIndex(g => g.RequiredMaterial);
+            _ = b.HasIndex(g => g.TargetPrinterId);
+            _ = b.HasIndex(g => g.SourcePrinterId);
+            _ = b.HasIndex(g => g.HealthStatus); // Index for dashboard queries
+            _ = b.HasIndex(g => g.LastHealthCheckDate); // Index for recent health checks
         });
 
         // Print Job Entity Configuration
-        modelBuilder.Entity<PrintJob>(b =>
+        _ = modelBuilder.Entity<PrintJob>(b =>
         {
-            b.HasKey(j => j.Id);
-            b.Property(j => j.Name).IsRequired().HasMaxLength(255);
-            b.Property(j => j.Status).HasConversion<int>();
-            b.Property(j => j.Priority).HasDefaultValue(0);
-            b.Property(j => j.EstimatedPrintTime).HasConversion<long>();
-            b.Property(j => j.ActualPrintTime).HasConversion<long>();
+            _ = b.HasKey(j => j.Id);
+            _ = b.Property(j => j.Name).IsRequired().HasMaxLength(255);
+            _ = b.Property(j => j.Status).HasConversion<int>();
+            _ = b.Property(j => j.Priority).HasDefaultValue(0);
+            _ = b.Property(j => j.EstimatedPrintTime).HasConversion<long>();
+            _ = b.Property(j => j.ActualPrintTime).HasConversion<long>();
 
             // JSON array properties
-            b.Property(j => j.RequiredCapabilities)
+            _ = b.Property(j => j.RequiredCapabilities)
                 .HasConversion(
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<string[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
-            b.Property(j => j.PreferredPrinterIds)
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
+            _ = b.Property(j => j.PreferredPrinterIds)
                 .HasConversion(
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<Guid[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
-            b.Property(j => j.ExcludedPrinterIds)
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<Guid[]>(v, (JsonSerializerOptions?)null));
+            _ = b.Property(j => j.ExcludedPrinterIds)
                 .HasConversion(
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<Guid[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<Guid[]>(v, (JsonSerializerOptions?)null));
 
             // Foreign Keys - Use NoAction to avoid cascade conflicts
-            b.HasOne(j => j.GcodeFile)
+            _ = b.HasOne(j => j.GcodeFile)
                 .WithMany()
                 .HasForeignKey(j => j.GcodeFileId)
                 .OnDelete(DeleteBehavior.NoAction);
-            b.HasOne(j => j.AssignedPrinter)
+            _ = b.HasOne(j => j.AssignedPrinter)
                 .WithMany()
                 .HasForeignKey(j => j.AssignedPrinterId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             // Indexes
-            b.HasIndex(j => j.Status);
-            b.HasIndex(j => j.QueuedAt);
-            b.HasIndex(j => j.Priority);
-            b.HasIndex(j => j.AssignedPrinterId);
+            _ = b.HasIndex(j => j.Status);
+            _ = b.HasIndex(j => j.QueuedAt);
+            _ = b.HasIndex(j => j.Priority);
+            _ = b.HasIndex(j => j.AssignedPrinterId);
         });
 
         // Printer Capabilities Entity Configuration
-        modelBuilder.Entity<PrinterCapabilities>(b =>
+        _ = modelBuilder.Entity<PrinterCapabilities>(b =>
         {
-            b.HasKey(c => c.Id);
-            b.Property(c => c.SupportedMaterials)
+            _ = b.HasKey(c => c.Id);
+            _ = b.Property(c => c.SupportedMaterials)
                 .HasConversion(
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<string[]>(v, (System.Text.Json.JsonSerializerOptions?)null));
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
 
             // Foreign Key - One-to-one relationship
-            b.HasOne(c => c.Printer)
+            _ = b.HasOne(c => c.Printer)
                 .WithOne(p => p.Capabilities)
                 .HasForeignKey<PrinterCapabilities>(c => c.PrinterId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Indexes
-            b.HasIndex(c => c.PrinterId).IsUnique();
-            b.HasIndex(c => c.NozzleDiameter);
-            b.HasIndex(c => c.IsAvailable);
+            _ = b.HasIndex(c => c.PrinterId).IsUnique();
+            _ = b.HasIndex(c => c.NozzleDiameter);
+            _ = b.HasIndex(c => c.IsAvailable);
         });
 
         // G-code Harvest Operation Entity Configuration
-        modelBuilder.Entity<GcodeHarvestOperation>(b =>
+        _ = modelBuilder.Entity<GcodeHarvestOperation>(b =>
         {
-            b.HasKey(h => h.Id);
-            b.Property(h => h.Status).HasConversion<int>();
+            _ = b.HasKey(h => h.Id);
+            _ = b.Property(h => h.Status).HasConversion<int>();
 
             // Foreign Key
-            b.HasOne(h => h.Printer)
+            _ = b.HasOne(h => h.Printer)
                 .WithMany()
                 .HasForeignKey(h => h.PrinterId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             // Indexes
-            b.HasIndex(h => h.PrinterId);
-            b.HasIndex(h => h.StartedAt);
-            b.HasIndex(h => h.Status);
+            _ = b.HasIndex(h => h.PrinterId);
+            _ = b.HasIndex(h => h.StartedAt);
+            _ = b.HasIndex(h => h.Status);
         });
 
         // HarvestDiscoveredFile Entity Configuration
-        modelBuilder.Entity<HarvestDiscoveredFile>(b =>
+        _ = modelBuilder.Entity<HarvestDiscoveredFile>(b =>
         {
-            b.HasKey(f => f.Id);
-            b.Property(f => f.HarvestOperationId).IsRequired();
-            b.Property(f => f.FilePath).IsRequired().HasMaxLength(512);
-            b.Property(f => f.FileName).IsRequired().HasMaxLength(256);
-            b.Property(f => f.Size).IsRequired();
-            b.Property(f => f.ThumbnailUrl).HasMaxLength(512);
-            b.Property(f => f.Status).IsRequired();
-            b.Property(f => f.Error).HasMaxLength(512);
-            b.Property(f => f.DiscoveredAt).IsRequired();
-            b.Property(f => f.StartedAt);
-            b.Property(f => f.CompletedAt);
-            b.HasIndex(f => f.HarvestOperationId);
+            _ = b.HasKey(f => f.Id);
+            _ = b.Property(f => f.HarvestOperationId).IsRequired();
+            _ = b.Property(f => f.FilePath).IsRequired().HasMaxLength(512);
+            _ = b.Property(f => f.FileName).IsRequired().HasMaxLength(256);
+            _ = b.Property(f => f.Size).IsRequired();
+            _ = b.Property(f => f.ThumbnailUrl).HasMaxLength(512);
+            _ = b.Property(f => f.Status).IsRequired();
+            _ = b.Property(f => f.Error).HasMaxLength(512);
+            _ = b.Property(f => f.DiscoveredAt).IsRequired();
+            _ = b.Property(f => f.StartedAt);
+            _ = b.Property(f => f.CompletedAt);
+            _ = b.HasIndex(f => f.HarvestOperationId);
         });
 
         // User Entity Configuration
-        modelBuilder.Entity<User>(b =>
+        _ = modelBuilder.Entity<User>(b =>
         {
-            b.HasKey(u => u.Id);
-            b.Property(u => u.Username).IsRequired().HasMaxLength(50);
-            b.Property(u => u.Email).IsRequired().HasMaxLength(255);
-            b.Property(u => u.PasswordHash).IsRequired().HasMaxLength(255);
-            b.Property(u => u.FirstName).HasMaxLength(100);
-            b.Property(u => u.LastName).HasMaxLength(100);
-            b.Property(u => u.EmailConfirmationToken).HasMaxLength(255);
-            b.Property(u => u.PasswordResetToken).HasMaxLength(255);
+            _ = b.HasKey(u => u.Id);
+            _ = b.Property(u => u.Username).IsRequired().HasMaxLength(50);
+            _ = b.Property(u => u.Email).IsRequired().HasMaxLength(255);
+            _ = b.Property(u => u.PasswordHash).IsRequired().HasMaxLength(255);
+            _ = b.Property(u => u.FirstName).HasMaxLength(100);
+            _ = b.Property(u => u.LastName).HasMaxLength(100);
+            _ = b.Property(u => u.EmailConfirmationToken).HasMaxLength(255);
+            _ = b.Property(u => u.PasswordResetToken).HasMaxLength(255);
 
             // Unique constraints
-            b.HasIndex(u => u.Username).IsUnique();
-            b.HasIndex(u => u.Email).IsUnique();
-            b.HasIndex(u => u.IsActive);
-            b.HasIndex(u => u.CreatedAt);
+            _ = b.HasIndex(u => u.Username).IsUnique();
+            _ = b.HasIndex(u => u.Email).IsUnique();
+            _ = b.HasIndex(u => u.IsActive);
+            _ = b.HasIndex(u => u.CreatedAt);
         });
 
         // Role Entity Configuration
-        modelBuilder.Entity<Role>(b =>
+        _ = modelBuilder.Entity<Role>(b =>
         {
-            b.HasKey(r => r.Id);
-            b.Property(r => r.Name).IsRequired().HasMaxLength(50);
-            b.Property(r => r.DisplayName).IsRequired().HasMaxLength(100);
-            b.Property(r => r.Description).HasColumnType("TEXT");
+            _ = b.HasKey(r => r.Id);
+            _ = b.Property(r => r.Name).IsRequired().HasMaxLength(50);
+            _ = b.Property(r => r.DisplayName).IsRequired().HasMaxLength(100);
+            _ = b.Property(r => r.Description).HasColumnType("TEXT");
 
             // Unique constraints
-            b.HasIndex(r => r.Name).IsUnique();
-            b.HasIndex(r => r.IsSystemRole);
-            b.HasIndex(r => r.IsActive);
+            _ = b.HasIndex(r => r.Name).IsUnique();
+            _ = b.HasIndex(r => r.IsSystemRole);
+            _ = b.HasIndex(r => r.IsActive);
         });
 
         // Resource Entity Configuration
-        modelBuilder.Entity<Resource>(b =>
+        _ = modelBuilder.Entity<Resource>(b =>
         {
-            b.HasKey(r => r.Id);
-            b.Property(r => r.Name).IsRequired().HasMaxLength(100);
-            b.Property(r => r.DisplayName).IsRequired().HasMaxLength(100);
-            b.Property(r => r.Description).HasColumnType("TEXT");
-            b.Property(r => r.ResourceType).IsRequired().HasMaxLength(50);
+            _ = b.HasKey(r => r.Id);
+            _ = b.Property(r => r.Name).IsRequired().HasMaxLength(100);
+            _ = b.Property(r => r.DisplayName).IsRequired().HasMaxLength(100);
+            _ = b.Property(r => r.Description).HasColumnType("TEXT");
+            _ = b.Property(r => r.ResourceType).IsRequired().HasMaxLength(50);
 
             // Unique constraints
-            b.HasIndex(r => r.Name).IsUnique();
-            b.HasIndex(r => r.ResourceType);
-            b.HasIndex(r => r.IsActive);
+            _ = b.HasIndex(r => r.Name).IsUnique();
+            _ = b.HasIndex(r => r.ResourceType);
+            _ = b.HasIndex(r => r.IsActive);
         });
 
         // Action Entity Configuration
-        modelBuilder.Entity<Domain.Action>(b =>
+        _ = modelBuilder.Entity<Domain.Action>(b =>
         {
-            b.HasKey(a => a.Id);
-            b.Property(a => a.Name).IsRequired().HasMaxLength(50);
-            b.Property(a => a.DisplayName).IsRequired().HasMaxLength(100);
-            b.Property(a => a.Description).HasColumnType("TEXT");
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.Name).IsRequired().HasMaxLength(50);
+            _ = b.Property(a => a.DisplayName).IsRequired().HasMaxLength(100);
+            _ = b.Property(a => a.Description).HasColumnType("TEXT");
 
             // Unique constraints
-            b.HasIndex(a => a.Name).IsUnique();
+            _ = b.HasIndex(a => a.Name).IsUnique();
         });
 
         // RolePermission Entity Configuration
-        modelBuilder.Entity<RolePermission>(b =>
+        _ = modelBuilder.Entity<RolePermission>(b =>
         {
-            b.HasKey(rp => rp.Id);
+            _ = b.HasKey(rp => rp.Id);
 
             // Foreign Keys
-            b.HasOne(rp => rp.Role)
+            _ = b.HasOne(rp => rp.Role)
                 .WithMany(r => r.RolePermissions)
                 .HasForeignKey(rp => rp.RoleId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            b.HasOne(rp => rp.Resource)
+            _ = b.HasOne(rp => rp.Resource)
                 .WithMany(r => r.RolePermissions)
                 .HasForeignKey(rp => rp.ResourceId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            b.HasOne(rp => rp.Action)
+            _ = b.HasOne(rp => rp.Action)
                 .WithMany(a => a.RolePermissions)
                 .HasForeignKey(rp => rp.ActionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Unique constraint - one permission per role-resource-action combination
-            b.HasIndex(rp => new { rp.RoleId, rp.ResourceId, rp.ActionId }).IsUnique();
+            _ = b.HasIndex(rp => new { rp.RoleId, rp.ResourceId, rp.ActionId }).IsUnique();
         });
 
         // UserRole Entity Configuration
-        modelBuilder.Entity<UserRole>(b =>
+        _ = modelBuilder.Entity<UserRole>(b =>
         {
-            b.HasKey(ur => ur.Id);
+            _ = b.HasKey(ur => ur.Id);
 
             // Foreign Keys
-            b.HasOne(ur => ur.User)
+            _ = b.HasOne(ur => ur.User)
                 .WithMany(u => u.UserRoles)
                 .HasForeignKey(ur => ur.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            b.HasOne(ur => ur.Role)
+            _ = b.HasOne(ur => ur.Role)
                 .WithMany(r => r.UserRoles)
                 .HasForeignKey(ur => ur.RoleId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Unique constraint - one assignment per user-role combination
-            b.HasIndex(ur => new { ur.UserId, ur.RoleId }).IsUnique();
-            b.HasIndex(ur => ur.IsActive);
-            b.HasIndex(ur => ur.ExpiresAt);
+            _ = b.HasIndex(ur => new { ur.UserId, ur.RoleId }).IsUnique();
+            _ = b.HasIndex(ur => ur.IsActive);
+            _ = b.HasIndex(ur => ur.ExpiresAt);
         });
 
         // RefreshToken Entity Configuration
-        modelBuilder.Entity<RefreshToken>(b =>
+        _ = modelBuilder.Entity<RefreshToken>(b =>
         {
-            b.HasKey(rt => rt.Id);
-            b.Property(rt => rt.Token).IsRequired().HasMaxLength(512);
-            b.Property(rt => rt.CreatedByIp).IsRequired().HasMaxLength(45);
-            b.Property(rt => rt.RevokedByIp).HasMaxLength(45);
-            b.Property(rt => rt.ReplacedByToken).HasMaxLength(512);
+            _ = b.HasKey(rt => rt.Id);
+            _ = b.Property(rt => rt.Token).IsRequired().HasMaxLength(512);
+            _ = b.Property(rt => rt.CreatedByIp).IsRequired().HasMaxLength(45);
+            _ = b.Property(rt => rt.RevokedByIp).HasMaxLength(45);
+            _ = b.Property(rt => rt.ReplacedByToken).HasMaxLength(512);
 
             // Foreign Key
-            b.HasOne(rt => rt.User)
+            _ = b.HasOne(rt => rt.User)
                 .WithMany()
                 .HasForeignKey(rt => rt.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Indexes
-            b.HasIndex(rt => rt.Token).IsUnique();
-            b.HasIndex(rt => rt.UserId);
-            b.HasIndex(rt => rt.ExpiresAt);
-            b.HasIndex(rt => rt.IsRevoked);
+            _ = b.HasIndex(rt => rt.Token).IsUnique();
+            _ = b.HasIndex(rt => rt.UserId);
+            _ = b.HasIndex(rt => rt.ExpiresAt);
+            _ = b.HasIndex(rt => rt.IsRevoked);
         });
 
-        modelBuilder.Entity<PasswordResetToken>(b =>
+        _ = modelBuilder.Entity<PasswordResetToken>(b =>
         {
-            b.HasKey(prt => prt.Id);
-            b.Property(prt => prt.Token).IsRequired().HasMaxLength(256);
-            b.Property(prt => prt.UsedByIp).HasMaxLength(45);
+            _ = b.HasKey(prt => prt.Id);
+            _ = b.Property(prt => prt.Token).IsRequired().HasMaxLength(256);
+            _ = b.Property(prt => prt.UsedByIp).HasMaxLength(45);
 
             // Foreign Key
-            b.HasOne(prt => prt.User)
+            _ = b.HasOne(prt => prt.User)
                 .WithMany()
                 .HasForeignKey(prt => prt.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Indexes
-            b.HasIndex(prt => prt.Token).IsUnique();
-            b.HasIndex(prt => prt.UserId);
-            b.HasIndex(prt => prt.ExpiresAt);
-            b.HasIndex(prt => prt.IsUsed);
+            _ = b.HasIndex(prt => prt.Token).IsUnique();
+            _ = b.HasIndex(prt => prt.UserId);
+            _ = b.HasIndex(prt => prt.ExpiresAt);
+            _ = b.HasIndex(prt => prt.IsUsed);
         });
 
-        modelBuilder.Entity<AuthAuditLog>(b =>
+        _ = modelBuilder.Entity<AuthAuditLog>(b =>
         {
-            b.HasKey(aal => aal.Id);
-            b.Property(aal => aal.EventType).IsRequired();
-            b.Property(aal => aal.Timestamp).IsRequired();
-            b.Property(aal => aal.IpAddress).HasMaxLength(45);
-            b.Property(aal => aal.UserAgent).HasMaxLength(512);
-            b.Property(aal => aal.FailureReason).HasMaxLength(512);
-            b.Property(aal => aal.Metadata).HasColumnType("TEXT");
-            b.Property(aal => aal.CorrelationId).HasMaxLength(64);
+            _ = b.HasKey(aal => aal.Id);
+            _ = b.Property(aal => aal.EventType).IsRequired();
+            _ = b.Property(aal => aal.Timestamp).IsRequired();
+            _ = b.Property(aal => aal.IpAddress).HasMaxLength(45);
+            _ = b.Property(aal => aal.UserAgent).HasMaxLength(512);
+            _ = b.Property(aal => aal.FailureReason).HasMaxLength(512);
+            _ = b.Property(aal => aal.Metadata).HasColumnType("TEXT");
+            _ = b.Property(aal => aal.CorrelationId).HasMaxLength(64);
 
             // Foreign Key (nullable - for failed logins where user doesn't exist)
-            b.HasOne(aal => aal.User)
+            _ = b.HasOne(aal => aal.User)
                 .WithMany()
                 .HasForeignKey(aal => aal.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Indexes for common queries
-            b.HasIndex(aal => aal.UserId);
-            b.HasIndex(aal => aal.EventType);
-            b.HasIndex(aal => aal.Timestamp);
-            b.HasIndex(aal => aal.Success);
-            b.HasIndex(aal => new { aal.UserId, aal.Timestamp }); // Common query pattern
+            _ = b.HasIndex(aal => aal.UserId);
+            _ = b.HasIndex(aal => aal.EventType);
+            _ = b.HasIndex(aal => aal.Timestamp);
+            _ = b.HasIndex(aal => aal.Success);
+            _ = b.HasIndex(aal => new { aal.UserId, aal.Timestamp }); // Common query pattern
         });
 
-        modelBuilder.Entity<RevokedToken>(b =>
+        _ = modelBuilder.Entity<RevokedToken>(b =>
         {
-            b.HasKey(rt => rt.Id);
-            b.Property(rt => rt.TokenHash).IsRequired().HasMaxLength(64); // SHA256 hash = 64 hex chars
-            b.Property(rt => rt.Reason).IsRequired().HasMaxLength(512);
-            b.Property(rt => rt.IpAddress).HasMaxLength(45);
+            _ = b.HasKey(rt => rt.Id);
+            _ = b.Property(rt => rt.TokenHash).IsRequired().HasMaxLength(64); // SHA256 hash = 64 hex chars
+            _ = b.Property(rt => rt.Reason).IsRequired().HasMaxLength(512);
+            _ = b.Property(rt => rt.IpAddress).HasMaxLength(45);
 
             // Foreign Keys
-            b.HasOne(rt => rt.User)
+            _ = b.HasOne(rt => rt.User)
                 .WithMany()
                 .HasForeignKey(rt => rt.UserId)
                 .OnDelete(DeleteBehavior.NoAction); // Changed from Cascade to NoAction to prevent multiple cascade paths in SQL Server
 
-            b.HasOne(rt => rt.RevokedByUser)
+            _ = b.HasOne(rt => rt.RevokedByUser)
                 .WithMany()
                 .HasForeignKey(rt => rt.RevokedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Indexes for fast token lookup and cleanup
-            b.HasIndex(rt => rt.TokenHash).IsUnique(); // Fast revocation check
-            b.HasIndex(rt => rt.UserId); // Get all revoked tokens for a user
-            b.HasIndex(rt => rt.ExpiresAt); // Cleanup expired revocations
-            b.HasIndex(rt => rt.RevokedAt); // Audit queries
+            _ = b.HasIndex(rt => rt.TokenHash).IsUnique(); // Fast revocation check
+            _ = b.HasIndex(rt => rt.UserId); // Get all revoked tokens for a user
+            _ = b.HasIndex(rt => rt.ExpiresAt); // Cleanup expired revocations
+            _ = b.HasIndex(rt => rt.RevokedAt); // Audit queries
         });
 
         // Model3D Entity Configuration
-        modelBuilder.Entity<Model3D>(b =>
+        _ = modelBuilder.Entity<Model3D>(b =>
         {
-            b.HasKey(m => m.Id);
-            b.Property(m => m.OriginalFileName).IsRequired().HasMaxLength(255);
-            b.Property(m => m.DisplayName).IsRequired().HasMaxLength(255);
-            b.Property(m => m.FilePath).IsRequired().HasMaxLength(512);
-            b.Property(m => m.FileHash).IsRequired().HasMaxLength(64);
-            b.Property(m => m.FileFormat).HasConversion<int>();
-            b.Property(m => m.FileSizeBytes).IsRequired();
-            b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
-            b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
-            b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
+            _ = b.HasKey(m => m.Id);
+            _ = b.Property(m => m.OriginalFileName).IsRequired().HasMaxLength(255);
+            _ = b.Property(m => m.DisplayName).IsRequired().HasMaxLength(255);
+            _ = b.Property(m => m.FilePath).IsRequired().HasMaxLength(512);
+            _ = b.Property(m => m.FileHash).IsRequired().HasMaxLength(64);
+            _ = b.Property(m => m.FileFormat).HasConversion<int>();
+            _ = b.Property(m => m.FileSizeBytes).IsRequired();
+            _ = b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
+            _ = b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
+            _ = b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
 
             // Foreign Key
-            b.HasOne(m => m.UploadedByUser)
+            _ = b.HasOne(m => m.UploadedByUser)
                 .WithMany()
                 .HasForeignKey(m => m.UploadedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Navigation: Model3D -> TagMappings
-            b.HasMany(m => m.TagMappings)
+            _ = b.HasMany(m => m.TagMappings)
                 .WithOne(tm => tm.Model3D)
                 .HasForeignKey(tm => tm.Model3DId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Indexes
-            b.HasIndex(m => m.FileHash).IsUnique();
-            b.HasIndex(m => m.UploadedAt);
-            b.HasIndex(m => m.FileFormat);
-            b.HasIndex(m => m.IsValid);
-            b.HasIndex(m => m.UploadedByUserId);
-            b.HasIndex(m => m.HealthStatus); // Index for dashboard queries
-            b.HasIndex(m => m.LastHealthCheckDate); // Index for recent health checks
+            _ = b.HasIndex(m => m.FileHash).IsUnique();
+            _ = b.HasIndex(m => m.UploadedAt);
+            _ = b.HasIndex(m => m.FileFormat);
+            _ = b.HasIndex(m => m.IsValid);
+            _ = b.HasIndex(m => m.UploadedByUserId);
+            _ = b.HasIndex(m => m.HealthStatus); // Index for dashboard queries
+            _ = b.HasIndex(m => m.LastHealthCheckDate); // Index for recent health checks
         });
 
         // Model3DTag Entity Configuration
-        modelBuilder.Entity<Model3DTag>(b =>
+        _ = modelBuilder.Entity<Model3DTag>(b =>
         {
-            b.HasKey(t => t.Id);
-            b.Property(t => t.Name).IsRequired().HasMaxLength(128);
-            b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
-            b.Property(t => t.Description).HasMaxLength(512);
+            _ = b.HasKey(t => t.Id);
+            _ = b.Property(t => t.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
+            _ = b.Property(t => t.Description).HasMaxLength(512);
 
             // Navigation: Model3DTag -> TagMappings
-            b.HasMany(t => t.TagMappings)
+            _ = b.HasMany(t => t.TagMappings)
                 .WithOne(tm => tm.Tag)
                 .HasForeignKey(tm => tm.TagId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Index for quick tag lookups
-            b.HasIndex(t => t.Name).IsUnique();
+            _ = b.HasIndex(t => t.Name).IsUnique();
         });
 
         // Model3DTagMapping Entity Configuration
-        modelBuilder.Entity<Model3DTagMapping>(b =>
+        _ = modelBuilder.Entity<Model3DTagMapping>(b =>
         {
-            b.HasKey(tm => tm.Id);
-            b.Property(tm => tm.Model3DId).IsRequired();
-            b.Property(tm => tm.TagId).IsRequired();
+            _ = b.HasKey(tm => tm.Id);
+            _ = b.Property(tm => tm.Model3DId).IsRequired();
+            _ = b.Property(tm => tm.TagId).IsRequired();
 
             // Foreign Keys
-            b.HasOne(tm => tm.Model3D)
+            _ = b.HasOne(tm => tm.Model3D)
                 .WithMany(m => m.TagMappings)
                 .HasForeignKey(tm => tm.Model3DId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            b.HasOne(tm => tm.Tag)
+            _ = b.HasOne(tm => tm.Tag)
                 .WithMany(t => t.TagMappings)
                 .HasForeignKey(tm => tm.TagId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Composite index to prevent duplicate tag assignments
-            b.HasIndex(tm => new { tm.Model3DId, tm.TagId }).IsUnique();
+            _ = b.HasIndex(tm => new { tm.Model3DId, tm.TagId }).IsUnique();
 
             // Index for finding all models with a tag
-            b.HasIndex(tm => tm.TagId);
+            _ = b.HasIndex(tm => tm.TagId);
         });
 
         // ProcessProfile Entity Configuration
-        modelBuilder.Entity<ProcessProfile>(b =>
+        _ = modelBuilder.Entity<ProcessProfile>(b =>
         {
-            b.HasKey(p => p.Id);
-            b.Property(p => p.Name).IsRequired().HasMaxLength(255);
-            b.Property(p => p.Description).HasMaxLength(1000);
-            b.Property(p => p.SlicerType).HasConversion<int>();
-            b.Property(p => p.Quality).HasConversion<int>();
-            b.Property(p => p.AdvancedSettings).HasColumnType("TEXT");
-            b.Property(p => p.RawJson).HasColumnType("TEXT");
-            b.Property(p => p.MetadataJson).HasColumnType("TEXT");
-            b.Property(p => p.Hash).HasMaxLength(64);
-            b.Property(p => p.IsSystem).HasDefaultValue(false);
+            _ = b.HasKey(p => p.Id);
+            _ = b.Property(p => p.Name).IsRequired().HasMaxLength(255);
+            _ = b.Property(p => p.Description).HasMaxLength(1000);
+            _ = b.Property(p => p.SlicerType).HasConversion<int>();
+            _ = b.Property(p => p.Quality).HasConversion<int>();
+            _ = b.Property(p => p.AdvancedSettings).HasColumnType("TEXT");
+            _ = b.Property(p => p.RawJson).HasColumnType("TEXT");
+            _ = b.Property(p => p.MetadataJson).HasColumnType("TEXT");
+            _ = b.Property(p => p.Hash).HasMaxLength(64);
+            _ = b.Property(p => p.IsSystem).HasDefaultValue(false);
 
             // Foreign Keys
-            b.HasOne(p => p.PrinterModel)
+            _ = b.HasOne(p => p.PrinterModel)
                 .WithMany()
                 .HasForeignKey(p => p.PrinterModelId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            b.HasOne(p => p.SpecificPrinter)
+            _ = b.HasOne(p => p.SpecificPrinter)
                 .WithMany()
                 .HasForeignKey(p => p.SpecificPrinterId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            b.HasOne(p => p.CreatedByUser)
+            _ = b.HasOne(p => p.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(p => p.CreatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Indexes
-            b.HasIndex(p => new { p.Name, p.SlicerType, p.PrinterModelId }).IsUnique();
-            b.HasIndex(p => p.SlicerType);
-            b.HasIndex(p => p.PrinterModelId);
-            b.HasIndex(p => p.IsDefault);
-            b.HasIndex(p => p.IsPublic);
-            b.HasIndex(p => p.CreatedByUserId);
-            b.HasIndex(p => p.Hash).IsUnique();
-            b.HasIndex(p => p.IsSystem);
+            _ = b.HasIndex(p => new { p.Name, p.SlicerType, p.PrinterModelId }).IsUnique();
+            _ = b.HasIndex(p => p.SlicerType);
+            _ = b.HasIndex(p => p.PrinterModelId);
+            _ = b.HasIndex(p => p.IsDefault);
+            _ = b.HasIndex(p => p.IsPublic);
+            _ = b.HasIndex(p => p.CreatedByUserId);
+            _ = b.HasIndex(p => p.Hash).IsUnique();
+            _ = b.HasIndex(p => p.IsSystem);
         });
 
         // MachineProfile Entity Configuration
-        modelBuilder.Entity<MachineProfile>(b =>
+        _ = modelBuilder.Entity<MachineProfile>(b =>
         {
-            b.HasKey(p => p.Id);
-            b.Property(p => p.Name).IsRequired().HasMaxLength(255);
-            b.Property(p => p.Manufacturer).IsRequired().HasMaxLength(255);
-            b.Property(p => p.Description).HasMaxLength(1000);
-            b.Property(p => p.SlicerType).HasConversion<int>();
-            b.Property(p => p.RawJson).HasColumnType("TEXT");
-            b.Property(p => p.SettingsJson).HasColumnType("TEXT");
-            b.Property(p => p.Hash).HasMaxLength(64);
-            b.Property(p => p.IsSystem).HasDefaultValue(false);
+            _ = b.HasKey(p => p.Id);
+            _ = b.Property(p => p.Name).IsRequired().HasMaxLength(255);
+            _ = b.Property(p => p.Manufacturer).IsRequired().HasMaxLength(255);
+            _ = b.Property(p => p.Description).HasMaxLength(1000);
+            _ = b.Property(p => p.SlicerType).HasConversion<int>();
+            _ = b.Property(p => p.RawJson).HasColumnType("TEXT");
+            _ = b.Property(p => p.SettingsJson).HasColumnType("TEXT");
+            _ = b.Property(p => p.Hash).HasMaxLength(64);
+            _ = b.Property(p => p.IsSystem).HasDefaultValue(false);
 
             // Foreign Keys
-            b.HasOne(p => p.PrinterModel)
+            _ = b.HasOne(p => p.PrinterModel)
                 .WithMany()
                 .HasForeignKey(p => p.PrinterModelId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            b.HasOne(p => p.CreatedByUser)
+            _ = b.HasOne(p => p.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(p => p.CreatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Indexes
-            b.HasIndex(p => new { p.Name, p.SlicerType }).IsUnique();
-            b.HasIndex(p => p.SlicerType);
-            b.HasIndex(p => p.Manufacturer);
-            b.HasIndex(p => p.Hash).IsUnique();
-            b.HasIndex(p => p.IsSystem);
-            b.HasIndex(p => p.CreatedByUserId);
+            _ = b.HasIndex(p => new { p.Name, p.SlicerType }).IsUnique();
+            _ = b.HasIndex(p => p.SlicerType);
+            _ = b.HasIndex(p => p.Manufacturer);
+            _ = b.HasIndex(p => p.Hash).IsUnique();
+            _ = b.HasIndex(p => p.IsSystem);
+            _ = b.HasIndex(p => p.CreatedByUserId);
         });
 
         // FilamentProfile Entity Configuration
-        modelBuilder.Entity<FilamentProfile>(b =>
+        _ = modelBuilder.Entity<FilamentProfile>(b =>
         {
-            b.HasKey(p => p.Id);
-            b.Property(p => p.Name).IsRequired().HasMaxLength(255);
-            b.Property(p => p.Material).IsRequired().HasMaxLength(64);
-            b.Property(p => p.Manufacturer).HasMaxLength(255);
-            b.Property(p => p.Description).HasMaxLength(1000);
-            b.Property(p => p.SlicerType).HasConversion<int>();
-            b.Property(p => p.RawJson).HasColumnType("TEXT");
-            b.Property(p => p.SettingsJson).HasColumnType("TEXT");
-            b.Property(p => p.Hash).HasMaxLength(64);
-            b.Property(p => p.IsSystem).HasDefaultValue(false);
+            _ = b.HasKey(p => p.Id);
+            _ = b.Property(p => p.Name).IsRequired().HasMaxLength(255);
+            _ = b.Property(p => p.Material).IsRequired().HasMaxLength(64);
+            _ = b.Property(p => p.Manufacturer).HasMaxLength(255);
+            _ = b.Property(p => p.Description).HasMaxLength(1000);
+            _ = b.Property(p => p.SlicerType).HasConversion<int>();
+            _ = b.Property(p => p.RawJson).HasColumnType("TEXT");
+            _ = b.Property(p => p.SettingsJson).HasColumnType("TEXT");
+            _ = b.Property(p => p.Hash).HasMaxLength(64);
+            _ = b.Property(p => p.IsSystem).HasDefaultValue(false);
 
             // Foreign Keys
-            b.HasOne(p => p.CreatedByUser)
+            _ = b.HasOne(p => p.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(p => p.CreatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Indexes
-            b.HasIndex(p => new { p.Material, p.SlicerType }).IsUnique();
-            b.HasIndex(p => p.SlicerType);
-            b.HasIndex(p => p.Material);
-            b.HasIndex(p => p.Hash).IsUnique();
-            b.HasIndex(p => p.IsSystem);
-            b.HasIndex(p => p.CreatedByUserId);
+            _ = b.HasIndex(p => new { p.Material, p.SlicerType }).IsUnique();
+            _ = b.HasIndex(p => p.SlicerType);
+            _ = b.HasIndex(p => p.Material);
+            _ = b.HasIndex(p => p.Hash).IsUnique();
+            _ = b.HasIndex(p => p.IsSystem);
+            _ = b.HasIndex(p => p.CreatedByUserId);
         });
 
         // Slicer Service (Registry) Entity Configuration
-        modelBuilder.Entity<SlicerService>(b =>
+        _ = modelBuilder.Entity<SlicerService>(b =>
         {
-            b.HasKey(s => s.Id);
-            b.Property(s => s.Name).IsRequired().HasMaxLength(200);
-            b.Property(s => s.Version).HasMaxLength(64);
-            b.Property(s => s.Host).HasMaxLength(512);
-            b.Property(s => s.UiManifestUrl).HasMaxLength(512);
-            b.Property(s => s.CapabilitiesJson).HasColumnType("TEXT");
-            b.Property(s => s.Status).HasMaxLength(64);
-            b.Property(s => s.ApiKey).HasMaxLength(128);
-            b.HasIndex(s => s.Name);
-            b.HasIndex(s => s.SlicerType);
-            b.HasIndex(s => s.Status);
+            _ = b.HasKey(s => s.Id);
+            _ = b.Property(s => s.Name).IsRequired().HasMaxLength(200);
+            _ = b.Property(s => s.Version).HasMaxLength(64);
+            _ = b.Property(s => s.Host).HasMaxLength(512);
+            _ = b.Property(s => s.UiManifestUrl).HasMaxLength(512);
+            _ = b.Property(s => s.CapabilitiesJson).HasColumnType("TEXT");
+            _ = b.Property(s => s.Status).HasMaxLength(64);
+            _ = b.Property(s => s.ApiKey).HasMaxLength(128);
+            _ = b.HasIndex(s => s.Name);
+            _ = b.HasIndex(s => s.SlicerType);
+            _ = b.HasIndex(s => s.Status);
         });
 
         // SliceJob Entity Configuration
-        modelBuilder.Entity<SliceJob>(b =>
+        _ = modelBuilder.Entity<SliceJob>(b =>
         {
-            b.HasKey(j => j.Id);
-            b.Property(j => j.UserId).IsRequired();
-            b.Property(j => j.ModelFileUrl).IsRequired().HasMaxLength(2048);
-            b.Property(j => j.ModelFileName).IsRequired().HasMaxLength(512);
-            b.Property(j => j.SlicerEngine).IsRequired();
-            b.Property(j => j.SlicerProfileJson).HasColumnType("TEXT");
-            b.Property(j => j.SlicerProfileId);
-            b.Property(j => j.RequiredCapabilitiesJson).HasColumnType("TEXT");
-            b.Property(j => j.Status).IsRequired().HasMaxLength(50);
-            b.Property(j => j.Priority).IsRequired();
-            b.Property(j => j.QueuedAt).IsRequired();
-            b.Property(j => j.ResultFileUrl).HasMaxLength(2048);
-            b.Property(j => j.ErrorMessage).HasColumnType("TEXT");
-            b.Property(j => j.ProgressMessage).HasMaxLength(512);
-            b.Property(j => j.CreatedAt).IsRequired();
-            b.Property(j => j.UpdatedAt).IsRequired();
+            _ = b.HasKey(j => j.Id);
+            _ = b.Property(j => j.UserId).IsRequired();
+            _ = b.Property(j => j.ModelFileUrl).IsRequired().HasMaxLength(2048);
+            _ = b.Property(j => j.ModelFileName).IsRequired().HasMaxLength(512);
+            _ = b.Property(j => j.SlicerEngine).IsRequired();
+            _ = b.Property(j => j.SlicerProfileJson).HasColumnType("TEXT");
+            _ = b.Property(j => j.SlicerProfileId);
+            _ = b.Property(j => j.RequiredCapabilitiesJson).HasColumnType("TEXT");
+            _ = b.Property(j => j.Status).IsRequired().HasMaxLength(50);
+            _ = b.Property(j => j.Priority).IsRequired();
+            _ = b.Property(j => j.QueuedAt).IsRequired();
+            _ = b.Property(j => j.ResultFileUrl).HasMaxLength(2048);
+            _ = b.Property(j => j.ErrorMessage).HasColumnType("TEXT");
+            _ = b.Property(j => j.ProgressMessage).HasMaxLength(512);
+            _ = b.Property(j => j.CreatedAt).IsRequired();
+            _ = b.Property(j => j.UpdatedAt).IsRequired();
 
             // Indexes for efficient querying
-            b.HasIndex(j => j.UserId);
-            b.HasIndex(j => j.PrinterId);
-            b.HasIndex(j => j.Status);
-            b.HasIndex(j => j.QueuedAt);
-            b.HasIndex(j => new { j.Status, j.Priority, j.QueuedAt }); // For queue processing
-            b.HasIndex(j => j.WorkerId);
-            b.HasIndex(j => j.SlicerProfileId);
+            _ = b.HasIndex(j => j.UserId);
+            _ = b.HasIndex(j => j.PrinterId);
+            _ = b.HasIndex(j => j.Status);
+            _ = b.HasIndex(j => j.QueuedAt);
+            _ = b.HasIndex(j => new { j.Status, j.Priority, j.QueuedAt }); // For queue processing
+            _ = b.HasIndex(j => j.WorkerId);
+            _ = b.HasIndex(j => j.SlicerProfileId);
 
             // Foreign key to SlicerProfile (optional reference). If profile deleted later we retain immutable snapshot JSON.
-            b.HasOne(j => j.SlicerProfile)
+            _ = b.HasOne(j => j.SlicerProfile)
                 .WithMany()
                 .HasForeignKey(j => j.SlicerProfileId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
         // Artifact Entity Configuration
-        modelBuilder.Entity<Artifact>(b =>
+        _ = modelBuilder.Entity<Artifact>(b =>
         {
-            b.HasKey(a => a.Id);
-            b.Property(a => a.JobId).IsRequired();
-            b.Property(a => a.Kind).IsRequired().HasMaxLength(64);
-            b.Property(a => a.FileName).IsRequired().HasMaxLength(256);
-            b.Property(a => a.RelativePath).IsRequired().HasMaxLength(1024);
-            b.Property(a => a.ContentType).IsRequired().HasMaxLength(128);
-            b.Property(a => a.SizeBytes).IsRequired();
-            b.Property(a => a.Sha256).IsRequired().HasMaxLength(64);
-            b.Property(a => a.CreatedAt).IsRequired();
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.JobId).IsRequired();
+            _ = b.Property(a => a.Kind).IsRequired().HasMaxLength(64);
+            _ = b.Property(a => a.FileName).IsRequired().HasMaxLength(256);
+            _ = b.Property(a => a.RelativePath).IsRequired().HasMaxLength(1024);
+            _ = b.Property(a => a.ContentType).IsRequired().HasMaxLength(128);
+            _ = b.Property(a => a.SizeBytes).IsRequired();
+            _ = b.Property(a => a.Sha256).IsRequired().HasMaxLength(64);
+            _ = b.Property(a => a.CreatedAt).IsRequired();
 
             // Helpful indexes for lookup & listing
-            b.HasIndex(a => a.JobId);
-            b.HasIndex(a => a.WorkerId);
-            b.HasIndex(a => a.CreatedAt);
-            b.HasIndex(a => new { a.JobId, a.Kind });
+            _ = b.HasIndex(a => a.JobId);
+            _ = b.HasIndex(a => a.WorkerId);
+            _ = b.HasIndex(a => a.CreatedAt);
+            _ = b.HasIndex(a => new { a.JobId, a.Kind });
         });
 
         // Worker Entity Configuration
-        modelBuilder.Entity<Worker>(b =>
+        _ = modelBuilder.Entity<Worker>(b =>
         {
-            b.HasKey(w => w.Id);
-            b.Property(w => w.ServiceId).IsRequired().HasMaxLength(256);
-            b.Property(w => w.Name).IsRequired().HasMaxLength(256);
-            b.Property(w => w.EndpointUrl).IsRequired().HasMaxLength(2048);
-            b.Property(w => w.CapabilitiesJson).HasColumnType("TEXT");
-            b.Property(w => w.Status).IsRequired().HasMaxLength(50);
-            b.Property(w => w.FreeSlots).IsRequired();
-            b.Property(w => w.TotalSlots).IsRequired();
-            b.Property(w => w.RegisteredAt).IsRequired();
-            b.Property(w => w.ApiKey).HasMaxLength(512);
-            b.Property(w => w.Version).HasMaxLength(50);
-            b.Property(w => w.MetadataJson).HasColumnType("TEXT");
-            b.Property(w => w.CreatedAt).IsRequired();
-            b.Property(w => w.UpdatedAt).IsRequired();
-            b.Property(w => w.DisabledReason).HasMaxLength(1024);
+            _ = b.HasKey(w => w.Id);
+            _ = b.Property(w => w.ServiceId).IsRequired().HasMaxLength(256);
+            _ = b.Property(w => w.Name).IsRequired().HasMaxLength(256);
+            _ = b.Property(w => w.EndpointUrl).IsRequired().HasMaxLength(2048);
+            _ = b.Property(w => w.CapabilitiesJson).HasColumnType("TEXT");
+            _ = b.Property(w => w.Status).IsRequired().HasMaxLength(50);
+            _ = b.Property(w => w.FreeSlots).IsRequired();
+            _ = b.Property(w => w.TotalSlots).IsRequired();
+            _ = b.Property(w => w.RegisteredAt).IsRequired();
+            _ = b.Property(w => w.ApiKey).HasMaxLength(512);
+            _ = b.Property(w => w.Version).HasMaxLength(50);
+            _ = b.Property(w => w.MetadataJson).HasColumnType("TEXT");
+            _ = b.Property(w => w.CreatedAt).IsRequired();
+            _ = b.Property(w => w.UpdatedAt).IsRequired();
+            _ = b.Property(w => w.DisabledReason).HasMaxLength(1024);
 
             // Indexes for efficient querying
-            b.HasIndex(w => w.ServiceId).IsUnique();
-            b.HasIndex(w => w.Status);
-            b.HasIndex(w => w.LastHeartbeat);
-            b.HasIndex(w => new { w.Status, w.FreeSlots }); // For worker selection
+            _ = b.HasIndex(w => w.ServiceId).IsUnique();
+            _ = b.HasIndex(w => w.Status);
+            _ = b.HasIndex(w => w.LastHeartbeat);
+            _ = b.HasIndex(w => new { w.Status, w.FreeSlots }); // For worker selection
         });
 
-        modelBuilder.Entity<PasswordPolicyEntity>(b =>
+        _ = modelBuilder.Entity<PasswordPolicyEntity>(b =>
         {
             // Keep the existing table name to avoid creating a migration due to the rename
-            b.ToTable("PasswordPolicies");
-            b.HasKey(pp => pp.Id);
-            b.Property(pp => pp.MinLength).IsRequired();
-            b.Property(pp => pp.RequireUppercase);
-            b.Property(pp => pp.RequireLowercase);
-            b.Property(pp => pp.RequireDigit);
-            b.Property(pp => pp.RequireSymbol);
+            _ = b.ToTable("PasswordPolicies");
+            _ = b.HasKey(pp => pp.Id);
+            _ = b.Property(pp => pp.MinLength).IsRequired();
+            _ = b.Property(pp => pp.RequireUppercase);
+            _ = b.Property(pp => pp.RequireLowercase);
+            _ = b.Property(pp => pp.RequireDigit);
+            _ = b.Property(pp => pp.RequireSymbol);
         });
 
         // SlicerSettings Entity Configuration
-        modelBuilder.Entity<SlicerSettings>(b =>
+        _ = modelBuilder.Entity<SlicerSettings>(b =>
         {
-            b.HasKey(s => s.Id);
-            b.Property(s => s.Enabled).IsRequired();
-            b.Property(s => s.PerEngineJson).HasColumnType("TEXT");
-            b.Property(s => s.UpdatedAt).IsRequired();
-            b.Property(s => s.JitterPercent).HasDefaultValue(15.0).IsRequired();
+            _ = b.HasKey(s => s.Id);
+            _ = b.Property(s => s.Enabled).IsRequired();
+            _ = b.Property(s => s.PerEngineJson).HasColumnType("TEXT");
+            _ = b.Property(s => s.UpdatedAt).IsRequired();
+            _ = b.Property(s => s.JitterPercent).HasDefaultValue(15.0).IsRequired();
         });
 
         // HarvestDiscoveredFile Entity Configuration
-        modelBuilder.Entity<HarvestDiscoveredFile>(b =>
+        _ = modelBuilder.Entity<HarvestDiscoveredFile>(b =>
         {
-            b.HasKey(f => f.Id);
-            b.Property(f => f.HarvestOperationId).IsRequired();
-            b.Property(f => f.FilePath).IsRequired().HasMaxLength(512);
-            b.Property(f => f.FileName).IsRequired().HasMaxLength(256);
-            b.Property(f => f.Size).IsRequired();
-            b.Property(f => f.ThumbnailUrl).HasMaxLength(512);
-            b.Property(f => f.Status).IsRequired();
-            b.Property(f => f.Error).HasMaxLength(512);
-            b.Property(f => f.DiscoveredAt).IsRequired();
-            b.Property(f => f.StartedAt);
-            b.Property(f => f.CompletedAt);
-            b.HasIndex(f => f.HarvestOperationId);
+            _ = b.HasKey(f => f.Id);
+            _ = b.Property(f => f.HarvestOperationId).IsRequired();
+            _ = b.Property(f => f.FilePath).IsRequired().HasMaxLength(512);
+            _ = b.Property(f => f.FileName).IsRequired().HasMaxLength(256);
+            _ = b.Property(f => f.Size).IsRequired();
+            _ = b.Property(f => f.ThumbnailUrl).HasMaxLength(512);
+            _ = b.Property(f => f.Status).IsRequired();
+            _ = b.Property(f => f.Error).HasMaxLength(512);
+            _ = b.Property(f => f.DiscoveredAt).IsRequired();
+            _ = b.Property(f => f.StartedAt);
+            _ = b.Property(f => f.CompletedAt);
+            _ = b.HasIndex(f => f.HarvestOperationId);
         });
 
         // File Health Audit Entity Configuration
-        modelBuilder.Entity<FileHealthAudit>(b =>
+        _ = modelBuilder.Entity<FileHealthAudit>(b =>
         {
-            b.HasKey(a => a.Id);
-            b.Property(a => a.AuditDate).IsRequired();
-            b.Property(a => a.AuditType).HasConversion<int>();
-            b.Property(a => a.FilesChecked).IsRequired();
-            b.Property(a => a.HealthyFiles).IsRequired();
-            b.Property(a => a.MissingFiles).IsRequired();
-            b.Property(a => a.CorruptedFiles).IsRequired();
-            b.Property(a => a.OrphanedFiles).IsRequired();
-            b.Property(a => a.MissingFileIds).HasColumnType("TEXT"); // JSON array
-            b.Property(a => a.CorruptedFileIds).HasColumnType("TEXT"); // JSON array
-            b.Property(a => a.OrphanedFilePaths).HasColumnType("TEXT"); // JSON array
-            b.Property(a => a.SummaryMessage).HasColumnType("TEXT");
-            b.Property(a => a.HasIssues).IsRequired();
-            b.Property(a => a.CreatedAt).IsRequired();
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.AuditDate).IsRequired();
+            _ = b.Property(a => a.AuditType).HasConversion<int>();
+            _ = b.Property(a => a.FilesChecked).IsRequired();
+            _ = b.Property(a => a.HealthyFiles).IsRequired();
+            _ = b.Property(a => a.MissingFiles).IsRequired();
+            _ = b.Property(a => a.CorruptedFiles).IsRequired();
+            _ = b.Property(a => a.OrphanedFiles).IsRequired();
+            _ = b.Property(a => a.MissingFileIds).HasColumnType("TEXT"); // JSON array
+            _ = b.Property(a => a.CorruptedFileIds).HasColumnType("TEXT"); // JSON array
+            _ = b.Property(a => a.OrphanedFilePaths).HasColumnType("TEXT"); // JSON array
+            _ = b.Property(a => a.SummaryMessage).HasColumnType("TEXT");
+            _ = b.Property(a => a.HasIssues).IsRequired();
+            _ = b.Property(a => a.CreatedAt).IsRequired();
 
             // Indexes for efficient querying and dashboard
-            b.HasIndex(a => a.AuditDate).IsDescending(); // Most recent audits first
-            b.HasIndex(a => a.AuditType);
-            b.HasIndex(a => a.HasIssues);
-            b.HasIndex(a => new { a.AuditType, a.AuditDate }).IsDescending(false, true); // Composite for type+recent queries
+            _ = b.HasIndex(a => a.AuditDate).IsDescending(); // Most recent audits first
+            _ = b.HasIndex(a => a.AuditType);
+            _ = b.HasIndex(a => a.HasIssues);
+            _ = b.HasIndex(a => new { a.AuditType, a.AuditDate }).IsDescending(false, true); // Composite for type+recent queries
         });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
         {
             // Use a static value for UpdatedAt to avoid model instability in migrations
-            modelBuilder.Entity<PasswordPolicyEntity>().HasData(new PasswordPolicyEntity
+            _ = modelBuilder.Entity<PasswordPolicyEntity>().HasData(new PasswordPolicyEntity
             {
                 Id = 1,
                 MinLength = 8,

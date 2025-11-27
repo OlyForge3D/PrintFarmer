@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
@@ -25,15 +26,15 @@ namespace Farm.Web.Api.Tests.Artifacts
         public async Task Unsupported_Kind_Returns_BadRequest_With_Allowed_List()
         {
             using IServiceScope scope = _factory.Services.CreateScope();
-            IArtifactsService svc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
-            IOptions<ArtifactStorageSettings> opts = Options.Create(new Farm.Infrastructure.Settings.ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
-            JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
-            ArtifactsController controller = new Farm.Web.Api.Controllers.ArtifactsController(svc, jobRepo, opts);
-            TestFormFile file = new TestFormFile(System.Text.Encoding.UTF8.GetBytes("dummy"), "a.txt", "text/plain");
+            IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+            IOptions<ArtifactStorageSettings> opts = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
+            JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
+            ArtifactsController controller = new ArtifactsController(svc, jobRepo, opts);
+            TestFormFile file = new TestFormFile(Encoding.UTF8.GetBytes("dummy"), "a.txt", "text/plain");
             IActionResult result = await controller.UploadAsync(Guid.NewGuid(), "invalid-kind", null, file, default);
-            result.Should().BeOfType<BadRequestObjectResult>();
+            _ = result.Should().BeOfType<BadRequestObjectResult>();
             BadRequestObjectResult bad = (BadRequestObjectResult)result;
-            bad.Value!.ToString()!.Should().Contain("allowedKinds");
+            _ = bad.Value!.ToString()!.Should().Contain("allowedKinds");
         }
 
         private sealed class TestFormFile : IFormFile
@@ -53,13 +54,13 @@ namespace Farm.Web.Api.Tests.Artifacts
             public long Length { get; }
             public string Name { get; }
             public string FileName { get; }
-            public void CopyTo(System.IO.Stream target) => target.Write(_data, 0, _data.Length);
-            public Task CopyToAsync(System.IO.Stream target, System.Threading.CancellationToken cancellationToken = default)
+            public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
+            public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
             {
                 target.Write(_data, 0, _data.Length);
                 return Task.CompletedTask;
             }
-            public System.IO.Stream OpenReadStream() => new System.IO.MemoryStream(_data, writable: false);
+            public Stream OpenReadStream() => new MemoryStream(_data, writable: false);
         }
     }
 }

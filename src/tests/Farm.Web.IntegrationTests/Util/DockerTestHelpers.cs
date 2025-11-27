@@ -68,7 +68,7 @@ public static class DockerTestHelpers
         }
 
         output.WriteLine($"Running: {command} {string.Join(" ", args)}");
-        process.Start();
+        _ = process.Start();
         Task<string> stdOutTask = process.StandardOutput.ReadToEndAsync();
         Task<string> stdErrTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();

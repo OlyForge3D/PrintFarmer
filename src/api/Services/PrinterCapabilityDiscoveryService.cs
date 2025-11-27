@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Text;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.PrinterCapabilities;
 using Farm.Infrastructure.Repositories.Printers;
@@ -272,7 +273,7 @@ public class PrinterCapabilityDiscoveryService(
                 return null; // Config file not accessible
             }
 
-            string configContent = System.Text.Encoding.UTF8.GetString(printerConfigBytes);
+            string configContent = Encoding.UTF8.GetString(printerConfigBytes);
             DiscoveredCapabilities discovered = new()
             {
                 // Parse Klipper configuration file (INI-style format)

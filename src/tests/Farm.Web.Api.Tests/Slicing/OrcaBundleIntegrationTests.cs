@@ -44,7 +44,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             "application/json");
 
         HttpResponseMessage previewResponse = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", previewContent);
-        previewResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = previewResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string previewJson = await previewResponse.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
@@ -52,10 +52,10 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(2);
-        preview.Filaments.Should().HaveCount(3);
-        preview.Processes.Should().HaveCount(3);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(2);
+        _ = preview.Filaments.Should().HaveCount(3);
+        _ = preview.Processes.Should().HaveCount(3);
 
         // Step 2: Import the bundle (this would normally require mapping, but we'll test the basic flow)
         // Note: Full import with mapping would require additional setup of PrinterModels/FilamentTypes
@@ -73,18 +73,18 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             "application/json");
 
         HttpResponseMessage exportResponse = await _client.PostAsync("/api/slicer/profiles/export/orca", exportContent);
-        exportResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = exportResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string exportedJson = await exportResponse.Content.ReadAsStringAsync();
-        exportedJson.Should().NotBeNullOrEmpty();
+        _ = exportedJson.Should().NotBeNullOrEmpty();
 
         // Step 4: Verify exported structure is valid JSON and contains expected sections
         using JsonDocument exportedDoc = JsonDocument.Parse(exportedJson);
         JsonElement root = exportedDoc.RootElement;
 
-        root.TryGetProperty("printer", out JsonElement printerSection).Should().BeTrue();
-        root.TryGetProperty("filament", out JsonElement filamentSection).Should().BeTrue();
-        root.TryGetProperty("process", out JsonElement processSection).Should().BeTrue();
+        _ = root.TryGetProperty("printer", out JsonElement printerSection).Should().BeTrue();
+        _ = root.TryGetProperty("filament", out JsonElement filamentSection).Should().BeTrue();
+        _ = root.TryGetProperty("process", out JsonElement processSection).Should().BeTrue();
     }
 
     [Fact(DisplayName = "Import with mapping resolves printer models correctly")]
@@ -123,16 +123,16 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(1);
-        preview.Printers[0].Name.Should().Contain("X1");
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(1);
+        _ = preview.Printers[0].Name.Should().Contain("X1");
     }
 
     [Fact(DisplayName = "Import with filament type mapping resolves materials correctly")]
@@ -176,17 +176,17 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Filaments.Should().HaveCount(2);
-        preview.Filaments[0].FilamentType.Should().Be("PLA");
-        preview.Filaments[1].FilamentType.Should().Be("PETG");
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Filaments.Should().HaveCount(2);
+        _ = preview.Filaments[0].FilamentType.Should().Be("PLA");
+        _ = preview.Filaments[1].FilamentType.Should().Be("PETG");
     }
 
     [Fact(DisplayName = "Export with specific printer models filters correctly")]
@@ -211,13 +211,13 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/export/orca", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string exportedJson = await response.Content.ReadAsStringAsync();
 
         using JsonDocument doc = JsonDocument.Parse(exportedJson);
         JsonElement root = doc.RootElement;
 
-        root.TryGetProperty("printer", out JsonElement printerSection).Should().BeTrue();
+        _ = root.TryGetProperty("printer", out JsonElement printerSection).Should().BeTrue();
         // Should only contain the single requested printer
     }
 
@@ -243,13 +243,13 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/export/orca", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string exportedJson = await response.Content.ReadAsStringAsync();
 
         using JsonDocument doc = JsonDocument.Parse(exportedJson);
         JsonElement root = doc.RootElement;
 
-        root.TryGetProperty("filament", out JsonElement filamentSection).Should().BeTrue();
+        _ = root.TryGetProperty("filament", out JsonElement filamentSection).Should().BeTrue();
         // Should contain the requested filament types
     }
 
@@ -272,17 +272,17 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/export/orca", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string exportedJson = await response.Content.ReadAsStringAsync();
 
         using JsonDocument doc = JsonDocument.Parse(exportedJson);
         JsonElement root = doc.RootElement;
 
         // Should contain metadata fields
-        root.TryGetProperty("metadata", out JsonElement metadata).Should().BeTrue();
-        metadata.TryGetProperty("exported_at", out _).Should().BeTrue();
-        metadata.TryGetProperty("source", out JsonElement source).Should().BeTrue();
-        source.GetString().Should().Be("PrintFarmer");
+        _ = root.TryGetProperty("metadata", out JsonElement metadata).Should().BeTrue();
+        _ = metadata.TryGetProperty("exported_at", out _).Should().BeTrue();
+        _ = metadata.TryGetProperty("source", out JsonElement source).Should().BeTrue();
+        _ = source.GetString().Should().Be("PrintFarmer");
     }
 
     [Fact(DisplayName = "Export excludes process profiles when not requested")]
@@ -304,7 +304,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/export/orca", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string exportedJson = await response.Content.ReadAsStringAsync();
 
         using JsonDocument doc = JsonDocument.Parse(exportedJson);
@@ -313,7 +313,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         // Process section should be empty or minimal
         if (root.TryGetProperty("process", out JsonElement processSection))
         {
-            processSection.GetArrayLength().Should().BeLessThanOrEqualTo(3); // Only default presets
+            _ = processSection.GetArrayLength().Should().BeLessThanOrEqualTo(3); // Only default presets
         }
     }
 
@@ -333,7 +333,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact(DisplayName = "Import handles missing required fields gracefully")]
@@ -362,7 +362,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     // Helper methods for database seeding
@@ -383,8 +383,8 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
                 Name = "Bambu Lab",
                 IsActive = true
             };
-            db.Manufacturers.Add(existingManufacturer);
-            await db.SaveChangesAsync();
+            _ = db.Manufacturers.Add(existingManufacturer);
+            _ = await db.SaveChangesAsync();
         }
 
         bool existsModel = await db.Models.AnyAsync(m => m.ManufacturerId == existingManufacturer.Id && m.Name.ToLower() == "x1 carbon");
@@ -403,8 +403,8 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
                 MaxHotendTemp = 300,
                 IsActive = true
             };
-            db.Models.Add(printerModel);
-            await db.SaveChangesAsync();
+            _ = db.Models.Add(printerModel);
+            _ = await db.SaveChangesAsync();
         }
     }
 
@@ -420,7 +420,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             bool exists = await db.FilamentTypes.AnyAsync(f => f.Name.ToLower() == lowered);
             if (!exists)
             {
-                db.FilamentTypes.Add(new FilamentType
+                _ = db.FilamentTypes.Add(new FilamentType
                 {
                     Id = Guid.NewGuid(),
                     Name = t,
@@ -428,7 +428,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
                 });
             }
         }
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
     }
 
     private async Task<Guid[]> SeedMultiplePrinterModels()
@@ -447,8 +447,8 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
                 Name = manufacturerName,
                 IsActive = true
             };
-            db.Manufacturers.Add(manufacturer);
-            await db.SaveChangesAsync();
+            _ = db.Manufacturers.Add(manufacturer);
+            _ = await db.SaveChangesAsync();
         }
 
         PrinterModel[] models = new[]
@@ -483,11 +483,11 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             bool exists = await db.Models.AnyAsync(x => x.ManufacturerId == m.ManufacturerId && x.Name.ToLower() == m.Name.ToLower());
             if (!exists)
             {
-                db.Models.Add(m);
+                _ = db.Models.Add(m);
                 addedIds.Add(m.Id);
             }
         }
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
 
         // If none were added because they existed, return the existing ids for the requested names
         if (addedIds.Count == 0)
@@ -513,7 +513,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
             if (existing == null)
             {
                 FilamentType ft = new FilamentType { Id = Guid.NewGuid(), Name = name, IsActive = true };
-                db.FilamentTypes.Add(ft);
+                _ = db.FilamentTypes.Add(ft);
                 addedIds.Add(ft.Id);
             }
             else
@@ -521,7 +521,7 @@ public class OrcaBundleIntegrationTests : IClassFixture<CustomWebApplicationFact
                 addedIds.Add(existing.Id);
             }
         }
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
 
         return addedIds.ToArray();
     }

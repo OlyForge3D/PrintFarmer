@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Services;
 /// Handles database initialization with retry logic for resilient startup
 /// </summary>
 
-public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger) : Farm.Web.Api.Services.Interfaces.IDatabaseInitializer
+public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService logger) : IDatabaseInitializer
 {
     private readonly AppDbContext _context = context;
     private readonly IUnifiedLoggingService _logger = logger;
@@ -331,7 +331,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
             {
                 _ = await _context.SaveChangesAsync();
             }
-            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
             {
                 _logger.LogWarning(ex, "Ignored unique constraint violation while seeding model-filament relationships; another process probably inserted the same records.");
             }
@@ -374,7 +374,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         {
             _ = await _context.SaveChangesAsync();
         }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
             _logger.LogWarning(ex, "Ignored unique constraint violation while seeding filament types; another process probably inserted the same records.");
         }

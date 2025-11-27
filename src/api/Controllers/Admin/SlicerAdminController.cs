@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 public partial class SlicerAdminController : ControllerBase
 {
     [HttpPost("dryrun")]
-    public ActionResult<Farm.Web.Shared.Contracts.Admin.DryRunResult> DryRun([FromBody] Farm.Web.Shared.Contracts.Admin.DryRunRequest request)
+    public ActionResult<DryRunResult> DryRun([FromBody] DryRunRequest request)
     {
         if (request == null)
         {
@@ -25,7 +25,7 @@ public partial class SlicerAdminController : ControllerBase
         Regex rx = MyRegex();
         MatchCollection matches = rx.Matches(template);
         HashSet<string> placeholders = new(StringComparer.OrdinalIgnoreCase);
-        foreach (System.Text.RegularExpressions.Match m in matches)
+        foreach (Match m in matches)
         {
             if (m.Success && m.Groups.Count > 1)
             {
@@ -33,7 +33,7 @@ public partial class SlicerAdminController : ControllerBase
             }
         }
 
-        DryRunResult result = new Farm.Web.Shared.Contracts.Admin.DryRunResult();
+        DryRunResult result = new DryRunResult();
 
         // Known placeholders we support
         string[] known = new[] { "input", "output", "config", "profile" };
@@ -84,6 +84,6 @@ public partial class SlicerAdminController : ControllerBase
         return Ok(result);
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex("\\{([a-zA-Z0-9_]+)\\}")]
-    private static partial System.Text.RegularExpressions.Regex MyRegex();
+    [GeneratedRegex("\\{([a-zA-Z0-9_]+)\\}")]
+    private static partial Regex MyRegex();
 }

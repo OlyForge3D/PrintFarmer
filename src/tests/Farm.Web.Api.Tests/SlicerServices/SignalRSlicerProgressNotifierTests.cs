@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Tests.SlicerServices;
 /// </summary>
 public class SignalRSlicerProgressNotifierTests
 {
-    private readonly Mock<IHubContext<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>> _mockHubContext;
+    private readonly Mock<IHubContext<SlicerProgressHub>> _mockHubContext;
     private readonly Mock<IHubClients> _mockClients;
     private readonly Mock<IClientProxy> _mockClientProxy;
     private readonly Mock<IGroupManager> _mockGroupManager;
@@ -20,19 +20,19 @@ public class SignalRSlicerProgressNotifierTests
 
     public SignalRSlicerProgressNotifierTests()
     {
-        _mockHubContext = new Mock<IHubContext<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>>();
+        _mockHubContext = new Mock<IHubContext<SlicerProgressHub>>();
         _mockClients = new Mock<IHubClients>();
         _mockClientProxy = new Mock<IClientProxy>();
         _mockGroupManager = new Mock<IGroupManager>();
         _testLogger = new TestLoggingService();
 
         // Setup hub context
-        _mockHubContext.Setup(h => h.Clients).Returns(_mockClients.Object);
-        _mockHubContext.Setup(h => h.Groups).Returns(_mockGroupManager.Object);
+        _ = _mockHubContext.Setup(h => h.Clients).Returns(_mockClients.Object);
+        _ = _mockHubContext.Setup(h => h.Groups).Returns(_mockGroupManager.Object);
 
         // Setup clients to return mock proxies
-        _mockClients.Setup(c => c.Clients(It.IsAny<IReadOnlyList<string>>())).Returns(_mockClientProxy.Object);
-        _mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(_mockClientProxy.Object);
+        _ = _mockClients.Setup(c => c.Clients(It.IsAny<IReadOnlyList<string>>())).Returns(_mockClientProxy.Object);
+        _ = _mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(_mockClientProxy.Object);
 
         _notifier = new SignalRSlicerProgressNotifier(_mockHubContext.Object, _testLogger);
     }
@@ -365,7 +365,7 @@ public class SignalRSlicerProgressNotifierTests
         await Task.WhenAll(tasks);
 
         // Assert - No exceptions should be thrown
-        tasks.All(t => t.IsCompletedSuccessfully).Should().BeTrue();
+        _ = tasks.All(t => t.IsCompletedSuccessfully).Should().BeTrue();
     }
 
     [Theory]
@@ -404,7 +404,7 @@ public class SignalRSlicerProgressNotifierTests
     public async Task Constructor_NullHubContext_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() =>
+        _ = Assert.Throws<ArgumentNullException>(() =>
             new SignalRSlicerProgressNotifier(null!, _testLogger));
     }
 
@@ -412,7 +412,7 @@ public class SignalRSlicerProgressNotifierTests
     public async Task Constructor_NullLogger_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() =>
+        _ = Assert.Throws<ArgumentNullException>(() =>
             new SignalRSlicerProgressNotifier(_mockHubContext.Object, null!));
     }
 

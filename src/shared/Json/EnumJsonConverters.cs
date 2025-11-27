@@ -43,7 +43,7 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
             return (PrinterBackend)num;
         }
         // case-insensitive name match
-        if (Enum.TryParse<PrinterBackend>(value, ignoreCase: true, out PrinterBackend parsed))
+        if (Enum.TryParse(value, ignoreCase: true, out PrinterBackend parsed))
         {
             return parsed;
         }
@@ -92,7 +92,7 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
         {
             return (PrintJobStatus)num;
         }
-        if (Enum.TryParse<PrintJobStatus>(value, ignoreCase: true, out PrintJobStatus parsed))
+        if (Enum.TryParse(value, ignoreCase: true, out PrintJobStatus parsed))
         {
             return parsed;
         }

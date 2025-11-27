@@ -147,7 +147,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             image.Mutate(ctx =>
             {
                 // Transparent background
-                ctx.Fill(new Color(new Rgba32(0, 0, 0, 0)));
+                _ = ctx.Fill(new Color(new Rgba32(0, 0, 0, 0)));
 
                 // Calculate bounds
                 Vector3 size = maxBounds - minBounds;
@@ -209,7 +209,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                         try
                         {
                             // Draw filled triangle
-                            ctx.FillPolygon(triangleColor, p0, p1, p2);
+                            _ = ctx.FillPolygon(triangleColor, p0, p1, p2);
 
                             // Draw subtle outline for edge definition
                             byte outlineR = (byte)(r * 0.6);
@@ -217,7 +217,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                             byte outlineB = (byte)(b * 0.6);
                             Color outlineColor = new Color(new Rgba32(outlineR, outlineG, outlineB, 255));
                             SolidPen outlinePen = Pens.Solid(outlineColor, 0.3f);
-                            ctx.DrawPolygon(outlinePen, p0, p1, p2);
+                            _ = ctx.DrawPolygon(outlinePen, p0, p1, p2);
                         }
                         catch
                         {
@@ -261,7 +261,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             using Image<Rgba32> image = new Image<Rgba32>(width, height);
             image.Mutate(ctx =>
             {
-                ctx.Fill(new Color(new Rgba32(255, 100, 100, 128))); // Semi-transparent red for errors
+                _ = ctx.Fill(new Color(new Rgba32(255, 100, 100, 128))); // Semi-transparent red for errors
             });
 
             image.SaveAsPng(outputPath);

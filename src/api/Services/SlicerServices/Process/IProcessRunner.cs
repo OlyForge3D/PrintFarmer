@@ -4,8 +4,8 @@ namespace Farm.Web.Api.Services.SlicerServices.Process;
 
 public interface IProcessHandle
 {
-    System.IO.StreamReader StandardOutput { get; }
-    System.IO.StreamReader StandardError { get; }
+    StreamReader StandardOutput { get; }
+    StreamReader StandardError { get; }
     bool HasExited { get; }
     int ExitCode { get; }
     Task<int> WaitForExitAsync(CancellationToken cancellationToken);

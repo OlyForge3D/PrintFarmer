@@ -182,7 +182,7 @@ public static class PrinterExpressionParser
             StringBuilder pattern = new StringBuilder();
             while (!Peek("/") && _position < _expression.Length)
             {
-                pattern.Append(_expression[_position++]);
+                _ = pattern.Append(_expression[_position++]);
             }
             Consume('/');
             return pattern.ToString();
@@ -199,7 +199,7 @@ public static class PrinterExpressionParser
                 StringBuilder value = new StringBuilder();
                 while (!Peek('"') && _position < _expression.Length)
                 {
-                    value.Append(_expression[_position++]);
+                    _ = value.Append(_expression[_position++]);
                 }
                 Consume('"');
                 return value.ToString();
@@ -220,7 +220,7 @@ public static class PrinterExpressionParser
             StringBuilder id = new StringBuilder();
             while (_position < _expression.Length && (char.IsLetterOrDigit(_expression[_position]) || _expression[_position] == '_' || _expression[_position] == '.'))
             {
-                id.Append(_expression[_position++]);
+                _ = id.Append(_expression[_position++]);
             }
             return id.ToString();
         }
@@ -230,12 +230,12 @@ public static class PrinterExpressionParser
             StringBuilder num = new StringBuilder();
             if (Peek('-'))
             {
-                num.Append(_expression[_position++]);
+                _ = num.Append(_expression[_position++]);
             }
 
             while (_position < _expression.Length && (char.IsDigit(_expression[_position]) || _expression[_position] == '.'))
             {
-                num.Append(_expression[_position++]);
+                _ = num.Append(_expression[_position++]);
             }
             return num.ToString();
         }

@@ -30,9 +30,9 @@ public class PasswordPolicyService : IPasswordPolicyService
         };
     }
 
-    public async Task<PasswordPolicyDto> UpdateAsync(Shared.UpdatePasswordPolicyRequest request, CancellationToken ct = default)
+    public async Task<PasswordPolicyDto> UpdateAsync(UpdatePasswordPolicyRequest request, CancellationToken ct = default)
     {
-        PasswordPolicyEntity entity = await _repo.GetAsync(ct) ?? new Farm.Infrastructure.Domain.PasswordPolicyEntity();
+        PasswordPolicyEntity entity = await _repo.GetAsync(ct) ?? new PasswordPolicyEntity();
         if (request.MinLength.HasValue)
         {
             entity.MinLength = request.MinLength.Value;

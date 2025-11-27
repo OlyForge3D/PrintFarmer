@@ -171,9 +171,9 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         };
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(async () =>
+        _ = await Assert.ThrowsAsync<ArgumentException>(async () =>
         {
-            await orchestrator.SubmitJobAsync(request);
+            _ = await orchestrator.SubmitJobAsync(request);
         });
     }
 }

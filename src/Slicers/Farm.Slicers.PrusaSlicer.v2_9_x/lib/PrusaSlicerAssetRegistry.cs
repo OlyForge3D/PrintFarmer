@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using System.Diagnostics;
 
 namespace Farm.Slicers.PrusaSlicer.v2_9_x.lib;
 
@@ -33,7 +34,7 @@ public class PrusaSlicerAssetRegistry : ISlicerAssetRegistry
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Failed to load PrusaSlicer asset manifest: {ex.Message}");
+            Debug.WriteLine($"Failed to load PrusaSlicer asset manifest: {ex.Message}");
             return new Dictionary<string, object>();
         }
     }

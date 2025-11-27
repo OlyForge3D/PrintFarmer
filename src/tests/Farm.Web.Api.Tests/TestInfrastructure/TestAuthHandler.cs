@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
         // this adapter we'd need to upgrade the ASP.NET packages to a version that supports
         // TimeProvider in the base constructor.
 #pragma warning disable CS0618
-        private sealed class TimeProviderSystemClock : Microsoft.AspNetCore.Authentication.ISystemClock
+        private sealed class TimeProviderSystemClock : ISystemClock
         {
             private readonly TimeProvider _tp;
             public TimeProviderSystemClock(TimeProvider tp) => _tp = tp ?? TimeProvider.System;

@@ -47,20 +47,20 @@ namespace Farm.Infrastructure.Repositories.Tags
         {
             ArgumentNullException.ThrowIfNull(tag);
 
-            await _dbContext.Model3DTags.AddAsync(tag, ct);
+            _ = await _dbContext.Model3DTags.AddAsync(tag, ct);
         }
 
         public async Task RemoveAsync(Model3DTag tag, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(tag);
 
-            _dbContext.Model3DTags.Remove(tag);
+            _ = _dbContext.Model3DTags.Remove(tag);
             await Task.CompletedTask; // Repository pattern consistency
         }
 
         public async Task SaveChangesAsync(CancellationToken ct)
         {
-            await _dbContext.SaveChangesAsync(ct);
+            _ = await _dbContext.SaveChangesAsync(ct);
         }
     }
 }

@@ -56,7 +56,7 @@ namespace Farm.Web.Api.Services.Slicing
                 throw new ArgumentException("Raw JSON is required", nameof(request));
             }
 
-            if (!Enum.TryParse<SlicerType>(request.SlicerType, ignoreCase: true, out SlicerType slicerType))
+            if (!Enum.TryParse(request.SlicerType, ignoreCase: true, out SlicerType slicerType))
             {
                 throw new ArgumentException($"Invalid slicer type: {request.SlicerType}", nameof(request));
             }
@@ -176,7 +176,7 @@ namespace Farm.Web.Api.Services.Slicing
                 _logger.LogWarning(ex, "Failed to extract profile defaults from metadata");
             }
 
-            ProfileQuality parsedQuality = Enum.TryParse<ProfileQuality>(quality, ignoreCase: true, out ProfileQuality q)
+            ProfileQuality parsedQuality = Enum.TryParse(quality, ignoreCase: true, out ProfileQuality q)
                 ? q
                 : ProfileQuality.Standard;
 

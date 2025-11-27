@@ -6,7 +6,7 @@ public interface IMoonrakerDiagnosticsService
 {
     Task<FileRoot[]?> GetFileRootsAsync(string url);
 
-    Task<Farm.Web.Api.Services.DirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes");
+    Task<DirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes");
 
     Task<MoonrakerFileInfo[]?> GetDetailedFileListAsync(string url, string root = "gcodes", string? path = null);
 }

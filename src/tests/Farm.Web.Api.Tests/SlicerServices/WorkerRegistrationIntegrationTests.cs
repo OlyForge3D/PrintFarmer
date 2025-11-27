@@ -56,7 +56,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", content);
 
         // Assert - Registration succeeded
-        registerResponse.Should().BeSuccessful();
+        _ = registerResponse.Should().BeSuccessful();
         string registerResult = await registerResponse.Content.ReadAsStringAsync();
         _output.WriteLine($"Registration result: {registerResult}");
 
@@ -65,9 +65,9 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             PropertyNameCaseInsensitive = true
         });
 
-        registrationResponse.Should().NotBeNull();
-        registrationResponse!.Id.Should().NotBeEmpty();
-        registrationResponse.ApiKey.Should().NotBeNullOrEmpty();
+        _ = registrationResponse.Should().NotBeNull();
+        _ = registrationResponse!.Id.Should().NotBeEmpty();
+        _ = registrationResponse.ApiKey.Should().NotBeNullOrEmpty();
 
         _output.WriteLine($"Worker registered with ID: {registrationResponse.Id}");
 
@@ -75,7 +75,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         HttpResponseMessage listResponse = await client.GetAsync("/api/slicers");
 
         // Assert - Worker appears in list
-        listResponse.Should().BeSuccessful();
+        _ = listResponse.Should().BeSuccessful();
         string listJson = await listResponse.Content.ReadAsStringAsync();
         _output.WriteLine($"Workers list: {listJson}");
 
@@ -84,8 +84,8 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             PropertyNameCaseInsensitive = true
         });
 
-        workers.Should().NotBeNull();
-        workers.Should().Contain(w => w.Id == registrationResponse.Id && w.Name == "test-orca-worker");
+        _ = workers.Should().NotBeNull();
+        _ = workers.Should().Contain(w => w.Id == registrationResponse.Id && w.Name == "test-orca-worker");
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             PropertyNameCaseInsensitive = true
         });
 
-        registration.Should().NotBeNull();
+        _ = registration.Should().NotBeNull();
         _output.WriteLine($"Registered worker: {registration!.Id}");
 
         // Act - Send heartbeat
@@ -132,12 +132,12 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         HttpResponseMessage heartbeatResponse = await client.PostAsync($"/api/slicers/{registration.Id}/heartbeat", heartbeatContent);
 
         // Assert - Heartbeat succeeded
-        heartbeatResponse.Should().BeSuccessful();
+        _ = heartbeatResponse.Should().BeSuccessful();
         _output.WriteLine("Heartbeat sent successfully");
 
         // Verify worker status was updated
         HttpResponseMessage getResponse = await client.GetAsync($"/api/slicers/{registration.Id}");
-        getResponse.Should().BeSuccessful();
+        _ = getResponse.Should().BeSuccessful();
 
         string workerJson = await getResponse.Content.ReadAsStringAsync();
         SlicerServiceDto? worker = JsonSerializer.Deserialize<SlicerServiceDto>(workerJson, new JsonSerializerOptions
@@ -145,8 +145,8 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             PropertyNameCaseInsensitive = true
         });
 
-        worker.Should().NotBeNull();
-        worker!.Status.Should().Be("Busy");
+        _ = worker.Should().NotBeNull();
+        _ = worker!.Status.Should().Be("Busy");
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             PropertyNameCaseInsensitive = true
         });
 
-        registration.Should().NotBeNull();
+        _ = registration.Should().NotBeNull();
         _output.WriteLine($"Registered worker: {registration!.Id}");
 
         // Act - Deregister
@@ -183,7 +183,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         HttpResponseMessage deregisterResponse = await client.PostAsync($"/api/slicers/{registration.Id}/deregister", null);
 
         // Assert - Deregistration succeeded
-        deregisterResponse.Should().BeSuccessful();
+        _ = deregisterResponse.Should().BeSuccessful();
         _output.WriteLine("Worker deregistered successfully");
 
         // Verify worker no longer appears in list
@@ -194,8 +194,8 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             PropertyNameCaseInsensitive = true
         });
 
-        workers.Should().NotBeNull();
-        workers.Should().NotContain(w => w.Id == registration.Id);
+        _ = workers.Should().NotBeNull();
+        _ = workers.Should().NotContain(w => w.Id == registration.Id);
     }
 
     private class RegistrationResult

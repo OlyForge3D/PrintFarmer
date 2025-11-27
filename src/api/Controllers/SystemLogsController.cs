@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Linq;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Microsoft.AspNetCore.Mvc;
@@ -8,9 +10,9 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/systemlogs")]
-public class SystemLogsController(Farm.Web.Api.Services.SystemLogs.ISystemLogService systemLogService) : ControllerBase
+public class SystemLogsController(Services.SystemLogs.ISystemLogService systemLogService) : ControllerBase
 {
-    private readonly Farm.Web.Api.Services.SystemLogs.ISystemLogService _service = systemLogService;
+    private readonly Services.SystemLogs.ISystemLogService _service = systemLogService;
 
     [HttpGet]
     public async Task<IActionResult> GetLogsAsync(
@@ -35,7 +37,7 @@ public class SystemLogsController(Farm.Web.Api.Services.SystemLogs.ISystemLogSer
         CancellationToken ct)
     {
         IReadOnlyList<SystemLog> logs = await _service.QueryAllLogsAsync(correlationId, level, from, to, metadata, ct);
-        string json = System.Text.Json.JsonSerializer.Serialize(logs);
-        return File(System.Text.Encoding.UTF8.GetBytes(json), "application/json", $"systemlogs_{DateTime.UtcNow:yyyyMMddHHmmss}.json");
+        string json = JsonSerializer.Serialize(logs);
+        return File(Encoding.UTF8.GetBytes(json), "application/json", $"systemlogs_{DateTime.UtcNow:yyyyMMddHHmmss}.json");
     }
 }

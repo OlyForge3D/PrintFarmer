@@ -1,4 +1,7 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Telemetry;
 
@@ -192,7 +195,7 @@ public class PrusaLinkApiClient
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/job").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        if (response.StatusCode == HttpStatusCode.NoContent)
         {
             return null;
         }
@@ -251,7 +254,7 @@ public class PrusaLinkApiClient
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/transfer").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        if (response.StatusCode == HttpStatusCode.NoContent)
         {
             return null;
         }
@@ -311,7 +314,7 @@ public class PrusaLinkApiClient
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), apiKey);
 
         request.Content = new StreamContent(fileStream);
-        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         request.Content.Headers.ContentLength = fileStream.Length;
 
         request.Headers.Add("Print-After-Upload", printAfterUpload ? "?1" : "?0");
@@ -372,7 +375,7 @@ public class PrusaLinkApiClient
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), apiKey);
         string jsonContent = JsonSerializer.Serialize(cameraIds, _jsonOptions);
-        request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+        request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -390,7 +393,7 @@ public class PrusaLinkApiClient
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), apiKey);
         string jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
-        request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+        request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -407,7 +410,7 @@ public class PrusaLinkApiClient
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras/snap").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        if (response.StatusCode == HttpStatusCode.NoContent)
         {
             return null;
         }
@@ -421,7 +424,7 @@ public class PrusaLinkApiClient
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        if (response.StatusCode == HttpStatusCode.NoContent)
         {
             return null;
         }
@@ -433,7 +436,7 @@ public class PrusaLinkApiClient
     public async Task<byte[]?> TriggerSnapshotAsync(string baseUrl, string cameraId, string? apiKey = null, CancellationToken ct = default)
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), apiKey);
-        request.Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
         if (!response.IsSuccessStatusCode)
@@ -448,7 +451,7 @@ public class PrusaLinkApiClient
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Patch, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), apiKey);
         string jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
-        request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+        request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
     }
@@ -480,7 +483,7 @@ public class PrusaLinkApiClient
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        if (response.StatusCode == HttpStatusCode.NoContent)
         {
             bool updateAvailable = response.Headers.Contains("Update-Available") &&
                 response.Headers.GetValues("Update-Available").FirstOrDefault() == "true";

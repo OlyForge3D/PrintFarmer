@@ -48,7 +48,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
 
             // Remove failures outside the window
             DateTime cutoff = DateTime.UtcNow.AddSeconds(-_settings.WindowSeconds);
-            state.RecentFailures.RemoveAll(t => t < cutoff);
+            _ = state.RecentFailures.RemoveAll(t => t < cutoff);
 
             failureCount = state.RecentFailures.Count;
 

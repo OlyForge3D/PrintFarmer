@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.SlicerServices;
@@ -11,13 +12,13 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/settings")]
 public class UnifiedSettingsController : ControllerBase
 {
-    private readonly Farm.Infrastructure.Settings.ISettingsService _modularSettingsService;
+    private readonly ISettingsService _modularSettingsService;
     private readonly IConfiguration _config;
     private readonly Dictionary<string, string> _keyNameToClassNameMap;
     private readonly ILogger<UnifiedSettingsController> _logger;
 
     public UnifiedSettingsController(
-        Farm.Infrastructure.Settings.ISettingsService modularSettingsService,
+        ISettingsService modularSettingsService,
         IConfiguration config,
         ILogger<UnifiedSettingsController> logger)
     {
@@ -64,9 +65,9 @@ public class UnifiedSettingsController : ControllerBase
             _logger.LogDebug("Settings POST: Raw payload object: {@SettingsSections}", settingsSections);
             Dictionary<string, Type> keyToType = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
-                .Where(t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<Farm.Infrastructure.Settings.AppSettingAttribute>(t) != null)
+                .Where(t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<AppSettingAttribute>(t) != null)
                 .ToDictionary(
-                    t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<Farm.Infrastructure.Settings.AppSettingAttribute>(t)!.Key,
+                    t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<AppSettingAttribute>(t)!.Key,
                     t => t
                 );
 
@@ -86,12 +87,12 @@ public class UnifiedSettingsController : ControllerBase
                     _logger.LogDebug("Settings POST: Deserializing section '{Key}' with type {Type}", key, settingsType);
                     try
                     {
-                        object? typedSettings = System.Text.Json.JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
+                        object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
                         _logger.LogDebug("Settings POST: Deserialized object for '{Key}': {@TypedSettings}", key, typedSettings);
                         if (typedSettings != null)
                         {
                             // Verify the type implements IAppSetting (required for Save<T>)
-                            if (!typeof(Farm.Infrastructure.Settings.IAppSetting).IsAssignableFrom(settingsType))
+                            if (!typeof(IAppSetting).IsAssignableFrom(settingsType))
                             {
                                 _logger.LogError("Settings POST: Type '{Type}' does not implement IAppSetting and cannot be saved to database", settingsType.Name);
                                 throw new InvalidOperationException($"Settings type '{settingsType.Name}' does not implement IAppSetting");
@@ -125,7 +126,7 @@ public class UnifiedSettingsController : ControllerBase
                                     return BadRequest(new { message = $"Validation failed for section '{key}'", errors });
                                 }
                             }
-                            System.Reflection.MethodInfo? saveMethod = typeof(Farm.Infrastructure.Settings.ISettingsService).GetMethod("Save");
+                            System.Reflection.MethodInfo? saveMethod = typeof(ISettingsService).GetMethod("Save");
                             if (saveMethod != null)
                             {
                                 try
@@ -258,7 +259,7 @@ public class UnifiedSettingsController : ControllerBase
             }
 
             // Get current discovery settings
-            NetworkDiscoverySettings? currentSettings = _modularSettingsService.GetByKey(keyName) as Farm.Infrastructure.Settings.NetworkDiscoverySettings;
+            NetworkDiscoverySettings? currentSettings = _modularSettingsService.GetByKey(keyName) as NetworkDiscoverySettings;
             if (currentSettings == null)
             {
                 _logger.LogWarning("Failed to get NetworkDiscoverySettings for heartbeat");
@@ -356,13 +357,13 @@ public class UnifiedSettingsController : ControllerBase
             Type settingsType = currentSettings.GetType();
 
             // Deserialize the JSON to the correct type
-            object? typedSettings = System.Text.Json.JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
+            object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
             if (typedSettings != null)
             {
                 // Save using the modular service
                 await Task.Run(() =>
                 {
-                    System.Reflection.MethodInfo? saveMethod = typeof(Farm.Infrastructure.Settings.ISettingsService).GetMethod("Save");
+                    System.Reflection.MethodInfo? saveMethod = typeof(ISettingsService).GetMethod("Save");
                     if (saveMethod != null)
                     {
                         System.Reflection.MethodInfo genericSaveMethod = saveMethod.MakeGenericMethod(settingsType);

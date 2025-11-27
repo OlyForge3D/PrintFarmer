@@ -25,25 +25,25 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GetPrinterAsync_ReturnsPrinter_WhenFound()
         {
             Guid id = Guid.NewGuid();
-            Mock<IPrintersRepository> repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
-            Printer expected = new Farm.Infrastructure.Domain.Printer { Id = id, Name = "TestPrinter" };
-            repoMock.Setup(r => r.FindByIdWithIncludesAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+            Mock<IPrintersRepository> repoMock = new Mock<IPrintersRepository>();
+            Printer expected = new Printer { Id = id, Name = "TestPrinter" };
+            _ = repoMock.Setup(r => r.FindByIdWithIncludesAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             Mock<IMoonrakerClient> moonMock = new Mock<IMoonrakerClient>();
             Mock<IPrusaLinkClient> prusaMock = new Mock<IPrusaLinkClient>();
             Mock<ISdcpClient> sdcpMock = new Mock<ISdcpClient>();
             Mock<IOctoPrintClient> octoMock = new Mock<IOctoPrintClient>();
-            Mock<ICircuitBreakerService> circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
-            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
-            Mock<ICatalogService> catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
-            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
-            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
-            Mock<IUnifiedLoggingService> loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
+            Mock<ICircuitBreakerService> circuitMock = new Mock<ICircuitBreakerService>();
+            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<IPrinterCapabilityDiscoveryService>();
+            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<IDefaultCatalogService>();
+            Mock<ICatalogService> catalogMock = new Mock<ICatalogService>();
+            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<IHttpClientFactory>();
+            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<INetworkUrlRewriteService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
+            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<IHubContext<PrinterHub>>();
 
             // Provide a real AutoMapper instance for mapping dependencies
-            MapperConfiguration mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
 
             PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
@@ -59,23 +59,23 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GetPrinterAsync_ReturnsNull_WhenNotFound()
         {
             Guid id = Guid.NewGuid();
-            Mock<IPrintersRepository> repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
-            repoMock.Setup(r => r.FindByIdWithIncludesAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.Printer?)null);
+            Mock<IPrintersRepository> repoMock = new Mock<IPrintersRepository>();
+            _ = repoMock.Setup(r => r.FindByIdWithIncludesAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Printer?)null);
 
             Mock<IMoonrakerClient> moonMock = new Mock<IMoonrakerClient>();
             Mock<IPrusaLinkClient> prusaMock = new Mock<IPrusaLinkClient>();
             Mock<ISdcpClient> sdcpMock = new Mock<ISdcpClient>();
             Mock<IOctoPrintClient> octoMock = new Mock<IOctoPrintClient>();
-            Mock<ICircuitBreakerService> circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
-            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
-            Mock<ICatalogService> catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
-            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
-            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
-            Mock<IUnifiedLoggingService> loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
+            Mock<ICircuitBreakerService> circuitMock = new Mock<ICircuitBreakerService>();
+            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<IPrinterCapabilityDiscoveryService>();
+            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<IDefaultCatalogService>();
+            Mock<ICatalogService> catalogMock = new Mock<ICatalogService>();
+            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<IHttpClientFactory>();
+            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<INetworkUrlRewriteService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
+            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<IHubContext<PrinterHub>>();
 
-            MapperConfiguration mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
 
             PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
@@ -200,21 +200,21 @@ namespace Farm.Web.Api.Tests.Services
 
         private static PrintersService CreatePrintersService()
         {
-            Mock<IPrintersRepository> repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
+            Mock<IPrintersRepository> repoMock = new Mock<IPrintersRepository>();
             Mock<IMoonrakerClient> moonMock = new Mock<IMoonrakerClient>();
             Mock<IPrusaLinkClient> prusaMock = new Mock<IPrusaLinkClient>();
             Mock<ISdcpClient> sdcpMock = new Mock<ISdcpClient>();
             Mock<IOctoPrintClient> octoMock = new Mock<IOctoPrintClient>();
-            Mock<ICircuitBreakerService> circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
-            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
-            Mock<ICatalogService> catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
-            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
-            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
-            Mock<IUnifiedLoggingService> loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
+            Mock<ICircuitBreakerService> circuitMock = new Mock<ICircuitBreakerService>();
+            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<IPrinterCapabilityDiscoveryService>();
+            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<IDefaultCatalogService>();
+            Mock<ICatalogService> catalogMock = new Mock<ICatalogService>();
+            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<IHttpClientFactory>();
+            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<INetworkUrlRewriteService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
+            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<IHubContext<PrinterHub>>();
 
-            MapperConfiguration mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
 
             return new PrintersService(

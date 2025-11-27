@@ -19,7 +19,7 @@ public static class DatabaseInitializationExtensions
     public static async Task InitializeDatabaseAsync(this WebApplication app,
         IUnifiedLoggingService logger,
         AppDbContext db,
-        Farm.Web.Api.Services.Interfaces.IDatabaseInitializer dbInitializer,
+        IDatabaseInitializer dbInitializer,
         IStartupStatus startupStatus)
     {
         // Get startup timeout from environment (default: 120 seconds)

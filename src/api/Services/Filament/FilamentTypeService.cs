@@ -17,17 +17,17 @@ namespace Farm.Web.Api.Services.Filament
     public class FilamentTypeService : IFilamentTypeService
     {
         private readonly IFilamentTypeRepository _repo;
-        private readonly Farm.Web.Api.Services.Interfaces.IStartupStatus _startupStatus;
+        private readonly IStartupStatus _startupStatus;
         private readonly ISpoolmanService _spoolmanService;
 
-        public FilamentTypeService(IFilamentTypeRepository repo, Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus, ISpoolmanService spoolmanService)
+        public FilamentTypeService(IFilamentTypeRepository repo, IStartupStatus startupStatus, ISpoolmanService spoolmanService)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
             _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
         }
 
-        public async Task<IReadOnlyList<Shared.FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct)
+        public async Task<IReadOnlyList<FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct)
         {
             if (!_startupStatus.IsReady)
             {
@@ -37,7 +37,7 @@ namespace Farm.Web.Api.Services.Filament
             return await _repo.GetFilamentTypesAsync(ct);
         }
 
-        public async Task<Shared.FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct)
+        public async Task<FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct)
         {
             if (!_startupStatus.IsReady)
             {
@@ -47,7 +47,7 @@ namespace Farm.Web.Api.Services.Filament
             return await _repo.GetFilamentPresetsAsync(ct);
         }
 
-        public async Task<Shared.FilamentTypeDto> CreateFilamentTypeAsync(Shared.CreateFilamentTypeRequest req, CancellationToken ct)
+        public async Task<FilamentTypeDto> CreateFilamentTypeAsync(CreateFilamentTypeRequest req, CancellationToken ct)
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Name))
             {
@@ -70,10 +70,10 @@ namespace Farm.Web.Api.Services.Filament
             };
             await _repo.AddFilamentTypeAsync(filamentType, ct);
             await _repo.SaveChangesAsync(ct);
-            return new Shared.FilamentTypeDto(filamentType.Id, filamentType.Name, new Shared.TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp));
+            return new FilamentTypeDto(filamentType.Id, filamentType.Name, new TempTargets(filamentType.DefaultHotendTemp, filamentType.DefaultBedTemp));
         }
 
-        public async Task UpdateFilamentTypeAsync(Guid id, Shared.UpdateFilamentTypeRequest req, CancellationToken ct)
+        public async Task UpdateFilamentTypeAsync(Guid id, UpdateFilamentTypeRequest req, CancellationToken ct)
         {
             if (req is null)
             {
@@ -111,17 +111,17 @@ namespace Farm.Web.Api.Services.Filament
             await _repo.SaveChangesAsync(ct);
         }
 
-        public async Task SaveFilamentPresetsAsync(Shared.FilamentPresetsDto presets, CancellationToken ct)
+        public async Task SaveFilamentPresetsAsync(FilamentPresetsDto presets, CancellationToken ct)
         {
             if (presets?.Presets == null)
             {
                 throw new ArgumentException("Presets are required", nameof(presets));
             }
 
-            foreach (KeyValuePair<string, Shared.TempTargets> kvp in presets.Presets)
+            foreach (KeyValuePair<string, TempTargets> kvp in presets.Presets)
             {
                 string name = kvp.Key.Trim();
-                Shared.TempTargets tempTargets = kvp.Value;
+                TempTargets tempTargets = kvp.Value;
                 // use repository to load or create
                 FilamentType? filamentType = await _repo.GetByNameAsync(name, ct);
                 if (filamentType == null)
@@ -146,22 +146,22 @@ namespace Farm.Web.Api.Services.Filament
             await _repo.SaveChangesAsync(ct);
         }
 
-        public async Task<Shared.SpoolmanFilamentImportResult> ImportFromSpoolmanAsync(CancellationToken ct)
+        public async Task<SpoolmanFilamentImportResult> ImportFromSpoolmanAsync(CancellationToken ct)
         {
             if (!_startupStatus.IsReady)
             {
                 throw new InvalidOperationException("System is still initializing");
             }
 
-            if (_spoolmanService.GetConfig() is not Shared.SpoolmanConfigDto config || string.IsNullOrWhiteSpace(config.BaseUrl))
+            if (_spoolmanService.GetConfig() is not SpoolmanConfigDto config || string.IsNullOrWhiteSpace(config.BaseUrl))
             {
                 throw new InvalidOperationException("Spoolman is not configured");
             }
 
-            IReadOnlyList<Shared.SpoolmanMaterialDto> materials = await _spoolmanService.ListMaterialsAsync(ct);
+            IReadOnlyList<SpoolmanMaterialDto> materials = await _spoolmanService.ListMaterialsAsync(ct);
 
             HashSet<string> uniqueMaterials = new(StringComparer.OrdinalIgnoreCase);
-            foreach (Shared.SpoolmanMaterialDto material in materials)
+            foreach (SpoolmanMaterialDto material in materials)
             {
                 if (!string.IsNullOrWhiteSpace(material.Name))
                 {
@@ -201,7 +201,7 @@ namespace Farm.Web.Api.Services.Filament
 
             await _repo.SaveChangesAsync(ct);
 
-            return new Shared.SpoolmanFilamentImportResult(
+            return new SpoolmanFilamentImportResult(
                 ImportedCount: importedCount,
                 SkippedCount: skippedCount,
                 TotalSpoolmanMaterials: uniqueMaterials.Count,

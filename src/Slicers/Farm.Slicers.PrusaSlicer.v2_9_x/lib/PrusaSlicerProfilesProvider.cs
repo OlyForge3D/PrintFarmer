@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using System.Diagnostics;
 
 namespace Farm.Slicers.PrusaSlicer.v2_9_x.lib;
 
@@ -34,7 +35,7 @@ public class PrusaSlicerProfilesProvider : ISlicerProfilesProvider
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Failed to load PrusaSlicer official profiles: {ex.Message}");
+            Debug.WriteLine($"Failed to load PrusaSlicer official profiles: {ex.Message}");
             return new Dictionary<string, object>();
         }
     }

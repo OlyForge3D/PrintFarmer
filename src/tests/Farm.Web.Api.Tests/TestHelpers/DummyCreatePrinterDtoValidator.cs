@@ -3,7 +3,7 @@ using FluentValidation;
 
 namespace Farm.Web.Api.Tests.TestHelpers;
 
-public class DummyCreatePrinterDtoValidator : FluentValidation.AbstractValidator<Farm.Web.Shared.CreatePrinterDto>
+public class DummyCreatePrinterDtoValidator : AbstractValidator<CreatePrinterDto>
 {
     public DummyCreatePrinterDtoValidator()
     {

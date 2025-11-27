@@ -1,5 +1,7 @@
 ﻿using System.Net;
 using System.Net.NetworkInformation;
+using System.Text;
+using System.Text.Json;
 using Farm.Shared.Discovery;
 using Farm.Web.Shared;
 
@@ -47,8 +49,8 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config = config ?? throw new ArgumentNullException(nameof(config));
 
-        _scanIntervalSeconds = _config.GetValue<int>("Discovery:ScanIntervalSeconds", 300); // 5 minutes default
-        _probeTimeoutMs = _config.GetValue<int>("Discovery:ProbeTimeoutMs", 200); // 200ms per probe
+        _scanIntervalSeconds = _config.GetValue("Discovery:ScanIntervalSeconds", 300); // 5 minutes default
+        _probeTimeoutMs = _config.GetValue("Discovery:ProbeTimeoutMs", 200); // 200ms per probe
     }
 
     /// <summary>
@@ -68,7 +70,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
             _logger.LogInformation("Scanning {IpCount} IP addresses across {SubnetCount} subnets", ipAddresses.Count, subnets.Length);
 
             // Use the core discovery service to probe all IPs
-            int maxConcurrent = _config.GetValue<int>("Discovery:MaxConcurrentProbes", 50);
+            int maxConcurrent = _config.GetValue("Discovery:MaxConcurrentProbes", 50);
             List<DiscoveredPrinterDto> discovered = await _coreDiscovery.DiscoverMultipleAsync(
                 ipAddresses,
                 _probeTimeoutMs,
@@ -207,11 +209,11 @@ public class ApiClient : IApiClient
         try
         {
             // Send discovered printer directly to API (single object, not array)
-            string json = System.Text.Json.JsonSerializer.Serialize(printer);
-            StringContent content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            string json = JsonSerializer.Serialize(printer);
+            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
             HttpResponseMessage response = await _httpClient.PostAsync("/api/printers/discovered", content, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            _ = response.EnsureSuccessStatusCode();
 
             _logger.LogDebug("Successfully registered printer with API");
         }

@@ -43,7 +43,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
             _settings.MaxAgeDays,
             _settings.MaxTotalBytes);
 
-        List<Artifact> candidatesForDeletion = new System.Collections.Generic.List<Farm.Infrastructure.Domain.Artifact>();
+        List<Artifact> candidatesForDeletion = new List<Artifact>();
 
         // Age-based cleanup: find artifacts older than MaxAgeDays
         if (_settings.MaxAgeDays.HasValue && _settings.MaxAgeDays.Value > 0)
@@ -134,7 +134,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
                 }
 
                 // Remove from database
-                _db.Artifacts.Remove(artifact);
+                _ = _db.Artifacts.Remove(artifact);
                 deletedCount++;
 
                 _logger.LogInformation(
@@ -152,7 +152,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
 
         if (deletedCount > 0)
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
             _logger.LogInformation("Successfully deleted {Count} artifacts", deletedCount);
         }
 

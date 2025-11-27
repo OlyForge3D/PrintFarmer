@@ -11,6 +11,6 @@ public interface ICatalogService
 
     Task<(IReadOnlyList<PrinterModelDto> list, string? etag)> GetModelsAsync(Guid? manufacturerId, CancellationToken ct);
     Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct);
-    Task<PrinterModelDto> CreateModelAsync(Farm.Web.Api.Controllers.Requests.CreateModelRequest req, CancellationToken ct);
-    Task<PrinterModelDto?> UpdateModelAsync(Guid id, Farm.Web.Api.Controllers.Requests.UpdateModelRequest req, CancellationToken ct);
+    Task<PrinterModelDto> CreateModelAsync(Controllers.Requests.CreateModelRequest req, CancellationToken ct);
+    Task<PrinterModelDto?> UpdateModelAsync(Guid id, Controllers.Requests.UpdateModelRequest req, CancellationToken ct);
 }

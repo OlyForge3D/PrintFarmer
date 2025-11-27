@@ -286,10 +286,10 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
         {
             parameters[prop.Key] = prop.Value switch
             {
-                JsonValue v when v.TryGetValue<string>(out string? str) => str,
-                JsonValue v when v.TryGetValue<long>(out long lng) => lng,
-                JsonValue v when v.TryGetValue<double>(out double dbl) => dbl,
-                JsonValue v when v.TryGetValue<bool>(out bool bln) => bln,
+                JsonValue v when v.TryGetValue(out string? str) => str,
+                JsonValue v when v.TryGetValue(out long lng) => lng,
+                JsonValue v when v.TryGetValue(out double dbl) => dbl,
+                JsonValue v when v.TryGetValue(out bool bln) => bln,
                 _ => prop.Value?.ToJsonString()
             };
         }
@@ -304,7 +304,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
         {
             if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<string>(out string? str))
+                if (value.TryGetValue(out string? str))
                 {
                     return str;
                 }
@@ -319,12 +319,12 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
         {
             if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<double>(out double dbl))
+                if (value.TryGetValue(out double dbl))
                 {
                     return dbl;
                 }
                 // Also handle string representations of numbers
-                if (value.TryGetValue<string>(out string? str) && double.TryParse(str, out dbl))
+                if (value.TryGetValue(out string? str) && double.TryParse(str, out dbl))
                 {
                     return dbl;
                 }
@@ -339,16 +339,16 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
         {
             if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<int>(out int intVal))
+                if (value.TryGetValue(out int intVal))
                 {
                     return intVal;
                 }
-                if (value.TryGetValue<long>(out long lng))
+                if (value.TryGetValue(out long lng))
                 {
                     return (int)lng;
                 }
                 // Handle string representations
-                if (value.TryGetValue<string>(out string? str) && int.TryParse(str, out intVal))
+                if (value.TryGetValue(out string? str) && int.TryParse(str, out intVal))
                 {
                     return intVal;
                 }
@@ -363,12 +363,12 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
         {
             if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<bool>(out bool bln))
+                if (value.TryGetValue(out bool bln))
                 {
                     return bln;
                 }
                 // Handle string representations ("true", "false", "1", "0")
-                if (value.TryGetValue<string>(out string? str))
+                if (value.TryGetValue(out string? str))
                 {
                     if (bool.TryParse(str, out bln))
                     {
@@ -385,7 +385,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                     }
                 }
                 // Handle numeric representations (1 = true, 0 = false)
-                if (value.TryGetValue<int>(out int intVal))
+                if (value.TryGetValue(out int intVal))
                 {
                     return intVal != 0;
                 }

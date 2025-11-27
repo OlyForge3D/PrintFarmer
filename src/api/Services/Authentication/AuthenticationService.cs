@@ -15,8 +15,8 @@ public class AuthenticationService(
     IPasswordHashingService passwordHashing,
     IConfiguration configuration,
     IUnifiedLoggingService logger,
-    Farm.Web.Api.Services.Email.IEmailService emailService,
-    Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
+    Email.IEmailService emailService,
+    IRateLimitService rateLimitService,
     IAccountLockoutService accountLockoutService,
     IAuthAuditService authAuditService) : IAuthenticationService
 {
@@ -27,8 +27,8 @@ public class AuthenticationService(
     private readonly IPasswordHashingService _passwordHashing = passwordHashing;
     private readonly IConfiguration _configuration = configuration;
     private readonly IUnifiedLoggingService _logger = logger;
-    private readonly Farm.Web.Api.Services.Email.IEmailService _emailService = emailService;
-    private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService = rateLimitService;
+    private readonly Email.IEmailService _emailService = emailService;
+    private readonly IRateLimitService _rateLimitService = rateLimitService;
     private readonly IAccountLockoutService _accountLockoutService = accountLockoutService;
     private readonly IAuthAuditService _authAuditService = authAuditService;
 

@@ -52,26 +52,26 @@ namespace Farm.Web.Api.Tests.SlicerServices
 
             // Act - register
             HttpResponseMessage resp = await client.PostAsync("/api/slicers/register", content);
-            resp.IsSuccessStatusCode.Should().BeTrue();
+            _ = resp.IsSuccessStatusCode.Should().BeTrue();
             string respBody = await resp.Content.ReadAsStringAsync();
             RegResponse? regResult = JsonSerializer.Deserialize<RegResponse>(respBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            regResult.Should().NotBeNull();
+            _ = regResult.Should().NotBeNull();
 
             // Query workers endpoint
             HttpResponseMessage workersResp = await client.GetAsync("/api/workers");
-            workersResp.IsSuccessStatusCode.Should().BeTrue();
+            _ = workersResp.IsSuccessStatusCode.Should().BeTrue();
             string workersJson = await workersResp.Content.ReadAsStringAsync();
-            workersJson.Should().Contain("dispatcher-worker-1");
+            _ = workersJson.Should().Contain("dispatcher-worker-1");
 
             // Validate Worker repository directly
             using IServiceScope scope = _factory.Services.CreateScope();
             IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
             Worker? worker = await workerRepo.GetByServiceIdAsync(regResult!.Id.ToString());
-            worker.Should().NotBeNull();
-            worker!.Name.Should().Be("dispatcher-worker-1");
-            worker.Status.Should().Be(WorkerStatus.Online);
-            worker.CapabilitiesJson.Should().Contain("orcaslicer");
-            worker.FreeSlots.Should().Be(2);
+            _ = worker.Should().NotBeNull();
+            _ = worker!.Name.Should().Be("dispatcher-worker-1");
+            _ = worker.Status.Should().Be(WorkerStatus.Online);
+            _ = worker.CapabilitiesJson.Should().Contain("orcaslicer");
+            _ = worker.FreeSlots.Should().Be(2);
         }
 
         [Fact(DisplayName = "Dispatcher selects registered worker with matching capability", Skip = "Integration host missing MeterProvider; covered by SlicersServiceWorkerSyncTests.")]
@@ -91,10 +91,10 @@ namespace Farm.Web.Api.Tests.SlicerServices
             string json = JsonSerializer.Serialize(registerDto);
             using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
             HttpResponseMessage resp = await client.PostAsync("/api/slicers/register", content);
-            resp.IsSuccessStatusCode.Should().BeTrue();
+            _ = resp.IsSuccessStatusCode.Should().BeTrue();
             string respBody = await resp.Content.ReadAsStringAsync();
             RegResponse? regResult = JsonSerializer.Deserialize<RegResponse>(respBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            regResult.Should().NotBeNull();
+            _ = regResult.Should().NotBeNull();
 
             // Create a queued slice job directly via repository
             using IServiceScope scope = _factory.Services.CreateScope();
@@ -117,10 +117,10 @@ namespace Farm.Web.Api.Tests.SlicerServices
             Worker? selected = await dispatcher.FindBestWorkerForJobAsync(job);
 
             // Assert
-            selected.Should().NotBeNull();
-            selected!.Name.Should().Be("dispatcher-worker-cap");
-            selected.CapabilitiesJson.Should().Contain("orcaslicer");
-            selected.Status.Should().Be(WorkerStatus.Online);
+            _ = selected.Should().NotBeNull();
+            _ = selected!.Name.Should().Be("dispatcher-worker-cap");
+            _ = selected.CapabilitiesJson.Should().Contain("orcaslicer");
+            _ = selected.Status.Should().Be(WorkerStatus.Online);
         }
 
         private class RegResponse

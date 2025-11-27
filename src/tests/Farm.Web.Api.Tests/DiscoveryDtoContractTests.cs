@@ -26,8 +26,8 @@ public class DiscoveryDtoContractTests
         );
 
         string json = JsonSerializer.Serialize(dto, _jsonOptions);
-        json.Should().Contain("\"networkRanges\"");
-        json.Should().Contain("\"autoDetectedNetworks\":true");
+        _ = json.Should().Contain("\"networkRanges\"");
+        _ = json.Should().Contain("\"autoDetectedNetworks\":true");
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class DiscoveryDtoContractTests
         );
 
         string json = JsonSerializer.Serialize(dto, _jsonOptions);
-        json.Should().Contain("\"networkRanges\"");
-        json.Should().Contain("\"autoDetectedNetworks\":false");
+        _ = json.Should().Contain("\"networkRanges\"");
+        _ = json.Should().Contain("\"autoDetectedNetworks\":false");
     }
 }

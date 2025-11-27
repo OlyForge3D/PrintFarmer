@@ -1,4 +1,6 @@
 ﻿using System;
+using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
@@ -22,8 +24,8 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
     public async Task SliceJob_E2E_Completion_Flow_With_Authorization()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
         Guid userId = Guid.NewGuid();
 
@@ -47,7 +49,7 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
         await jobRepo.SaveChangesAsync();
 
         // 3. Upload bulk artifacts (gcode, thumbnail, preview)
-        byte[] gcodeBytes = System.Text.Encoding.UTF8.GetBytes("; Example G-code\nG28\nG1 X10 Y10");
+        byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Example G-code\nG28\nG1 X10 Y10");
         byte[] thumbnailBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG header
         byte[] previewBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }; // JPEG header
 
@@ -74,31 +76,31 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
 
         // 6. Verify completion state
         SliceJob? completed = await jobRepo.GetByIdAsync(job.Id);
-        completed.Should().NotBeNull();
-        completed!.Status.Should().Be(SliceJobStatus.Completed);
-        completed.ArtifactsCount.Should().Be(4);
-        completed.ArtifactsTotalBytes.Should().BeGreaterThan(0);
-        completed.ArtifactIdsCsv.Should().NotBeNullOrEmpty();
-        completed.ArtifactIdsCsv!.Split(',').Should().HaveCount(4);
-        completed.ResultFileUrl.Should().Contain(gcode.Id.ToString());
-        completed.EstimatedPrintTimeSeconds.Should().Be(1500);
-        completed.FilamentUsedGrams.Should().Be(25.3m);
+        _ = completed.Should().NotBeNull();
+        _ = completed!.Status.Should().Be(SliceJobStatus.Completed);
+        _ = completed.ArtifactsCount.Should().Be(4);
+        _ = completed.ArtifactsTotalBytes.Should().BeGreaterThan(0);
+        _ = completed.ArtifactIdsCsv.Should().NotBeNullOrEmpty();
+        _ = completed.ArtifactIdsCsv!.Split(',').Should().HaveCount(4);
+        _ = completed.ResultFileUrl.Should().Contain(gcode.Id.ToString());
+        _ = completed.EstimatedPrintTimeSeconds.Should().Be(1500);
+        _ = completed.FilamentUsedGrams.Should().Be(25.3m);
 
         // 7. Verify artifacts accessible
         IReadOnlyList<Artifact> artifacts = await artifactsService.ListByJobAsync(job.Id, default);
-        artifacts.Should().HaveCount(4);
-        artifacts.Should().Contain(a => a.Kind == "gcode");
-        artifacts.Should().Contain(a => a.Kind == "thumbnail");
-        artifacts.Should().Contain(a => a.Kind == "preview");
-        artifacts.Should().Contain(a => a.Kind == "log");
+        _ = artifacts.Should().HaveCount(4);
+        _ = artifacts.Should().Contain(a => a.Kind == "gcode");
+        _ = artifacts.Should().Contain(a => a.Kind == "thumbnail");
+        _ = artifacts.Should().Contain(a => a.Kind == "preview");
+        _ = artifacts.Should().Contain(a => a.Kind == "log");
 
         // 8. Verify artifact files exist on disk
         foreach (Artifact artifact in artifacts)
         {
             (Artifact artifact, string fullPath)? result = await artifactsService.GetWithPathAsync(artifact.Id, default);
-            result.Should().NotBeNull();
+            _ = result.Should().NotBeNull();
             (Artifact? a, string? path) = result!.Value;
-            System.IO.File.Exists(path).Should().BeTrue($"artifact file should exist at {path}");
+            _ = File.Exists(path).Should().BeTrue($"artifact file should exist at {path}");
         }
     }
 
@@ -119,12 +121,12 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
         public long Length { get; }
         public string Name { get; }
         public string FileName { get; }
-        public void CopyTo(System.IO.Stream target) => target.Write(_data, 0, _data.Length);
-        public Task CopyToAsync(System.IO.Stream target, CancellationToken cancellationToken = default)
+        public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
         {
             target.Write(_data, 0, _data.Length);
             return Task.CompletedTask;
         }
-        public System.IO.Stream OpenReadStream() => new System.IO.MemoryStream(_data, writable: false);
+        public Stream OpenReadStream() => new MemoryStream(_data, writable: false);
     }
 }

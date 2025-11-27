@@ -52,7 +52,7 @@ public class AccountLockoutService : IAccountLockoutService
             // Audit log account unlock (automatic expiration)
             await _authAuditService.LogAccountUnlockedAsync(user.Id, "Lockout period expired", null);
 
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
         }
 
         return false;
@@ -71,8 +71,8 @@ public class AccountLockoutService : IAccountLockoutService
                 AttemptedAt = DateTime.UtcNow,
                 FailureReason = failureReason ?? "User not found"
             };
-            _context.FailedLoginAttempts.Add(attempt);
-            await _context.SaveChangesAsync();
+            _ = _context.FailedLoginAttempts.Add(attempt);
+            _ = await _context.SaveChangesAsync();
             return;
         }
 
@@ -88,7 +88,7 @@ public class AccountLockoutService : IAccountLockoutService
             AttemptedAt = DateTime.UtcNow,
             FailureReason = failureReason ?? "Invalid password"
         };
-        _context.FailedLoginAttempts.Add(failedAttempt);
+        _ = _context.FailedLoginAttempts.Add(failedAttempt);
 
         // Check if we should lock the account
         if (user.FailedLoginAttempts >= _maxFailedAttempts)
@@ -103,7 +103,7 @@ public class AccountLockoutService : IAccountLockoutService
                 ipAddress);
         }
 
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
     }
 
     public async Task RecordFailedLoginByUsernameAsync(string username, string? ipAddress, string? failureReason = null)
@@ -124,8 +124,8 @@ public class AccountLockoutService : IAccountLockoutService
                 AttemptedAt = DateTime.UtcNow,
                 FailureReason = failureReason ?? "User not found"
             };
-            _context.FailedLoginAttempts.Add(attempt);
-            await _context.SaveChangesAsync();
+            _ = _context.FailedLoginAttempts.Add(attempt);
+            _ = await _context.SaveChangesAsync();
         }
     }
 
@@ -137,7 +137,7 @@ public class AccountLockoutService : IAccountLockoutService
             user.FailedLoginAttempts = 0;
             user.LockoutEnd = null;
             user.LastFailedLogin = null;
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
         }
     }
 
@@ -160,7 +160,7 @@ public class AccountLockoutService : IAccountLockoutService
         {
             user.LockoutEnd = DateTime.UtcNow.AddMinutes(lockoutDurationMinutes);
             user.FailedLoginAttempts = _maxFailedAttempts; // Mark as max to indicate manual lockout
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
         }
     }
 
@@ -172,7 +172,7 @@ public class AccountLockoutService : IAccountLockoutService
             user.LockoutEnd = null;
             user.FailedLoginAttempts = 0;
             user.LastFailedLogin = null;
-            await _context.SaveChangesAsync();
+            _ = await _context.SaveChangesAsync();
         }
     }
 }

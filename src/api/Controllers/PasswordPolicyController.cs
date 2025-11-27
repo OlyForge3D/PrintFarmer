@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/settings/security/password-policy")]
 [Authorize(Roles = "farm_admin")]
-public class PasswordPolicyController(Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService svc) : ControllerBase
+public class PasswordPolicyController(Services.PasswordPolicy.IPasswordPolicyService svc) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PasswordPolicyDto>> GetAsync(CancellationToken ct)

@@ -36,7 +36,7 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail,log" });
         // Provide stub slice job repository + settings to satisfy new controller signature
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
         Guid jobId = Guid.NewGuid();
@@ -53,12 +53,12 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         IActionResult result = await controller.BulkUploadAsync(jobId, workerId, files, CancellationToken.None);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
+        _ = result.Should().BeOfType<OkObjectResult>();
         OkObjectResult okResult = (OkObjectResult)result;
         IEnumerable<ArtifactDto>? artifacts = okResult.Value as IEnumerable<ArtifactDto>;
-        artifacts.Should().NotBeNull();
-        artifacts.Should().HaveCount(3);
-        artifacts!.Select(a => a.Kind).Should().Contain(new[] { "gcode", "thumbnail", "log" });
+        _ = artifacts.Should().NotBeNull();
+        _ = artifacts.Should().HaveCount(3);
+        _ = artifacts!.Select(a => a.Kind).Should().Contain(new[] { "gcode", "thumbnail", "log" });
     }
 
     [Fact(DisplayName = "Bulk upload with no files returns 400")]
@@ -68,7 +68,7 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings());
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
         FormFileCollection files = new FormFileCollection();
@@ -77,7 +77,7 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         IActionResult result = await controller.BulkUploadAsync(Guid.NewGuid(), null, files, CancellationToken.None);
 
         // Assert
-        result.Should().BeOfType<BadRequestObjectResult>();
+        _ = result.Should().BeOfType<BadRequestObjectResult>();
     }
 
     [Fact(DisplayName = "Bulk upload infers kind from file extension")]
@@ -87,7 +87,7 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
-        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new JobDispatcherServiceTests.StubSliceJobRepository();
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
         Guid jobId = Guid.NewGuid();
@@ -101,11 +101,11 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         IActionResult result = await controller.BulkUploadAsync(jobId, null, files, CancellationToken.None);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
+        _ = result.Should().BeOfType<OkObjectResult>();
         OkObjectResult okResult = (OkObjectResult)result;
         IEnumerable<ArtifactDto>? artifacts = okResult.Value as IEnumerable<ArtifactDto>;
-        artifacts.Should().HaveCount(2);
-        artifacts!.Select(a => a.Kind).Should().Contain(new[] { "gcode", "thumbnail" });
+        _ = artifacts.Should().HaveCount(2);
+        _ = artifacts!.Select(a => a.Kind).Should().Contain(new[] { "gcode", "thumbnail" });
     }
 
     private static IFormFile CreateFormFile(byte[] content, string fileName, string contentType)

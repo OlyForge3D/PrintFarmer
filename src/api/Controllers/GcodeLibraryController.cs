@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-library")]
 [Tags("G-code Library")]
-public class GcodeLibraryController(Farm.Web.Api.Services.Gcode.IGcodeLibraryService gcodeService, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
+public class GcodeLibraryController(Services.Gcode.IGcodeLibraryService gcodeService, IWebHostEnvironment env, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all G-code files in the library

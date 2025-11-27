@@ -73,21 +73,21 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     {
         profile.CreatedAt = DateTime.UtcNow;
         profile.UpdatedAt = profile.CreatedAt;
-        await _db.ProcessProfiles.AddAsync(profile, ct);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.ProcessProfiles.AddAsync(profile, ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task UpdateAsync(ProcessProfile profile, CancellationToken ct = default)
     {
         profile.UpdatedAt = DateTime.UtcNow;
-        _db.ProcessProfiles.Update(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.ProcessProfiles.Update(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(ProcessProfile profile, CancellationToken ct = default)
     {
-        _db.ProcessProfiles.Remove(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.ProcessProfiles.Remove(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task SetDefaultAsync(ProcessProfile profile, Guid? userId, CancellationToken ct = default)
@@ -110,7 +110,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
         }
         profile.IsDefault = true;
         profile.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -128,8 +128,8 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
         {
             imported.CreatedAt = DateTime.UtcNow;
             imported.UpdatedAt = imported.CreatedAt;
-            await _db.ProcessProfiles.AddAsync(imported, ct);
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.ProcessProfiles.AddAsync(imported, ct);
+            _ = await _db.SaveChangesAsync(ct);
             return imported;
         }
         // If existing is system and override not allowed, just return existing
@@ -148,7 +148,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
         existing.EnableSupports = imported.EnableSupports;
         existing.Quality = imported.Quality;
         existing.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
         return existing;
     }
 
@@ -179,7 +179,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
         }
 
         _db.ProcessProfiles.RemoveRange(profilesToDelete);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
         return profilesToDelete.Count;
     }
 }

@@ -39,8 +39,8 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
             EmailConfirmed = true,
             FailedLoginAttempts = 0
         };
-        context.Users.Add(user);
-        await context.SaveChangesAsync();
+        _ = context.Users.Add(user);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -49,16 +49,16 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         {
             LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "lockouttest", Password = "WrongPassword" };
             HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
-            response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
 
         // Assert - Next login should be blocked due to lockout
         LoginRequest finalRequest = new LoginRequest { UsernameOrEmail = "lockouttest", Password = "ValidPassword123!" };
         HttpResponseMessage finalResponse = await client.PostAsJsonAsync("/api/auth/login", finalRequest);
 
-        finalResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _ = finalResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         string errorContent = await finalResponse.Content.ReadAsStringAsync();
-        errorContent.Should().Contain("locked");
+        _ = errorContent.Should().Contain("locked");
     }
 
     [Fact]
@@ -79,8 +79,8 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
             EmailConfirmed = true,
             FailedLoginAttempts = 3 // Already has some failed attempts
         };
-        context.Users.Add(user);
-        await context.SaveChangesAsync();
+        _ = context.Users.Add(user);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -89,15 +89,15 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Verify counter was reset (reload from a fresh scope to avoid caching)
         using IServiceScope verifyScope = _factory.Services.CreateScope();
         AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
         User? updatedUser = await verifyContext.Users.FindAsync(user.Id);
-        updatedUser.Should().NotBeNull();
-        updatedUser!.FailedLoginAttempts.Should().Be(0);
-        updatedUser.LockoutEnd.Should().BeNull();
+        _ = updatedUser.Should().NotBeNull();
+        _ = updatedUser!.FailedLoginAttempts.Should().Be(0);
+        _ = updatedUser.LockoutEnd.Should().BeNull();
     }
 
     [Fact]
@@ -119,8 +119,8 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
             FailedLoginAttempts = 5,
             LockoutEnd = DateTime.UtcNow.AddSeconds(-10) // Expired 10 seconds ago
         };
-        context.Users.Add(user);
-        await context.SaveChangesAsync();
+        _ = context.Users.Add(user);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -129,10 +129,10 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert - Should succeed
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         AuthenticationResult? authResult = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
-        authResult.Should().NotBeNull();
-        authResult!.Success.Should().BeTrue();
+        _ = authResult.Should().NotBeNull();
+        _ = authResult!.Success.Should().BeTrue();
     }
 
     [Fact]
@@ -148,12 +148,12 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         // Verify audit entry was created
         List<FailedLoginAttempt> auditEntries = context.FailedLoginAttempts
             .Where(f => f.Identifier == "doesnotexist")
             .ToList();
-        auditEntries.Should().HaveCountGreaterThan(0);
+        _ = auditEntries.Should().HaveCountGreaterThan(0);
     }
 }

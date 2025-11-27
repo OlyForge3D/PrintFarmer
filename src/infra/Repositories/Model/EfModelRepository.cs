@@ -97,13 +97,13 @@ namespace Farm.Infrastructure.Repositories.Model
 
         public async Task UpdateAsync(Model3D model, CancellationToken ct)
         {
-            _db.Models3D.Update(model);
+            _ = _db.Models3D.Update(model);
             await Task.CompletedTask;
         }
 
         public async Task SaveChangesAsync(CancellationToken ct)
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
         }
     }
 }

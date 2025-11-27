@@ -61,7 +61,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         }
 
         // Map the new DTO to the old service DTO
-        Shared.RegisterRequest serviceRequest = new Farm.Web.Shared.RegisterRequest(
+        Shared.RegisterRequest serviceRequest = new Shared.RegisterRequest(
             request.Username,
             request.Email,
             request.Password,
@@ -122,7 +122,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
             return Unauthorized();
         }
 
-        Farm.Web.Shared.UserDto? serviceUser = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+        Shared.UserDto? serviceUser = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
         if (serviceUser == null)
         {
             return NotFound();
@@ -195,7 +195,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
 
         try
         {
-            await _authService.InitiatePasswordResetAsync(request.Email, HttpContext.Connection.RemoteIpAddress?.ToString());
+            _ = await _authService.InitiatePasswordResetAsync(request.Email, HttpContext.Connection.RemoteIpAddress?.ToString());
 
             // Always return success message to prevent email enumeration
             return Ok(new ForgotPasswordResponse

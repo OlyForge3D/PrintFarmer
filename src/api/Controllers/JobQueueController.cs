@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/job-queue")]
 [Tags("Print Job Queue")]
-public class JobQueueController(Farm.Web.Api.Services.Queue.IJobQueueService queueService, IUnifiedLoggingService logger) : ControllerBase
+public class JobQueueController(Services.Queue.IJobQueueService queueService, IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Get all jobs in the queue

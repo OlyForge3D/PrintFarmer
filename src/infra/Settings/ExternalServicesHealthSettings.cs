@@ -22,15 +22,15 @@ namespace Farm.Infrastructure.Settings
         {
             if (PercentFailedThreshold < 0 || PercentFailedThreshold > 100)
             {
-                ValidationResult vr = new System.ComponentModel.DataAnnotations.ValidationResult("PercentFailedThreshold must be between 0 and 100", new[] { nameof(PercentFailedThreshold) });
-                throw new System.ComponentModel.DataAnnotations.ValidationException(vr, null, PercentFailedThreshold);
+                ValidationResult vr = new ValidationResult("PercentFailedThreshold must be between 0 and 100", new[] { nameof(PercentFailedThreshold) });
+                throw new ValidationException(vr, null, PercentFailedThreshold);
             }
 
             // Allow -1 for all, 0 for none, or positive numbers; clamp large values
             if (PrintersToCheck < -1)
             {
-                ValidationResult vr = new System.ComponentModel.DataAnnotations.ValidationResult("PrintersToCheck must be -1, 0, or a positive integer", new[] { nameof(PrintersToCheck) });
-                throw new System.ComponentModel.DataAnnotations.ValidationException(vr, null, PrintersToCheck);
+                ValidationResult vr = new ValidationResult("PrintersToCheck must be -1, 0, or a positive integer", new[] { nameof(PrintersToCheck) });
+                throw new ValidationException(vr, null, PrintersToCheck);
             }
         }
     }

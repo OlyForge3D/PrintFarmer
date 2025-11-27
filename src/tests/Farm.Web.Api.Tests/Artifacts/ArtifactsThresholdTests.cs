@@ -28,10 +28,10 @@ public class ArtifactsThresholdTests
         Thread.Sleep(50);
 
         // Assert
-        capturedEvent.Should().NotBeNull();
-        capturedEvent!.Level.Should().Be(StorageThresholdLevel.Warning);
-        capturedEvent.CurrentBytes.Should().Be(1200);
-        capturedEvent.WarningThreshold.Should().Be(1000);
+        _ = capturedEvent.Should().NotBeNull();
+        _ = capturedEvent!.Level.Should().Be(StorageThresholdLevel.Warning);
+        _ = capturedEvent.CurrentBytes.Should().Be(1200);
+        _ = capturedEvent.WarningThreshold.Should().Be(1000);
     }
 
     [Fact(DisplayName = "Critical threshold event fires when exceeded")]
@@ -41,7 +41,7 @@ public class ArtifactsThresholdTests
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
-        List<StorageThresholdEventArgs> events = new System.Collections.Generic.List<StorageThresholdEventArgs>();
+        List<StorageThresholdEventArgs> events = new List<StorageThresholdEventArgs>();
         metrics.ThresholdExceeded += (sender, e) => events.Add(e);
 
         // Act - Upload enough to exceed critical
@@ -51,10 +51,10 @@ public class ArtifactsThresholdTests
         Thread.Sleep(50);
 
         // Assert
-        events.Should().ContainSingle(e => e.Level == StorageThresholdLevel.Critical);
+        _ = events.Should().ContainSingle(e => e.Level == StorageThresholdLevel.Critical);
         StorageThresholdEventArgs criticalEvent = events.First(e => e.Level == StorageThresholdLevel.Critical);
-        criticalEvent.CurrentBytes.Should().Be(5500);
-        criticalEvent.CriticalThreshold.Should().Be(5000);
+        _ = criticalEvent.CurrentBytes.Should().Be(5500);
+        _ = criticalEvent.CriticalThreshold.Should().Be(5000);
     }
 
     [Fact(DisplayName = "Multiple uploads trigger warning only once")]
@@ -76,7 +76,7 @@ public class ArtifactsThresholdTests
         Thread.Sleep(20);
 
         // Assert - Only one event should fire (when first crossing warning)
-        eventCount.Should().Be(1);
+        _ = eventCount.Should().Be(1);
     }
 
     [Fact(DisplayName = "Threshold state gauge reflects current state")]
@@ -87,7 +87,7 @@ public class ArtifactsThresholdTests
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
         MeterListener meterListener = new MeterListener();
-        List<int> stateValues = new System.Collections.Generic.List<int>();
+        List<int> stateValues = new List<int>();
 
         meterListener.InstrumentPublished = (instrument, listener) =>
         {
@@ -127,9 +127,9 @@ public class ArtifactsThresholdTests
         meterListener.Dispose();
 
         // Assert
-        initialState.Should().Be(0); // Normal
-        warningState.Should().Be(1); // Warning
-        criticalState.Should().Be(2); // Critical
+        _ = initialState.Should().Be(0); // Normal
+        _ = warningState.Should().Be(1); // Warning
+        _ = criticalState.Should().Be(2); // Critical
     }
 
     [Fact(DisplayName = "No events when thresholds not configured")]
@@ -147,6 +147,6 @@ public class ArtifactsThresholdTests
         Thread.Sleep(50);
 
         // Assert
-        eventCount.Should().Be(0);
+        _ = eventCount.Should().Be(0);
     }
 }

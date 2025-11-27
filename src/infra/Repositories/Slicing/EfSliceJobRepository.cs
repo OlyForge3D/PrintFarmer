@@ -23,7 +23,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
     {
-        await _db.SliceJobs.AddAsync(job, ct);
+        _ = await _db.SliceJobs.AddAsync(job, ct);
     }
 
     public async Task<SliceJob?> GetByIdAsync(Guid id, CancellationToken ct = default)
@@ -328,6 +328,6 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 }

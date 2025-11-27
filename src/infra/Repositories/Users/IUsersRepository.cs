@@ -10,9 +10,9 @@ namespace Farm.Infrastructure.Repositories.Users;
 public interface IUsersRepository
 {
     Task<IReadOnlyList<UserDto>> GetUsersAsync(CancellationToken ct = default);
-    Task<Farm.Infrastructure.Domain.User?> GetUserEntityAsync(Guid id, CancellationToken ct = default);
+    Task<User?> GetUserEntityAsync(Guid id, CancellationToken ct = default);
     Task<bool> AnyUserByUsernameOrEmailAsync(string username, string email, CancellationToken ct = default);
-    Task AddUserAsync(Farm.Infrastructure.Domain.User user, IEnumerable<Guid>? roleIds, CancellationToken ct = default);
+    Task AddUserAsync(User user, IEnumerable<Guid>? roleIds, CancellationToken ct = default);
     Task UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default);
     Task DeleteUserAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<RoleDto>> GetRolesAsync(CancellationToken ct = default);

@@ -27,7 +27,7 @@ namespace Farm.Web.Api.Services.Users
             return await _users.GetUsersAsync(ct);
         }
 
-        public async Task<UserDto> CreateUserAsync(Farm.Web.Shared.CreateUserRequest request, CancellationToken ct)
+        public async Task<UserDto> CreateUserAsync(Shared.CreateUserRequest request, CancellationToken ct)
         {
             User user = new User
             {

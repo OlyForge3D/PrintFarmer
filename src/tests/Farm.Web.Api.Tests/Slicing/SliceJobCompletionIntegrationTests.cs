@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -31,12 +32,12 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
     public async Task SliceJob_Service_Completion_Flow_Succeeds()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
         // 1. Create processing job
-        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -52,12 +53,12 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         await jobRepo.SaveChangesAsync();
 
         // 2. Upload artifact via service
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("; G-code test contents");
+        byte[] bytes = Encoding.UTF8.GetBytes("; G-code test contents");
         TestFormFile formFile = new TestFormFile(bytes, "output.gcode", "application/gcode");
         Artifact artifact = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
-        artifact.Id.Should().NotBe(Guid.Empty);
-        artifact.JobId.Should().Be(job.Id);
-        artifact.Kind.Should().Be("gcode");
+        _ = artifact.Id.Should().NotBe(Guid.Empty);
+        _ = artifact.JobId.Should().Be(job.Id);
+        _ = artifact.Kind.Should().Be("gcode");
 
         // 3. Complete job
         string resultUrl = $"/api/artifacts/{artifact.Id}/download";
@@ -66,30 +67,30 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
 
         // 4. Reload and assert
         SliceJob? updated = await jobRepo.GetByIdAsync(job.Id);
-        updated.Should().NotBeNull();
-        updated!.Status.Should().Be(Farm.Infrastructure.Domain.SliceJobStatus.Completed);
-        updated.ResultFileUrl.Should().Be(resultUrl);
-        updated.ProgressPercent.Should().Be(100);
-        updated.EstimatedPrintTimeSeconds.Should().Be(1234);
-        updated.FilamentUsedGrams.Should().Be(15.6m);
-        updated.ArtifactsCount.Should().Be(1);
-        updated.ArtifactsTotalBytes.Should().BeGreaterThan(0);
-        updated.ArtifactIdsCsv.Should().Contain(artifact.Id.ToString());
+        _ = updated.Should().NotBeNull();
+        _ = updated!.Status.Should().Be(Farm.Infrastructure.Domain.SliceJobStatus.Completed);
+        _ = updated.ResultFileUrl.Should().Be(resultUrl);
+        _ = updated.ProgressPercent.Should().Be(100);
+        _ = updated.EstimatedPrintTimeSeconds.Should().Be(1234);
+        _ = updated.FilamentUsedGrams.Should().Be(15.6m);
+        _ = updated.ArtifactsCount.Should().Be(1);
+        _ = updated.ArtifactsTotalBytes.Should().BeGreaterThan(0);
+        _ = updated.ArtifactIdsCsv.Should().Contain(artifact.Id.ToString());
 
         // Parse CSV correctness
         string[] ids = updated.ArtifactIdsCsv!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        ids.Should().HaveCount(1);
-        Guid.Parse(ids[0]).Should().Be(artifact.Id);
+        _ = ids.Should().HaveCount(1);
+        _ = Guid.Parse(ids[0]).Should().Be(artifact.Id);
     }
 
     [Fact(DisplayName = "Slice job completion persists multi-artifact summary")]
     public async Task SliceJob_Completion_MultiArtifact_Summary()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
-        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -105,7 +106,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         await jobRepo.SaveChangesAsync();
 
         // Upload multiple artifacts
-        Artifact gcode = await artifactsService.UploadAsync(new TestFormFile(System.Text.Encoding.UTF8.GetBytes(";gcode"), "a.gcode", "application/gcode"), job.Id, null, "gcode", default);
+        Artifact gcode = await artifactsService.UploadAsync(new TestFormFile(Encoding.UTF8.GetBytes(";gcode"), "a.gcode", "application/gcode"), job.Id, null, "gcode", default);
         Artifact preview = await artifactsService.UploadAsync(new TestFormFile(new byte[] { 1, 2, 3, 4, 5 }, "preview.png", "image/png"), job.Id, null, "preview", default);
         Artifact log = await artifactsService.UploadTextAsync("Log line A\nLog line B", "log.txt", job.Id, null, "log", default);
 
@@ -115,11 +116,11 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         await jobRepo.SaveChangesAsync();
 
         SliceJob? updated = await jobRepo.GetByIdAsync(job.Id);
-        updated.Should().NotBeNull();
-        updated!.ArtifactsCount.Should().Be(3);
-        updated.ArtifactIdsCsv.Should().NotBeNull();
-        updated.ArtifactIdsCsv!.Split(',').Length.Should().Be(3);
-        updated.ArtifactsTotalBytes.Should().BeGreaterThanOrEqualTo(gcode.SizeBytes + preview.SizeBytes + log.SizeBytes);
+        _ = updated.Should().NotBeNull();
+        _ = updated!.ArtifactsCount.Should().Be(3);
+        _ = updated.ArtifactIdsCsv.Should().NotBeNull();
+        _ = updated.ArtifactIdsCsv!.Split(',').Length.Should().Be(3);
+        _ = updated.ArtifactsTotalBytes.Should().BeGreaterThanOrEqualTo(gcode.SizeBytes + preview.SizeBytes + log.SizeBytes);
     }
 
     private sealed class TestFormFile : Microsoft.AspNetCore.Http.IFormFile

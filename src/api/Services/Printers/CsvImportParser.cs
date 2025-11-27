@@ -26,7 +26,7 @@ internal static class CsvImportParser
             {
                 if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
                 {
-                    current.Append('"');
+                    _ = current.Append('"');
                     i += 2;
                 }
                 else
@@ -38,12 +38,12 @@ internal static class CsvImportParser
             else if (c == ',' && !inQuotes)
             {
                 values.Add(current.ToString());
-                current.Clear();
+                _ = current.Clear();
                 i++;
             }
             else
             {
-                current.Append(c);
+                _ = current.Append(c);
                 i++;
             }
         }

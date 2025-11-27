@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -123,7 +124,7 @@ namespace Farm.Web.Api.Services.Slicing
                     Description = profile.Description,
                     Settings = string.IsNullOrEmpty(profile.AdvancedSettings)
                         ? new Dictionary<string, object>()
-                        : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(profile.AdvancedSettings) ?? new Dictionary<string, object>()
+                        : JsonSerializer.Deserialize<Dictionary<string, object>>(profile.AdvancedSettings) ?? new Dictionary<string, object>()
                 }
             };
         }
@@ -137,11 +138,11 @@ namespace Farm.Web.Api.Services.Slicing
             string? slicerTypeStr,
             string? qualityStr)
         {
-            SlicerType slicerType = Enum.TryParse<SlicerType>(slicerTypeStr, ignoreCase: true, out SlicerType st)
+            SlicerType slicerType = Enum.TryParse(slicerTypeStr, ignoreCase: true, out SlicerType st)
                 ? st
                 : SlicerType.PrusaSlicer;
 
-            ProfileQuality quality = Enum.TryParse<ProfileQuality>(qualityStr, ignoreCase: true, out ProfileQuality q)
+            ProfileQuality quality = Enum.TryParse(qualityStr, ignoreCase: true, out ProfileQuality q)
                 ? q
                 : ProfileQuality.Standard;
 

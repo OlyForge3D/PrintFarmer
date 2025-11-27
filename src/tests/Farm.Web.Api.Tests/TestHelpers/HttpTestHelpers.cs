@@ -21,7 +21,7 @@ public sealed class FakeHttpMessageHandler : HttpMessageHandler
         {
             resp = responder(request) ?? new HttpResponseMessage(HttpStatusCode.NotFound);
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             resp = new HttpResponseMessage(HttpStatusCode.InternalServerError)
             {

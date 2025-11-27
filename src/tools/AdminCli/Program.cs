@@ -1,7 +1,9 @@
 ﻿using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using Farm.Shared.Discovery;
@@ -152,7 +154,7 @@ internal static class Program
 
             if (!string.IsNullOrWhiteSpace(outputFile))
             {
-                await System.IO.File.WriteAllTextAsync(outputFile, csv);
+                await File.WriteAllTextAsync(outputFile, csv);
                 Console.WriteLine($"✓ Sample CSV generated: {outputFile}");
             }
             else
@@ -176,13 +178,13 @@ internal static class Program
     private static string GenerateSampleCsv()
     {
         StringBuilder csv = new StringBuilder();
-        csv.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,IsEnabled");
+        _ = csv.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,IsEnabled");
 
         // Example rows for each backend type
-        csv.AppendLine("\"Moonraker Printer\",\"192.168.1.100\",\"Moonraker\",\"7125\",\"80\",\"Creality\",\"Ender-3 Max\",\"Main production printer\",\"false\"");
-        csv.AppendLine("\"PrusaLink Printer\",\"192.168.1.101\",\"PrusaLink\",\"80\",\"443\",\"Prusa\",\"MK3S+\",\"High precision prints\",\"false\"");
-        csv.AppendLine("\"SDCP Printer\",\"192.168.1.102\",\"SDCP\",\"80\",\"80\",\"Bambu Lab\",\"X1 Carbon\",\"Fast prints\",\"false\"");
-        csv.AppendLine("\"OctoPrint Printer\",\"192.168.1.103\",\"Moonraker\",\"7125\",\"80\",\"Anet\",\"A8 Plus\",\"Legacy setup with OctoPrint\",\"false\"");
+        _ = csv.AppendLine("\"Moonraker Printer\",\"192.168.1.100\",\"Moonraker\",\"7125\",\"80\",\"Creality\",\"Ender-3 Max\",\"Main production printer\",\"false\"");
+        _ = csv.AppendLine("\"PrusaLink Printer\",\"192.168.1.101\",\"PrusaLink\",\"80\",\"443\",\"Prusa\",\"MK3S+\",\"High precision prints\",\"false\"");
+        _ = csv.AppendLine("\"SDCP Printer\",\"192.168.1.102\",\"SDCP\",\"80\",\"80\",\"Bambu Lab\",\"X1 Carbon\",\"Fast prints\",\"false\"");
+        _ = csv.AppendLine("\"OctoPrint Printer\",\"192.168.1.103\",\"Moonraker\",\"7125\",\"80\",\"Anet\",\"A8 Plus\",\"Legacy setup with OctoPrint\",\"false\"");
 
         return csv.ToString();
     }
@@ -256,7 +258,7 @@ internal static class Program
             // Output results
             if (!string.IsNullOrWhiteSpace(outputFile))
             {
-                await System.IO.File.WriteAllTextAsync(outputFile, formattedOutput);
+                await File.WriteAllTextAsync(outputFile, formattedOutput);
                 Console.WriteLine($"Results saved to: {outputFile}");
             }
             else
@@ -299,9 +301,9 @@ internal static class Program
         List<DiscoveredPrinterInfo> discovered = new List<DiscoveredPrinterInfo>();
 
         // Get local network interfaces
-        List<NetworkInterface> interfaces = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
-            .Where(i => i.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Ethernet ||
-                        i.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211)
+        List<NetworkInterface> interfaces = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(i => i.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
+                        i.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
             .ToList();
 
         // Apply interface filter if specified
@@ -310,7 +312,7 @@ internal static class Program
             interfaces = interfaces.Where(i => interfaceConstraints.Contains(i.Name)).ToList();
             if (interfaces.Count == 0)
             {
-                Console.WriteLine($"[Discovery] No matching interfaces found. Available: {string.Join(", ", System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces().Select(i => i.Name))}");
+                Console.WriteLine($"[Discovery] No matching interfaces found. Available: {string.Join(", ", NetworkInterface.GetAllNetworkInterfaces().Select(i => i.Name))}");
                 return discovered;
             }
         }
@@ -320,7 +322,7 @@ internal static class Program
         foreach (NetworkInterface iface in interfaces)
         {
             IPInterfaceProperties ipProps = iface.GetIPProperties();
-            foreach (UnicastIPAddressInformation? unicast in ipProps.UnicastAddresses.Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork))
+            foreach (UnicastIPAddressInformation? unicast in ipProps.UnicastAddresses.Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork))
             {
                 IPAddress ip = unicast.Address;
                 IPAddress subnet = unicast.IPv4Mask;
@@ -380,7 +382,7 @@ internal static class Program
                         string[] parts = applicableConstraint.Split('/');
                         if (parts.Length == 2 && int.TryParse(parts[1], out int constraintCidr))
                         {
-                            IPAddress constraintIp = System.Net.IPAddress.Parse(parts[0]);
+                            IPAddress constraintIp = IPAddress.Parse(parts[0]);
                             IPAddress constraintSubnet = CIDRToSubnetMask(constraintCidr);
                             scanStart = GetNetworkAddress(constraintIp, constraintSubnet);
                             scanEnd = GetBroadcastAddress(constraintIp, constraintSubnet);
@@ -395,7 +397,7 @@ internal static class Program
                 uint total = end - start;
                 int scanCount = 0;
 
-                using SemaphoreSlim semaphore = new System.Threading.SemaphoreSlim(maxConcurrentScans, maxConcurrentScans);
+                using SemaphoreSlim semaphore = new SemaphoreSlim(maxConcurrentScans, maxConcurrentScans);
                 List<Task> scanTasks = new List<Task>();
 
                 for (uint i = start + 1; i < end; i++)
@@ -416,7 +418,7 @@ internal static class Program
                             }
 
                             byte[] ipBytes = BitConverter.GetBytes(ipValue).Reverse().ToArray();
-                            string targetIp = new System.Net.IPAddress(ipBytes).ToString();
+                            string targetIp = new IPAddress(ipBytes).ToString();
 
                             // Probe with each discovery probe and collect all results
                             List<ProbeResult> probeResults = new();
@@ -465,7 +467,7 @@ internal static class Program
                         }
                         finally
                         {
-                            semaphore.Release();
+                            _ = semaphore.Release();
                         }
                     });
                     scanTasks.Add(task);
@@ -486,7 +488,7 @@ internal static class Program
     /// <summary>
     /// Checks if a constraint range (CIDR) contains the target range.
     /// </summary>
-    private static bool IpRangeContainsRange(string cidrConstraint, System.Net.IPAddress targetNetwork, System.Net.IPAddress targetBroadcast)
+    private static bool IpRangeContainsRange(string cidrConstraint, IPAddress targetNetwork, IPAddress targetBroadcast)
     {
         string[] parts = cidrConstraint.Split('/');
         if (parts.Length != 2 || !int.TryParse(parts[1], out int constraintCidr))
@@ -494,7 +496,7 @@ internal static class Program
             throw new ArgumentException($"Invalid CIDR format: {cidrConstraint}");
         }
 
-        IPAddress constraintIp = System.Net.IPAddress.Parse(parts[0]);
+        IPAddress constraintIp = IPAddress.Parse(parts[0]);
         IPAddress constraintSubnet = CIDRToSubnetMask(constraintCidr);
         IPAddress constraintNetwork = GetNetworkAddress(constraintIp, constraintSubnet);
         IPAddress constraintBroadcast = GetBroadcastAddress(constraintIp, constraintSubnet);
@@ -527,8 +529,8 @@ internal static class Program
             return 1;
         }
 
-        if (System.Net.IPAddress.TryParse(ip1, out IPAddress? addr1) &&
-            System.Net.IPAddress.TryParse(ip2, out IPAddress? addr2))
+        if (IPAddress.TryParse(ip1, out IPAddress? addr1) &&
+            IPAddress.TryParse(ip2, out IPAddress? addr2))
         {
             uint bytes1 = BitConverter.ToUInt32(addr1.GetAddressBytes().Reverse().ToArray(), 0);
             uint bytes2 = BitConverter.ToUInt32(addr2.GetAddressBytes().Reverse().ToArray(), 0);
@@ -541,7 +543,7 @@ internal static class Program
     /// <summary>
     /// Converts CIDR notation (e.g., 24 for /24) to subnet mask (e.g., 255.255.255.0)
     /// </summary>
-    private static System.Net.IPAddress CIDRToSubnetMask(int cidr)
+    private static IPAddress CIDRToSubnetMask(int cidr)
     {
         if (cidr < 0 || cidr > 32)
         {
@@ -550,10 +552,10 @@ internal static class Program
 
         uint mask = (uint.MaxValue << (32 - cidr)) & 0xFFFFFFFF;
         byte[] bytes = BitConverter.GetBytes(mask).Reverse().ToArray();
-        return new System.Net.IPAddress(bytes);
+        return new IPAddress(bytes);
     }
 
-    private static int GetCIDR(System.Net.IPAddress mask)
+    private static int GetCIDR(IPAddress mask)
     {
         byte[] bytes = mask.GetAddressBytes();
         int bits = 0;
@@ -574,7 +576,7 @@ internal static class Program
         return 32;
     }
 
-    private static System.Net.IPAddress GetNetworkAddress(System.Net.IPAddress ip, System.Net.IPAddress mask)
+    private static IPAddress GetNetworkAddress(IPAddress ip, IPAddress mask)
     {
         byte[] ipBytes = ip.GetAddressBytes();
         byte[] maskBytes = mask.GetAddressBytes();
@@ -585,10 +587,10 @@ internal static class Program
             resultBytes[i] = (byte)(ipBytes[i] & maskBytes[i]);
         }
 
-        return new System.Net.IPAddress(resultBytes);
+        return new IPAddress(resultBytes);
     }
 
-    private static System.Net.IPAddress GetBroadcastAddress(System.Net.IPAddress ip, System.Net.IPAddress mask)
+    private static IPAddress GetBroadcastAddress(IPAddress ip, IPAddress mask)
     {
         byte[] ipBytes = ip.GetAddressBytes();
         byte[] maskBytes = mask.GetAddressBytes();
@@ -599,7 +601,7 @@ internal static class Program
             resultBytes[i] = (byte)(ipBytes[i] | ~maskBytes[i]);
         }
 
-        return new System.Net.IPAddress(resultBytes);
+        return new IPAddress(resultBytes);
     }
 
     private class DiscoveredPrinterInfo
@@ -632,7 +634,7 @@ internal static class Program
     private static string FormatAsCSV(DiscoveredPrinterInfo[] printers, bool setDisabledByDefault)
     {
         StringBuilder csv = new StringBuilder();
-        csv.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,IsEnabled");
+        _ = csv.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,IsEnabled");
 
         foreach (DiscoveredPrinterInfo printer in printers)
         {
@@ -640,7 +642,7 @@ internal static class Program
             string enabled = setDisabledByDefault ? "false" : "true";
             string backendPort = printer.BackendPort?.ToString() ?? "";
             string frontendPort = printer.FrontendPort?.ToString() ?? "";
-            csv.AppendLine($"\"{EscapeCsv(name)}\",\"{printer.IpAddress}\",\"{printer.Backend}\",{backendPort},{frontendPort},\"Unknown\",\"Unknown\",\"Auto-discovered\",{enabled}");
+            _ = csv.AppendLine($"\"{EscapeCsv(name)}\",\"{printer.IpAddress}\",\"{printer.Backend}\",{backendPort},{frontendPort},\"Unknown\",\"Unknown\",\"Auto-discovered\",{enabled}");
         }
 
         return csv.ToString();
@@ -743,7 +745,7 @@ internal static class Program
     private sealed record AuthResult(bool Success, string? Token, DateTime? ExpiresAt, object? User, string? Error);
     private sealed record DiscoveryConfig(string Range = "", string Interface = "", int Timeout = 200, int Concurrent = 10, string Format = "json", bool NoApproval = false);
 
-    private static string GetConfigPath() => System.IO.Path.Combine(
+    private static string GetConfigPath() => Path.Combine(
         System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile),
         ".admincli",
         "discovery-config.json");
@@ -753,13 +755,13 @@ internal static class Program
         try
         {
             string configPath = GetConfigPath();
-            string? directory = System.IO.Path.GetDirectoryName(configPath);
-            if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
+            string? directory = Path.GetDirectoryName(configPath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
-                System.IO.Directory.CreateDirectory(directory);
+                _ = Directory.CreateDirectory(directory);
             }
             string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
-            await System.IO.File.WriteAllTextAsync(configPath, json);
+            await File.WriteAllTextAsync(configPath, json);
         }
         catch
         {
@@ -772,11 +774,11 @@ internal static class Program
         try
         {
             string configPath = GetConfigPath();
-            if (!System.IO.File.Exists(configPath))
+            if (!File.Exists(configPath))
             {
                 return null;
             }
-            string json = await System.IO.File.ReadAllTextAsync(configPath);
+            string json = await File.ReadAllTextAsync(configPath);
             return JsonSerializer.Deserialize<DiscoveryConfig>(json);
         }
         catch

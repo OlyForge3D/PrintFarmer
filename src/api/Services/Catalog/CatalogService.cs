@@ -103,7 +103,7 @@ public class CatalogService : ICatalogService
         return await _repo.GetModelByIdAsync(id, ct);
     }
 
-    public async Task<PrinterModelDto> CreateModelAsync(Farm.Web.Api.Controllers.Requests.CreateModelRequest req, CancellationToken ct)
+    public async Task<PrinterModelDto> CreateModelAsync(Controllers.Requests.CreateModelRequest req, CancellationToken ct)
     {
         string originalModelName = req.Name;
         string normalizedName = CatalogNameNormalizer.NormalizeModel(originalModelName);
@@ -184,7 +184,7 @@ public class CatalogService : ICatalogService
             Array.Empty<string>());
     }
 
-    public async Task<PrinterModelDto?> UpdateModelAsync(Guid id, Farm.Web.Api.Controllers.Requests.UpdateModelRequest req, CancellationToken ct)
+    public async Task<PrinterModelDto?> UpdateModelAsync(Guid id, Controllers.Requests.UpdateModelRequest req, CancellationToken ct)
     {
         PrinterModel? model = await _repo.GetModelEntityAsync(id, ct);
         if (model is null)

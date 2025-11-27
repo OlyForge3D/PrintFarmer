@@ -36,20 +36,20 @@ public class EfMachineProfileRepository(AppDbContext db) : IMachineProfileReposi
 
     public async Task AddAsync(MachineProfile profile, CancellationToken ct = default)
     {
-        _db.MachineProfiles.Add(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.MachineProfiles.Add(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task UpdateAsync(MachineProfile profile, CancellationToken ct = default)
     {
-        _db.MachineProfiles.Update(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.MachineProfiles.Update(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(MachineProfile profile, CancellationToken ct = default)
     {
-        _db.MachineProfiles.Remove(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.MachineProfiles.Remove(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
@@ -59,7 +59,7 @@ public class EfMachineProfileRepository(AppDbContext db) : IMachineProfileReposi
             .ToListAsync(ct);
 
         _db.MachineProfiles.RemoveRange(profiles);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
         return profiles.Count;
     }
 }

@@ -187,7 +187,7 @@ public class EfUsersRepository : IUsersRepository
             AssignedAt = DateTime.UtcNow,
             IsActive = true
         });
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public Task<User?> GetByUsernameAsync(string username, CancellationToken ct = default)
@@ -240,7 +240,7 @@ public class EfUsersRepository : IUsersRepository
         }
         user.PasswordHash = newPasswordHash ?? string.Empty;
         user.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
         Console.WriteLine($"[EfUsersRepository] Password updated for UserId={userId}");
         return true;
     }
@@ -248,7 +248,7 @@ public class EfUsersRepository : IUsersRepository
     public async Task CreatePasswordResetTokenAsync(PasswordResetToken token, CancellationToken ct = default)
     {
         _ = _db.PasswordResetTokens.Add(token);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public Task<PasswordResetToken?> GetPasswordResetTokenAsync(string token, CancellationToken ct = default)

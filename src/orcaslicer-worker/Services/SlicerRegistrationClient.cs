@@ -72,7 +72,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                     supportedFeatures = new[] { "multi-material", "variable-layer-height", "auto-arrange" },
                     capabilities = WorkerConstants.Capabilities
                 }),
-                MaxConcurrentJobs = _configuration.GetValue<int>("Worker:MaxConcurrentJobs", 1),
+                MaxConcurrentJobs = _configuration.GetValue("Worker:MaxConcurrentJobs", 1),
                 Tags = "orcaslicer,production"
             };
 

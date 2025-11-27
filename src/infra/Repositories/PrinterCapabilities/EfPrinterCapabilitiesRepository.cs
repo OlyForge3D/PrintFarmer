@@ -18,7 +18,7 @@ public class EfPrinterCapabilitiesRepository : IPrinterCapabilitiesRepository
         _db = db;
     }
 
-    public async Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetAllWithPrinterAsync(CancellationToken ct = default)
+    public async Task<List<Domain.PrinterCapabilities>> GetAllWithPrinterAsync(CancellationToken ct = default)
     {
         return await _db.PrinterCapabilities
             .Include(c => c.Printer)
@@ -26,7 +26,7 @@ public class EfPrinterCapabilitiesRepository : IPrinterCapabilitiesRepository
             .ToListAsync(ct);
     }
 
-    public async Task<Farm.Infrastructure.Domain.PrinterCapabilities?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct = default)
+    public async Task<Domain.PrinterCapabilities?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct = default)
     {
         return await _db.PrinterCapabilities
             .Include(c => c.Printer)
@@ -39,29 +39,29 @@ public class EfPrinterCapabilitiesRepository : IPrinterCapabilitiesRepository
             .AnyAsync(c => c.PrinterId == printerId, ct);
     }
 
-    public async Task AddAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, CancellationToken ct = default)
+    public async Task AddAsync(Domain.PrinterCapabilities capabilities, CancellationToken ct = default)
     {
-        await _db.PrinterCapabilities.AddAsync(capabilities, ct);
+        _ = await _db.PrinterCapabilities.AddAsync(capabilities, ct);
     }
 
-    public Task UpdateAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, CancellationToken ct = default)
+    public Task UpdateAsync(Domain.PrinterCapabilities capabilities, CancellationToken ct = default)
     {
-        _db.PrinterCapabilities.Update(capabilities);
+        _ = _db.PrinterCapabilities.Update(capabilities);
         return Task.CompletedTask;
     }
 
-    public Task RemoveAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, CancellationToken ct = default)
+    public Task RemoveAsync(Domain.PrinterCapabilities capabilities, CancellationToken ct = default)
     {
-        _db.PrinterCapabilities.Remove(capabilities);
+        _ = _db.PrinterCapabilities.Remove(capabilities);
         return Task.CompletedTask;
     }
 
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
-    public async Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetStaleCapabilitiesAsync(
+    public async Task<List<Domain.PrinterCapabilities>> GetStaleCapabilitiesAsync(
         DateTime threshold,
         int limit,
         CancellationToken ct = default)
@@ -77,7 +77,7 @@ public class EfPrinterCapabilitiesRepository : IPrinterCapabilitiesRepository
     }
 
     public async Task LoadPrinterReferenceAsync(
-        Farm.Infrastructure.Domain.PrinterCapabilities capabilities,
+        Domain.PrinterCapabilities capabilities,
         CancellationToken ct = default)
     {
         await _db.Entry(capabilities)
@@ -103,7 +103,7 @@ public class EfPrinterCapabilitiesRepository : IPrinterCapabilitiesRepository
         return await _db.GcodeFiles.FindAsync(new object[] { id }, ct);
     }
 
-    public async Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetAvailableWithPrinterAsync(CancellationToken ct = default)
+    public async Task<List<Domain.PrinterCapabilities>> GetAvailableWithPrinterAsync(CancellationToken ct = default)
     {
         return await _db.PrinterCapabilities
             .Include(c => c.Printer)

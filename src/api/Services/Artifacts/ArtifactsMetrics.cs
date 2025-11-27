@@ -21,12 +21,12 @@ public sealed class ArtifactsMetrics : IDisposable
         "printfarmer.artifacts.upload_bytes",
         unit: "bytes",
         description: "Size of individual artifact uploads");
-    private static readonly ObservableGauge<long> s_storageTotalBytes = s_meter.CreateObservableGauge<long>(
+    private static readonly ObservableGauge<long> s_storageTotalBytes = s_meter.CreateObservableGauge(
         "printfarmer.artifacts.storage_total_bytes",
         ObserveStorageBytes,
         unit: "bytes",
         description: "Approximate total size of stored artifacts (global)");
-    private static readonly ObservableGauge<int> s_storageThresholdState = s_meter.CreateObservableGauge<int>(
+    private static readonly ObservableGauge<int> s_storageThresholdState = s_meter.CreateObservableGauge(
         "printfarmer.artifacts.storage_threshold_state",
         ObserveThresholdState,
         description: "Storage threshold state: 0=normal, 1=warning, 2=critical");
@@ -69,8 +69,8 @@ public sealed class ArtifactsMetrics : IDisposable
     /// </summary>
     public void SetThresholds(long warningBytes, long criticalBytes)
     {
-        Interlocked.Exchange(ref s_warningThreshold, warningBytes);
-        Interlocked.Exchange(ref s_criticalThreshold, criticalBytes);
+        _ = Interlocked.Exchange(ref s_warningThreshold, warningBytes);
+        _ = Interlocked.Exchange(ref s_criticalThreshold, criticalBytes);
     }
 
     /// <summary>Record artifact upload metrics (increment counters and update gauge baseline).</summary>
@@ -121,10 +121,10 @@ public sealed class ArtifactsMetrics : IDisposable
     /// </summary>
     public static void ResetForTests()
     {
-        Interlocked.Exchange(ref s_storageBytes, 0);
-        Interlocked.Exchange(ref s_warningThreshold, 0);
-        Interlocked.Exchange(ref s_criticalThreshold, 0);
-        Interlocked.Exchange(ref s_currentState, 0);
+        _ = Interlocked.Exchange(ref s_storageBytes, 0);
+        _ = Interlocked.Exchange(ref s_warningThreshold, 0);
+        _ = Interlocked.Exchange(ref s_criticalThreshold, 0);
+        _ = Interlocked.Exchange(ref s_currentState, 0);
     }
 
     public void Dispose()

@@ -1,4 +1,5 @@
-﻿using System.Data.Common;
+﻿using System.Data;
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Data;
@@ -40,7 +41,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         }
     }
 
-    private static void DumpAuthAuditInfo(Farm.Infrastructure.Data.AppDbContext ctx, string tag = "verify")
+    private static void DumpAuthAuditInfo(AppDbContext ctx, string tag = "verify")
     {
         try
         {
@@ -49,7 +50,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             { Console.WriteLine($"[TestDiag][{tag}] Conn={ctx.Database.GetConnectionString()}"); }
             catch { }
             DbConnection conn = ctx.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
             { conn.Open(); }
             using DbCommand cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT COUNT(*) FROM \"AuthAuditLogs\"";
@@ -106,7 +107,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Approve the user
         User user = await context.Users.FirstAsync(u => u.Username == "auditloginuser");
         user.IsActive = true;
-        await context.SaveChangesAsync();
+        _ = await context.SaveChangesAsync();
 
         // Act - Login
         LoginRequest loginRequest = new LoginRequest("auditloginuser", "SecurePassword123!");
@@ -124,10 +125,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.Login)
             .ToListAsync();
 
-        auditLogs.Should().HaveCount(1);
-        auditLogs[0].Success.Should().BeTrue();
-        auditLogs[0].UserId.Should().Be(user.Id);
-        auditLogs[0].EventType.Should().Be(AuthEventType.Login);
+        _ = auditLogs.Should().HaveCount(1);
+        _ = auditLogs[0].Success.Should().BeTrue();
+        _ = auditLogs[0].UserId.Should().Be(user.Id);
+        _ = auditLogs[0].EventType.Should().Be(AuthEventType.Login);
     }
 
     [Fact]
@@ -141,7 +142,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             "Audit",
             "Fail");
 
-        await _client.PostAsJsonAsync("/api/auth/register", new
+        _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -156,7 +157,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
 
         User user = await context.Users.FirstAsync(u => u.Username == "auditfailuser");
         user.IsActive = true;
-        await context.SaveChangesAsync();
+        _ = await context.SaveChangesAsync();
 
         // Act - Failed login with wrong password
         LoginRequest loginRequest = new LoginRequest("auditfailuser", "WrongPassword123!");
@@ -173,10 +174,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             .OrderByDescending(a => a.Timestamp)
             .ToListAsync();
 
-        auditLogs.Should().NotBeEmpty();
+        _ = auditLogs.Should().NotBeEmpty();
         AuthAuditLog failedLogin = auditLogs.First();
-        failedLogin.Success.Should().BeFalse();
-        failedLogin.FailureReason.Should().Contain("Invalid password");
+        _ = failedLogin.Success.Should().BeFalse();
+        _ = failedLogin.FailureReason.Should().Contain("Invalid password");
     }
 
     [Fact]
@@ -214,9 +215,9 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.Register)
             .ToListAsync();
 
-        auditLogs.Should().HaveCount(1);
-        auditLogs[0].Success.Should().BeTrue();
-        auditLogs[0].EventType.Should().Be(AuthEventType.Register);
+        _ = auditLogs.Should().HaveCount(1);
+        _ = auditLogs[0].Success.Should().BeTrue();
+        _ = auditLogs[0].EventType.Should().Be(AuthEventType.Register);
     }
 
     [Fact]
@@ -233,7 +234,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             "Audit",
             "PwChange");
 
-        await _client.PostAsJsonAsync("/api/auth/register", new
+        _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -248,12 +249,12 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
 
         User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
-        await context.SaveChangesAsync();
+        _ = await context.SaveChangesAsync();
 
         // Act - Change password by calling the service directly (avoids controller model binding subtleties in tests)
-        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
         bool success = await authService.ChangePasswordAsync(user.Id, "OldPassword123!", "NewPassword123!");
-        success.Should().BeTrue();
+        _ = success.Should().BeTrue();
 
         // Assert - Check audit log
         using IServiceScope verifyScope = _factory.Services.CreateScope();
@@ -265,9 +266,9 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.PasswordChange)
             .ToListAsync();
 
-        auditLogs.Should().HaveCount(1);
-        auditLogs[0].Success.Should().BeTrue();
-        auditLogs[0].EventType.Should().Be(AuthEventType.PasswordChange);
+        _ = auditLogs.Should().HaveCount(1);
+        _ = auditLogs[0].Success.Should().BeTrue();
+        _ = auditLogs[0].EventType.Should().Be(AuthEventType.PasswordChange);
     }
 
     [Fact]
@@ -283,7 +284,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             "Audit",
             "Reset");
 
-        await _client.PostAsJsonAsync("/api/auth/register", new
+        _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -294,7 +295,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         });
 
         // Act - Initiate password reset
-        Shared.Contracts.Auth.ForgotPasswordRequest forgotPasswordRequest = new Farm.Web.Shared.Contracts.Auth.ForgotPasswordRequest
+        Shared.Contracts.Auth.ForgotPasswordRequest forgotPasswordRequest = new Shared.Contracts.Auth.ForgotPasswordRequest
         {
             Email = email
         };
@@ -311,10 +312,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             .OrderByDescending(a => a.Timestamp)
             .ToListAsync();
 
-        auditLogs.Should().NotBeEmpty();
+        _ = auditLogs.Should().NotBeEmpty();
         AuthAuditLog resetLog = auditLogs.First();
-        resetLog.Success.Should().BeTrue();
-        resetLog.Metadata.Should().Contain(email);
+        _ = resetLog.Success.Should().BeTrue();
+        _ = resetLog.Metadata.Should().Contain(email);
     }
 
     [Fact]
@@ -331,7 +332,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             "Audit",
             "ResetComp");
 
-        await _client.PostAsJsonAsync("/api/auth/register", new
+        _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -359,11 +360,11 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             IsUsed = false
         };
 
-        context.PasswordResetTokens.Add(resetToken);
-        await context.SaveChangesAsync();
+        _ = context.PasswordResetTokens.Add(resetToken);
+        _ = await context.SaveChangesAsync();
 
         // Act - Complete password reset
-        Shared.Contracts.Auth.ResetPasswordRequest resetPasswordRequest = new Farm.Web.Shared.Contracts.Auth.ResetPasswordRequest
+        Shared.Contracts.Auth.ResetPasswordRequest resetPasswordRequest = new Shared.Contracts.Auth.ResetPasswordRequest
         {
             Token = "test-reset-token-123",
             Email = email,
@@ -383,9 +384,9 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.PasswordReset)
             .ToListAsync();
 
-        auditLogs.Should().HaveCount(1);
-        auditLogs[0].Success.Should().BeTrue();
-        auditLogs[0].EventType.Should().Be(AuthEventType.PasswordReset);
+        _ = auditLogs.Should().HaveCount(1);
+        _ = auditLogs[0].Success.Should().BeTrue();
+        _ = auditLogs[0].EventType.Should().Be(AuthEventType.PasswordReset);
     }
 
     [Fact]
@@ -402,7 +403,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             "Audit",
             "Lock");
 
-        await _client.PostAsJsonAsync("/api/auth/register", new
+        _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -417,13 +418,13 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
 
         User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
-        await context.SaveChangesAsync();
+        _ = await context.SaveChangesAsync();
 
         // Act - Trigger account lockout with 5 failed login attempts
         for (int i = 0; i < 5; i++)
         {
             LoginRequest loginRequest = new LoginRequest(username, "WrongPassword!");
-            await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+            _ = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
         }
 
         // Assert - Check audit log for account locked event
@@ -436,10 +437,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.AccountLocked)
             .ToListAsync();
 
-        auditLogs.Should().HaveCount(1);
-        auditLogs[0].Success.Should().BeTrue();
-        auditLogs[0].Metadata.Should().Contain("5"); // Should contain attempt count
-        auditLogs[0].Metadata.Should().Contain("LockoutDurationMinutes"); // Should contain lockout duration
+        _ = auditLogs.Should().HaveCount(1);
+        _ = auditLogs[0].Success.Should().BeTrue();
+        _ = auditLogs[0].Metadata.Should().Contain("5"); // Should contain attempt count
+        _ = auditLogs[0].Metadata.Should().Contain("LockoutDurationMinutes"); // Should contain lockout duration
     }
 
     [Fact]
@@ -456,7 +457,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             "Audit",
             "GetLog");
 
-        await _client.PostAsJsonAsync("/api/auth/register", new
+        _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -471,11 +472,11 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
 
         User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
-        await context.SaveChangesAsync();
+        _ = await context.SaveChangesAsync();
 
         // Perform login
         LoginRequest loginRequest = new LoginRequest(username, "SecurePassword123!");
-        await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+        _ = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
 
         // Act - Get audit log via service
         IAuthAuditService auditService = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
@@ -484,9 +485,9 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         DumpAuthAuditInfo(context, "GetUserAuditLog");
 
         // Assert
-        auditLogs.Should().HaveCountGreaterOrEqualTo(2); // Register + Login
-        auditLogs.Should().Contain(log => log.EventType == AuthEventType.Register);
-        auditLogs.Should().Contain(log => log.EventType == AuthEventType.Login);
-        auditLogs.Should().OnlyContain(log => log.UserId == user.Id);
+        _ = auditLogs.Should().HaveCountGreaterOrEqualTo(2); // Register + Login
+        _ = auditLogs.Should().Contain(log => log.EventType == AuthEventType.Register);
+        _ = auditLogs.Should().Contain(log => log.EventType == AuthEventType.Login);
+        _ = auditLogs.Should().OnlyContain(log => log.UserId == user.Id);
     }
 }

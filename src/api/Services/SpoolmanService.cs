@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
@@ -1068,7 +1069,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     private async Task<SpoolmanDiscoveryResult> ScanIpForSpoolmanAsync(string ip, CancellationToken ct)
     {
         string url = $"http://{ip}:7912";
-        System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        System.Diagnostics.Stopwatch stopwatch = Stopwatch.StartNew();
 
         try
         {

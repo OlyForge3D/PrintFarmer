@@ -1,4 +1,5 @@
-﻿using Farm.Web.Shared;
+﻿using System.Text.Json;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
@@ -33,7 +34,7 @@ public class SlicingProgressController : ControllerBase
         CancellationToken ct = HttpContext.RequestAborted;
         while (!ct.IsCancellationRequested)
         {
-            string payload = System.Text.Json.JsonSerializer.Serialize(new
+            string payload = JsonSerializer.Serialize(new
             {
                 jobId = job.JobId,
                 status = job.Status.ToString(),

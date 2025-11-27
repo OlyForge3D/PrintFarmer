@@ -16,7 +16,7 @@ namespace Farm.Web.Shared;
 //  - Simple API-only enums rely on global options (no attribute clutter).
 //
 // Custom tolerant converter (numeric OR string) for backward compatibility in tests and workers.
-[JsonConverter(typeof(Farm.Web.Shared.Json.PrinterBackendJsonConverter))]
+[JsonConverter(typeof(Json.PrinterBackendJsonConverter))]
 public enum PrinterBackend
 {
     Unknown = 0,
@@ -689,7 +689,7 @@ public class RegisterDiscoveredPrinterDto
             IpAddress = IpAddress,
             ServerUrl = $"http://{IpAddress}:{Port}",
             OriginalServerUrl = null,
-            Backend = Enum.TryParse<PrinterBackend>(PrinterBackend, ignoreCase: true, out PrinterBackend b) ? b : global::Farm.Web.Shared.PrinterBackend.Moonraker,
+            Backend = Enum.TryParse(PrinterBackend, ignoreCase: true, out PrinterBackend b) ? b : global::Farm.Web.Shared.PrinterBackend.Moonraker,
             BackendPort = Port,
             FrontendPort = null,
             DiscoveredAt = DiscoveredAt,
@@ -956,7 +956,7 @@ public record UpdateGcodeFileDto(
 /// Lifecycle status of a print job.
 /// </summary>
 // Custom permissive converter so tests / workers can deserialize numeric or string forms ("Queued", 0, "0").
-[JsonConverter(typeof(Farm.Web.Shared.Json.PrintJobStatusJsonConverter))]
+[JsonConverter(typeof(Json.PrintJobStatusJsonConverter))]
 public enum PrintJobStatus
 {
     Queued = 0,
@@ -1675,10 +1675,10 @@ public class AllProfilesResponseDto_Deprecated
 /// </summary>
 public class ManufacturerBundleProfileEntry
 {
-    [System.Text.Json.Serialization.JsonPropertyName("name")]
+    [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
-    [System.Text.Json.Serialization.JsonPropertyName("sub_path")]
+    [JsonPropertyName("sub_path")]
     public string SubPath { get; set; } = string.Empty; // Relative path like "machine/Prusa MK4S.json"
 }
 
@@ -1688,25 +1688,25 @@ public class ManufacturerBundleProfileEntry
 /// </summary>
 public class ManufacturerBundleDto
 {
-    [System.Text.Json.Serialization.JsonPropertyName("name")]
+    [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
-    [System.Text.Json.Serialization.JsonPropertyName("version")]
+    [JsonPropertyName("version")]
     public string Version { get; set; } = string.Empty;
 
-    [System.Text.Json.Serialization.JsonPropertyName("description")]
+    [JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
 
-    [System.Text.Json.Serialization.JsonPropertyName("machine_model_list")]
+    [JsonPropertyName("machine_model_list")]
     public IList<ManufacturerBundleProfileEntry> MachineModelList { get; set; } = new List<ManufacturerBundleProfileEntry>();
 
-    [System.Text.Json.Serialization.JsonPropertyName("machine_list")]
+    [JsonPropertyName("machine_list")]
     public IList<ManufacturerBundleProfileEntry> MachineList { get; set; } = new List<ManufacturerBundleProfileEntry>();
 
-    [System.Text.Json.Serialization.JsonPropertyName("process_list")]
+    [JsonPropertyName("process_list")]
     public IList<ManufacturerBundleProfileEntry> ProcessList { get; set; } = new List<ManufacturerBundleProfileEntry>();
 
-    [System.Text.Json.Serialization.JsonPropertyName("filament_list")]
+    [JsonPropertyName("filament_list")]
     public IList<ManufacturerBundleProfileEntry> FilamentList { get; set; } = new List<ManufacturerBundleProfileEntry>();
 }
 

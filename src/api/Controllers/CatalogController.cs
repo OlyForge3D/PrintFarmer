@@ -15,10 +15,10 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/catalog")]
 [Tags("Catalog")]
-public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService, Farm.Web.Api.Services.Catalog.ICatalogService catalogService) : ControllerBase
+public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingService unifiedLoggingService, Services.Catalog.ICatalogService catalogService) : ControllerBase
 {
     private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _unifiedLoggingService = unifiedLoggingService;
-    private readonly Farm.Web.Api.Services.Catalog.ICatalogService _catalogService = catalogService;
+    private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
 
     /// <summary>
     /// Gets all available printer manufacturers.

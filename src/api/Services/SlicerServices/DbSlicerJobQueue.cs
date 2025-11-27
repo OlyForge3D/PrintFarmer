@@ -145,7 +145,7 @@ namespace Farm.Web.Api.Services.SlicerServices
                 UserId = sj.UserId,
                 CreatedAt = sj.QueuedAt,
                 Priority = (SlicingJobPriority)sj.Priority,
-                Status = Enum.TryParse<SlicingJobStatus>(sj.Status, true, out SlicingJobStatus st) ? st : SlicingJobStatus.Queued,
+                Status = Enum.TryParse(sj.Status, true, out SlicingJobStatus st) ? st : SlicingJobStatus.Queued,
                 ModelFileUrl = Uri.TryCreate(sj.ModelFileUrl, UriKind.RelativeOrAbsolute, out Uri? u) ? u : new Uri("about:blank", UriKind.RelativeOrAbsolute),
                 ModelFileName = sj.ModelFileName,
                 EngineType = (SlicerEngineType)sj.SlicerEngine,

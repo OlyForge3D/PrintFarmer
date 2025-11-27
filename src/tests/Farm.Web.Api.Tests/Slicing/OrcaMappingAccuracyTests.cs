@@ -64,15 +64,15 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(1);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(1);
         // Mapping service should recognize X1C variations
     }
 
@@ -110,15 +110,15 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(1);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(1);
         // Should match MK4 exactly, not MK3 or other variants
     }
 
@@ -155,7 +155,7 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         // Should not match small-bed printers
     }
 
@@ -192,16 +192,16 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(1);
-        preview.Printers[0].NozzleDiameter.Should().Be(0.6);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(1);
+        _ = preview.Printers[0].NozzleDiameter.Should().Be(0.6);
     }
 
     [Fact(DisplayName = "Filament type derivation from name works correctly")]
@@ -243,23 +243,23 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Filaments.Should().HaveCount(3);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Filaments.Should().HaveCount(3);
 
         // First filament should be derived as PLA from name
         OrcaFilamentPresetDto? plaFilament = preview.Filaments.FirstOrDefault(f => f.Name.Contains("PLA"));
-        plaFilament.Should().NotBeNull();
+        _ = plaFilament.Should().NotBeNull();
 
         // Third filament should use explicit type
         OrcaFilamentPresetDto? absFilament = preview.Filaments.FirstOrDefault(f => f.FilamentType == "ABS");
-        absFilament.Should().NotBeNull();
+        _ = absFilament.Should().NotBeNull();
     }
 
     [Fact(DisplayName = "Quality classification from layer height works correctly")]
@@ -303,20 +303,20 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Processes.Should().HaveCount(3);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Processes.Should().HaveCount(3);
 
         // Verify layer heights are preserved
-        preview.Processes.Should().Contain(p => Math.Abs(p.LayerHeight - 0.12) < 0.01);
-        preview.Processes.Should().Contain(p => Math.Abs(p.LayerHeight - 0.20) < 0.01);
-        preview.Processes.Should().Contain(p => Math.Abs(p.LayerHeight - 0.28) < 0.01);
+        _ = preview.Processes.Should().Contain(p => Math.Abs(p.LayerHeight - 0.12) < 0.01);
+        _ = preview.Processes.Should().Contain(p => Math.Abs(p.LayerHeight - 0.20) < 0.01);
+        _ = preview.Processes.Should().Contain(p => Math.Abs(p.LayerHeight - 0.28) < 0.01);
     }
 
     [Fact(DisplayName = "Empty sections handled gracefully")]
@@ -349,17 +349,17 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
         HttpResponseMessage response = await _client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string previewJson = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(previewJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(1);
-        preview.Filaments.Should().BeEmpty();
-        preview.Processes.Should().BeEmpty();
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(1);
+        _ = preview.Filaments.Should().BeEmpty();
+        _ = preview.Processes.Should().BeEmpty();
     }
 
     // Helper methods for database seeding
@@ -382,8 +382,8 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             IsActive = true
         };
 
-        db.Manufacturers.Add(manufacturer);
-        await db.SaveChangesAsync();
+        _ = db.Manufacturers.Add(manufacturer);
+        _ = await db.SaveChangesAsync();
         return manufacturer;
     }
 
@@ -427,10 +427,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                db.Models.Add(pm);
+                _ = db.Models.Add(pm);
             }
         }
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
     }
 
     private async Task SeedSimilarPrinterModels()
@@ -471,10 +471,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                db.Models.Add(pm);
+                _ = db.Models.Add(pm);
             }
         }
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
     }
 
     private async Task SeedPrintersWithDifferentBedSizes()
@@ -515,10 +515,10 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                db.Models.Add(pm);
+                _ = db.Models.Add(pm);
             }
         }
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
     }
 
     private async Task SeedPrintersWithDifferentNozzles()
@@ -570,9 +570,9 @@ public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactor
             bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                db.Models.Add(pm);
+                _ = db.Models.Add(pm);
             }
         }
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
     }
 }

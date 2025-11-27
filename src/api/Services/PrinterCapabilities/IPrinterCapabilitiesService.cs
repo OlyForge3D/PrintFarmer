@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
         Task<IReadOnlyList<PrinterDto>> GetCompatiblePrintersAsync(Guid gcodeFileId, CancellationToken ct = default);
         Task<bool> DeleteAsync(Guid printerId, CancellationToken ct = default);
         Task<(PrinterCapabilitiesDto? result, bool isNew)> DiscoverAsync(Guid printerId, CancellationToken ct = default);
-        Task<Farm.Web.Api.Services.Interfaces.CapabilityValidationResult> ValidateAsync(Guid printerId, CancellationToken ct = default);
+        Task<Interfaces.CapabilityValidationResult> ValidateAsync(Guid printerId, CancellationToken ct = default);
         Task<PrinterCapabilitiesDto?> GetModelDefaultsAsync(Guid printerId, CancellationToken ct = default);
     }
 }

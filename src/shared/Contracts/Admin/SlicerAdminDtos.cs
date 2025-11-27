@@ -5,7 +5,7 @@ namespace Farm.Web.Shared.Contracts.Admin
     public class DryRunRequest
     {
         public string? Template { get; set; }
-        public Farm.Web.Shared.SlicerEngineType Engine { get; set; } = Farm.Web.Shared.SlicerEngineType.OrcaSlicer;
+        public SlicerEngineType Engine { get; set; } = Farm.Web.Shared.SlicerEngineType.OrcaSlicer;
     }
 
     public class DryRunResult

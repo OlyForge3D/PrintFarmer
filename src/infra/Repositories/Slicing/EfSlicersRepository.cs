@@ -16,7 +16,7 @@ namespace Farm.Infrastructure.Repositories.Slicing
 
         public async Task AddAsync(SlicerService svc, CancellationToken ct)
         {
-            await _db.SlicerServices.AddAsync(svc, ct);
+            _ = await _db.SlicerServices.AddAsync(svc, ct);
         }
 
         public async Task<IReadOnlyList<SlicerService>> ListAsync(CancellationToken ct)
@@ -31,13 +31,13 @@ namespace Farm.Infrastructure.Repositories.Slicing
 
         public Task RemoveAsync(SlicerService svc, CancellationToken ct)
         {
-            _db.SlicerServices.Remove(svc);
+            _ = _db.SlicerServices.Remove(svc);
             return Task.CompletedTask;
         }
 
         public async Task SaveChangesAsync(CancellationToken ct)
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
         }
     }
 }

@@ -14,8 +14,8 @@ public class SystemProcessRunner : IProcessRunner
     {
         private readonly System.Diagnostics.Process _proc = proc;
 
-        public System.IO.StreamReader StandardOutput => _proc.StandardOutput;
-        public System.IO.StreamReader StandardError => _proc.StandardError;
+        public StreamReader StandardOutput => _proc.StandardOutput;
+        public StreamReader StandardError => _proc.StandardError;
         public bool HasExited => _proc.HasExited;
         public int ExitCode => _proc.ExitCode;
 

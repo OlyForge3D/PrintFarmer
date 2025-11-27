@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Mapping
         public PrinterMappingProfile()
         {
             // Moonraker service models -> Shared DTOs
-            CreateMap<Services.HistoryJob, SharedModels.HistoryJob>()
+            _ = CreateMap<HistoryJob, SharedModels.HistoryJob>()
                 .ForMember(dest => dest.JobId, opt => opt.MapFrom(src => src.JobId))
                 .ForMember(dest => dest.Exists, opt => opt.MapFrom(src => src.Exists))
                 .ForMember(dest => dest.Filename, opt => opt.MapFrom(src => src.Filename))
@@ -23,13 +23,13 @@ namespace Farm.Web.Api.Mapping
                 .ForMember(dest => dest.FilamentUsed, opt => opt.MapFrom(src => src.FilamentUsed))
                 .ForMember(dest => dest.AuxiliaryData, opt => opt.MapFrom(src => src.AuxiliaryData));
 
-            CreateMap<Services.AuxiliaryData, SharedModels.AuxiliaryData>();
+            _ = CreateMap<AuxiliaryData, SharedModels.AuxiliaryData>();
 
-            CreateMap<Services.HistoryTotals, SharedModels.HistoryTotals>()
+            _ = CreateMap<HistoryTotals, SharedModels.HistoryTotals>()
                 .ForMember(dest => dest.JobTotals, opt => opt.MapFrom(src => src.JobTotals))
                 .ForMember(dest => dest.AuxiliaryTotals, opt => opt.MapFrom(src => src.AuxiliaryTotals));
 
-            CreateMap<Services.JobTotals, SharedModels.JobTotals>()
+            _ = CreateMap<JobTotals, SharedModels.JobTotals>()
                 .ForMember(dest => dest.TotalJobs, opt => opt.MapFrom(src => (int)src.TotalJobs))
                 .ForMember(dest => dest.TotalTime, opt => opt.MapFrom(src => src.TotalTime))
                 .ForMember(dest => dest.TotalPrintTime, opt => opt.MapFrom(src => src.TotalPrintTime))
@@ -37,7 +37,7 @@ namespace Farm.Web.Api.Mapping
                 .ForMember(dest => dest.LongestJob, opt => opt.MapFrom(src => src.LongestJob))
                 .ForMember(dest => dest.LongestPrint, opt => opt.MapFrom(src => src.LongestPrint));
 
-            CreateMap<Services.AuxiliaryTotals, SharedModels.AuxiliaryTotals>();
+            _ = CreateMap<AuxiliaryTotals, SharedModels.AuxiliaryTotals>();
         }
     }
 }

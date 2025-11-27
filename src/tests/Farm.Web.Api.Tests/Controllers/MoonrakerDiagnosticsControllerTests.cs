@@ -15,32 +15,32 @@ public class MoonrakerDiagnosticsControllerTests
     public async Task GetFileRootsAsync_ReturnsOk_WhenServiceReturnsRoots()
     {
         Mock<IMoonrakerDiagnosticsService> mockSvc = new Mock<IMoonrakerDiagnosticsService>();
-        Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
-        mockSvc.Setup(s => s.GetFileRootsAsync(It.IsAny<string>()))
+        _ = mockSvc.Setup(s => s.GetFileRootsAsync(It.IsAny<string>()))
             .ReturnsAsync(new[] { new FileRoot { Path = "/gcodes" } });
 
         MoonrakerDiagnosticsController controller = new MoonrakerDiagnosticsController(mockSvc.Object, mockLogger.Object);
 
         ActionResult<FileRoot[]> result = await controller.GetFileRootsAsync("http://x");
 
-        Assert.IsType<OkObjectResult>(result.Result);
+        _ = Assert.IsType<OkObjectResult>(result.Result);
     }
 
     [Fact]
     public async Task GetFileRootsAsync_ReturnsProblem_WhenServiceReturnsNull()
     {
         Mock<IMoonrakerDiagnosticsService> mockSvc = new Mock<IMoonrakerDiagnosticsService>();
-        Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
-        mockSvc.Setup(s => s.GetFileRootsAsync(It.IsAny<string>()))
+        _ = mockSvc.Setup(s => s.GetFileRootsAsync(It.IsAny<string>()))
             .ReturnsAsync((FileRoot[]?)null);
 
         MoonrakerDiagnosticsController controller = new MoonrakerDiagnosticsController(mockSvc.Object, mockLogger.Object);
 
         ActionResult<FileRoot[]> result = await controller.GetFileRootsAsync("http://x");
 
-        Assert.IsType<ObjectResult>(result.Result);
+        _ = Assert.IsType<ObjectResult>(result.Result);
         ObjectResult? obj = result.Result as ObjectResult;
         Assert.Equal(500, obj?.StatusCode);
     }

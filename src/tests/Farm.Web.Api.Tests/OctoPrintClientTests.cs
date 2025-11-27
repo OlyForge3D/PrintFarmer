@@ -19,7 +19,7 @@ public class OctoPrintClientTests
     {
         List<HttpRequestMessage> recorded = new List<HttpRequestMessage>();
         Mock<HttpMessageHandler> handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
-        handler.Protected()
+        _ = handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
             {
@@ -45,9 +45,9 @@ public class OctoPrintClientTests
     [Fact]
     public async Task GetPrinterStateAsync_ParsesStateAndTemps()
     {
-        (OctoPrintClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (OctoPrintClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/api/printer");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/api/printer");
             return Json(new
             {
                 state = "Operational",
@@ -60,16 +60,16 @@ public class OctoPrintClientTests
         });
         string json = await client.GetPrinterStateAsync("http://octo", "key");
         JsonDocument doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("state").GetString().Should().Be("Operational");
-        doc.RootElement.GetProperty("temperature").GetProperty("tool0").GetProperty("actual").GetDouble().Should().Be(210.5);
+        _ = doc.RootElement.GetProperty("state").GetString().Should().Be("Operational");
+        _ = doc.RootElement.GetProperty("temperature").GetProperty("tool0").GetProperty("actual").GetDouble().Should().Be(210.5);
     }
 
     [Fact]
     public async Task GetJobStatusAsync_ParsesJobName()
     {
-        (OctoPrintClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (OctoPrintClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/api/job");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/api/job");
             return Json(new
             {
                 job = new { file = new { name = "test.gcode" } },
@@ -78,15 +78,15 @@ public class OctoPrintClientTests
         });
         string json = await client.GetJobStatusAsync("http://octo", "key");
         JsonDocument doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("job").GetProperty("file").GetProperty("name").GetString().Should().Be("test.gcode");
+        _ = doc.RootElement.GetProperty("job").GetProperty("file").GetProperty("name").GetString().Should().Be("test.gcode");
     }
 
     [Fact]
     public async Task PluginDetection_ParsesPluginsList()
     {
-        (OctoPrintClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (OctoPrintClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/api/plugins");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/api/plugins");
             return Json(new
             {
                 plugins = new[] {
@@ -99,7 +99,7 @@ public class OctoPrintClientTests
         HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "http://octo/api/plugins");
         request.Headers.Add("X-Api-Key", "key");
         // Use reflection to access internal HttpClient property
-        PropertyInfo? httpClientProp = typeof(OctoPrintClient).GetProperty("HttpClient", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        PropertyInfo? httpClientProp = typeof(OctoPrintClient).GetProperty("HttpClient", BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(httpClientProp);
         object? httpClientObj = httpClientProp.GetValue(client);
         Assert.NotNull(httpClientObj);
@@ -108,6 +108,6 @@ public class OctoPrintClientTests
         string pluginsJson = await response.Content.ReadAsStringAsync();
         JsonDocument doc = JsonDocument.Parse(pluginsJson);
         List<string?> keys = doc.RootElement.GetProperty("plugins").EnumerateArray().Select(p => p.GetProperty("key").GetString()).ToList();
-        keys.Should().Contain(new[] { "display_current_position", "spoolmanager", "spoolman" });
+        _ = keys.Should().Contain(new[] { "display_current_position", "spoolmanager", "spoolman" });
     }
 }

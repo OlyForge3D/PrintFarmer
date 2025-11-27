@@ -106,7 +106,7 @@ public interface IMoonrakerClient
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>A task containing the fully constructed PrinterDto with all backend-specific details</returns>
     Task<PrinterDto> CreatePrinterDtoAsync(
-        Farm.Infrastructure.Domain.Printer printer,
+        Printer printer,
         PrinterCompositeStatus status,
         PrinterSpoolInfoDto? spoolInfo,
         CancellationToken ct = default);

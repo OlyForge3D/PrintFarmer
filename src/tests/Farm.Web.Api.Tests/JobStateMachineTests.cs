@@ -25,7 +25,7 @@ public class JobStateMachineTests
         bool isValid = JobStateMachine.IsValidTransition(fromState, toState);
 
         // Assert
-        isValid.Should().BeTrue($"transition from {fromState} to {toState} should be valid");
+        _ = isValid.Should().BeTrue($"transition from {fromState} to {toState} should be valid");
     }
 
     [Theory]
@@ -42,7 +42,7 @@ public class JobStateMachineTests
     {
         // Act & Assert
         Action action = () => JobStateMachine.ValidateTransition(fromState, toState);
-        action.Should().NotThrow($"transition from {fromState} to {toState} should be valid");
+        _ = action.Should().NotThrow($"transition from {fromState} to {toState} should be valid");
     }
 
     [Theory]
@@ -61,7 +61,7 @@ public class JobStateMachineTests
         JobState resultState = JobStateMachine.Transition(fromState, toState);
 
         // Assert
-        resultState.Should().Be(toState);
+        _ = resultState.Should().Be(toState);
     }
 
     #endregion
@@ -112,7 +112,7 @@ public class JobStateMachineTests
         bool isValid = JobStateMachine.IsValidTransition(fromState, toState);
 
         // Assert
-        isValid.Should().BeFalse($"transition from {fromState} to {toState} should be invalid");
+        _ = isValid.Should().BeFalse($"transition from {fromState} to {toState} should be invalid");
     }
 
     [Theory]
@@ -137,7 +137,7 @@ public class JobStateMachineTests
     {
         // Act & Assert
         Action action = () => JobStateMachine.ValidateTransition(fromState, toState);
-        action.Should().Throw<InvalidJobStateTransitionException>()
+        _ = action.Should().Throw<InvalidJobStateTransitionException>()
               .WithMessage($"Invalid transition from {fromState} to {toState}");
     }
 
@@ -153,11 +153,11 @@ public class JobStateMachineTests
     {
         // Act & Assert
         Func<JobState> action = () => JobStateMachine.Transition(fromState, toState);
-        action.Should().Throw<InvalidJobStateTransitionException>()
+        _ = action.Should().Throw<InvalidJobStateTransitionException>()
               .WithMessage($"Invalid transition from {fromState} to {toState}")
               .Which.FromState.Should().Be(fromState);
 
-        action.Should().Throw<InvalidJobStateTransitionException>()
+        _ = action.Should().Throw<InvalidJobStateTransitionException>()
               .Which.ToState.Should().Be(toState);
     }
 
@@ -176,7 +176,7 @@ public class JobStateMachineTests
         bool isTerminal = JobStateMachine.IsTerminal(state);
 
         // Assert
-        isTerminal.Should().BeTrue($"{state} should be a terminal state");
+        _ = isTerminal.Should().BeTrue($"{state} should be a terminal state");
     }
 
     [Theory]
@@ -189,7 +189,7 @@ public class JobStateMachineTests
         bool isTerminal = JobStateMachine.IsTerminal(state);
 
         // Assert
-        isTerminal.Should().BeFalse($"{state} should not be a terminal state");
+        _ = isTerminal.Should().BeFalse($"{state} should not be a terminal state");
     }
 
     [Fact]
@@ -199,7 +199,7 @@ public class JobStateMachineTests
         IReadOnlyCollection<JobState> terminalStates = JobStateMachine.GetTerminalStates();
 
         // Assert
-        terminalStates.Should().BeEquivalentTo(new[]
+        _ = terminalStates.Should().BeEquivalentTo(new[]
         {
             JobState.Succeeded,
             JobState.Failed,
@@ -219,7 +219,7 @@ public class JobStateMachineTests
         IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Queued);
 
         // Assert
-        validStates.Should().BeEquivalentTo(new[] { JobState.Dispatched, JobState.Cancelled });
+        _ = validStates.Should().BeEquivalentTo(new[] { JobState.Dispatched, JobState.Cancelled });
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class JobStateMachineTests
         IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Dispatched);
 
         // Assert
-        validStates.Should().BeEquivalentTo(new[] { JobState.Processing, JobState.Cancelled, JobState.DeadLetter });
+        _ = validStates.Should().BeEquivalentTo(new[] { JobState.Processing, JobState.Cancelled, JobState.DeadLetter });
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public class JobStateMachineTests
         IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Processing);
 
         // Assert
-        validStates.Should().BeEquivalentTo(new[]
+        _ = validStates.Should().BeEquivalentTo(new[]
         {
             JobState.Succeeded,
             JobState.Failed,
@@ -259,7 +259,7 @@ public class JobStateMachineTests
         IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(terminalState);
 
         // Assert
-        validStates.Should().BeEmpty($"{terminalState} is terminal and should have no valid next states");
+        _ = validStates.Should().BeEmpty($"{terminalState} is terminal and should have no valid next states");
     }
 
     #endregion
@@ -277,9 +277,9 @@ public class JobStateMachineTests
         InvalidJobStateTransitionException exception = new InvalidJobStateTransitionException(fromState, toState);
 
         // Assert
-        exception.FromState.Should().Be(fromState);
-        exception.ToState.Should().Be(toState);
-        exception.Message.Should().Be($"Invalid transition from {fromState} to {toState}");
+        _ = exception.FromState.Should().Be(fromState);
+        _ = exception.ToState.Should().Be(toState);
+        _ = exception.Message.Should().Be($"Invalid transition from {fromState} to {toState}");
     }
 
     #endregion
@@ -300,7 +300,7 @@ public class JobStateMachineTests
         bool isValid = JobStateMachine.IsValidTransition(state, sameState);
 
         // Assert
-        isValid.Should().BeFalse("transitioning to the same state should be invalid");
+        _ = isValid.Should().BeFalse("transitioning to the same state should be invalid");
     }
 
     [Fact]
@@ -310,7 +310,7 @@ public class JobStateMachineTests
         IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Queued);
 
         // Assert
-        validStates.Should().BeAssignableTo<IReadOnlyCollection<JobState>>();
+        _ = validStates.Should().BeAssignableTo<IReadOnlyCollection<JobState>>();
     }
 
     [Fact]
@@ -320,7 +320,7 @@ public class JobStateMachineTests
         IReadOnlyCollection<JobState> terminalStates = JobStateMachine.GetTerminalStates();
 
         // Assert
-        terminalStates.Should().BeAssignableTo<IReadOnlyCollection<JobState>>();
+        _ = terminalStates.Should().BeAssignableTo<IReadOnlyCollection<JobState>>();
     }
 
     #endregion
@@ -335,16 +335,16 @@ public class JobStateMachineTests
 
         // Act & Assert - Full successful workflow
         currentState = JobStateMachine.Transition(currentState, JobState.Dispatched);
-        currentState.Should().Be(JobState.Dispatched);
+        _ = currentState.Should().Be(JobState.Dispatched);
 
         currentState = JobStateMachine.Transition(currentState, JobState.Processing);
-        currentState.Should().Be(JobState.Processing);
+        _ = currentState.Should().Be(JobState.Processing);
 
         currentState = JobStateMachine.Transition(currentState, JobState.Succeeded);
-        currentState.Should().Be(JobState.Succeeded);
+        _ = currentState.Should().Be(JobState.Succeeded);
 
         // Terminal state - no further transitions possible
-        JobStateMachine.IsTerminal(currentState).Should().BeTrue();
+        _ = JobStateMachine.IsTerminal(currentState).Should().BeTrue();
     }
 
     [Fact]
@@ -358,8 +358,8 @@ public class JobStateMachineTests
         currentState = JobStateMachine.Transition(currentState, JobState.Processing);
         currentState = JobStateMachine.Transition(currentState, JobState.Failed);
 
-        currentState.Should().Be(JobState.Failed);
-        JobStateMachine.IsTerminal(currentState).Should().BeTrue();
+        _ = currentState.Should().Be(JobState.Failed);
+        _ = JobStateMachine.IsTerminal(currentState).Should().BeTrue();
     }
 
     [Fact]
@@ -370,8 +370,8 @@ public class JobStateMachineTests
         currentState = JobStateMachine.Transition(currentState, JobState.Cancelled);
 
         // Assert
-        currentState.Should().Be(JobState.Cancelled);
-        JobStateMachine.IsTerminal(currentState).Should().BeTrue();
+        _ = currentState.Should().Be(JobState.Cancelled);
+        _ = JobStateMachine.IsTerminal(currentState).Should().BeTrue();
     }
 
     [Fact]
@@ -383,8 +383,8 @@ public class JobStateMachineTests
         currentState = JobStateMachine.Transition(currentState, JobState.DeadLetter);
 
         // Assert
-        currentState.Should().Be(JobState.DeadLetter);
-        JobStateMachine.IsTerminal(currentState).Should().BeTrue();
+        _ = currentState.Should().Be(JobState.DeadLetter);
+        _ = JobStateMachine.IsTerminal(currentState).Should().BeTrue();
     }
 
     #endregion

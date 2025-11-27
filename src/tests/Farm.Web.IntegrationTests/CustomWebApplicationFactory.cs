@@ -26,10 +26,10 @@ namespace Farm.Web.IntegrationTests
         protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
-            builder.ConfigureServices(services =>
+            _ = builder.ConfigureServices(services =>
             {
                 // Provide a lightweight test orchestrator so integration tests can run without full worker infrastructure.
-                services.AddSingleton<Farm.Web.Shared.ISlicerOrchestrator, TestSlicerOrchestrator>();
+                _ = services.AddSingleton<Shared.ISlicerOrchestrator, TestSlicerOrchestrator>();
             });
         }
 
@@ -58,7 +58,7 @@ namespace Farm.Web.IntegrationTests
             // explicitly in their own setup.
 
             // Ensure host runs in Testing environment to match other test factories
-            builder.UseEnvironment("Testing");
+            _ = builder.UseEnvironment("Testing");
 
             IHost host = base.CreateHost(builder);
 
@@ -67,10 +67,10 @@ namespace Farm.Web.IntegrationTests
             try
             {
                 using IServiceScope scope = host.Services.CreateScope();
-                AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-                db.Database.EnsureCreated();
+                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                _ = db.Database.EnsureCreated();
 
-                DatabaseInitializer? initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
+                DatabaseInitializer? initializer = scope.ServiceProvider.GetService<DatabaseInitializer>();
                 if (initializer != null)
                 {
                     try

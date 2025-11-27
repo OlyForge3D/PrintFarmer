@@ -51,15 +51,15 @@ public class SharedSqliteFixture : IDisposable
         // in-memory DB alive.
         ServiceCollection services = new ServiceCollection();
         // Minimal configuration: register DbContext using the connection string
-        services.AddDbContext<AppDbContext>(opts => opts.UseSqlite(connStr));
+        _ = services.AddDbContext<AppDbContext>(opts => opts.UseSqlite(connStr));
 
         // Register DatabaseInitializer and its dependencies similarly to startup
         // We will attempt to reuse the project's service registrations minimally.
-        services.AddLogging();
+        _ = services.AddLogging();
         // Tests run without the full service graph; DatabaseInitializer depends on IUnifiedLoggingService.
         // Provide a simple NoOp implementation so the initializer can be constructed for seeding.
-        services.AddSingleton<IUnifiedLoggingService, NoOpUnifiedLoggingService>();
-        services.AddScoped<DatabaseInitializer>();
+        _ = services.AddSingleton<IUnifiedLoggingService, NoOpUnifiedLoggingService>();
+        _ = services.AddScoped<DatabaseInitializer>();
 
         ServiceProvider provider = services.BuildServiceProvider();
         using IServiceScope scope = provider.CreateScope();

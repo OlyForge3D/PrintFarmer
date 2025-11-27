@@ -1,5 +1,7 @@
 ﻿using System;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -20,7 +22,7 @@ namespace Farm.Web.Api.Tests.Services
     {
         private static IFormFile CreateFormFile(string name, string content, string fileName)
         {
-            MemoryStream ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+            MemoryStream ms = new MemoryStream(Encoding.UTF8.GetBytes(content));
             return new FormFile(ms, 0, ms.Length, name, fileName);
         }
 
@@ -28,14 +30,14 @@ namespace Farm.Web.Api.Tests.Services
         public async Task UploadModelAsync_CompositeHash_Path_CreatesNewHash()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
             // Arrange: existing model with same file hash but different base name and same extension
             string content = "abc123";
-            byte[] hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content));
+            byte[] hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
             string contentHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
 
-            Model3D existing = new Farm.Infrastructure.Domain.Model3D
+            Model3D existing = new Model3D
             {
                 Id = Guid.NewGuid(),
                 OriginalFileName = "othername.stl",
@@ -46,23 +48,23 @@ namespace Farm.Web.Api.Tests.Services
             };
 
             Mock<IModelRepository> mockRepo = new Mock<IModelRepository>(MockBehavior.Strict);
-            mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(existing);
-            mockRepo.Setup(r => r.AddAsync(It.IsAny<Farm.Infrastructure.Domain.Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-            mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(existing);
+            _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
-            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
-            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+            _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
             Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
 
             // When base names differ, composite hash should be computed and a new model added
-            mockRepo.Verify(r => r.AddAsync(It.IsAny<Farm.Infrastructure.Domain.Model3D>(), It.IsAny<CancellationToken>()), Times.Once);
+            mockRepo.Verify(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()), Times.Once);
             Assert.NotNull(result);
             Assert.Equal("model.stl", result.FileName);
         }
@@ -71,12 +73,12 @@ namespace Farm.Web.Api.Tests.Services
         public void ValidateModel_InvalidFileType_ReturnsIssue()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IModelRepository> mockRepo = new Mock<IModelRepository>();
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
-            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
             // Setup ValidateModelExtension to throw for invalid extensions
-            mockFileManagement.Setup(s => s.ValidateModelExtension(It.IsAny<string>()))
+            _ = mockFileManagement.Setup(s => s.ValidateModelExtension(It.IsAny<string>()))
                 .Callback<string>(ext =>
                 {
                     string[] allowedExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" };
@@ -87,7 +89,7 @@ namespace Farm.Web.Api.Tests.Services
                     }
                 });
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile badFile = CreateFormFile("file", "x", "model.exe");
 
@@ -101,68 +103,68 @@ namespace Farm.Web.Api.Tests.Services
         public void ValidateModel_EmptyFile_ThrowsArgument()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IModelRepository> mockRepo = new Mock<IModelRepository>();
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
-            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.stl");
 
-            Assert.Throws<ArgumentException>(() => service.ValidateModel(empty));
+            _ = Assert.Throws<ArgumentException>(() => service.ValidateModel(empty));
         }
 
         [Fact]
         public async Task UploadModelAsync_AnalysisServiceThrows_Succeeds()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
             Mock<IModelRepository> mockRepo = new Mock<IModelRepository>(MockBehavior.Strict);
-            mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.Model3D?)null);
-            mockRepo.Setup(r => r.AddAsync(It.IsAny<Farm.Infrastructure.Domain.Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-            mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
+            _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            Mock<IModelAnalysisService> mockAnalysis = new Mock<Farm.Web.Api.Services.Interfaces.IModelAnalysisService>(MockBehavior.Strict);
-            mockAnalysis.Setup(a => a.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("analysis failed"));
+            Mock<IModelAnalysisService> mockAnalysis = new Mock<IModelAnalysisService>(MockBehavior.Strict);
+            _ = mockAnalysis.Setup(a => a.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("analysis failed"));
 
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
-            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
-            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+            _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object, mockAnalysis.Object);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockAnalysis.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 
             Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
 
             Assert.NotNull(result);
-            mockRepo.Verify(r => r.AddAsync(It.IsAny<Farm.Infrastructure.Domain.Model3D>(), It.IsAny<CancellationToken>()), Times.Once);
+            mockRepo.Verify(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]
         public async Task UploadModelAsync_RepositorySaveFails_Propagates()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
             Mock<IModelRepository> mockRepo = new Mock<IModelRepository>(MockBehavior.Strict);
-            mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.Model3D?)null);
-            mockRepo.Setup(r => r.AddAsync(It.IsAny<Farm.Infrastructure.Domain.Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-            mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("db failure"));
+            _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
+            _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("db failure"));
 
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
-            mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
-            mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+            _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => service.UploadModelAsync(file, CancellationToken.None));
+            _ = await Assert.ThrowsAsync<InvalidOperationException>(() => service.UploadModelAsync(file, CancellationToken.None));
         }
     }
 }

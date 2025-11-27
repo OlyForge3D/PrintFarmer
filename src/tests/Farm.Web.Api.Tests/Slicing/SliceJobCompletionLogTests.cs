@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -32,22 +33,22 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
     public async Task Completion_Persists_Log_Text_As_Artifact()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         // Manually construct controller (controllers aren't added to root service provider in this test host)
         ISliceJobRepository repo = jobRepo;
-        ISliceJobEventService evtSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Slicing.ISliceJobEventService>();
+        ISliceJobEventService evtSvc = scope.ServiceProvider.GetRequiredService<ISliceJobEventService>();
         ILoggerFactory loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
-        ILogger<Farm.Web.Api.Controllers.Slicing.SliceJobController> logger = loggerFactory.CreateLogger<Farm.Web.Api.Controllers.Slicing.SliceJobController>();
+        ILogger<SliceJobController> logger = loggerFactory.CreateLogger<SliceJobController>();
         IHostEnvironment hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
-        IProcessProfileRepository profileRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository>();
-        IRateLimitService rateLimit = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.RateLimiting.IRateLimitService>();
-        SliceJobMetrics metrics = new Farm.Web.Api.Services.Slicing.SliceJobMetrics();
-        IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Workers.IWorkerAuthService>();
+        IProcessProfileRepository profileRepo = scope.ServiceProvider.GetRequiredService<IProcessProfileRepository>();
+        IRateLimitService rateLimit = scope.ServiceProvider.GetRequiredService<IRateLimitService>();
+        SliceJobMetrics metrics = new SliceJobMetrics();
+        IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<IWorkerAuthService>();
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
-        SliceJobController controller = new Farm.Web.Api.Controllers.Slicing.SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth)
+        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
@@ -68,7 +69,7 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
         await jobRepo.SaveChangesAsync();
 
         // Upload primary gcode artifact
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("; gcode content");
+        byte[] bytes = Encoding.UTF8.GetBytes("; gcode content");
         TestFormFile formFile = new TestFormFile(bytes, "primary.gcode", "application/gcode");
         Artifact primary = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
 
@@ -82,17 +83,17 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
 
         // Validate response
         OkObjectResult? ok = result as OkObjectResult;
-        ok.Should().NotBeNull();
+        _ = ok.Should().NotBeNull();
         CompleteSliceJobResponse? response = ok!.Value as CompleteSliceJobResponse;
-        response.Should().NotBeNull();
-        response!.ArtifactIds.Should().Contain(primary.Id);
-        response.LogArtifactId.Should().NotBeNull();
-        response.ArtifactIds.Should().Contain(response.LogArtifactId!.Value);
+        _ = response.Should().NotBeNull();
+        _ = response!.ArtifactIds.Should().Contain(primary.Id);
+        _ = response.LogArtifactId.Should().NotBeNull();
+        _ = response.ArtifactIds.Should().Contain(response.LogArtifactId!.Value);
 
         // Verify artifact persisted
         IReadOnlyList<Artifact> artifacts = await artifactsService.ListByJobAsync(job.Id, default);
-        artifacts.Should().HaveCount(2);
-        artifacts.Should().Contain(a => a.Kind == "log" && a.Id == response.LogArtifactId);
+        _ = artifacts.Should().HaveCount(2);
+        _ = artifacts.Should().Contain(a => a.Kind == "log" && a.Id == response.LogArtifactId);
     }
 
     private sealed class TestFormFile : IFormFile
@@ -112,12 +113,12 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
         public long Length { get; }
         public string Name { get; }
         public string FileName { get; }
-        public void CopyTo(System.IO.Stream target) => target.Write(_data, 0, _data.Length);
-        public Task CopyToAsync(System.IO.Stream target, CancellationToken cancellationToken = default)
+        public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
         {
             target.Write(_data, 0, _data.Length);
             return Task.CompletedTask;
         }
-        public System.IO.Stream OpenReadStream() => new System.IO.MemoryStream(_data, writable: false);
+        public Stream OpenReadStream() => new MemoryStream(_data, writable: false);
     }
 }

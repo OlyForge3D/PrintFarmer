@@ -31,7 +31,7 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// </summary>
     [HttpPost("initial-admin")]
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
-        [FromBody] Farm.Web.Shared.Contracts.Setup.CreateInitialAdminRequest request,
+        [FromBody] Shared.Contracts.Setup.CreateInitialAdminRequest request,
         CancellationToken ct)
     {
         AuthenticationResult result = await _setupService.CreateInitialAdminAsync(request, ct);

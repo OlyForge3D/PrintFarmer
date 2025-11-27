@@ -27,7 +27,7 @@ public class ModelController : ControllerBase
     private readonly IVirusScanner _virusScanner;
     private readonly IThumbnailGenerationService _thumbnailService;
     private readonly string _modelsPath;
-    private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
+    private readonly Services.IO.IFileSystem _fileSystem;
     private readonly IFileManagementService _fileManagementService;
     private readonly ITagService _tagService;
     private readonly IModelRepository _modelRepo;
@@ -39,7 +39,7 @@ public class ModelController : ControllerBase
         IModelAnalysisService analysisService,
         IVirusScanner virusScanner,
         IThumbnailGenerationService thumbnailService,
-        Farm.Web.Api.Services.IO.IFileSystem fileSystem,
+        Services.IO.IFileSystem fileSystem,
         IFileManagementService fileManagementService,
         ITagService tagService,
         IModelRepository modelRepo)

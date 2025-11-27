@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.SlicerServices.Process;
+﻿using System.Text;
+using Farm.Web.Api.Services.SlicerServices.Process;
 using Farm.Web.Api.Services.SlicerServices.Progress;
 using Farm.Web.Shared;
 
@@ -23,8 +24,8 @@ public class SlicerProgressMonitorTests
 
     private class TestProcessHandle : IProcessHandle
     {
-        private readonly System.IO.MemoryStream _ms;
-        private readonly System.IO.StreamReader _sr;
+        private readonly MemoryStream _ms;
+        private readonly StreamReader _sr;
         private readonly int _exitDelayMs;
         private bool _exited;
         public bool Killed { get; private set; }
@@ -32,14 +33,14 @@ public class SlicerProgressMonitorTests
         public TestProcessHandle(IEnumerable<string> lines, int exitDelayMs = 100)
         {
             _exitDelayMs = exitDelayMs;
-            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines) + '\n');
-            _ms = new System.IO.MemoryStream(bytes);
-            _sr = new System.IO.StreamReader(_ms);
+            byte[] bytes = Encoding.UTF8.GetBytes(string.Join('\n', lines) + '\n');
+            _ms = new MemoryStream(bytes);
+            _sr = new StreamReader(_ms);
             _exited = false;
         }
 
-        public System.IO.StreamReader StandardOutput => _sr;
-        public System.IO.StreamReader StandardError => new System.IO.StreamReader(new System.IO.MemoryStream());
+        public StreamReader StandardOutput => _sr;
+        public StreamReader StandardError => new StreamReader(new MemoryStream());
         public bool HasExited => _exited;
         public int ExitCode { get; private set; } = 0;
 
@@ -79,10 +80,10 @@ public class SlicerProgressMonitorTests
 
         await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token);
 
-        notifier.Updates.Should().NotBeEmpty();
-        notifier.Updates.Any(u => u.Progress == 10).Should().BeTrue();
-        notifier.Updates.Any(u => u.Progress >= 49 && u.Progress <= 51).Should().BeTrue();
-        notifier.Updates.Any(u => u.Progress == 100).Should().BeTrue();
+        _ = notifier.Updates.Should().NotBeEmpty();
+        _ = notifier.Updates.Any(u => u.Progress == 10).Should().BeTrue();
+        _ = notifier.Updates.Any(u => u.Progress >= 49 && u.Progress <= 51).Should().BeTrue();
+        _ = notifier.Updates.Any(u => u.Progress == 100).Should().BeTrue();
     }
 
     [Fact]
@@ -95,9 +96,9 @@ public class SlicerProgressMonitorTests
 
         await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new OrcaProgressParser(), null, cts.Token);
 
-        notifier.Updates.Should().NotBeEmpty();
-        notifier.Updates.Any(u => u.Progress == 30).Should().BeTrue();
-        notifier.Updates.Any(u => u.Progress == 100).Should().BeTrue();
+        _ = notifier.Updates.Should().NotBeEmpty();
+        _ = notifier.Updates.Any(u => u.Progress == 30).Should().BeTrue();
+        _ = notifier.Updates.Any(u => u.Progress == 100).Should().BeTrue();
     }
 
     [Fact]
@@ -116,7 +117,7 @@ public class SlicerProgressMonitorTests
         CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token, null, onFailure);
 
-        called.Should().BeTrue();
-        handle.Killed.Should().BeTrue();
+        _ = called.Should().BeTrue();
+        _ = handle.Killed.Should().BeTrue();
     }
 }

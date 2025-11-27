@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.IO;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Temp;
@@ -184,9 +185,9 @@ public class SlicerWorkerHostedService : BackgroundService
 
                 // Treat IO/timeout related exceptions as transient; also treat process exit (InvalidOperationException) as transient
                 bool isTransient =
-                    ex is System.IO.IOException
+                    ex is IOException
                     || ex is TimeoutException
-                    || ex is System.Net.Http.HttpRequestException
+                    || ex is HttpRequestException
                     || (ex is InvalidOperationException && !(ex.Message?.Contains("No gcode", StringComparison.OrdinalIgnoreCase) ?? false));
 
                 if (isTransient && job.RetryCount < maxRetries)

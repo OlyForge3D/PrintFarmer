@@ -21,7 +21,7 @@ public class JobDispatcherRetryTests
     {
         public List<SliceJob> Jobs { get; } = new();
         public Task AddAsync(SliceJob job, CancellationToken ct = default) { Jobs.Add(job); return Task.CompletedTask; }
-        public Task<SliceJob?> GetByIdAsync(Guid id, CancellationToken ct = default) => Task.FromResult<SliceJob?>(Jobs.Find(j => j.Id == id));
+        public Task<SliceJob?> GetByIdAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Jobs.Find(j => j.Id == id));
         public Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs);
         public Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs.FindAll(j => j.Status == status));
         public Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
@@ -118,7 +118,7 @@ public class JobDispatcherRetryTests
     {
         public List<Worker> Workers { get; } = new();
         public Task AddAsync(Worker w) { Workers.Add(w); return Task.CompletedTask; }
-        public Task<Worker?> GetByIdAsync(Guid id) => Task.FromResult<Worker?>(Workers.Find(w => w.Id == id));
+        public Task<Worker?> GetByIdAsync(Guid id) => Task.FromResult(Workers.Find(w => w.Id == id));
         public Task<Worker?> GetByServiceIdAsync(string serviceId) => Task.FromResult<Worker?>(null);
         public Task<IReadOnlyList<Worker>> GetAllAsync(int limit = 100, int offset = 0) => Task.FromResult((IReadOnlyList<Worker>)Workers);
         public Task<IReadOnlyList<Worker>> GetByStatusAsync(string status, int limit = 100, int offset = 0) => Task.FromResult((IReadOnlyList<Worker>)Workers.FindAll(w => w.Status == status));
@@ -209,7 +209,7 @@ public class JobDispatcherRetryTests
         StubSliceJobEventService evtService = new StubSliceJobEventService();
         StubLogger logger = new StubLogger();
         FlakyHttpClientFactory httpFactory = new FlakyHttpClientFactory();
-        RetryOptions retryOptions = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
+        RetryOptions retryOptions = new RetryOptions();
         JobDispatcherService dispatcher = new JobDispatcherService(jobRepo, workerRepo, evtService, logger, httpFactory, retryOptions);
 
         Worker worker = new Worker

@@ -42,7 +42,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         // Verify user can access protected endpoint with their token
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", userToken);
         HttpResponseMessage beforeRevocationResponse = await client.GetAsync("/api/users");
-        beforeRevocationResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden); // Regular user can't access admin endpoint, but token is valid
+        _ = beforeRevocationResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden); // Regular user can't access admin endpoint, but token is valid
 
         // Act - Admin revokes all user sessions
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
@@ -50,16 +50,16 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         HttpResponseMessage revokeResponse = await client.PostAsJsonAsync($"/api/users/{userId}/revoke-sessions", revokeRequest);
 
         // Assert - Revocation succeeds
-        revokeResponse.IsSuccessStatusCode.Should().BeTrue();
+        _ = revokeResponse.IsSuccessStatusCode.Should().BeTrue();
         RevokeSessionsResult? revokeResult = await revokeResponse.Content.ReadFromJsonAsync<RevokeSessionsResult>();
-        revokeResult.Should().NotBeNull();
-        revokeResult!.UserId.Should().Be(userId);
-        revokeResult.RevokedCount.Should().BeGreaterThan(0);
+        _ = revokeResult.Should().NotBeNull();
+        _ = revokeResult!.UserId.Should().Be(userId);
+        _ = revokeResult.RevokedCount.Should().BeGreaterThan(0);
 
         // User's token should now be invalid
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", userToken);
         HttpResponseMessage afterRevocationResponse = await client.GetAsync("/api/users");
-        afterRevocationResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "revoked token should be rejected");
+        _ = afterRevocationResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "revoked token should be rejected");
     }
 
     [Fact]
@@ -75,9 +75,9 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         HttpResponseMessage response = await client.PostAsJsonAsync($"/api/users/{adminUserId}/revoke-sessions", revokeRequest);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         string content = await response.Content.ReadAsStringAsync();
-        content.Should().Contain("cannot revoke their own sessions");
+        _ = content.Should().Contain("cannot revoke their own sessions");
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
     {
         // Arrange
         HttpClient client = CreateClient();
-        (string? adminToken, Guid _) = await CreateAdminUserAsync();
+        (string? adminToken, _) = await CreateAdminUserAsync();
         Guid nonExistentUserId = Guid.NewGuid();
 
         // Act
@@ -94,7 +94,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         HttpResponseMessage response = await client.PostAsJsonAsync($"/api/users/{nonExistentUserId}/revoke-sessions", revokeRequest);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -108,20 +108,20 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         // Revoke user sessions
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
         var revokeRequest = new { Reason = "Test revocation for history" };
-        await client.PostAsJsonAsync($"/api/users/{userId}/revoke-sessions", revokeRequest);
+        _ = await client.PostAsJsonAsync($"/api/users/{userId}/revoke-sessions", revokeRequest);
 
         // Act - Get revocation history
         HttpResponseMessage response = await client.GetAsync($"/api/users/{userId}/revoked-tokens");
 
         // Assert
-        response.IsSuccessStatusCode.Should().BeTrue();
+        _ = response.IsSuccessStatusCode.Should().BeTrue();
         List<RevokedTokenDto> revocations = (await response.Content.ReadFromJsonAsync<List<RevokedTokenDto>>()) ?? new List<RevokedTokenDto>();
-        revocations.Should().NotBeEmpty();
+        _ = revocations.Should().NotBeEmpty();
         // Guarded use of FirstOrDefault() with explicit NotBeNull assertion to satisfy static analysis
         RevokedTokenDto? first = revocations.FirstOrDefault();
-        first.Should().NotBeNull();
-        first!.Reason.Should().Contain("Test revocation for history");
-        first.RevokedByUserId.Should().Be(adminUserId);
+        _ = first.Should().NotBeNull();
+        _ = first!.Reason.Should().Contain("Test revocation for history");
+        _ = first.RevokedByUserId.Should().Be(adminUserId);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         User? existingUser = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (existingUser == null)
         {
-            db.Users.Add(new User
+            _ = db.Users.Add(new User
             {
                 Id = userId,
                 Username = $"revocation_{userId}",
@@ -146,7 +146,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
                 CreatedAt = DateTime.UtcNow,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Password123!")
             });
-            await db.SaveChangesAsync();
+            _ = await db.SaveChangesAsync();
         }
 
         // Create an expired revocation record (already past expiration)
@@ -173,24 +173,24 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
             IpAddress = "127.0.0.1"
         };
 
-        db.RevokedTokens.Add(expiredRevocation);
-        db.RevokedTokens.Add(activeRevocation);
-        await db.SaveChangesAsync();
+        _ = db.RevokedTokens.Add(expiredRevocation);
+        _ = db.RevokedTokens.Add(activeRevocation);
+        _ = await db.SaveChangesAsync();
 
         // Act - Run cleanup
-        ITokenRevocationService tokenRevocationService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.ITokenRevocationService>();
+        ITokenRevocationService tokenRevocationService = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
         int deletedCount = await tokenRevocationService.CleanupExpiredRevocationsAsync();
 
         // Assert
-        deletedCount.Should().BeGreaterThan(0, "at least the expired record should be deleted");
+        _ = deletedCount.Should().BeGreaterThan(0, "at least the expired record should be deleted");
 
         // Verify expired record is gone
         bool expiredExists = await db.RevokedTokens.AnyAsync(r => r.Id == expiredRevocation.Id);
-        expiredExists.Should().BeFalse("expired revocation should be deleted");
+        _ = expiredExists.Should().BeFalse("expired revocation should be deleted");
 
         // Verify active record still exists
         bool activeExists = await db.RevokedTokens.AnyAsync(r => r.Id == activeRevocation.Id);
-        activeExists.Should().BeTrue("active revocation should remain");
+        _ = activeExists.Should().BeTrue("active revocation should remain");
     }
 
     [Fact]
@@ -209,26 +209,26 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         // Both tokens should work initially
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token1);
         HttpResponseMessage response1Before = await client.GetAsync("/healthz");
-        response1Before.IsSuccessStatusCode.Should().BeTrue();
+        _ = response1Before.IsSuccessStatusCode.Should().BeTrue();
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token2);
         HttpResponseMessage response2Before = await client.GetAsync("/healthz");
-        response2Before.IsSuccessStatusCode.Should().BeTrue();
+        _ = response2Before.IsSuccessStatusCode.Should().BeTrue();
 
         // Act - Admin revokes all sessions
-        (string? adminToken, Guid _) = await CreateAdminUserAsync();
+        (string? adminToken, _) = await CreateAdminUserAsync();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
         var revokeRequest = new { Reason = "Revoking all sessions for security" };
-        await client.PostAsJsonAsync($"/api/users/{userId}/revoke-sessions", revokeRequest);
+        _ = await client.PostAsJsonAsync($"/api/users/{userId}/revoke-sessions", revokeRequest);
 
         // Assert - Both tokens should now be invalid
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token1);
         HttpResponseMessage response1After = await client.GetAsync("/api/users");
-        response1After.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _ = response1After.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token2);
         HttpResponseMessage response2After = await client.GetAsync("/api/users");
-        response2After.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _ = response2After.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     private async Task<(string Token, Guid UserId)> CreateRegularUserAsync(string username, string email, string password)
@@ -260,7 +260,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
             if (user != null)
             {
                 user.IsActive = true;
-                await db.SaveChangesAsync();
+                _ = await db.SaveChangesAsync();
             }
 
             // Login after activation
@@ -277,7 +277,7 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
         // Check if admin already exists
         User? existingAdmin = await db.Users.FirstOrDefaultAsync(u => u.Username == "testadmin");
@@ -307,20 +307,20 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
         string passwordHash = BCrypt.Net.BCrypt.HashPassword("AdminPassword123!");
         adminUser.PasswordHash = passwordHash;
 
-        db.Users.Add(adminUser);
+        _ = db.Users.Add(adminUser);
 
         // Add admin role
         Role? adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
         if (adminRole == null)
         {
             adminRole = new Role { Id = Guid.NewGuid(), Name = "farm_admin", CreatedAt = DateTime.UtcNow };
-            db.Roles.Add(adminRole);
+            _ = db.Roles.Add(adminRole);
         }
 
         UserRole userRole = new UserRole { UserId = adminUser.Id, RoleId = adminRole.Id };
-        db.UserRoles.Add(userRole);
+        _ = db.UserRoles.Add(userRole);
 
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
 
         // Get token via login
         HttpClient adminClient = CreateClient();

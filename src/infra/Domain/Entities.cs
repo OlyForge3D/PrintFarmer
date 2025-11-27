@@ -761,7 +761,7 @@ public enum FileAuditType
     FullAudit = 3
 }
 
-[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1724:Type names should not match namespace", Justification = "Renamed infra domain type to PasswordPolicyEntity to avoid CA1724 conflicts with API domain type.")]
+[SuppressMessage("Naming", "CA1724:Type names should not match namespace", Justification = "Renamed infra domain type to PasswordPolicyEntity to avoid CA1724 conflicts with API domain type.")]
 public class PasswordPolicyEntity
 {
     public int Id { get; set; }

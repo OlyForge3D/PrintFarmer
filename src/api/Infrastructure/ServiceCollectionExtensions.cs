@@ -76,7 +76,7 @@ public static class ServiceCollectionExtensions
             _ = optionsBuilder.UseSqlite(connectionString);
         }
 
-        _ = services.AddSingleton<DbContextOptions<AppDbContext>>(optionsBuilder.Options);
+        _ = services.AddSingleton(optionsBuilder.Options);
         _ = services.AddDbContextFactory<AppDbContext>();
 
         return services;
@@ -89,19 +89,19 @@ public static class ServiceCollectionExtensions
         try
         {
             // Use the SectionName constant if present
-            _ = services.Configure<Farm.Infrastructure.Settings.DatabaseSettings>(s => { });
+            _ = services.Configure<DatabaseSettings>(s => { });
         }
         catch { }
 
         // Register a lightweight provider for system settings that reads from IConfiguration
-        _ = services.AddSingleton<Farm.Infrastructure.Settings.ISystemSettingsProvider, Farm.Infrastructure.Settings.ConfigurationSystemSettingsProvider>();
+        _ = services.AddSingleton<ISystemSettingsProvider, ConfigurationSystemSettingsProvider>();
 
         // Register SettingsService so DI constructs it with IConfiguration, AppDbContext and IUnifiedLoggingService
         _ = services.AddScoped<ISettingsService, SettingsService>();
 
         // Settings initialization from environment variables (scoped to match ISettingsService)
         // Register settings initialization via its interface
-        _ = services.AddScoped<Farm.Infrastructure.Settings.ISettingsInitializationService, SettingsInitializationService>();
+        _ = services.AddScoped<ISettingsInitializationService, SettingsInitializationService>();
 
         return services;
     }
@@ -120,9 +120,9 @@ public static class ServiceCollectionExtensions
 
         // Business Services (Note: Network discovery is handled by the printer-discovery microservice)
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Printers.IPrintersRepository, Farm.Infrastructure.Repositories.Printers.EfPrintersRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IProfilesRepository, Farm.Infrastructure.Repositories.Slicing.EfProfilesRepository>();
+        _ = services.AddScoped<IProfilesRepository, EfProfilesRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
-        _ = services.AddScoped<Farm.Web.Api.Services.Queue.IQueueDataService, Farm.Web.Api.Services.Queue.QueueDataService>();
+        _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
         // Catalog repository contract moved to infra; register infra implementation
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
@@ -137,18 +137,18 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SchemaHealth.ISchemaHealthRepository, Farm.Infrastructure.Repositories.SchemaHealth.SchemaHealthRepository>();
 
         // Slicing repositories - moved to infra
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfProcessProfileRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IMachineProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfMachineProfileRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.IFilamentProfileRepository, Farm.Infrastructure.Repositories.Slicing.EfFilamentProfileRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.ISlicersRepository, Farm.Infrastructure.Repositories.Slicing.EfSlicersRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository, Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository>();
+        _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
+        _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
+        _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
+        _ = services.AddScoped<ISlicersRepository, EfSlicersRepository>();
+        _ = services.AddScoped<ISliceJobRepository, EfSliceJobRepository>();
 
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
 
         // Profile Parsing and Import Services
-        _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileParsingService, Farm.Web.Api.Services.Slicing.ProfileParsingService>();
-        _ = services.AddScoped<Farm.Web.Api.Services.Slicing.IProfileImportService, Farm.Web.Api.Services.Slicing.ProfileImportService>();
+        _ = services.AddScoped<IProfileParsingService, ProfileParsingService>();
+        _ = services.AddScoped<IProfileImportService, ProfileImportService>();
 
         // Slicer Library Registration
         // Dynamically discover and register slicer library plugins using SlicerPluginAttribute.
@@ -178,7 +178,7 @@ public static class ServiceCollectionExtensions
             _ = services.AddHostedService<SystemLogCleanupService>();
         }
         _ = services.AddScoped<DatabaseInitializer>();
-        _ = services.AddScoped<Farm.Web.Api.Services.Interfaces.IDatabaseInitializer, DatabaseInitializer>();
+        _ = services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
         // NetworkUrlRewriteService is stateless and depends on IConfiguration and logging - safe as a Singleton
         // Register NetworkUrlRewriteService as the implementation for INetworkUrlRewriteService
         _ = services.AddSingleton<INetworkUrlRewriteService, NetworkUrlRewriteService>();
@@ -195,21 +195,21 @@ public static class ServiceCollectionExtensions
 
         // Storage path service for multi-deployment support (Docker and Kubernetes)
         // Provides centralized configuration for file storage paths
-        _ = services.AddSingleton<Farm.Web.Api.Services.StorageManagement.IStoragePathService, Farm.Web.Api.Services.StorageManagement.StoragePathService>();
+        _ = services.AddSingleton<Services.StorageManagement.IStoragePathService, Services.StorageManagement.StoragePathService>();
 
         // File Management Services
         // Unified file operations (path resolution, sanitization, hashing, utilities)
-        _ = services.AddSingleton<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
+        _ = services.AddSingleton<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
         // File integrity verification (existence, hash, size checks)
-        _ = services.AddSingleton<Farm.Web.Api.Services.FileManagement.IFileIntegrityService, Farm.Web.Api.Services.FileManagement.FileIntegrityService>();
+        _ = services.AddSingleton<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
         // Chunked upload state management (scoped to request lifetime)
-        _ = services.AddScoped<Farm.Web.Api.Services.FileManagement.IChunkedUploadService, Farm.Web.Api.Services.FileManagement.ChunkedUploadService>();
+        _ = services.AddScoped<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
 
         // Artifact Services
         // Metrics instrumentation for artifact storage lifecycle (singleton for process-wide meter management)
-        _ = services.AddSingleton<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
-        _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
-        _ = services.AddScoped<Farm.Web.Api.Services.Artifacts.IArtifactsService, Farm.Web.Api.Services.Artifacts.ArtifactsService>();
+        _ = services.AddSingleton<Services.Artifacts.ArtifactsMetrics>();
+        _ = services.Configure<ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
+        _ = services.AddScoped<Services.Artifacts.IArtifactsService, Services.Artifacts.ArtifactsService>();
 
         // HTTP Clients with typed clients
         _ = services.AddHttpClient<IMoonrakerClient, MoonrakerClient>(client =>
@@ -244,39 +244,39 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IAuthenticationService, AuthenticationService>();
 
         // Email (MVP)
-        services.AddSingleton<Farm.Web.Api.Services.Email.IEmailTemplateRenderer, Farm.Web.Api.Services.Email.EmailTemplateRenderer>();
-        services.AddSingleton(sp =>
+        _ = services.AddSingleton<IEmailTemplateRenderer, EmailTemplateRenderer>();
+        _ = services.AddSingleton(sp =>
         {
             IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
-            EmailOptions opts = new Farm.Web.Api.Services.Email.EmailOptions();
+            EmailOptions opts = new EmailOptions();
             cfg.GetSection("Email").Bind(opts);
             return opts;
         });
-        services.AddScoped<Farm.Web.Api.Services.Email.IEmailService>(sp =>
+        _ = services.AddScoped<IEmailService>(sp =>
         {
-            IUnifiedLoggingService logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            EmailOptions opts = sp.GetRequiredService<Farm.Web.Api.Services.Email.EmailOptions>();
-            IEmailTemplateRenderer renderer = sp.GetRequiredService<Farm.Web.Api.Services.Email.IEmailTemplateRenderer>();
+            IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
+            EmailOptions opts = sp.GetRequiredService<EmailOptions>();
+            IEmailTemplateRenderer renderer = sp.GetRequiredService<IEmailTemplateRenderer>();
             return opts.Provider?.Equals("mailjet", StringComparison.OrdinalIgnoreCase) == true
                 ? new Farm.Web.Api.Services.Email.MailjetEmailService(logger, opts, renderer)
                 : new Farm.Web.Api.Services.Email.ConsoleEmailService(logger, renderer);
         });
 
         // Rate Limiting
-        services.AddSingleton(sp =>
+        _ = services.AddSingleton(sp =>
         {
             IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
-            RateLimitOptions opts = new Farm.Web.Api.Services.RateLimiting.RateLimitOptions();
+            RateLimitOptions opts = new RateLimitOptions();
             cfg.GetSection("RateLimiting").Bind(opts);
             return opts;
         });
-        services.AddSingleton<Farm.Web.Api.Services.RateLimiting.IRateLimitService, Farm.Web.Api.Services.RateLimiting.InMemoryRateLimitService>();
+        _ = services.AddSingleton<IRateLimitService, InMemoryRateLimitService>();
 
         // Job dispatch retry options
-        services.AddSingleton(sp =>
+        _ = services.AddSingleton(sp =>
         {
             IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
-            RetryOptions opts = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
+            RetryOptions opts = new RetryOptions();
             cfg.GetSection("JobDispatchRetry").Bind(opts);
             return opts;
         });
@@ -286,25 +286,25 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IStartupStatus, StartupStatus>();
 
         // Harvest configuration
-        _ = services.Configure<Farm.Infrastructure.Settings.GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
+        _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
 
         // Harvest queue and gcode harvest service
         // IHarvestQueue must be Singleton because it's used by background tasks that outlive HTTP request scopes
         _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
-        _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService, Farm.Web.Api.Services.Gcode.GcodeMetadataExtractorService>();
-        _ = services.AddScoped<Farm.Web.Api.Services.Gcode.IGcodeFilesService, Farm.Web.Api.Services.Gcode.GcodeFilesService>();
+        _ = services.AddScoped<Services.Gcode.IGcodeMetadataExtractorService, Services.Gcode.GcodeMetadataExtractorService>();
+        _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Gcode.IGcodeRepository, Farm.Infrastructure.Repositories.Gcode.EfGcodeRepository>();
 
         // Gcode upload settings and quota service
-        _ = services.AddSingleton<Farm.Web.Api.Services.IGcodeUploadSettings, Farm.Web.Api.Services.InMemoryGcodeUploadSettings>();
-        _ = services.AddSingleton<Farm.Web.Api.Services.IGcodeUploadQuotaService, Farm.Web.Api.Services.InMemoryGcodeUploadQuotaService>();
+        _ = services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
+        _ = services.AddSingleton<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
 
         // Model file management services
         // IModelRepository must be Scoped (uses EF DbContext which is scoped)
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Model.IModelRepository, Farm.Infrastructure.Repositories.Model.EfModelRepository>();
         // IModelService is Scoped to match repository lifetime and per-request data patterns
-        _ = services.AddScoped<Farm.Web.Api.Services.Model.IModelService, Farm.Web.Api.Services.Model.ModelService>();
+        _ = services.AddScoped<Services.Model.IModelService, Services.Model.ModelService>();
         // ModelAnalysisService is stateless and reusable - register as Singleton for efficiency
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
         // ClamAVVirusScanner is stateless after initialization - register as Singleton for efficiency
@@ -312,7 +312,7 @@ public static class ServiceCollectionExtensions
         // ThumbnailGenerationService manages path state but doesn't hold request-specific data - Singleton is safe
         _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
         // SystemFileSystem is a pure wrapper around static File/Directory APIs - stateless, register as Singleton
-        _ = services.AddSingleton<Farm.Web.Api.Services.IO.IFileSystem, Farm.Web.Api.Services.IO.SystemFileSystem>();
+        _ = services.AddSingleton<Services.IO.IFileSystem, Services.IO.SystemFileSystem>();
 
         // Background worker to process harvest file jobs from the queue
         if (!disableBg)

@@ -14,6 +14,6 @@ namespace Farm.Web.Api.Services.Model
         Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct);
         Task DeleteModelAsync(Guid id, CancellationToken ct);
         Model3DValidationResultDto ValidateModel(IFormFile modelFile);
-        Task<Shared.Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct);
+        Task<Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct);
     }
 }

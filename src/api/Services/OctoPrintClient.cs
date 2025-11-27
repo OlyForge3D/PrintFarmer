@@ -1,4 +1,5 @@
 ﻿using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -41,7 +42,7 @@ public class OctoPrintClient(HttpClient httpClient) : IOctoPrintClient
     {
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", apiKey);
-        request.Content = new StringContent($"{{\"command\":\"select\",\"print\":true,\"file\":\"{fileName}\"}}", System.Text.Encoding.UTF8, "application/json");
+        request.Content = new StringContent($"{{\"command\":\"select\",\"print\":true,\"file\":\"{fileName}\"}}", Encoding.UTF8, "application/json");
         HttpResponseMessage response = await _httpClient.SendAsync(request);
         return response.IsSuccessStatusCode;
     }
@@ -50,7 +51,7 @@ public class OctoPrintClient(HttpClient httpClient) : IOctoPrintClient
     {
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", apiKey);
-        request.Content = new StringContent("{\"command\":\"cancel\"}", System.Text.Encoding.UTF8, "application/json");
+        request.Content = new StringContent("{\"command\":\"cancel\"}", Encoding.UTF8, "application/json");
         HttpResponseMessage response = await _httpClient.SendAsync(request);
         return response.IsSuccessStatusCode;
     }

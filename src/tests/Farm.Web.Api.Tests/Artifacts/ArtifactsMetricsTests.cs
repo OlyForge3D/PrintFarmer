@@ -83,13 +83,13 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
         IFormFile file = CreateFormFile(content, "test.gcode", "application/x-gcode");
 
         // Act
-        await service.UploadAsync(file, jobId, workerId, "gcode", CancellationToken.None);
+        _ = await service.UploadAsync(file, jobId, workerId, "gcode", CancellationToken.None);
 
         // Assert - Wait briefly for async metrics collection
         await Task.Delay(100);
 
-        counterValues.Should().Contain(1, "upload counter should record increment of 1");
-        histogramValues.Should().Contain(content.Length, "histogram should record exact file size");
+        _ = counterValues.Should().Contain(1, "upload counter should record increment of 1");
+        _ = histogramValues.Should().Contain(content.Length, "histogram should record exact file size");
 
         meterListener.Dispose();
     }
@@ -134,10 +134,10 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
 
         // Act - Upload two artifacts
         IFormFile file1 = CreateFormFile(content1, "first.gcode", "application/x-gcode");
-        await service.UploadAsync(file1, jobId, workerId, "gcode", CancellationToken.None);
+        _ = await service.UploadAsync(file1, jobId, workerId, "gcode", CancellationToken.None);
 
         IFormFile file2 = CreateFormFile(content2, "second.png", "image/png");
-        await service.UploadAsync(file2, jobId, workerId, "thumbnail", CancellationToken.None);
+        _ = await service.UploadAsync(file2, jobId, workerId, "thumbnail", CancellationToken.None);
 
         // Observe gauge after uploads
         meterListener.RecordObservableInstruments();
@@ -147,7 +147,7 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
         long finalGaugeValue = gaugeValues.Last();
         int expectedIncrease = content1.Length + content2.Length;
 
-        (finalGaugeValue - initialGaugeValue).Should().Be(expectedIncrease,
+        _ = (finalGaugeValue - initialGaugeValue).Should().Be(expectedIncrease,
             "gauge should reflect cumulative size of both uploads");
 
         meterListener.Dispose();
@@ -176,7 +176,7 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
         {
             if (instrument.Name == "printfarmer.artifacts.uploaded_total")
             {
-                Interlocked.Add(ref counterTotal, measurement);
+                _ = Interlocked.Add(ref counterTotal, measurement);
             }
         });
 
@@ -190,13 +190,13 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
         {
             byte[] content = Encoding.UTF8.GetBytes($"artifact {i}");
             IFormFile file = CreateFormFile(content, $"test{i}.gcode", "application/x-gcode");
-            await service.UploadAsync(file, jobId, workerId, "gcode", CancellationToken.None);
+            _ = await service.UploadAsync(file, jobId, workerId, "gcode", CancellationToken.None);
         }
 
         await Task.Delay(100);
 
         // Assert
-        counterTotal.Should().Be(5, "counter should increment for each upload");
+        _ = counterTotal.Should().Be(5, "counter should increment for each upload");
 
         meterListener.Dispose();
     }

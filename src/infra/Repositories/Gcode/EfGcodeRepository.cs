@@ -86,13 +86,13 @@ namespace Farm.Infrastructure.Repositories.Gcode
 
         public Task AddAsync(GcodeFile file, CancellationToken ct)
         {
-            _db.GcodeFiles.Add(file);
+            _ = _db.GcodeFiles.Add(file);
             return Task.CompletedTask;
         }
 
         public Task RemoveAsync(GcodeFile file, CancellationToken ct)
         {
-            _db.GcodeFiles.Remove(file);
+            _ = _db.GcodeFiles.Remove(file);
             return Task.CompletedTask;
         }
 

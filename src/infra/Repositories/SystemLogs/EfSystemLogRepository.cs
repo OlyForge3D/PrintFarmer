@@ -88,7 +88,7 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
 
         public Task AddAsync(SystemLog log, CancellationToken ct)
         {
-            _db.SystemLogs.Add(log);
+            _ = _db.SystemLogs.Add(log);
             return _db.SaveChangesAsync(ct);
         }
 
@@ -101,7 +101,7 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
             if (oldLogs.Count > 0)
             {
                 _db.SystemLogs.RemoveRange(oldLogs);
-                await _db.SaveChangesAsync(ct);
+                _ = await _db.SaveChangesAsync(ct);
             }
 
             return oldLogs.Count;

@@ -166,7 +166,7 @@ public class MoonrakerDiscoveryProbe : BaseDiscoveryProbe
                 portTimeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Min(timeoutMs / 2, 2000)));
 
                 HttpResponseMessage response = await client.GetAsync(testUrl, portTimeoutCts.Token);
-                if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
                 {
                     // Port is open and responding; likely the frontend
                     return port;

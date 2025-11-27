@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Farm.Web.Shared.Contracts.Slicing;
@@ -31,9 +32,9 @@ public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationF
             SlicerProfileJson = "{}"
         };
         HttpResponseMessage submitResp = await client.PostAsJsonAsync("/api/slice", submitReq);
-        submitResp.IsSuccessStatusCode.Should().BeTrue();
+        _ = submitResp.IsSuccessStatusCode.Should().BeTrue();
         SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
-        submitted.Should().NotBeNull();
+        _ = submitted.Should().NotBeNull();
 
         // Claim job
         ClaimJobRequest claimReq = new ClaimJobRequest
@@ -43,7 +44,7 @@ public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationF
             LeaseDurationSeconds = 120
         };
         HttpResponseMessage claimResp = await client.PostAsJsonAsync("/api/slice/claim", claimReq);
-        claimResp.IsSuccessStatusCode.Should().BeTrue();
+        _ = claimResp.IsSuccessStatusCode.Should().BeTrue();
 
         // Progress update
         SliceJobProgressUpdateRequest progressReq = new SliceJobProgressUpdateRequest
@@ -52,15 +53,15 @@ public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationF
             ProgressMessage = "Layer slicing"
         };
         HttpResponseMessage progressResp = await client.PostAsJsonAsync($"/api/slice/{submitted!.JobId}/progress", progressReq);
-        progressResp.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+        _ = progressResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         // Fetch status
         HttpResponseMessage statusResp = await client.GetAsync($"/api/slice/{submitted.JobId}");
-        statusResp.IsSuccessStatusCode.Should().BeTrue();
+        _ = statusResp.IsSuccessStatusCode.Should().BeTrue();
         SliceJobStatusResponse? status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        status.Should().NotBeNull();
-        status!.ProgressPercent.Should().Be(42);
-        status.ProgressMessage.Should().Be("Layer slicing");
-        status.Status.Should().Be("Processing");
+        _ = status.Should().NotBeNull();
+        _ = status!.ProgressPercent.Should().Be(42);
+        _ = status.ProgressMessage.Should().Be("Layer slicing");
+        _ = status.Status.Should().Be("Processing");
     }
 }

@@ -1,4 +1,5 @@
-﻿using System.Data.Common;
+﻿using System.Data;
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -21,13 +22,13 @@ internal sealed class TestSqlitePragmaEnforcer : DbCommandInterceptor
             {
                 return;
             }
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
             {
                 conn.Open();
             }
             using SqliteCommand cmd = conn.CreateCommand();
             cmd.CommandText = "PRAGMA foreign_keys = ON;";
-            cmd.ExecuteNonQuery();
+            _ = cmd.ExecuteNonQuery();
         }
         catch
         {

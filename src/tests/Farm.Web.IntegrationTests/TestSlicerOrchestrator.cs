@@ -42,7 +42,7 @@ namespace Farm.Web.IntegrationTests
 
         public Task<SlicingJobStatusResponse?> GetJobStatusAsync(Guid jobId, CancellationToken cancellationToken = default)
         {
-            _jobs.TryGetValue(jobId, out SlicingJobStatusResponse? r);
+            _ = _jobs.TryGetValue(jobId, out SlicingJobStatusResponse? r);
             return Task.FromResult((SlicingJobStatusResponse?)r);
         }
 

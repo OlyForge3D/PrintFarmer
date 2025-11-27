@@ -27,7 +27,7 @@ public class GracefulShutdownServiceTests
             _mockAppLifetime.Object,
             _testLogger);
         CancellationToken cancellationToken = CancellationToken.None;
-        _mockAppLifetime.Setup(x => x.ApplicationStopping)
+        _ = _mockAppLifetime.Setup(x => x.ApplicationStopping)
             .Returns(new CancellationToken());
 
         // Act

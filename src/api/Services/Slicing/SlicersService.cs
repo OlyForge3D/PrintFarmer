@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -157,7 +159,7 @@ namespace Farm.Web.Api.Services.Slicing
             {
                 // Log but don't fail registration if Worker sync fails
                 // In production, you'd want proper logging here
-                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker entity: {ex.Message}");
+                Debug.WriteLine($"Failed to sync Worker entity: {ex.Message}");
             }
 
             // Seed profiles from the worker (OrcaSlicer only)
@@ -170,7 +172,7 @@ namespace Farm.Web.Api.Services.Slicing
                 catch (Exception ex)
                 {
                     // Log but don't fail registration if profile seeding fails
-                    System.Diagnostics.Debug.WriteLine($"Failed to seed profiles from worker: {ex.Message}");
+                    Debug.WriteLine($"Failed to seed profiles from worker: {ex.Message}");
                 }
             }
 
@@ -263,7 +265,7 @@ namespace Farm.Web.Api.Services.Slicing
             catch (Exception ex)
             {
                 // Log but don't fail heartbeat if Worker sync fails
-                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker heartbeat: {ex.Message}");
+                Debug.WriteLine($"Failed to sync Worker heartbeat: {ex.Message}");
             }
 
             // Record heartbeat metrics
@@ -339,7 +341,7 @@ namespace Farm.Web.Api.Services.Slicing
             catch (Exception ex)
             {
                 // Log but don't fail deregistration if Worker sync fails
-                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker deregistration: {ex.Message}");
+                Debug.WriteLine($"Failed to sync Worker deregistration: {ex.Message}");
             }
 
             // Record metrics
@@ -389,7 +391,7 @@ namespace Farm.Web.Api.Services.Slicing
             catch (Exception ex)
             {
                 // Log but don't fail rotation if Worker sync fails
-                System.Diagnostics.Debug.WriteLine($"Failed to sync Worker API key rotation: {ex.Message}");
+                Debug.WriteLine($"Failed to sync Worker API key rotation: {ex.Message}");
             }
 
             // Record metrics
@@ -427,7 +429,7 @@ namespace Farm.Web.Api.Services.Slicing
                 IReadOnlyList<ProcessProfile> existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
                 if (existingSystemProfiles.Any(p => p.IsSystem))
                 {
-                    System.Diagnostics.Debug.WriteLine("System OrcaSlicer profiles already exist, skipping seed");
+                    Debug.WriteLine("System OrcaSlicer profiles already exist, skipping seed");
                     return;
                 }
 
@@ -437,7 +439,7 @@ namespace Farm.Web.Api.Services.Slicing
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Worker /profiles returned {response.StatusCode}");
+                    Debug.WriteLine($"Worker /profiles returned {response.StatusCode}");
                     return;
                 }
 
@@ -446,7 +448,7 @@ namespace Farm.Web.Api.Services.Slicing
 
                 if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
                 {
-                    System.Diagnostics.Debug.WriteLine("No profiles available from worker");
+                    Debug.WriteLine("No profiles available from worker");
                     return;
                 }
 
@@ -478,7 +480,7 @@ namespace Farm.Web.Api.Services.Slicing
                                 Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
                                 Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
-                                Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                                Quality = Enum.TryParse(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                 LayerHeight = profile.LayerHeight,
                                 InfillPercentage = profile.InfillPercentage,
                                 PrintSpeed = profile.PrintSpeed,
@@ -497,27 +499,27 @@ namespace Farm.Web.Api.Services.Slicing
                         }
                         catch (Exception ex)
                         {
-                            System.Diagnostics.Debug.WriteLine($"Failed to import process profile: {ex.Message}");
+                            Debug.WriteLine($"Failed to import process profile: {ex.Message}");
                         }
                     }
                 }
 
                 if (imported > 0)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Seeded {imported} system OrcaSlicer profiles on worker registration");
+                    Debug.WriteLine($"Seeded {imported} system OrcaSlicer profiles on worker registration");
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error seeding profiles: {ex.Message}");
+                Debug.WriteLine($"Error seeding profiles: {ex.Message}");
                 // Don't throw - profile seeding is best-effort
             }
         }
 
         private static string ComputeProfileHash(string profileJson)
         {
-            using SHA256 sha256 = System.Security.Cryptography.SHA256.Create();
-            byte[] hashedBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(profileJson));
+            using SHA256 sha256 = SHA256.Create();
+            byte[] hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(profileJson));
             return Convert.ToHexString(hashedBytes);
         }
     }

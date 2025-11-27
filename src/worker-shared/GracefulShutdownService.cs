@@ -27,7 +27,7 @@ public class GracefulShutdownService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _lifetime.ApplicationStopping.Register(OnStopping);
+        _ = _lifetime.ApplicationStopping.Register(OnStopping);
         _logger.LogInformation($"Graceful shutdown service active (grace={_grace.TotalSeconds}s)");
         try
         {

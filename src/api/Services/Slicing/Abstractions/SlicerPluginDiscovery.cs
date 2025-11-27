@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Diagnostics;
+using System.Reflection;
 using Farm.Web.Shared.Contracts.Slicing.Libraries;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -78,7 +79,7 @@ public static class SlicerPluginDiscovery
                             RegisteredLibraries.Add(library);
                             RegisteredUIProviders.Add(uiProvider);
 
-                            System.Diagnostics.Debug.WriteLine(
+                            Debug.WriteLine(
                                 $"[SlicerPluginDiscovery] Loaded plugin: {library.SlicerName} v{library.SlicerVersion} " +
                                 $"from assembly {assembly.GetName().Name}");
                         }

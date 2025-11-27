@@ -8,7 +8,7 @@ namespace Farm.Web.Api.Services;
 /// Handles URL rewriting for external services based on the runtime environment.
 /// This allows the same configuration to work across Docker, native execution, and different platforms.
 /// </summary>
-public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfiguration configuration) : Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService
+public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfiguration configuration) : Interfaces.INetworkUrlRewriteService
 {
     private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -158,7 +158,7 @@ public class NetworkUrlRewriteService(IUnifiedLoggingService logger, IConfigurat
     private static bool IsLocalNetworkAddress(string host)
     {
         // Check if the host is a private IP address
-        if (System.Net.IPAddress.TryParse(host, out IPAddress? ipAddress))
+        if (IPAddress.TryParse(host, out IPAddress? ipAddress))
         {
             byte[] bytes = ipAddress.GetAddressBytes();
 

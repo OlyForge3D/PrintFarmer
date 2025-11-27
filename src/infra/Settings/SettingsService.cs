@@ -58,7 +58,7 @@ namespace Farm.Infrastructure.Settings
             _settings[appAttr.Key] = settings;
 
             // Persist to DB (AppSettings only)
-            string json = System.Text.Json.JsonSerializer.Serialize(settings);
+            string json = JsonSerializer.Serialize(settings);
             AppSettingsEntity? entity = _dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
             if (entity == null)
             {
@@ -69,7 +69,7 @@ namespace Farm.Infrastructure.Settings
                     SettingsJson = json,
                     UpdatedAt = DateTime.UtcNow
                 };
-                _dbContext.AppSettingsEntities.Add(entity);
+                _ = _dbContext.AppSettingsEntities.Add(entity);
             }
             else
             {
@@ -138,7 +138,7 @@ namespace Farm.Infrastructure.Settings
                     {
                         try
                         {
-                            instance = System.Text.Json.JsonSerializer.Deserialize(dbEntity.SettingsJson, type);
+                            instance = JsonSerializer.Deserialize(dbEntity.SettingsJson, type);
                         }
                         catch
                         {

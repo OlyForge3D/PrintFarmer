@@ -13,7 +13,7 @@ namespace Farm.Infrastructure.Repositories.Catalog
     // Implementation of catalog data access. Does not implement the API interface here
     // to avoid a cross-project dependency from infra -> api. The interface will be moved
     // to a shared contract (or infra) in a follow-up step and this class can then implement it.
-    public class EfCatalogRepository : Farm.Infrastructure.Repositories.Catalog.ICatalogRepository
+    public class EfCatalogRepository : ICatalogRepository
     {
         private readonly AppDbContext _db;
 
@@ -36,7 +36,7 @@ namespace Farm.Infrastructure.Repositories.Catalog
 
         public Task AddManufacturerAsync(Guid id, string name, CancellationToken ct = default)
         {
-            _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name });
+            _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name });
             return Task.CompletedTask;
         }
 
@@ -67,7 +67,7 @@ namespace Farm.Infrastructure.Repositories.Catalog
             // Add new
             foreach (Guid filamentTypeId in filamentTypeIds)
             {
-                _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType { PrinterModelId = modelId, FilamentTypeId = filamentTypeId });
+                _ = _db.PrinterModelFilamentTypes.Add(new PrinterModelFilamentType { PrinterModelId = modelId, FilamentTypeId = filamentTypeId });
             }
         }
 
@@ -83,11 +83,11 @@ namespace Farm.Infrastructure.Repositories.Catalog
                 m.Id,
                 m.Name,
                 m.ManufacturerId,
-                m.MotionType.HasValue ? (Farm.Web.Shared.MotionType?)m.MotionType.Value : null,
+                m.MotionType.HasValue ? (MotionType?)m.MotionType.Value : null,
                 m.MaxX,
                 m.MaxY,
                 m.MaxZ,
-                m.DefaultBackend.HasValue ? (Farm.Web.Shared.PrinterBackend?)m.DefaultBackend.Value : null,
+                m.DefaultBackend.HasValue ? (PrinterBackend?)m.DefaultBackend.Value : null,
                 m.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray()
             )).ToList();
             return list;
@@ -104,17 +104,17 @@ namespace Farm.Infrastructure.Repositories.Catalog
             return new PrinterModelDto(model.Id,
                 model.Name,
                 model.ManufacturerId,
-                model.MotionType.HasValue ? (Farm.Web.Shared.MotionType?)model.MotionType.Value : null,
+                model.MotionType.HasValue ? (MotionType?)model.MotionType.Value : null,
                 model.MaxX,
                 model.MaxY,
                 model.MaxZ,
-                model.DefaultBackend.HasValue ? (Farm.Web.Shared.PrinterBackend?)model.DefaultBackend.Value : null,
+                model.DefaultBackend.HasValue ? (PrinterBackend?)model.DefaultBackend.Value : null,
                 model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
         }
 
         public Task AddModelAsync(PrinterModel model, CancellationToken ct = default)
         {
-            _db.Models.Add(model);
+            _ = _db.Models.Add(model);
             return Task.CompletedTask;
         }
 

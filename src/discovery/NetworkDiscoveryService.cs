@@ -147,7 +147,7 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
             }
             finally
             {
-                semaphore.Release();
+                _ = semaphore.Release();
             }
         });
 

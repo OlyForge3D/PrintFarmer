@@ -59,7 +59,7 @@ internal static class SlicerArgTemplateBuilder
         return cfg.ToString();
     }
 
-    public static string GeneratePrusaSlicerConfig(Farm.Web.Shared.SlicerProfileDto? profile)
+    public static string GeneratePrusaSlicerConfig(SlicerProfileDto? profile)
     {
         StringBuilder cfg = new();
         double layerHeight = profile?.ProcessProfile?.LayerHeight ?? 0.2;

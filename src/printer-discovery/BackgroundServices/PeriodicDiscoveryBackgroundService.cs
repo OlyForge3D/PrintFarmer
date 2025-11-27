@@ -20,8 +20,8 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService
     {
         _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _enabled = config.GetValue<bool>("Discovery:EnablePeriodicDiscovery", true);
-        _scanIntervalSeconds = config.GetValue<int>("Discovery:ScanIntervalSeconds", 300);
+        _enabled = config.GetValue("Discovery:EnablePeriodicDiscovery", true);
+        _scanIntervalSeconds = config.GetValue("Discovery:ScanIntervalSeconds", 300);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

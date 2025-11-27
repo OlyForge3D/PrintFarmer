@@ -65,8 +65,8 @@ public class TokenRevocationService : ITokenRevocationService
                 IpAddress = ipAddress
             };
 
-            _context.RevokedTokens.Add(revokedToken);
-            await _context.SaveChangesAsync(cancellationToken);
+            _ = _context.RevokedTokens.Add(revokedToken);
+            _ = await _context.SaveChangesAsync(cancellationToken);
 
             // Audit log the revocation
             await _authAuditService.LogTokenRevokedAsync(userId, revokedByUserId, reason, ipAddress);
@@ -123,8 +123,8 @@ public class TokenRevocationService : ITokenRevocationService
                 IpAddress = ipAddress
             };
 
-            _context.RevokedTokens.Add(revocationMarker);
-            await _context.SaveChangesAsync(cancellationToken);
+            _ = _context.RevokedTokens.Add(revocationMarker);
+            _ = await _context.SaveChangesAsync(cancellationToken);
 
             // Audit log the mass revocation
             await _authAuditService.LogTokenRevokedAsync(
@@ -194,7 +194,7 @@ public class TokenRevocationService : ITokenRevocationService
                 .ToListAsync(cancellationToken);
 
             _context.RevokedTokens.RemoveRange(expiredRevocations);
-            await _context.SaveChangesAsync(cancellationToken);
+            _ = await _context.SaveChangesAsync(cancellationToken);
 
             _logging.LogInformation($"[TokenRevocation] Cleaned up {expiredRevocations.Count} expired revoked tokens");
             return expiredRevocations.Count;

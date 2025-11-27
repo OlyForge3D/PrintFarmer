@@ -42,14 +42,14 @@ namespace Farm.Infrastructure.Repositories.Tags
         {
             ArgumentNullException.ThrowIfNull(mapping);
 
-            await _dbContext.Model3DTagMappings.AddAsync(mapping, ct);
+            _ = await _dbContext.Model3DTagMappings.AddAsync(mapping, ct);
         }
 
         public async Task RemoveAsync(Model3DTagMapping mapping, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(mapping);
 
-            _dbContext.Model3DTagMappings.Remove(mapping);
+            _ = _dbContext.Model3DTagMappings.Remove(mapping);
             await Task.CompletedTask; // Repository pattern consistency
         }
 
@@ -70,13 +70,13 @@ namespace Farm.Infrastructure.Repositories.Tags
             Model3DTagMapping? mapping = await GetMappingAsync(modelId, tagId, ct);
             if (mapping != null)
             {
-                _dbContext.Model3DTagMappings.Remove(mapping);
+                _ = _dbContext.Model3DTagMappings.Remove(mapping);
             }
         }
 
         public async Task SaveChangesAsync(CancellationToken ct)
         {
-            await _dbContext.SaveChangesAsync(ct);
+            _ = await _dbContext.SaveChangesAsync(ct);
         }
     }
 }

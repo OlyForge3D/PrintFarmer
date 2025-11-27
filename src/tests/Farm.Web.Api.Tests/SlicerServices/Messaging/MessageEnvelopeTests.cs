@@ -26,15 +26,15 @@ public class MessageEnvelopeTests
         MessageEnvelope envelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, SlicingJobPriority.High);
 
         // Assert
-        envelope.Should().NotBeNull();
-        envelope.JobId.Should().NotBeEmpty();
-        envelope.SlicerType.Should().Be(SlicerEngineType.OrcaSlicer);
-        envelope.Priority.Should().Be(SlicingJobPriority.High);
-        envelope.Attempt.Should().Be(1);
-        envelope.CorrelationId.Should().NotBeEmpty();
-        envelope.Checksum.Should().NotBeNullOrEmpty();
-        envelope.SubmittedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
-        envelope.Version.Should().Be(MessageEnvelope.CurrentVersion);
+        _ = envelope.Should().NotBeNull();
+        _ = envelope.JobId.Should().NotBeEmpty();
+        _ = envelope.SlicerType.Should().Be(SlicerEngineType.OrcaSlicer);
+        _ = envelope.Priority.Should().Be(SlicingJobPriority.High);
+        _ = envelope.Attempt.Should().Be(1);
+        _ = envelope.CorrelationId.Should().NotBeEmpty();
+        _ = envelope.Checksum.Should().NotBeNullOrEmpty();
+        _ = envelope.SubmittedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+        _ = envelope.Version.Should().Be(MessageEnvelope.CurrentVersion);
     }
 
     [Fact]
@@ -55,9 +55,9 @@ public class MessageEnvelopeTests
         string checksum2 = MessageEnvelope.GenerateChecksum(jobContent);
 
         // Assert
-        checksum1.Should().NotBeNullOrEmpty();
-        checksum2.Should().NotBeNullOrEmpty();
-        checksum1.Should().Be(checksum2); // Same content should produce same checksum
+        _ = checksum1.Should().NotBeNullOrEmpty();
+        _ = checksum2.Should().NotBeNullOrEmpty();
+        _ = checksum1.Should().Be(checksum2); // Same content should produce same checksum
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class MessageEnvelopeTests
         string checksum2 = MessageEnvelope.GenerateChecksum(jobContent2);
 
         // Assert
-        checksum1.Should().NotBe(checksum2);
+        _ = checksum1.Should().NotBe(checksum2);
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public class MessageEnvelopeTests
         bool isValid = envelope.ValidateChecksum(jobContent);
 
         // Assert
-        isValid.Should().BeTrue();
+        _ = isValid.Should().BeTrue();
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class MessageEnvelopeTests
         bool isValid = envelope.ValidateChecksum(modifiedContent);
 
         // Assert
-        isValid.Should().BeFalse();
+        _ = isValid.Should().BeFalse();
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class MessageEnvelopeTests
         bool isDuplicate = envelope1.IsDuplicateOf(envelope2);
 
         // Assert
-        isDuplicate.Should().BeTrue();
+        _ = isDuplicate.Should().BeTrue();
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public class MessageEnvelopeTests
         bool isDuplicate = envelope1.IsDuplicateOf(envelope2);
 
         // Assert
-        isDuplicate.Should().BeFalse(); // Different correlation IDs
+        _ = isDuplicate.Should().BeFalse(); // Different correlation IDs
     }
 
     [Fact]
@@ -180,7 +180,7 @@ public class MessageEnvelopeTests
         bool isDuplicate = envelope1.IsDuplicateOf(envelope2);
 
         // Assert
-        isDuplicate.Should().BeFalse(); // Different checksums
+        _ = isDuplicate.Should().BeFalse(); // Different checksums
     }
 
     [Fact]
@@ -194,11 +194,11 @@ public class MessageEnvelopeTests
         MessageEnvelope retryEnvelope = MessageEnvelope.CreateRetry(originalEnvelope);
 
         // Assert
-        retryEnvelope.Attempt.Should().Be(originalEnvelope.Attempt + 1);
-        retryEnvelope.CorrelationId.Should().Be(originalEnvelope.CorrelationId);
-        retryEnvelope.Checksum.Should().Be(originalEnvelope.Checksum);
-        retryEnvelope.JobId.Should().NotBe(originalEnvelope.JobId); // New job ID for retry
-        retryEnvelope.SubmittedAt.Should().BeAfter(originalEnvelope.SubmittedAt);
+        _ = retryEnvelope.Attempt.Should().Be(originalEnvelope.Attempt + 1);
+        _ = retryEnvelope.CorrelationId.Should().Be(originalEnvelope.CorrelationId);
+        _ = retryEnvelope.Checksum.Should().Be(originalEnvelope.Checksum);
+        _ = retryEnvelope.JobId.Should().NotBe(originalEnvelope.JobId); // New job ID for retry
+        _ = retryEnvelope.SubmittedAt.Should().BeAfter(originalEnvelope.SubmittedAt);
     }
 
     [Fact]
@@ -224,14 +224,14 @@ public class MessageEnvelopeTests
         SlicingJobContent content = SlicingJobContent.FromRequest(request);
 
         // Assert
-        content.UserId.Should().Be(request.UserId);
-        content.PrinterId.Should().Be(request.PrinterId);
-        content.ModelFileUrl.Should().Be(request.ModelFileUrl.ToString());
-        content.ModelFileName.Should().Be(request.ModelFileName);
-        content.SlicerEngine.Should().Be(request.SlicerEngine);
-        content.Priority.Should().Be(request.Priority);
-        content.SlicerProfile.Should().Be(request.SlicerProfile);
-        content.Metadata.Should().Equal(request.Metadata);
+        _ = content.UserId.Should().Be(request.UserId);
+        _ = content.PrinterId.Should().Be(request.PrinterId);
+        _ = content.ModelFileUrl.Should().Be(request.ModelFileUrl.ToString());
+        _ = content.ModelFileName.Should().Be(request.ModelFileName);
+        _ = content.SlicerEngine.Should().Be(request.SlicerEngine);
+        _ = content.Priority.Should().Be(request.Priority);
+        _ = content.SlicerProfile.Should().Be(request.SlicerProfile);
+        _ = content.Metadata.Should().Equal(request.Metadata);
     }
 
     [Fact]
@@ -250,9 +250,9 @@ public class MessageEnvelopeTests
         MessageEnvelope envelope = request.GetOrCreateEnvelope();
 
         // Assert
-        envelope.Should().NotBeNull();
-        envelope.SlicerType.Should().Be(SlicerEngineType.OrcaSlicer);
-        envelope.Priority.Should().Be(SlicingJobPriority.Normal);
+        _ = envelope.Should().NotBeNull();
+        _ = envelope.SlicerType.Should().Be(SlicerEngineType.OrcaSlicer);
+        _ = envelope.Priority.Should().Be(SlicingJobPriority.Normal);
     }
 
     [Fact]
@@ -278,6 +278,6 @@ public class MessageEnvelopeTests
         MessageEnvelope envelope = request.GetOrCreateEnvelope();
 
         // Assert
-        envelope.Should().BeSameAs(existingEnvelope);
+        _ = envelope.Should().BeSameAs(existingEnvelope);
     }
 }

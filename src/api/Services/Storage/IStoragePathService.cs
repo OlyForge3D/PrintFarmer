@@ -152,7 +152,7 @@ public class StoragePathService : IStoragePathService
                 if (!Directory.Exists(dir))
                 {
                     _logger.LogInformation("Creating storage directory: {Directory}", dir);
-                    Directory.CreateDirectory(dir);
+                    _ = Directory.CreateDirectory(dir);
                 }
             }
 

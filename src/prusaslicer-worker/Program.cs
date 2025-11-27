@@ -4,6 +4,7 @@ using Farm.PrusaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.Text.Json;
 
 namespace Farm.PrusaSlicer.Worker;
 
@@ -60,7 +61,7 @@ public static class Program
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
                 {
                     status = report.Status == HealthStatus.Healthy ? "ok" : "unhealthy",
                     timestamp = DateTime.UtcNow
@@ -82,7 +83,7 @@ public static class Program
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
                 {
                     status = report.Status == HealthStatus.Healthy ? "ready" : "not-ready",
                     relaxed = relaxedReadiness,

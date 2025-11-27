@@ -18,7 +18,7 @@ public class MoonrakerClientRetryTests
     {
         int attempt = 0;
         Mock<HttpMessageHandler> handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
-        handler.Protected()
+        _ = handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
             {
@@ -34,7 +34,7 @@ public class MoonrakerClientRetryTests
     [Fact]
     public async Task ExecuteWithRetryAsync_SucceedsOnThirdAttemptAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, int _) = CreateFlakyClient(i =>
+        (IMoonrakerClient? client, _, _) = CreateFlakyClient(i =>
         {
             if (i < 3)
             {
@@ -60,14 +60,14 @@ public class MoonrakerClientRetryTests
             return s;
         }, maxRetries: 2, initialDelayMs: 1, operationName: nameof(client.GetStatusAsync));
 
-        status.IsOnline.Should().BeTrue();
-        attempts.Should().Be(3);
+        _ = status.IsOnline.Should().BeTrue();
+        _ = attempts.Should().Be(3);
     }
 
     [Fact]
     public async Task ExecuteWithRetryAsync_FailsAfterMaxRetriesAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, int _) = CreateFlakyClient(i => throw new TaskCanceledException("timeout"));
+        (IMoonrakerClient? client, _, _) = CreateFlakyClient(i => throw new TaskCanceledException("timeout"));
 
         int attempts = 0;
         Func<Task> act = async () =>
@@ -87,14 +87,14 @@ public class MoonrakerClientRetryTests
         // The underlying transient exception we simulate is TaskCanceledException (e.g. HTTP timeout). We assert on the
         // wrapper type and inner exception to prevent losing signal if RetryPolicyHelper implementation changes later.
         ExceptionAssertions<InvalidOperationException> thrown = await act.Should().ThrowAsync<InvalidOperationException>();
-        thrown.Which.InnerException.Should().BeOfType<TaskCanceledException>();
-        attempts.Should().Be(3); // initial try + 2 retries
+        _ = thrown.Which.InnerException.Should().BeOfType<TaskCanceledException>();
+        _ = attempts.Should().Be(3); // initial try + 2 retries
     }
 
     [Fact]
     public async Task DirectoryCall_WithTransient5xx_RetriesAndSucceedsAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, int _) = CreateFlakyClient(i =>
+        (IMoonrakerClient? client, _, _) = CreateFlakyClient(i =>
         {
             if (i == 1)
             {
@@ -129,7 +129,7 @@ public class MoonrakerClientRetryTests
             return d;
         }, maxRetries: 2, initialDelayMs: 1, operationName: nameof(client.GetDirectoryAsync));
 
-        dir.Should().NotBeNull();
-        attempts.Should().Be(2);
+        _ = dir.Should().NotBeNull();
+        _ = attempts.Should().Be(2);
     }
 }

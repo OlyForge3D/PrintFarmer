@@ -98,13 +98,13 @@ public class EfHarvestRepository : IHarvestRepository
 
     public Task AddOperationAsync(GcodeHarvestOperation operation, CancellationToken ct = default)
     {
-        _db.GcodeHarvestOperations.Add(operation);
+        _ = _db.GcodeHarvestOperations.Add(operation);
         return Task.CompletedTask;
     }
 
     public Task UpdateOperationAsync(GcodeHarvestOperation operation, CancellationToken ct = default)
     {
-        _db.GcodeHarvestOperations.Update(operation);
+        _ = _db.GcodeHarvestOperations.Update(operation);
         return Task.CompletedTask;
     }
 
@@ -171,7 +171,7 @@ public class EfHarvestRepository : IHarvestRepository
 
     public Task AddDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default)
     {
-        _db.HarvestDiscoveredFiles.Add(file);
+        _ = _db.HarvestDiscoveredFiles.Add(file);
         return Task.CompletedTask;
     }
 
@@ -189,13 +189,13 @@ public class EfHarvestRepository : IHarvestRepository
 
     public Task UpdateDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default)
     {
-        _db.HarvestDiscoveredFiles.Update(file);
+        _ = _db.HarvestDiscoveredFiles.Update(file);
         return Task.CompletedTask;
     }
 
     public Task DeleteDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default)
     {
-        _db.HarvestDiscoveredFiles.Remove(file);
+        _ = _db.HarvestDiscoveredFiles.Remove(file);
         return Task.CompletedTask;
     }
 
@@ -213,6 +213,6 @@ public class EfHarvestRepository : IHarvestRepository
     // Combined operations
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 }

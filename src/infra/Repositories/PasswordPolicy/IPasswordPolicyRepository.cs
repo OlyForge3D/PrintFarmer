@@ -6,6 +6,6 @@ namespace Farm.Infrastructure.Repositories.PasswordPolicy;
 
 public interface IPasswordPolicyRepository
 {
-    Task<Farm.Infrastructure.Domain.PasswordPolicyEntity?> GetAsync(CancellationToken ct = default);
-    Task SaveAsync(Farm.Infrastructure.Domain.PasswordPolicyEntity policy, CancellationToken ct = default);
+    Task<PasswordPolicyEntity?> GetAsync(CancellationToken ct = default);
+    Task SaveAsync(PasswordPolicyEntity policy, CancellationToken ct = default);
 }

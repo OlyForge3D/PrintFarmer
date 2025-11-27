@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -106,8 +107,8 @@ namespace Farm.Web.Api.Services.Slicing
 
         private static string ComputeSha256(string input)
         {
-            using SHA256 sha = System.Security.Cryptography.SHA256.Create();
-            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(input);
+            using SHA256 sha = SHA256.Create();
+            byte[] bytes = Encoding.UTF8.GetBytes(input);
             byte[] hash = sha.ComputeHash(bytes);
             return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
         }

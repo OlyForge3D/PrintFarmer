@@ -20,14 +20,14 @@ namespace Farm.Web.Api.Tests.Services
         private static AppDbContext CreateSqliteInMemoryDb()
         {
             // Use SQLite in-memory to provide relational Include/ThenInclude semantics similar to production
-            SqliteConnection connection = new Microsoft.Data.Sqlite.SqliteConnection("DataSource=:memory:");
+            SqliteConnection connection = new SqliteConnection("DataSource=:memory:");
             connection.Open();
             DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite(connection)
                 .Options;
 
             AppDbContext ctx = new AppDbContext(opts);
-            ctx.Database.EnsureCreated();
+            _ = ctx.Database.EnsureCreated();
             return ctx;
         }
 
@@ -36,21 +36,21 @@ namespace Farm.Web.Api.Tests.Services
         {
             using AppDbContext db = CreateSqliteInMemoryDb();
             // Seed a printer and its capabilities
-            Manufacturer manufacturer = new Farm.Infrastructure.Domain.Manufacturer { Id = Guid.NewGuid(), Name = "M1" };
-            PrinterModel model = new Farm.Infrastructure.Domain.PrinterModel { Id = Guid.NewGuid(), Name = "Model1", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer };
-            Printer printer = new Farm.Infrastructure.Domain.Printer { Id = Guid.NewGuid(), Name = "P1", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer, ModelId = model.Id, Model = model };
-            db.Manufacturers.Add(manufacturer);
-            db.Models.Add(model);
-            db.Printers.Add(printer);
-            PrinterCapabilities cap = new Farm.Infrastructure.Domain.PrinterCapabilities { Id = Guid.NewGuid(), PrinterId = printer.Id, IsAvailable = true, LastUpdated = DateTime.UtcNow };
+            Manufacturer manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "M1" };
+            PrinterModel model = new PrinterModel { Id = Guid.NewGuid(), Name = "Model1", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer };
+            Printer printer = new Printer { Id = Guid.NewGuid(), Name = "P1", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer, ModelId = model.Id, Model = model };
+            _ = db.Manufacturers.Add(manufacturer);
+            _ = db.Models.Add(model);
+            _ = db.Printers.Add(printer);
+            PrinterCapabilities cap = new PrinterCapabilities { Id = Guid.NewGuid(), PrinterId = printer.Id, IsAvailable = true, LastUpdated = DateTime.UtcNow };
             cap.Printer = printer;
-            db.PrinterCapabilities.Add(cap);
-            await db.SaveChangesAsync();
+            _ = db.PrinterCapabilities.Add(cap);
+            _ = await db.SaveChangesAsync();
             // Ensure the in-memory DB contains the capability we just added.
-            await db.PrinterCapabilities.Include(c => c.Printer).ToListAsync();
+            _ = await db.PrinterCapabilities.Include(c => c.Printer).ToListAsync();
 
-            Mock<IPrinterCapabilityDiscoveryService> discoveryMock = new Moq.Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            Mock<IUnifiedLoggingService> loggerMock = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IPrinterCapabilityDiscoveryService> discoveryMock = new Mock<IPrinterCapabilityDiscoveryService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
             EfPrinterCapabilitiesRepository repo = new EfPrinterCapabilitiesRepository(db);
 
             PrinterCapabilitiesService svc = new PrinterCapabilitiesService(repo, loggerMock.Object, discoveryMock.Object);
@@ -63,16 +63,16 @@ namespace Farm.Web.Api.Tests.Services
         public async Task CreateAsync_CreatesCapabilities_WhenPrinterExists()
         {
             using AppDbContext db = CreateSqliteInMemoryDb();
-            Manufacturer manufacturer = new Farm.Infrastructure.Domain.Manufacturer { Id = Guid.NewGuid(), Name = "M2" };
-            PrinterModel model = new Farm.Infrastructure.Domain.PrinterModel { Id = Guid.NewGuid(), Name = "Model2", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer };
-            Printer printer = new Farm.Infrastructure.Domain.Printer { Id = Guid.NewGuid(), Name = "P2", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer, ModelId = model.Id, Model = model };
-            db.Manufacturers.Add(manufacturer);
-            db.Models.Add(model);
-            db.Printers.Add(printer);
-            await db.SaveChangesAsync();
+            Manufacturer manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "M2" };
+            PrinterModel model = new PrinterModel { Id = Guid.NewGuid(), Name = "Model2", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer };
+            Printer printer = new Printer { Id = Guid.NewGuid(), Name = "P2", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer, ModelId = model.Id, Model = model };
+            _ = db.Manufacturers.Add(manufacturer);
+            _ = db.Models.Add(model);
+            _ = db.Printers.Add(printer);
+            _ = await db.SaveChangesAsync();
 
-            Mock<IPrinterCapabilityDiscoveryService> discoveryMock = new Moq.Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            Mock<IUnifiedLoggingService> loggerMock = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IPrinterCapabilityDiscoveryService> discoveryMock = new Mock<IPrinterCapabilityDiscoveryService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
             EfPrinterCapabilitiesRepository repo = new EfPrinterCapabilitiesRepository(db);
 
             PrinterCapabilitiesService svc = new PrinterCapabilitiesService(repo, loggerMock.Object, discoveryMock.Object);

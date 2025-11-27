@@ -25,7 +25,7 @@ public class EfPrintersRepository : IPrintersRepository
     public async Task AddAsync(Printer p, CancellationToken ct)
     {
         _ = _db.Printers.Add(p);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task RemoveAsync(Printer p, CancellationToken ct)
@@ -63,7 +63,7 @@ public class EfPrintersRepository : IPrintersRepository
 
         // Now remove the printer itself
         _ = _db.Printers.Remove(p);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);
@@ -122,7 +122,7 @@ public class EfPrintersRepository : IPrintersRepository
             existing.UpdatedAt = capabilities.UpdatedAt;
         }
 
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct)

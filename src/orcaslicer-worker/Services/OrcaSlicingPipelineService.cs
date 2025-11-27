@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core; // shared interfaces
@@ -26,7 +27,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/usr/local/bin/orcaslicer";
         if (!Directory.Exists(_workingDirectory))
         {
-            Directory.CreateDirectory(_workingDirectory);
+            _ = Directory.CreateDirectory(_workingDirectory);
         }
     }
 
@@ -34,7 +35,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     {
         ArgumentNullException.ThrowIfNull(job);
         string jobWorkDir = Path.Combine(_workingDirectory, job.Id.ToString());
-        Directory.CreateDirectory(jobWorkDir);
+        _ = Directory.CreateDirectory(jobWorkDir);
         try
         {
             _logger.LogInformation($"Starting slicing pipeline for job {job.Id}");
@@ -79,7 +80,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private async Task<string> FetchStlFileAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
     {
         HttpResponseMessage response = await _httpClient.GetAsync(job.ModelFileUrl, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        _ = response.EnsureSuccessStatusCode();
         string stlFilePath = Path.Combine(workDir, job.ModelFileName);
         await using FileStream fileStream = File.Create(stlFilePath);
         await response.Content.CopyToAsync(fileStream, cancellationToken);
@@ -110,9 +111,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string filamentJsonPath = Path.Combine(workDir, "filament.json");
 
         // Write the profiles directly as JSON - they should already contain complete settings from the database
-        string machineJson = System.Text.Json.JsonSerializer.Serialize(profile.MachineProfile, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-        string processJson = System.Text.Json.JsonSerializer.Serialize(profile.ProcessProfile, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-        string filamentJson = System.Text.Json.JsonSerializer.Serialize(profile.FilamentProfile, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        string machineJson = JsonSerializer.Serialize(profile.MachineProfile, new JsonSerializerOptions { WriteIndented = true });
+        string processJson = JsonSerializer.Serialize(profile.ProcessProfile, new JsonSerializerOptions { WriteIndented = true });
+        string filamentJson = JsonSerializer.Serialize(profile.FilamentProfile, new JsonSerializerOptions { WriteIndented = true });
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, processJson, cancellationToken);
@@ -130,7 +131,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private async Task<string> RunOrcaSlicerAsync(string stlPath, string configPath, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         string gcodeOutputDir = Path.Combine(workDir, "output");
-        Directory.CreateDirectory(gcodeOutputDir);
+        _ = Directory.CreateDirectory(gcodeOutputDir);
 
         string gcodeFilePath = Path.Combine(gcodeOutputDir, Path.GetFileNameWithoutExtension(job.ModelFileName) + ".gcode");
         if (!File.Exists(_orcaSlicerBinaryPath))
@@ -162,7 +163,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             }
         };
         Task progressTask = MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
-        process.Start();
+        _ = process.Start();
         Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);

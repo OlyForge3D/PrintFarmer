@@ -1,7 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AutoMapper;
@@ -62,7 +64,7 @@ try
 {
     if (string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase))
     {
-        builder.Host.UseDefaultServiceProvider(options =>
+        _ = builder.Host.UseDefaultServiceProvider(options =>
         {
             options.ValidateOnBuild = false;
             options.ValidateScopes = false;
@@ -85,7 +87,7 @@ builder.Services.AddPrintFarmerDatabase(builder.Configuration);
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.
 // This ensures POCOs like DatabaseSettings are configured from env/config without needing AppDbContext.
-builder.Services.Configure<Farm.Infrastructure.Settings.DatabaseSettings>(builder.Configuration.GetSection(Farm.Infrastructure.Settings.DatabaseSettings.SectionName));
+builder.Services.Configure<DatabaseSettings>(builder.Configuration.GetSection(Farm.Infrastructure.Settings.DatabaseSettings.SectionName));
 builder.Services.AddPrintFarmerSettings();
 
 // Attempt to unify WebRoot to repository-level /wwwroot directory (shared across API & React build output)
@@ -120,7 +122,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi(options =>
 {
     // Configure OpenAPI document with JWT Bearer security
-    OpenApiSecurityScheme securityScheme = new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    OpenApiSecurityScheme securityScheme = new OpenApiSecurityScheme
     {
         Name = "Authorization",
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
@@ -130,14 +132,14 @@ builder.Services.AddOpenApi(options =>
         Description = "JWT Authorization header using the Bearer scheme. Enter your JWT token in the text input below.\n\nExample: \"abc123xyz\""
     };
 
-    options.AddOperationTransformer((operation, api, ct) =>
+    _ = options.AddOperationTransformer((operation, api, ct) =>
     {
         operation.Security ??= [];
         operation.Security.Add(new()
         {
-            [new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            [new OpenApiSecurityScheme
             {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                Reference = new OpenApiReference
                 {
                     Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
                     Id = "Bearer"
@@ -147,7 +149,7 @@ builder.Services.AddOpenApi(options =>
         return Task.CompletedTask;
     });
 
-    options.AddDocumentTransformer((document, context, ct) =>
+    _ = options.AddDocumentTransformer((document, context, ct) =>
     {
         document.Components ??= new();
         document.Components.SecuritySchemes["Bearer"] = securityScheme;
@@ -196,7 +198,7 @@ catch { /* best-effort */ }
 // Also skip telemetry when running under the 'Testing' environment to avoid external exporters
 if (!disableTelemetry && !string.Equals(builder.Environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
 {
-    builder.Services.AddOpenTelemetry()
+    _ = builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource =>
     {
         _ = resource.AddService("PrintFarmer.API", serviceVersion: "1.0.0")
@@ -391,8 +393,8 @@ builder.Services.AddSingleton<IAssetService, AssetService>();
 // Runs hourly to detect orphaned/missing/corrupted files
 builder.Services.AddHostedService(sp =>
 {
-    IServiceScopeFactory scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
-    IUnifiedLoggingService logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+    IServiceScopeFactory scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+    IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
     IConfiguration config = sp.GetRequiredService<IConfiguration>();
     string modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
     string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
@@ -432,7 +434,7 @@ builder.Services.AddAuthentication("Bearer")
         TokenValidationParameters tvp = new()
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(key)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
             ValidateIssuer = true,
             ValidIssuer = issuer,
             ValidateAudience = true,
@@ -488,7 +490,7 @@ try
     string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
     if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
     {
-        builder.WebHost.UseUrls("http://0.0.0.0:5245");
+        _ = builder.WebHost.UseUrls("http://0.0.0.0:5245");
     }
 }
 catch
@@ -502,10 +504,10 @@ catch
 // use the services safely. We build a temporary provider (disposed immediately)
 // and stash references to services that are safe to keep for the lifetime of the
 // process (loggers, unified logging, temp path provider, startup status).
-Farm.Infrastructure.Telemetry.IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
-Microsoft.Extensions.Logging.ILogger<Program>? _capturedStartupLogger = null;
+IUnifiedLoggingService? _capturedStartupUnifiedLogging = null;
+ILogger<Program>? _capturedStartupLogger = null;
 ITempPathProvider? _capturedTempPathProvider = null;
-Farm.Web.Api.Services.Interfaces.IStartupStatus? _capturedStartupStatus = null;
+IStartupStatus? _capturedStartupStatus = null;
 
 WebApplication app;
 try
@@ -535,10 +537,10 @@ try
 {
     await using AsyncServiceScope _captureScope = app.Services.CreateAsyncScope();
     IServiceProvider _captureSp = _captureScope.ServiceProvider;
-    _capturedStartupUnifiedLogging = _captureSp.GetService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-    _capturedStartupLogger = _captureSp.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    _capturedStartupUnifiedLogging = _captureSp.GetService<IUnifiedLoggingService>();
+    _capturedStartupLogger = _captureSp.GetService<ILogger<Program>>();
     _capturedTempPathProvider = _captureSp.GetService<ITempPathProvider>();
-    _capturedStartupStatus = _captureSp.GetService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
+    _capturedStartupStatus = _captureSp.GetService<IStartupStatus>();
 }
 catch
 {
@@ -549,7 +551,7 @@ catch
 try
 {
     ArtifactStorageSettings artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
-    ArtifactsMetrics artifactMetrics = app.Services.GetRequiredService<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
+    ArtifactsMetrics artifactMetrics = app.Services.GetRequiredService<ArtifactsMetrics>();
 
     if (artifactSettings.EnableStorageAlerts)
     {
@@ -558,7 +560,7 @@ try
         // Subscribe to threshold events for logging
         artifactMetrics.ThresholdExceeded += (sender, e) =>
         {
-            ILogger<Program>? logger = app.Services.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+            ILogger<Program>? logger = app.Services.GetService<ILogger<Program>>();
             string levelStr = e.Level switch
             {
                 Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Warning => "WARNING",
@@ -595,7 +597,7 @@ if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION
     // Prefer startup-captured unified logging / logger when available to avoid creating
     // a scope inside the ApplicationStarted callback.
     IUnifiedLoggingService? _deferredUls = _capturedStartupUnifiedLogging ?? app.Services.GetService<IUnifiedLoggingService>();
-    Microsoft.Extensions.Logging.ILogger<Program>? _deferredLg = _capturedStartupLogger ?? app.Services.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    ILogger<Program>? _deferredLg = _capturedStartupLogger ?? app.Services.GetService<ILogger<Program>>();
 
     _ = lifetime.ApplicationStarted.Register(() => ProgramHelpers.HandleDeferredConsoleRedirection(_deferredUls, _deferredLg));
 }
@@ -635,7 +637,7 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    _ = app.MapOpenApi();
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
@@ -643,7 +645,7 @@ if (app.Environment.IsDevelopment())
 app.UseCors("Default");
 
 // Rate limiting for authentication endpoints
-app.UseMiddleware<Farm.Web.Api.Middleware.AuthenticationRateLimitMiddleware>();
+app.UseMiddleware<AuthenticationRateLimitMiddleware>();
 
 // Authentication and Authorization
 app.UseAuthentication();
@@ -656,14 +658,14 @@ app.MapHub<HarvestHub>("/hubs/harvest");
 // Slicer registry events hub (worker registration, heartbeat, deregistration)
 app.MapHub<SlicerHub>("/hubs/slicer-registry");
 // Slicer progress hub for job processing progress events
-app.MapHub<Farm.Web.Api.Services.SlicerServices.SlicerProgressHub>("/hubs/slicers");
+app.MapHub<SlicerProgressHub>("/hubs/slicers");
 
 // Prometheus metrics endpoint (guarded so tests without MeterProvider don't throw)
 try
 {
-    if (app.Services.GetService<OpenTelemetry.Metrics.MeterProvider>() != null)
+    if (app.Services.GetService<MeterProvider>() != null)
     {
-        app.MapPrometheusScrapingEndpoint();
+        _ = app.MapPrometheusScrapingEndpoint();
     }
 }
 catch
@@ -676,7 +678,7 @@ catch
 // Use app.Environment directly instead of resolving IHostEnvironment from the service provider
 IHostEnvironment _programHostEnvironment = app.Environment;
 // Resolve IStartupStatus once from the root provider (it's a singleton-like service used for diagnostics)
-Farm.Web.Api.Services.Interfaces.IStartupStatus? _startupStatus = _capturedStartupStatus ?? app.Services.GetService<Farm.Web.Api.Services.Interfaces.IStartupStatus>();
+IStartupStatus? _startupStatus = _capturedStartupStatus ?? app.Services.GetService<IStartupStatus>();
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>
@@ -704,7 +706,7 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 // GET /api/settings/network-discovery  
 // POST /api/settings/network-discovery
 // (Legacy endpoints removed - use unified controller instead)
-app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromBody] Farm.Infrastructure.Settings.NetworkDiscoverySettings body) =>
+app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettings body) =>
 {
     NetworkValidationResult validation = Farm.Web.Api.Services.NetworkValidationService.ValidateSettings(body);
     return Results.Ok(new
@@ -720,13 +722,13 @@ app.MapPost("/api/network-discovery/settings/validate", [Microsoft.AspNetCore.Au
 // GET /api/settings/signalr
 // POST /api/settings/signalr
 // (Legacy endpoints removed - use unified controller instead)
-app.MapPost("/api/network-discovery/auto-detect", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
-app.MapPost("/api/network-discovery/settings/apply-env", [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")] ([FromServices] Farm.Infrastructure.Settings.ISettingsService settingsService) =>
+app.MapPost("/api/network-discovery/auto-detect", [Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
+app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "RequireAdmin")] ([FromServices] ISettingsService settingsService) =>
 {
     // Allows re-applying environment driven defaults from DISCOVERY_RANGES / DISCOVERY_PORTS
     string? rangesEnv = Environment.GetEnvironmentVariable("DISCOVERY_RANGES");
     string? portsEnv = Environment.GetEnvironmentVariable("DISCOVERY_PORTS");
-    NetworkDiscoverySettings current = settingsService.Get<Farm.Infrastructure.Settings.NetworkDiscoverySettings>() ?? new Farm.Infrastructure.Settings.NetworkDiscoverySettings();
+    NetworkDiscoverySettings current = settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
     // TODO: Update logic for new NetworkDiscoverySettings properties if needed
     settingsService.Save(current);
     return Results.Ok(current);
@@ -741,10 +743,10 @@ app.MapGet("/diagnostics/temp-root", ([FromServices] IWebHostEnvironment env, [F
         : Results.Ok(new { tempRoot = provider.GetTempRoot() })
 );
 // Combined diagnostics (non-sensitive) for UI consumption
-app.MapGet("/api/diagnostics/summary", ([FromServices] Farm.Web.Api.Services.Interfaces.ISpoolmanService spoolmanSvc, [FromServices] Farm.Infrastructure.Settings.ISettingsService settingsService) =>
+app.MapGet("/api/diagnostics/summary", ([FromServices] ISpoolmanService spoolmanSvc, [FromServices] ISettingsService settingsService) =>
 {
     SpoolmanConfigDto? spoolCfg = spoolmanSvc.GetConfig();
-    NetworkDiscoverySettings discovery = settingsService.Get<Farm.Infrastructure.Settings.NetworkDiscoverySettings>() ?? new Farm.Infrastructure.Settings.NetworkDiscoverySettings();
+    NetworkDiscoverySettings discovery = settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
     return Results.Ok(new
     {
         spoolman = new { configured = spoolCfg is not null && !string.IsNullOrWhiteSpace(spoolCfg.BaseUrl), baseUrl = spoolCfg?.BaseUrl },
@@ -898,7 +900,7 @@ try
 
         if (Directory.Exists(artifactPath))
         {
-            app.UseStaticFiles(new StaticFileOptions
+            _ = app.UseStaticFiles(new StaticFileOptions
             {
                 FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(artifactPath),
                 RequestPath = "/artifacts",
@@ -988,16 +990,19 @@ public partial class Program
 // Small test-only startup filter used from Program when running under Testing
 namespace Farm.Web.Api.Testing
 {
-    internal sealed class TestStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    using System.IO;
+    using System.Text;
+
+    internal sealed class TestStartupFilter : IStartupFilter
     {
         private readonly System.Action _onConfigure;
 
         public TestStartupFilter(System.Action onConfigure)
         {
-            _onConfigure = onConfigure ?? throw new System.ArgumentNullException(nameof(onConfigure));
+            _onConfigure = onConfigure ?? throw new ArgumentNullException(nameof(onConfigure));
         }
 
-        public System.Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(System.Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next)
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
         {
             return app =>
             {

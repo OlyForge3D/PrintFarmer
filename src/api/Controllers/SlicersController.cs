@@ -12,9 +12,9 @@ namespace Farm.Web.Api.Controllers;
 [RequireSlicerApiKey]
 public class SlicersController : ControllerBase
 {
-    private readonly Farm.Web.Api.Services.Slicing.ISlicersService _service;
+    private readonly Services.Slicing.ISlicersService _service;
 
-    public SlicersController(Farm.Web.Api.Services.Slicing.ISlicersService service)
+    public SlicersController(Services.Slicing.ISlicersService service)
     {
         _service = service ?? throw new ArgumentNullException(nameof(service));
     }
@@ -30,7 +30,7 @@ public class SlicersController : ControllerBase
     // Registration uses static key
 
     [HttpPost("register")]
-    public async Task<IActionResult> RegisterAsync([FromBody] Farm.Web.Shared.Contracts.Slicing.RegisterSlicerDto dto)
+    public async Task<IActionResult> RegisterAsync([FromBody] Shared.Contracts.Slicing.RegisterSlicerDto dto)
     {
         SlicerService svc = new SlicerService
         {
@@ -74,7 +74,7 @@ public class SlicersController : ControllerBase
 
     [HttpPost("{id}/heartbeat")]
     [RequireSlicerServiceApiKey]
-    public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] Farm.Web.Shared.Contracts.Slicing.HeartbeatDto dto)
+    public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] Shared.Contracts.Slicing.HeartbeatDto dto)
     {
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         bool ok = await _service.HeartbeatAsync(id, dto, ct);

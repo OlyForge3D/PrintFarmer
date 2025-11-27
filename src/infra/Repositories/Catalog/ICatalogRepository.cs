@@ -16,11 +16,11 @@ public interface ICatalogRepository
 
     Task<IReadOnlyList<PrinterModelDto>> GetModelsCachedAsync(Guid? manufacturerId, CancellationToken ct = default);
     Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct = default);
-    Task AddModelAsync(Farm.Infrastructure.Domain.PrinterModel model, CancellationToken ct = default);
+    Task AddModelAsync(Domain.PrinterModel model, CancellationToken ct = default);
     Task<IEnumerable<Guid>> GetValidFilamentTypeIdsAsync(Guid[] ids, CancellationToken ct = default);
     Task<PrinterModelDto?> GetModelWithFilamentNamesAsync(Guid id, CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
-    Task<Farm.Infrastructure.Domain.PrinterModel?> GetModelEntityAsync(Guid id, CancellationToken ct = default);
+    Task<Domain.PrinterModel?> GetModelEntityAsync(Guid id, CancellationToken ct = default);
     Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default);
     Task<Guid?> GetUnknownModelIdAsync(CancellationToken ct = default);
 }

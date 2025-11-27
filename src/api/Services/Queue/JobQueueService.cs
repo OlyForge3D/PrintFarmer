@@ -63,7 +63,7 @@ namespace Farm.Web.Api.Services.Queue
                 Id = j.Id,
                 GcodeFileId = j.GcodeFileId,
                 AssignedPrinterId = j.AssignedPrinterId,
-                Status = (Farm.Web.Shared.PrintJobStatus?)j.Status,
+                Status = (PrintJobStatus?)j.Status,
                 Priority = j.Priority,
                 QueuePosition = 0,
                 RequiredNozzleDiameter = j.RequiredNozzleDiameter,
@@ -110,7 +110,7 @@ namespace Farm.Web.Api.Services.Queue
                 }
             }
 
-            PrintJob job = new Farm.Infrastructure.Domain.PrintJob
+            PrintJob job = new PrintJob
             {
                 Id = Guid.NewGuid(),
                 Name = gcode.DisplayName,
@@ -138,7 +138,7 @@ namespace Farm.Web.Api.Services.Queue
                 GcodeFileName = gcode.DisplayName,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == job.AssignedPrinterId)?.Name ?? "Unknown",
-                Status = (Farm.Web.Shared.PrintJobStatus?)job.Status,
+                Status = (PrintJobStatus?)job.Status,
                 Priority = job.Priority,
                 QueuePosition = job.QueuePosition,
                 RequiredNozzleDiameter = job.RequiredNozzleDiameter,
@@ -165,7 +165,7 @@ namespace Farm.Web.Api.Services.Queue
                 GcodeFileName = job.GcodeFile?.DisplayName ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-                Status = (Farm.Web.Shared.PrintJobStatus?)job.Status,
+                Status = (PrintJobStatus?)job.Status,
                 Priority = job.Priority,
                 QueuePosition = job.QueuePosition,
                 RequiredNozzleDiameter = job.RequiredNozzleDiameter,
@@ -218,7 +218,7 @@ namespace Farm.Web.Api.Services.Queue
                 GcodeFileName = job.GcodeFile?.DisplayName ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-                Status = (Farm.Web.Shared.PrintJobStatus?)job.Status,
+                Status = (PrintJobStatus?)job.Status,
                 Priority = job.Priority,
                 QueuePosition = job.QueuePosition,
                 EstimatedPrintTime = job.EstimatedPrintTime,
@@ -288,7 +288,7 @@ namespace Farm.Web.Api.Services.Queue
                 GcodeFileName = job.GcodeFile?.DisplayName ?? string.Empty,
                 AssignedPrinterId = job.AssignedPrinterId,
                 AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-                Status = (Farm.Web.Shared.PrintJobStatus?)job.Status,
+                Status = (PrintJobStatus?)job.Status,
                 Priority = job.Priority,
                 QueuePosition = job.QueuePosition,
                 RequiredNozzleDiameter = job.RequiredNozzleDiameter,
@@ -331,7 +331,7 @@ namespace Farm.Web.Api.Services.Queue
             return null;
         }
 
-        private static DateTime? CalculateEstimatedCompletionTime(List<Farm.Infrastructure.Domain.PrintJob> queuedJobs, Farm.Infrastructure.Domain.PrintJob? currentJob)
+        private static DateTime? CalculateEstimatedCompletionTime(List<PrintJob> queuedJobs, PrintJob? currentJob)
         {
             double totalMinutes = 0.0;
 

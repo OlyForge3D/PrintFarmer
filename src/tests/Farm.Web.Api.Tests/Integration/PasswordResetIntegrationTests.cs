@@ -37,8 +37,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsActive = true,
             EmailConfirmed = true
         };
-        context.Users.Add(user);
-        await context.SaveChangesAsync();
+        _ = context.Users.Add(user);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -47,10 +47,10 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         ForgotPasswordResponse? result = await response.Content.ReadFromJsonAsync<ForgotPasswordResponse>();
-        result.Should().NotBeNull();
-        result!.Success.Should().BeTrue();
+        _ = result.Should().NotBeNull();
+        _ = result!.Success.Should().BeTrue();
 
         // Verify token was created in database
         using IServiceScope verifyScope = _factory.Services.CreateScope();
@@ -58,8 +58,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         List<PasswordResetToken> tokens = await verifyContext.PasswordResetTokens
             .Where(t => t.UserId == user.Id && !t.IsUsed)
             .ToListAsync();
-        tokens.Should().HaveCountGreaterThan(0);
-        tokens[0].ExpiresAt.Should().BeAfter(DateTime.UtcNow);
+        _ = tokens.Should().HaveCountGreaterThan(0);
+        _ = tokens[0].ExpiresAt.Should().BeAfter(DateTime.UtcNow);
     }
 
     [Fact]
@@ -73,11 +73,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
 
         // Assert - Should return success to prevent email enumeration
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         ForgotPasswordResponse? result = await response.Content.ReadFromJsonAsync<ForgotPasswordResponse>();
-        result.Should().NotBeNull();
-        result!.Success.Should().BeTrue();
-        result.Message.Should().Contain("If an account with that email exists");
+        _ = result.Should().NotBeNull();
+        _ = result!.Success.Should().BeTrue();
+        _ = result.Message.Should().Contain("If an account with that email exists");
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsActive = true,
             EmailConfirmed = true
         };
-        context.Users.Add(user);
+        _ = context.Users.Add(user);
 
         // Create a valid reset token
         PasswordResetToken resetToken = new PasswordResetToken
@@ -109,8 +109,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             ExpiresAt = DateTime.UtcNow.AddHours(1),
             IsUsed = false
         };
-        context.PasswordResetTokens.Add(resetToken);
-        await context.SaveChangesAsync();
+        _ = context.PasswordResetTokens.Add(resetToken);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -125,29 +125,29 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
-        result.Should().NotBeNull();
-        result!.Success.Should().BeTrue();
+        _ = result.Should().NotBeNull();
+        _ = result!.Success.Should().BeTrue();
 
         // Verify password was changed
         using IServiceScope verifyScope = _factory.Services.CreateScope();
         AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
         User? updatedUser = await verifyContext.Users.FindAsync(user.Id);
-        updatedUser.Should().NotBeNull();
+        _ = updatedUser.Should().NotBeNull();
 
         // Verify old password no longer works
         IPasswordHashingService verifyHashing = verifyScope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
-        verifyHashing.VerifyPassword("OldPassword123!", updatedUser!.PasswordHash).Should().BeFalse();
+        _ = verifyHashing.VerifyPassword("OldPassword123!", updatedUser!.PasswordHash).Should().BeFalse();
 
         // Verify new password works
-        verifyHashing.VerifyPassword("NewSecurePassword123!", updatedUser.PasswordHash).Should().BeTrue();
+        _ = verifyHashing.VerifyPassword("NewSecurePassword123!", updatedUser.PasswordHash).Should().BeTrue();
 
         // Verify token is marked as used
         PasswordResetToken? usedToken = await verifyContext.PasswordResetTokens.FindAsync(resetToken.Id);
-        usedToken.Should().NotBeNull();
-        usedToken!.IsUsed.Should().BeTrue();
-        usedToken.UsedAt.Should().NotBeNull();
+        _ = usedToken.Should().NotBeNull();
+        _ = usedToken!.IsUsed.Should().BeTrue();
+        _ = usedToken.UsedAt.Should().NotBeNull();
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsActive = true,
             EmailConfirmed = true
         };
-        context.Users.Add(user);
+        _ = context.Users.Add(user);
 
         // Create an expired reset token
         PasswordResetToken resetToken = new PasswordResetToken
@@ -179,8 +179,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             ExpiresAt = DateTime.UtcNow.AddHours(-1), // Expired 1 hour ago
             IsUsed = false
         };
-        context.PasswordResetTokens.Add(resetToken);
-        await context.SaveChangesAsync();
+        _ = context.PasswordResetTokens.Add(resetToken);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -195,11 +195,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
-        result.Should().NotBeNull();
-        result!.Success.Should().BeFalse();
-        result.Message.Should().Contain("Invalid or expired");
+        _ = result.Should().NotBeNull();
+        _ = result!.Success.Should().BeFalse();
+        _ = result.Message.Should().Contain("Invalid or expired");
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsActive = true,
             EmailConfirmed = true
         };
-        context.Users.Add(user);
+        _ = context.Users.Add(user);
 
         // Create a used reset token
         PasswordResetToken resetToken = new PasswordResetToken
@@ -232,8 +232,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsUsed = true, // Already used
             UsedAt = DateTime.UtcNow.AddMinutes(-10)
         };
-        context.PasswordResetTokens.Add(resetToken);
-        await context.SaveChangesAsync();
+        _ = context.PasswordResetTokens.Add(resetToken);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -248,10 +248,10 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
-        result.Should().NotBeNull();
-        result!.Success.Should().BeFalse();
+        _ = result.Should().NotBeNull();
+        _ = result!.Success.Should().BeFalse();
     }
 
     [Fact]
@@ -271,8 +271,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsActive = true,
             EmailConfirmed = true
         };
-        context.Users.Add(user);
-        await context.SaveChangesAsync();
+        _ = context.Users.Add(user);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -287,10 +287,10 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
-        result.Should().NotBeNull();
-        result!.Success.Should().BeFalse();
+        _ = result.Should().NotBeNull();
+        _ = result!.Success.Should().BeFalse();
     }
 
     [Fact]
@@ -310,7 +310,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsActive = true,
             EmailConfirmed = true
         };
-        context.Users.Add(user);
+        _ = context.Users.Add(user);
 
         PasswordResetToken resetToken = new PasswordResetToken
         {
@@ -321,8 +321,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             ExpiresAt = DateTime.UtcNow.AddHours(1),
             IsUsed = false
         };
-        context.PasswordResetTokens.Add(resetToken);
-        await context.SaveChangesAsync();
+        _ = context.PasswordResetTokens.Add(resetToken);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -337,10 +337,10 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
-        result.Should().NotBeNull();
-        result!.Success.Should().BeFalse();
+        _ = result.Should().NotBeNull();
+        _ = result!.Success.Should().BeFalse();
     }
 
     [Fact]
@@ -360,8 +360,8 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             IsActive = true,
             EmailConfirmed = true
         };
-        context.Users.Add(user);
-        await context.SaveChangesAsync();
+        _ = context.Users.Add(user);
+        _ = await context.SaveChangesAsync();
 
         HttpClient client = _factory.CreateClient();
 
@@ -371,13 +371,13 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         for (int i = 0; i < 3; i++)
         {
             HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
-            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
         // 4th request should still return success (to prevent information leakage)
         // but internally should be rate limited
         HttpResponseMessage finalResponse = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
-        finalResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = finalResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Verify that no new tokens are created beyond rate limit
         // (This is a simplified check - actual behavior depends on rate limit configuration)
@@ -388,6 +388,6 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
             .CountAsync();
 
         // Should have created tokens for the first 3 requests only
-        tokenCount.Should().BeLessOrEqualTo(3);
+        _ = tokenCount.Should().BeLessOrEqualTo(3);
     }
 }

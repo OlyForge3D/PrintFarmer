@@ -21,7 +21,7 @@ public class SpoolmanServiceTests
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         // Returning null intentionally for this test case. Suppress CS8603 for this line.
 #pragma warning disable CS8603 // Possible null reference return
-        settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(() => (SpoolmanSettings?)null);
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(() => (SpoolmanSettings?)null);
 #pragma warning restore CS8603 // Possible null reference return
 
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
@@ -40,7 +40,7 @@ public class SpoolmanServiceTests
     public async Task ListSpoolsAsync_PaginatesAcrossNextUrls()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         // First page returns a 'next' field pointing to second page; second page returns final array
@@ -82,7 +82,7 @@ public class SpoolmanServiceTests
     public async Task ListMaterialsAsync_ParsesStringArrayAndObjectArrayFormats()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         // Handler will respond to material endpoint: first call returns string array, second call returns object array
@@ -128,7 +128,7 @@ public class SpoolmanServiceTests
     {
         // configure settings to return base url
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
 
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
@@ -155,7 +155,7 @@ public class SpoolmanServiceTests
 
         IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
 
-        Assert.Single(items);
+        _ = Assert.Single(items);
         Assert.Equal(42, items[0].Id);
     }
 
@@ -191,7 +191,7 @@ public class SpoolmanServiceTests
     public async Task ListSpoolsAsync_HandlesRelativeNextLinkResolution()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local/root" });
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local/root" });
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
@@ -231,7 +231,7 @@ public class SpoolmanServiceTests
     public async Task GetSpoolByIdAsync_ReturnsNull_OnNonJsonOrNonSuccess()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
@@ -260,7 +260,7 @@ public class SpoolmanServiceTests
     public async Task ListSpoolsAsync_LogsWarnings_OnEmptySuccessfulResponses()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
-        settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>

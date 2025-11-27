@@ -88,7 +88,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
             TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
             void OnExited(object? sender, EventArgs e)
             {
-                tcs.TrySetResult(true);
+                _ = tcs.TrySetResult(true);
             }
             proc.EnableRaisingEvents = true;
             proc.Exited += OnExited;
@@ -112,7 +112,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
 
             // Parse version from output: typically "OrcaSlicer 1.7.0" or similar
             // Extract the version number pattern (e.g., "1.7.0", "2.0.0")
-            Match versionMatch = System.Text.RegularExpressions.Regex.Match(output, @"(\d+\.\d+(?:\.\d+)?)");
+            Match versionMatch = Regex.Match(output, @"(\d+\.\d+(?:\.\d+)?)");
             return versionMatch.Success ? versionMatch.Groups[1].Value : null;
         }
         catch

@@ -26,13 +26,13 @@ public class SystemLogServiceTests
             new SystemLog { CorrelationId = "c2", Level = "Error", Timestamp = DateTime.UtcNow.AddMinutes(-5), Metadata = "bar" },
             new SystemLog { CorrelationId = "c1", Level = "Error", Timestamp = DateTime.UtcNow, Metadata = "baz" }
         );
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
 
-        EfSystemLogRepository repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
+        EfSystemLogRepository repo = new EfSystemLogRepository(db);
         SystemLogService svc = new SystemLogService(repo);
         IReadOnlyList<SystemLog> results = await svc.QueryLogsAsync("c1", "Error", null, null, null, default);
 
-        Assert.Single(results);
+        _ = Assert.Single(results);
         Assert.Equal("c1", results[0]!.CorrelationId);
         Assert.Equal("Error", results[0]!.Level);
     }
@@ -46,9 +46,9 @@ public class SystemLogServiceTests
             new SystemLog { CorrelationId = "c2", Level = "Error", Timestamp = DateTime.UtcNow.AddMinutes(-5), Metadata = "bar" },
             new SystemLog { CorrelationId = "c1", Level = "Error", Timestamp = DateTime.UtcNow, Metadata = "baz" }
         );
-        await db.SaveChangesAsync();
+        _ = await db.SaveChangesAsync();
 
-        EfSystemLogRepository repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
+        EfSystemLogRepository repo = new EfSystemLogRepository(db);
         SystemLogService svc = new SystemLogService(repo);
         IReadOnlyList<SystemLog> results = await svc.QueryAllLogsAsync(null, null, null, null, "ba", default);
 

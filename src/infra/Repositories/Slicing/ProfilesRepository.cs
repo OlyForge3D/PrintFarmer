@@ -16,13 +16,13 @@ public class EfProfilesRepository : IProfilesRepository
     public async Task AddAsync(ProcessProfile profile, CancellationToken ct)
     {
         _ = _db.ProcessProfiles.Add(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task RemoveAsync(ProcessProfile profile, CancellationToken ct)
     {
         _ = _db.ProcessProfiles.Remove(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);

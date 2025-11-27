@@ -13,9 +13,9 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/printer-capabilities")]
 [Tags("Printer Capabilities")]
-public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabilities.IPrinterCapabilitiesService svc, IUnifiedLoggingService logger) : ControllerBase
+public class PrinterCapabilitiesController(Services.PrinterCapabilities.IPrinterCapabilitiesService svc, IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly Farm.Web.Api.Services.PrinterCapabilities.IPrinterCapabilitiesService _svc = svc;
+    private readonly Services.PrinterCapabilities.IPrinterCapabilitiesService _svc = svc;
     private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>

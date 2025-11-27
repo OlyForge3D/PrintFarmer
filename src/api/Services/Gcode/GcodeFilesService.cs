@@ -48,7 +48,7 @@ namespace Farm.Web.Api.Services.Gcode
             // Ensure storage root exists
             if (!Directory.Exists(storageRoot))
             {
-                Directory.CreateDirectory(storageRoot);
+                _ = Directory.CreateDirectory(storageRoot);
             }
 
             string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
@@ -74,7 +74,7 @@ namespace Farm.Web.Api.Services.Gcode
             // Create the requested directory if it doesn't exist (for root or nested paths)
             if (!Directory.Exists(requestedDirFullPath))
             {
-                Directory.CreateDirectory(requestedDirFullPath);
+                _ = Directory.CreateDirectory(requestedDirFullPath);
             }
 
             System.IO.DirectoryInfo dirInfo = new(requestedDirFullPath);
@@ -192,7 +192,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             if (!Directory.Exists(targetDirFullPath))
             {
-                Directory.CreateDirectory(targetDirFullPath);
+                _ = Directory.CreateDirectory(targetDirFullPath);
             }
 
             string originalName = Path.GetFileName(file.FileName);
@@ -240,7 +240,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             if (!Directory.Exists(targetDirFullPath))
             {
-                Directory.CreateDirectory(targetDirFullPath);
+                _ = Directory.CreateDirectory(targetDirFullPath);
             }
 
             foreach (IFormFile? f in files)
@@ -291,7 +291,7 @@ namespace Farm.Web.Api.Services.Gcode
             // Create parent directory if needed
             if (!Directory.Exists(parentDirFullPath))
             {
-                Directory.CreateDirectory(parentDirFullPath);
+                _ = Directory.CreateDirectory(parentDirFullPath);
             }
 
             string newDirFullPath = Path.GetFullPath(Path.Combine(parentDirFullPath, name));
@@ -304,7 +304,7 @@ namespace Farm.Web.Api.Services.Gcode
                 throw new InvalidOperationException("Directory already exists");
             }
 
-            Directory.CreateDirectory(newDirFullPath);
+            _ = Directory.CreateDirectory(newDirFullPath);
 
             GcodeFileEntryDto dto = new(
                 Path: CombineVirtual(virtualDir, name),
@@ -410,7 +410,7 @@ namespace Farm.Web.Api.Services.Gcode
             }
             else
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(destFull)!);
+                _ = Directory.CreateDirectory(Path.GetDirectoryName(destFull)!);
                 File.Move(sourceFull, destFull, overwrite: overwrite);
             }
 

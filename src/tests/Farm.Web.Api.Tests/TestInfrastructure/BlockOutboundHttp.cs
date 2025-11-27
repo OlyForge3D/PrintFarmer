@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,7 +28,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
                     {
                         return base.SendAsync(request, cancellationToken);
                     }
-                    return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
                 }
 
                 // Block all other outbound calls

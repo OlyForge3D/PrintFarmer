@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Domain;
@@ -210,8 +211,8 @@ public partial class HarvestWorkerService(
                         {
                             _logger.LogInformation($"Renaming duplicate file {job.FileName} per policy", null, null);
                             // Generate a new unique name with -copy suffix (in discovered scope)
-                            string baseName = System.IO.Path.GetFileNameWithoutExtension(discoveredFile.FileName);
-                            string ext = System.IO.Path.GetExtension(discoveredFile.FileName);
+                            string baseName = Path.GetFileNameWithoutExtension(discoveredFile.FileName);
+                            string ext = Path.GetExtension(discoveredFile.FileName);
                             int copyIndex = 1;
                             string candidate;
                             do
@@ -510,7 +511,7 @@ public partial class HarvestWorkerService(
         // Extract common parameters (simplified for now)
         if (content.Contains("printing time", StringComparison.OrdinalIgnoreCase) && content.Contains('h') && content.Contains('m'))
         {
-            Match timeMatch = System.Text.RegularExpressions.Regex.Match(content, @"(\d+)h (\d+)m");
+            Match timeMatch = Regex.Match(content, @"(\d+)h (\d+)m");
             if (timeMatch.Success)
             {
                 int hours = int.Parse(timeMatch.Groups[1].Value);
@@ -610,8 +611,8 @@ public partial class HarvestWorkerService(
         base.Dispose();
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"PrusaSlicer (\S+)")]
-    private static partial System.Text.RegularExpressions.Regex MyRegex();
+    [GeneratedRegex(@"PrusaSlicer (\S+)")]
+    private static partial Regex MyRegex();
     [GeneratedRegex(@"Cura_SteamEngine (\S+)")]
     private static partial Regex MyRegex1();
 }

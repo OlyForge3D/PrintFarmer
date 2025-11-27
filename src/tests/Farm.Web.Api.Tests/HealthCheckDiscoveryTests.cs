@@ -36,7 +36,7 @@ public class HealthCheckDiscoveryTests
         _mockHostEnvironment = new Mock<IHostEnvironment>();
         _mockSpoolmanService = new Mock<ISpoolmanService>();
 
-        _mockHostEnvironment.Setup(h => h.EnvironmentName).Returns("Development");
+        _ = _mockHostEnvironment.Setup(h => h.EnvironmentName).Returns("Development");
     }
 
     #region Spoolman Health Check Tests
@@ -45,7 +45,7 @@ public class HealthCheckDiscoveryTests
     public async Task SpoolmanHealthCheck_WhenNotConfigured_ReturnsHealthy()
     {
         // Arrange
-        _mockSpoolmanService.Setup(s => s.GetConfig()).Returns((SpoolmanConfigDto?)null);
+        _ = _mockSpoolmanService.Setup(s => s.GetConfig()).Returns((SpoolmanConfigDto?)null);
         SpoolmanHealthCheck healthCheck = new SpoolmanHealthCheck(_mockSpoolmanService.Object, _mockHttpClientFactory.Object);
         HealthCheckContext context = new HealthCheckContext();
 
@@ -53,8 +53,8 @@ public class HealthCheckDiscoveryTests
         HealthCheckResult result = await healthCheck.CheckHealthAsync(context);
 
         // Assert
-        result.Status.Should().Be(HealthStatus.Healthy);
-        result.Description.Should().Contain("not configured");
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
+        _ = result.Description.Should().Contain("not configured");
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public class HealthCheckDiscoveryTests
     {
         // Arrange
         SpoolmanConfigDto emptyConfig = new SpoolmanConfigDto(string.Empty);
-        _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(emptyConfig);
+        _ = _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(emptyConfig);
         SpoolmanHealthCheck healthCheck = new SpoolmanHealthCheck(_mockSpoolmanService.Object, _mockHttpClientFactory.Object);
         HealthCheckContext context = new HealthCheckContext();
 
@@ -70,8 +70,8 @@ public class HealthCheckDiscoveryTests
         HealthCheckResult result = await healthCheck.CheckHealthAsync(context);
 
         // Assert
-        result.Status.Should().Be(HealthStatus.Healthy);
-        result.Description.Should().Contain("not configured");
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
+        _ = result.Description.Should().Contain("not configured");
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class HealthCheckDiscoveryTests
     {
         // Arrange
         SpoolmanConfigDto whitespaceConfig = new SpoolmanConfigDto("   ");
-        _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(whitespaceConfig);
+        _ = _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(whitespaceConfig);
         SpoolmanHealthCheck healthCheck = new SpoolmanHealthCheck(_mockSpoolmanService.Object, _mockHttpClientFactory.Object);
         HealthCheckContext context = new HealthCheckContext();
 
@@ -87,8 +87,8 @@ public class HealthCheckDiscoveryTests
         HealthCheckResult result = await healthCheck.CheckHealthAsync(context);
 
         // Assert
-        result.Status.Should().Be(HealthStatus.Healthy);
-        result.Description.Should().Contain("not configured");
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
+        _ = result.Description.Should().Contain("not configured");
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public class HealthCheckDiscoveryTests
     {
         // Arrange
         SpoolmanConfigDto validConfig = new SpoolmanConfigDto("http://spoolman.local:7912");
-        _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(validConfig);
+        _ = _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(validConfig);
 
         // Use a real HttpClientFactory since HttpClient methods can't be mocked (not virtual)
         HttpClientFactory clientFactory = new HttpClientFactory();
@@ -110,9 +110,9 @@ public class HealthCheckDiscoveryTests
         HealthCheckResult result = await healthCheck.CheckHealthAsync(context);
 
         // Assert
-        result.Should().NotBeNull();
+        _ = result.Should().NotBeNull();
         // Result will be Degraded (can't reach spoolman.local) but that's expected in tests
-        result.Status.Should().BeOneOf(HealthStatus.Healthy, HealthStatus.Degraded);
+        _ = result.Status.Should().BeOneOf(HealthStatus.Healthy, HealthStatus.Degraded);
     }
 
     private class HttpClientFactory : IHttpClientFactory
@@ -128,7 +128,7 @@ public class HealthCheckDiscoveryTests
     {
         // Arrange
         SpoolmanConfigDto validConfig = new SpoolmanConfigDto("http://unreachable.local:7912");
-        _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(validConfig);
+        _ = _mockSpoolmanService.Setup(s => s.GetConfig()).Returns(validConfig);
 
         HttpClientFactory clientFactory = new HttpClientFactory();
         SpoolmanHealthCheck healthCheck = new SpoolmanHealthCheck(_mockSpoolmanService.Object, clientFactory);
@@ -138,9 +138,9 @@ public class HealthCheckDiscoveryTests
         HealthCheckResult result = await healthCheck.CheckHealthAsync(context);
 
         // Assert
-        result.Should().NotBeNull();
+        _ = result.Should().NotBeNull();
         // Should be Degraded or Unhealthy when host can't be reached
-        result.Status.Should().BeOneOf(HealthStatus.Degraded, HealthStatus.Unhealthy);
+        _ = result.Status.Should().BeOneOf(HealthStatus.Degraded, HealthStatus.Unhealthy);
     }
 
     #endregion
@@ -161,7 +161,7 @@ public class HealthCheckDiscoveryTests
         bool isValid = !settings.EnableDiscovery || (settings.DiscoverySubnets?.Count ?? 0) > 0;
 
         // Assert
-        isValid.Should().BeTrue("Empty discovery settings should be valid (discovery just disabled)");
+        _ = isValid.Should().BeTrue("Empty discovery settings should be valid (discovery just disabled)");
     }
 
     [Fact]
@@ -178,9 +178,9 @@ public class HealthCheckDiscoveryTests
         IList<string> subnets = settings.DiscoverySubnets;
 
         // Assert
-        subnets.Should().HaveCount(2);
-        subnets[0].Should().Be("192.168.0.0/16");
-        subnets[1].Should().Be("10.0.0.0/8");
+        _ = subnets.Should().HaveCount(2);
+        _ = subnets[0].Should().Be("192.168.0.0/16");
+        _ = subnets[1].Should().Be("10.0.0.0/8");
     }
 
     [Fact]
@@ -197,8 +197,8 @@ public class HealthCheckDiscoveryTests
         IList<string> subnets = settings.DiscoverySubnets;
 
         // Assert
-        subnets.Should().HaveCount(1);
-        subnets[0].Should().Be("192.168.1.0/24");
+        _ = subnets.Should().HaveCount(1);
+        _ = subnets[0].Should().Be("192.168.1.0/24");
     }
 
     [Fact]
@@ -215,7 +215,7 @@ public class HealthCheckDiscoveryTests
         bool shouldUseSubnets = settings.EnableDiscovery;
 
         // Assert
-        shouldUseSubnets.Should().BeFalse("Subnets should not be used when discovery is disabled");
+        _ = shouldUseSubnets.Should().BeFalse("Subnets should not be used when discovery is disabled");
     }
 
     #endregion
@@ -237,9 +237,9 @@ public class HealthCheckDiscoveryTests
         };
 
         // Assert
-        envVars.Should().ContainKey(expectedPfarmVariable);
-        envVars[expectedPfarmVariable].Should().Be(spoolmanBaseUrl);
-        envVars["SPOOLMAN_BASE_URL"].Should().Be(spoolmanBaseUrl);
+        _ = envVars.Should().ContainKey(expectedPfarmVariable);
+        _ = envVars[expectedPfarmVariable].Should().Be(spoolmanBaseUrl);
+        _ = envVars["SPOOLMAN_BASE_URL"].Should().Be(spoolmanBaseUrl);
     }
 
     [Fact]
@@ -259,11 +259,11 @@ public class HealthCheckDiscoveryTests
         };
 
         // Assert
-        envVars.Should().ContainKey("PFARM__NetworkDiscovery__EnableDiscovery");
-        envVars["PFARM__NetworkDiscovery__EnableDiscovery"].Should().Be(enableDiscovery);
+        _ = envVars.Should().ContainKey("PFARM__NetworkDiscovery__EnableDiscovery");
+        _ = envVars["PFARM__NetworkDiscovery__EnableDiscovery"].Should().Be(enableDiscovery);
 
-        envVars.Should().ContainKey("PFARM__NetworkDiscovery__DiscoverySubnets");
-        envVars["PFARM__NetworkDiscovery__DiscoverySubnets"].Should().Be(discoverySubnets);
+        _ = envVars.Should().ContainKey("PFARM__NetworkDiscovery__DiscoverySubnets");
+        _ = envVars["PFARM__NetworkDiscovery__DiscoverySubnets"].Should().Be(discoverySubnets);
     }
 
     #endregion
@@ -284,7 +284,7 @@ public class HealthCheckDiscoveryTests
         bool isDiscoveryEnabled = settings.EnableDiscovery;
 
         // Assert
-        isDiscoveryEnabled.Should().BeFalse();
+        _ = isDiscoveryEnabled.Should().BeFalse();
         // The comprehensive health check should not fail due to missing discovery configuration
     }
 
@@ -302,7 +302,7 @@ public class HealthCheckDiscoveryTests
         bool hasValidConfig = settings.EnableDiscovery && (settings.DiscoverySubnets?.Count ?? 0) > 0;
 
         // Assert
-        hasValidConfig.Should().BeFalse("Enabled discovery without subnets is misconfigured");
+        _ = hasValidConfig.Should().BeFalse("Enabled discovery without subnets is misconfigured");
     }
 
     [Fact]
@@ -319,7 +319,7 @@ public class HealthCheckDiscoveryTests
         bool hasValidConfig = settings.EnableDiscovery && (settings.DiscoverySubnets?.Count ?? 0) > 0;
 
         // Assert
-        hasValidConfig.Should().BeTrue("Properly configured discovery should be valid");
+        _ = hasValidConfig.Should().BeTrue("Properly configured discovery should be valid");
     }
 
     #endregion
@@ -340,7 +340,7 @@ public class HealthCheckDiscoveryTests
         bool isEmpty = !settings.DiscoverySubnets.Any();
 
         // Assert
-        isEmpty.Should().BeTrue("Empty subnet list should be recognized as empty");
+        _ = isEmpty.Should().BeTrue("Empty subnet list should be recognized as empty");
     }
 
     [Fact]
@@ -357,7 +357,7 @@ public class HealthCheckDiscoveryTests
         bool hasValidItems = settings.DiscoverySubnets.Any(s => !string.IsNullOrWhiteSpace(s));
 
         // Assert
-        hasValidItems.Should().BeFalse("Whitespace-only subnet list should have no valid items");
+        _ = hasValidItems.Should().BeFalse("Whitespace-only subnet list should have no valid items");
     }
 
     [Fact]
@@ -370,7 +370,7 @@ public class HealthCheckDiscoveryTests
         bool shouldCheckHealth = config != null && !string.IsNullOrWhiteSpace(config.BaseUrl);
 
         // Assert
-        shouldCheckHealth.Should().BeFalse("Health check should be skipped when Spoolman is not configured");
+        _ = shouldCheckHealth.Should().BeFalse("Health check should be skipped when Spoolman is not configured");
     }
 
     [Fact]
@@ -383,7 +383,7 @@ public class HealthCheckDiscoveryTests
         bool isValidUri = Uri.TryCreate(invalidConfig.BaseUrl, UriKind.Absolute, out Uri? uri);
 
         // Assert
-        isValidUri.Should().BeFalse("Invalid URI should not parse");
+        _ = isValidUri.Should().BeFalse("Invalid URI should not parse");
     }
 
     [Fact]
@@ -396,10 +396,10 @@ public class HealthCheckDiscoveryTests
         bool isValidUri = Uri.TryCreate(validConfig.BaseUrl, UriKind.Absolute, out Uri? uri);
 
         // Assert
-        isValidUri.Should().BeTrue("Valid URI should parse");
-        uri.Should().NotBeNull();
-        uri!.Host.Should().Be("spoolman.local");
-        uri.Port.Should().Be(7912);
+        _ = isValidUri.Should().BeTrue("Valid URI should parse");
+        _ = uri.Should().NotBeNull();
+        _ = uri!.Host.Should().Be("spoolman.local");
+        _ = uri.Port.Should().Be(7912);
     }
 
     #endregion
@@ -429,9 +429,9 @@ public class HealthCheckDiscoveryTests
         string pfarmDiscoverySubnets = deployedEnvVars["PFARM__NetworkDiscovery__DiscoverySubnets"];
 
         // Assert
-        pfarmSpoolmanUrl.Should().Be("http://spoolman.local:7912");
-        pfarmDiscoveryEnabled.Should().Be("true");
-        pfarmDiscoverySubnets.Should().Be("192.168.0.0/16,10.0.0.0/8");
+        _ = pfarmSpoolmanUrl.Should().Be("http://spoolman.local:7912");
+        _ = pfarmDiscoveryEnabled.Should().Be("true");
+        _ = pfarmDiscoverySubnets.Should().Be("192.168.0.0/16,10.0.0.0/8");
     }
 
     [Fact]
@@ -450,9 +450,9 @@ public class HealthCheckDiscoveryTests
         bool spoolmanConfigured = !string.IsNullOrWhiteSpace(deployedEnvVars["PFARM__Spoolman__BaseUrl"]);
 
         // Assert
-        spoolmanEnabled.Should().BeFalse();
+        _ = spoolmanEnabled.Should().BeFalse();
         // Spoolman health check should handle the empty configuration gracefully
-        spoolmanConfigured.Should().BeFalse();
+        _ = spoolmanConfigured.Should().BeFalse();
     }
 
     #endregion

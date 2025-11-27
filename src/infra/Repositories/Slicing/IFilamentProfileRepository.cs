@@ -50,20 +50,20 @@ public class EfFilamentProfileRepository(AppDbContext db) : IFilamentProfileRepo
 
     public async Task AddAsync(FilamentProfile profile, CancellationToken ct = default)
     {
-        _db.FilamentProfiles.Add(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.FilamentProfiles.Add(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task UpdateAsync(FilamentProfile profile, CancellationToken ct = default)
     {
-        _db.FilamentProfiles.Update(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.FilamentProfiles.Update(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(FilamentProfile profile, CancellationToken ct = default)
     {
-        _db.FilamentProfiles.Remove(profile);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.FilamentProfiles.Remove(profile);
+        _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
@@ -73,7 +73,7 @@ public class EfFilamentProfileRepository(AppDbContext db) : IFilamentProfileRepo
             .ToListAsync(ct);
 
         _db.FilamentProfiles.RemoveRange(profiles);
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
         return profiles.Count;
     }
 }

@@ -108,14 +108,14 @@ namespace Farm.Web.Api.Services.Workers
 
             using IServiceScope scope = _sp.CreateScope();
             ISliceJobRepository repo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
-            IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
+            IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
 
             // Determine stuck jobs: jobs with expired leases OR processing longer than 15 minutes
             int longRunningSeconds = 60 * 15; // 15 minutes
             // Retry on transient DB/DNS errors with exponential backoff
             const int maxDbRetries = 4;
             int attempt = 0;
-            IReadOnlyList<Farm.Infrastructure.Domain.SliceJob>? stuck = null;
+            IReadOnlyList<SliceJob>? stuck = null;
             while (attempt < maxDbRetries)
             {
                 try
@@ -163,7 +163,7 @@ namespace Farm.Web.Api.Services.Workers
 
                     // If lease expired, increment retry and requeue or fail depending on retry count
                     await repo.IncrementRetryAndRequeueAsync(job.Id, _retrySettings.MaxAttempts, ct);
-                    SliceJobMetrics? metrics = scope.ServiceProvider.GetService<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
+                    SliceJobMetrics? metrics = scope.ServiceProvider.GetService<SliceJobMetrics>();
                     metrics?.RecordJobRetry();
                     metrics?.RecordJobTimedOut();
                     if (job.RetryCount + 1 > _retrySettings.MaxAttempts)

@@ -24,10 +24,10 @@ public class BackendSelectionTests
         );
 
         // Assert
-        settings.Backends.Should().NotBeNull();
-        settings.Backends.Should().HaveCount(2);
-        settings.Backends.Should().Contain(PrinterBackend.Moonraker);
-        settings.Backends.Should().Contain(PrinterBackend.PrusaLink);
+        _ = settings.Backends.Should().NotBeNull();
+        _ = settings.Backends.Should().HaveCount(2);
+        _ = settings.Backends.Should().Contain(PrinterBackend.Moonraker);
+        _ = settings.Backends.Should().Contain(PrinterBackend.PrusaLink);
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public class BackendSelectionTests
         );
 
         // Assert
-        settings.Backends.Should().BeNull();
+        _ = settings.Backends.Should().BeNull();
     }
 
     [Fact]
@@ -52,10 +52,10 @@ public class BackendSelectionTests
         NetworkDiscoverySettingsDto settings = new NetworkDiscoverySettingsDto();
 
         // Assert
-        settings.Backends.Should().BeNull();
-        settings.NetworkRanges.Should().BeEmpty();
-        settings.TimeoutMs.Should().Be(3000);
-        settings.MaxConcurrentScans.Should().Be(20);
+        _ = settings.Backends.Should().BeNull();
+        _ = settings.NetworkRanges.Should().BeEmpty();
+        _ = settings.TimeoutMs.Should().Be(3000);
+        _ = settings.MaxConcurrentScans.Should().Be(20);
         // NOTE: Ports parameter removed - each discovery probe handles its own backend-specific ports
     }
 
@@ -69,9 +69,9 @@ public class BackendSelectionTests
         StartDiscoveryRequest request = new StartDiscoveryRequest(Backends: backends);
 
         // Assert
-        request.Backends.Should().NotBeNull();
-        request.Backends.Should().HaveCount(1);
-        request.Backends.Should().Contain(PrinterBackend.SDCP);
+        _ = request.Backends.Should().NotBeNull();
+        _ = request.Backends.Should().HaveCount(1);
+        _ = request.Backends.Should().Contain(PrinterBackend.SDCP);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class BackendSelectionTests
         StartDiscoveryRequest request = new StartDiscoveryRequest(Backends: null);
 
         // Assert
-        request.Backends.Should().BeNull();
+        _ = request.Backends.Should().BeNull();
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class BackendSelectionTests
         StartDiscoveryRequest request = new StartDiscoveryRequest();
 
         // Assert
-        request.Backends.Should().BeNull();
+        _ = request.Backends.Should().BeNull();
     }
 
     [Theory]
@@ -111,9 +111,9 @@ public class BackendSelectionTests
         );
 
         // Assert
-        settings.Backends.Should().NotBeNull();
-        settings.Backends.Should().HaveCount(1);
-        settings.Backends.Should().Contain(backend);
+        _ = settings.Backends.Should().NotBeNull();
+        _ = settings.Backends.Should().HaveCount(1);
+        _ = settings.Backends.Should().Contain(backend);
     }
 
     [Fact]
@@ -135,12 +135,12 @@ public class BackendSelectionTests
         );
 
         // Assert
-        settings.Backends.Should().NotBeNull();
-        settings.Backends.Should().HaveCount(4);
-        settings.Backends.Should().Contain(PrinterBackend.Moonraker);
-        settings.Backends.Should().Contain(PrinterBackend.PrusaLink);
-        settings.Backends.Should().Contain(PrinterBackend.SDCP);
-        settings.Backends.Should().Contain(PrinterBackend.OctoPrint);
+        _ = settings.Backends.Should().NotBeNull();
+        _ = settings.Backends.Should().HaveCount(4);
+        _ = settings.Backends.Should().Contain(PrinterBackend.Moonraker);
+        _ = settings.Backends.Should().Contain(PrinterBackend.PrusaLink);
+        _ = settings.Backends.Should().Contain(PrinterBackend.SDCP);
+        _ = settings.Backends.Should().Contain(PrinterBackend.OctoPrint);
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class BackendSelectionTests
         );
 
         // Assert
-        settings.Backends.Should().NotBeNull();
-        settings.Backends.Should().BeEmpty();
+        _ = settings.Backends.Should().NotBeNull();
+        _ = settings.Backends.Should().BeEmpty();
     }
 }

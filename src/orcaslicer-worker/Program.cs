@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
@@ -43,7 +45,7 @@ public static class Program
 
         // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
         _ = builder.Services.AddSingleton<IPrintFarmerTelemetryService, PrintFarmerTelemetryService>();
-        _ = builder.Services.AddScoped<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, Farm.Infrastructure.Telemetry.UnifiedLoggingService>();
+        _ = builder.Services.AddScoped<IUnifiedLoggingService, UnifiedLoggingService>();
 
         // Background services (shared graceful shutdown + queue consumer derived)
         _ = builder.Services.AddHostedService<GracefulShutdownService>(); // shared
@@ -73,7 +75,7 @@ public static class Program
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
                 {
                     status = report.Status == HealthStatus.Healthy ? "ok" : "unhealthy",
                     timestamp = DateTime.UtcNow
@@ -94,7 +96,7 @@ public static class Program
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
                 {
                     status = report.Status == HealthStatus.Healthy ? "ready" : "not-ready",
                     relaxed = relaxedReadiness,
@@ -144,12 +146,12 @@ public static class Program
             try
             {
                 app.Logger.LogInformation("Starting OrcaSlicer profile preload for catalog manufacturers...");
-                Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                Stopwatch stopwatch = Stopwatch.StartNew();
 
                 ISlicerProfilesService profileService = app.Services.GetRequiredService<ISlicerProfilesService>();
 
                 // First load all machines to get the list of available manufacturers
-                Stopwatch machineStart = System.Diagnostics.Stopwatch.StartNew();
+                Stopwatch machineStart = Stopwatch.StartNew();
                 IList<MachineProfileDto> machines = await profileService.ListAvailableMachineProfilesAsync();
                 machineStart.Stop();
 
@@ -172,9 +174,9 @@ public static class Program
                     if (response.IsSuccessStatusCode)
                     {
                         string content = await response.Content.ReadAsStringAsync();
-                        List<ManufacturerDto>? manufacturerDtos = System.Text.Json.JsonSerializer.Deserialize<List<ManufacturerDto>>(
+                        List<ManufacturerDto>? manufacturerDtos = JsonSerializer.Deserialize<List<ManufacturerDto>>(
                             content,
-                            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
                         );
 
                         HashSet<string> catalogManufacturers = manufacturerDtos?
@@ -184,13 +186,13 @@ public static class Program
                         app.Logger.LogInformation("Catalog has {CatalogManufacturerCount} manufacturers", catalogManufacturers.Count);
 
                         // Load filament and process profiles only for manufacturers in catalog
-                        Stopwatch filamentStart = System.Diagnostics.Stopwatch.StartNew();
+                        Stopwatch filamentStart = Stopwatch.StartNew();
                         IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync();
                         int catalogFilaments = filaments
                             .Count(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer));
                         filamentStart.Stop();
 
-                        Stopwatch processStart = System.Diagnostics.Stopwatch.StartNew();
+                        Stopwatch processStart = Stopwatch.StartNew();
                         IList<ProcessProfileDto> processes = await profileService.ListAvailableProcessProfilesAsync();
                         processStart.Stop();
 
@@ -218,11 +220,11 @@ public static class Program
                     app.Logger.LogWarning("Error fetching catalog manufacturers: {Exception}. Loading all profiles instead.", ex.Message);
 
                     // Fallback: load all profiles if catalog API is unavailable
-                    Stopwatch filamentStart = System.Diagnostics.Stopwatch.StartNew();
+                    Stopwatch filamentStart = Stopwatch.StartNew();
                     IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync();
                     filamentStart.Stop();
 
-                    Stopwatch processStart = System.Diagnostics.Stopwatch.StartNew();
+                    Stopwatch processStart = Stopwatch.StartNew();
                     IList<ProcessProfileDto> processes = await profileService.ListAvailableProcessProfilesAsync();
                     processStart.Stop();
 

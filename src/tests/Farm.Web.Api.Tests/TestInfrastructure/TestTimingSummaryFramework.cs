@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure;
 
 /// <summary>
 /// Custom xUnit test framework hook that, on disposal (after all tests complete),
-/// reads the per-test timing CSV (emitted by <see cref="Farm.Web.Api.Tests.TestTimingAttribute"/>)
+/// reads the per-test timing CSV (emitted by <see cref="TestTimingAttribute"/>)
 /// and writes an aggregated summary (percentiles & top hotspots) to both console output
 /// and a companion file "test-timings-summary.txt" in the same directory.
 /// Enabled by default when timing is enabled; can be disabled via PF_TIMING_SUMMARY=0.
@@ -62,7 +62,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
             string csvPath = Path.Combine(baseDir, "test-timings.csv");
             if (!File.Exists(csvPath))
             {
-                _sink.OnMessage(new DiagnosticMessage($"[TIMING-SUMMARY] No timing CSV found at {csvPath}; skipping."));
+                _ = _sink.OnMessage(new DiagnosticMessage($"[TIMING-SUMMARY] No timing CSV found at {csvPath}; skipping."));
                 return;
             }
             List<string> allLines = File.ReadAllLines(csvPath)
@@ -87,7 +87,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 .ToList();
             if (lines.Count == 0)
             {
-                _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] Timing CSV empty; skipping."));
+                _ = _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] Timing CSV empty; skipping."));
                 return;
             }
             List<TimingEntry> entries = new List<TimingEntry>(lines.Count);
@@ -106,7 +106,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
             }
             if (entries.Count == 0)
             {
-                _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] No valid entries parsed; skipping."));
+                _ = _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] No valid entries parsed; skipping."));
                 return;
             }
             List<TimingEntry> sorted = entries.OrderBy(e => e.DurationMs).ToList();
@@ -189,12 +189,12 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
             File.WriteAllLines(summaryPath, summaryLines);
             foreach (string l in summaryLines)
             {
-                _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] " + l));
+                _ = _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] " + l));
             }
         }
         catch (Exception ex)
         {
-            _sink.OnMessage(new DiagnosticMessage($"[TIMING-SUMMARY] Failed to generate summary: {ex.Message}"));
+            _ = _sink.OnMessage(new DiagnosticMessage($"[TIMING-SUMMARY] Failed to generate summary: {ex.Message}"));
         }
     }
 

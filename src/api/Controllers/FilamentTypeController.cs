@@ -22,10 +22,10 @@ namespace Farm.Web.Api.Controllers;
 public class FilamentTypeController : ControllerBase
 {
     private readonly IFilamentTypeService _filamentService;
-    private readonly Farm.Web.Api.Services.Interfaces.IStartupStatus _startupStatus;
+    private readonly IStartupStatus _startupStatus;
     private readonly IUnifiedLoggingService _logger;
 
-    public FilamentTypeController(IFilamentTypeService filamentService, Farm.Web.Api.Services.Interfaces.IStartupStatus startupStatus, IUnifiedLoggingService logger)
+    public FilamentTypeController(IFilamentTypeService filamentService, IStartupStatus startupStatus, IUnifiedLoggingService logger)
     {
         _filamentService = filamentService ?? throw new ArgumentNullException(nameof(filamentService));
         _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
@@ -40,9 +40,9 @@ public class FilamentTypeController : ControllerBase
     /// <response code="200">Returns the list of filament types</response>
     /// <response code="503">If the system is still initializing</response>
     [HttpGet]
-    [ProducesResponseType(typeof(IEnumerable<Shared.FilamentTypeDto>), 200)]
+    [ProducesResponseType(typeof(IEnumerable<FilamentTypeDto>), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<IEnumerable<Shared.FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<FilamentTypeDto>>> GetFilamentTypesAsync(CancellationToken ct)
     {
         // Ensure initialization is complete to prevent race conditions during startup
         try
@@ -73,9 +73,9 @@ public class FilamentTypeController : ControllerBase
     /// <response code="200">Returns the filament presets dictionary</response>
     /// <response code="503">If the system is still initializing</response>
     [HttpGet("presets")]
-    [ProducesResponseType(typeof(Shared.FilamentPresetsDto), 200)]
+    [ProducesResponseType(typeof(FilamentPresetsDto), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<Shared.FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
+    public async Task<ActionResult<FilamentPresetsDto>> GetFilamentPresetsAsync(CancellationToken ct)
     {
         try
         {
@@ -107,10 +107,10 @@ public class FilamentTypeController : ControllerBase
     /// <response code="400">If the filament type data is invalid</response>
     /// <response code="409">If a filament type with the same name already exists</response>
     [HttpPost]
-    [ProducesResponseType(typeof(Shared.FilamentTypeDto), 201)]
+    [ProducesResponseType(typeof(FilamentTypeDto), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
-    public async Task<ActionResult<Shared.FilamentTypeDto>> CreateFilamentTypeAsync([FromBody] Shared.CreateFilamentTypeRequest request, CancellationToken ct)
+    public async Task<ActionResult<FilamentTypeDto>> CreateFilamentTypeAsync([FromBody] CreateFilamentTypeRequest request, CancellationToken ct)
     {
         try
         {
@@ -142,7 +142,7 @@ public class FilamentTypeController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
-    public async Task<IActionResult> UpdateFilamentTypeAsync(Guid id, [FromBody] Shared.UpdateFilamentTypeRequest request, CancellationToken ct)
+    public async Task<IActionResult> UpdateFilamentTypeAsync(Guid id, [FromBody] UpdateFilamentTypeRequest request, CancellationToken ct)
     {
         try
         {
@@ -204,7 +204,7 @@ public class FilamentTypeController : ControllerBase
     [HttpPost("presets")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
-    public async Task<IActionResult> SaveFilamentPresetsAsync([FromBody] Shared.FilamentPresetsDto presets, CancellationToken ct)
+    public async Task<IActionResult> SaveFilamentPresetsAsync([FromBody] FilamentPresetsDto presets, CancellationToken ct)
     {
         try
         {
@@ -231,10 +231,10 @@ public class FilamentTypeController : ControllerBase
     /// <response code="400">If Spoolman is not configured</response>
     /// <response code="503">If system is still initializing</response>
     [HttpPost("import-from-spoolman")]
-    [ProducesResponseType(typeof(Shared.SpoolmanFilamentImportResult), 200)]
+    [ProducesResponseType(typeof(SpoolmanFilamentImportResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<Shared.SpoolmanFilamentImportResult>> ImportFromSpoolmanAsync(CancellationToken ct)
+    public async Task<ActionResult<SpoolmanFilamentImportResult>> ImportFromSpoolmanAsync(CancellationToken ct)
     {
         try
         {

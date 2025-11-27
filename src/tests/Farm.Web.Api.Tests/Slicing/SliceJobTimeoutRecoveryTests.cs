@@ -23,7 +23,7 @@ public class SliceJobTimeoutRecoveryTests
     public async Task RenewLeaseAsync_ExtendsLease()
     {
         await using AppDbContext db = CreateInMemoryContext();
-        EfSliceJobRepository repo = new Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository(db);
+        EfSliceJobRepository repo = new EfSliceJobRepository(db);
 
         SliceJob job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, ClaimedAt = DateTime.UtcNow, LeaseExpiresAt = DateTime.UtcNow.AddSeconds(10) };
         await repo.AddAsync(job);
@@ -34,7 +34,7 @@ public class SliceJobTimeoutRecoveryTests
 
         SliceJob? reloaded = await db.SliceJobs.FindAsync(job.Id);
 #pragma warning disable CS8602 // Dereference of a possibly null reference.
-        Assert.NotNull(reloaded.LeaseExpiresAt);
+        _ = Assert.NotNull(reloaded.LeaseExpiresAt);
 #pragma warning restore CS8602 // Dereference of a possibly null reference.
         Assert.True(reloaded.LeaseExpiresAt > DateTime.UtcNow.AddSeconds(200));
     }
@@ -43,7 +43,7 @@ public class SliceJobTimeoutRecoveryTests
     public async Task IncrementRetryAndRequeueAsync_RequeuesOrFails()
     {
         await using AppDbContext db = CreateInMemoryContext();
-        EfSliceJobRepository repo = new Farm.Infrastructure.Repositories.Slicing.EfSliceJobRepository(db);
+        EfSliceJobRepository repo = new EfSliceJobRepository(db);
 
         SliceJob job = new SliceJob { Id = Guid.NewGuid(), Status = SliceJobStatus.Processing, RetryCount = 0 };
         await repo.AddAsync(job);

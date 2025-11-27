@@ -30,7 +30,7 @@ public class SdcpDiscoveryProbe : INetworkDiscoveryProbe
             byte[] discoveryBytes = Encoding.ASCII.GetBytes(SDCP_DISCOVERY_MESSAGE);
 
             // Send discovery broadcast to the target IP
-            await client.SendAsync(discoveryBytes, discoveryBytes.Length, ipAddress, SDCP_DISCOVERY_PORT);
+            _ = await client.SendAsync(discoveryBytes, discoveryBytes.Length, ipAddress, SDCP_DISCOVERY_PORT);
 
             // Wait for response with timeout
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

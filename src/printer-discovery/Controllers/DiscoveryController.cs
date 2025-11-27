@@ -89,8 +89,8 @@ public class DiscoveryController : ControllerBase
         {
             ServiceName = "Printer Discovery Service",
             Version = "1.0.0",
-            ScanIntervalSeconds = config.GetValue<int>("Discovery:ScanIntervalSeconds", 300),
-            PeriodicDiscoveryEnabled = config.GetValue<bool>("Discovery:EnablePeriodicDiscovery", true),
+            ScanIntervalSeconds = config.GetValue("Discovery:ScanIntervalSeconds", 300),
+            PeriodicDiscoveryEnabled = config.GetValue("Discovery:EnablePeriodicDiscovery", true),
             ApiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245",
             Timestamp = DateTime.UtcNow
         });

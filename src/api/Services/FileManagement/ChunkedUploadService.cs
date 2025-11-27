@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -79,7 +80,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         string metaFilePath = tempFilePath + ".meta.json";
 
         // Create empty temp file
-        using (System.IO.File.Create(tempFilePath))
+        using (File.Create(tempFilePath))
         {
         }
 
@@ -197,7 +198,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             {
                 // Finalize upload
                 await FinalizeUploadAsync(state);
-                _uploadStates.TryRemove(uploadId, out _);
+                _ = _uploadStates.TryRemove(uploadId, out _);
             }
             else
             {
@@ -216,7 +217,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         catch
         {
             // Revert quota on failure
-            quotaService.TryAddUsage(userId, -chunkData.Length, out _, out _);
+            _ = quotaService.TryAddUsage(userId, -chunkData.Length, out _, out _);
             throw;
         }
     }
@@ -355,14 +356,14 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         {
             try
             {
-                if (System.IO.File.Exists(state.TempFilePath))
+                if (File.Exists(state.TempFilePath))
                 {
-                    System.IO.File.Delete(state.TempFilePath);
+                    File.Delete(state.TempFilePath);
                 }
 
-                if (System.IO.File.Exists(state.MetaFilePath))
+                if (File.Exists(state.MetaFilePath))
                 {
-                    System.IO.File.Delete(state.MetaFilePath);
+                    File.Delete(state.MetaFilePath);
                 }
             }
             catch (Exception ex)
@@ -379,7 +380,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
 
             // Check for collision again (rare but possible)
-            if (System.IO.File.Exists(finalPath))
+            if (File.Exists(finalPath))
             {
                 string uniqueName = _fileManagementService.ResolveUniqueFileName(
                     state.TargetDirectoryFullPath,
@@ -400,10 +401,10 @@ public sealed class ChunkedUploadService : IChunkedUploadService
                     // Hash mismatch - delete temp file and fail
                     try
                     {
-                        System.IO.File.Delete(state.TempFilePath);
-                        if (System.IO.File.Exists(state.MetaFilePath))
+                        File.Delete(state.TempFilePath);
+                        if (File.Exists(state.MetaFilePath))
                         {
-                            System.IO.File.Delete(state.MetaFilePath);
+                            File.Delete(state.MetaFilePath);
                         }
                     }
                     catch { }
@@ -413,14 +414,14 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             }
 
             // Move temp file to final destination
-            System.IO.File.Move(state.TempFilePath, finalPath, overwrite: false);
+            File.Move(state.TempFilePath, finalPath, overwrite: false);
 
             // Clean up metadata file
-            if (System.IO.File.Exists(state.MetaFilePath))
+            if (File.Exists(state.MetaFilePath))
             {
                 try
                 {
-                    System.IO.File.Delete(state.MetaFilePath);
+                    File.Delete(state.MetaFilePath);
                 }
                 catch { }
             }
@@ -448,7 +449,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             };
 
             string json = JsonSerializer.Serialize(model);
-            System.IO.File.WriteAllText(state.MetaFilePath, json);
+            File.WriteAllText(state.MetaFilePath, json);
         }
         catch (Exception ex)
         {

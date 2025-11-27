@@ -17,7 +17,7 @@ public class MoonrakerClientTests
     {
         List<HttpRequestMessage> recorded = new List<HttpRequestMessage>();
         Mock<HttpMessageHandler> handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
-        handler.Protected()
+        _ = handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
             {
@@ -46,36 +46,36 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetStatusAsync_ReturnsOnlineAndStateAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/printer/info");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/printer/info");
             return Json(new { result = new { state = "ready" } });
         });
 
         PrinterStatus status = await client.GetStatusAsync(Base);
-        status.IsOnline.Should().BeTrue();
-        status.State.Should().Be("ready");
+        _ = status.IsOnline.Should().BeTrue();
+        _ = status.State.Should().Be("ready");
     }
 
     [Fact]
     public async Task GetPrinterInfoAsync_ParsesWrappedInfoAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/printer/info");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/printer/info");
             return Json(new { result = new { hostname = "mkr-01", state = "ready" } });
         });
 
         MoonrakerPrinterInfo? info = await client.GetPrinterInfoAsync(Base);
-        info.Should().NotBeNull();
-        info!.Hostname.Should().Be("mkr-01");
-        info.State.Should().Be("ready");
+        _ = info.Should().NotBeNull();
+        _ = info!.Hostname.Should().Be("mkr-01");
+        _ = info.State.Should().Be("ready");
     }
 
     [Fact]
     public async Task GetJobAsync_WhenPrinting_ReturnsProgressJobNameAndThumbAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
             if (req.RequestUri!.ToString().Contains("/printer/objects/query?print_stats&display_status&job_queue"))
             {
@@ -103,19 +103,19 @@ public class MoonrakerClientTests
         });
 
         PrinterJob? job = await client.GetJobAsync(Base);
-        job.Should().NotBeNull();
-        job!.PrintState.Should().Be("printing");
-        job.Progress.Should().BeApproximately(42.0, 0.001);
-        job.JobName.Should().Be("benchy.gcode");
-        job.ThumbnailUrl.Should().NotBeNullOrWhiteSpace();
-        job.ThumbnailUrl!.Should().Contain("/server/files/gcodes/");
-        job.ThumbnailUrl.Should().Contain("thumbs%2Fbenchy-120x120.png");
+        _ = job.Should().NotBeNull();
+        _ = job!.PrintState.Should().Be("printing");
+        _ = job.Progress.Should().BeApproximately(42.0, 0.001);
+        _ = job.JobName.Should().Be("benchy.gcode");
+        _ = job.ThumbnailUrl.Should().NotBeNullOrWhiteSpace();
+        _ = job.ThumbnailUrl!.Should().Contain("/server/files/gcodes/");
+        _ = job.ThumbnailUrl.Should().Contain("thumbs%2Fbenchy-120x120.png");
     }
 
     [Fact]
     public async Task GetCompositeStatusAsync_AggregatesStateJobPositionTempsAndCameraAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
             string url = req.RequestUri!.ToString();
             if (url.EndsWith("/printer/info"))
@@ -147,27 +147,27 @@ public class MoonrakerClientTests
         });
 
         PrinterCompositeStatus cs = await client.GetCompositeStatusAsync(Base);
-        cs.IsOnline.Should().BeTrue();
-        cs.State.Should().Be("standby"); // print_stats.state (job state) is used in composite status
-        cs.X.Should().Be(10.0);
-        cs.Y.Should().Be(20.0);
-        cs.Z.Should().Be(5.0);
-        cs.HotendTemp.Should().Be(205.0);
-        cs.BedTemp.Should().BeApproximately(58.5, 0.001);
-        cs.HotendTarget.Should().Be(210.0);
-        cs.BedTarget.Should().Be(60.0);
-        cs.CameraStreamUrl.Should().NotBeNullOrWhiteSpace();
-        cs.CameraSnapshotUrl.Should().NotBeNullOrWhiteSpace();
-        cs.CameraStreamUrl!.Should().EndWith("/stream");
-        cs.CameraSnapshotUrl!.Should().EndWith("/snap.jpg");
+        _ = cs.IsOnline.Should().BeTrue();
+        _ = cs.State.Should().Be("standby"); // print_stats.state (job state) is used in composite status
+        _ = cs.X.Should().Be(10.0);
+        _ = cs.Y.Should().Be(20.0);
+        _ = cs.Z.Should().Be(5.0);
+        _ = cs.HotendTemp.Should().Be(205.0);
+        _ = cs.BedTemp.Should().BeApproximately(58.5, 0.001);
+        _ = cs.HotendTarget.Should().Be(210.0);
+        _ = cs.BedTarget.Should().Be(60.0);
+        _ = cs.CameraStreamUrl.Should().NotBeNullOrWhiteSpace();
+        _ = cs.CameraSnapshotUrl.Should().NotBeNullOrWhiteSpace();
+        _ = cs.CameraStreamUrl!.Should().EndWith("/stream");
+        _ = cs.CameraSnapshotUrl!.Should().EndWith("/snap.jpg");
 
-        recorded.Should().NotBeEmpty();
+        _ = recorded.Should().NotBeEmpty();
     }
 
     [Fact]
     public async Task GetCameraSnapshotAsync_FetchesSnapshotBytesAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
             string url = req.RequestUri!.ToString();
 
@@ -182,14 +182,14 @@ public class MoonrakerClientTests
         });
 
         byte[]? bytes = await client.GetCameraSnapshotAsync(Base);
-        bytes.Should().NotBeNull();
-        bytes!.Length.Should().Be(3);
+        _ = bytes.Should().NotBeNull();
+        _ = bytes!.Length.Should().Be(3);
     }
 
     [Fact]
     public async Task GetCompositeStatusAsync_NormalizesLoopbackCameraHostsToBaseAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
             string url = req.RequestUri!.ToString();
             if (url.EndsWith("/printer/info"))
@@ -221,15 +221,15 @@ public class MoonrakerClientTests
         });
 
         PrinterCompositeStatus cs = await client.GetCompositeStatusAsync(Base);
-        cs.IsOnline.Should().BeTrue();
-        cs.CameraStreamUrl.Should().NotBeNullOrWhiteSpace();
-        cs.CameraSnapshotUrl.Should().NotBeNullOrWhiteSpace();
+        _ = cs.IsOnline.Should().BeTrue();
+        _ = cs.CameraStreamUrl.Should().NotBeNullOrWhiteSpace();
+        _ = cs.CameraSnapshotUrl.Should().NotBeNullOrWhiteSpace();
 
         // Base is http://printer -> normalized to base host with scheme; explicit port may or may not be present
-        cs.CameraStreamUrl!.Should().StartWith("http://printer");
-        cs.CameraStreamUrl.Should().EndWith("/stream.mjpg");
-        cs.CameraSnapshotUrl!.Should().StartWith("http://printer");
-        cs.CameraSnapshotUrl.Should().EndWith("/snap.jpg");
+        _ = cs.CameraStreamUrl!.Should().StartWith("http://printer");
+        _ = cs.CameraStreamUrl.Should().EndWith("/stream.mjpg");
+        _ = cs.CameraSnapshotUrl!.Should().StartWith("http://printer");
+        _ = cs.CameraSnapshotUrl.Should().EndWith("/snap.jpg");
     }
 
     [Theory]
@@ -241,81 +241,81 @@ public class MoonrakerClientTests
     [InlineData("M112", nameof(IMoonrakerClient.EmergencyStopAsync))]
     public async Task GcodeCommandEndpoints_SendExpectedScriptAsync(string expectedScript, string methodName)
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
-            req.Method.Should().Be(HttpMethod.Post);
-            req.RequestUri!.AbsolutePath.Should().Be("/printer/gcode/script");
+            _ = req.Method.Should().Be(HttpMethod.Post);
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/printer/gcode/script");
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
         // Disambiguate overloads: explicitly select (string baseUrl, CancellationToken ct) signature
         MethodInfo? mi = typeof(IMoonrakerClient).GetMethod(methodName, [typeof(string), typeof(CancellationToken)]);
-        mi.Should().NotBeNull();
+        _ = mi.Should().NotBeNull();
         Task<bool> task = (Task<bool>)mi!.Invoke(client, [Base, CancellationToken.None])!;
         bool ok = await task;
-        ok.Should().BeTrue();
+        _ = ok.Should().BeTrue();
         string body = await recorded.Single().Content!.ReadAsStringAsync();
-        body.Should().Contain(expectedScript);
+        _ = body.Should().Contain(expectedScript);
     }
 
     [Fact]
     public async Task SetTempsAsync_PostsM104AndM140Async()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
         bool ok = await client.SetTempsAsync(Base, hotend: 210, bed: 60);
-        ok.Should().BeTrue();
+        _ = ok.Should().BeTrue();
         string body = await recorded.Single().Content!.ReadAsStringAsync();
-        body.Should().Contain("M104 S210");
-        body.Should().Contain("M140 S60");
+        _ = body.Should().Contain("M104 S210");
+        _ = body.Should().Contain("M140 S60");
     }
 
     [Fact]
     public async Task MoveAsync_UsesRelativeModeAndResetsAbsoluteAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
         bool ok = await client.MoveAsync(Base, x: 1.5, y: -2.25, f: 1200);
-        ok.Should().BeTrue();
+        _ = ok.Should().BeTrue();
         string body = await recorded.Single().Content!.ReadAsStringAsync();
-        body.Should().Contain("G91 G0");
-        body.Should().Contain("X1.5 Y-2.25 F1200");
-        body.Should().Contain("G90");
+        _ = body.Should().Contain("G91 G0");
+        _ = body.Should().Contain("X1.5 Y-2.25 F1200");
+        _ = body.Should().Contain("G90");
     }
 
     [Fact]
     public async Task MoveToAsync_UsesAbsoluteMoveAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
         bool ok = await client.MoveToAsync(Base, x: 100, z: 0.2, f: 3000);
-        ok.Should().BeTrue();
+        _ = ok.Should().BeTrue();
         string body = await recorded.Single().Content!.ReadAsStringAsync();
-        body.Should().Contain("G90 G0 X100 Z0.2 F3000");
+        _ = body.Should().Contain("G90 G0 X100 Z0.2 F3000");
     }
 
     [Fact]
     public async Task StartPrintAsync_PostsFilenameAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/printer/print/start");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/printer/print/start");
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
         bool ok = await client.StartPrintAsync(Base, "benchy.gcode");
-        ok.Should().BeTrue();
+        _ = ok.Should().BeTrue();
         string body = await recorded.Single().Content!.ReadAsStringAsync();
-        body.Should().Contain("benchy.gcode");
+        _ = body.Should().Contain("benchy.gcode");
     }
 
     [Fact]
     public async Task GetFileListAsync_ReturnsGcodeNamesAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/server/files/list");
-            req.RequestUri!.Query.Should().Contain("root=gcodes");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/server/files/list");
+            _ = req.RequestUri!.Query.Should().Contain("root=gcodes");
             return Json(new
             {
                 result = new[]
@@ -328,76 +328,76 @@ public class MoonrakerClientTests
         });
 
         string[] list = await client.GetFileListAsync(Base);
-        list.Should().BeEquivalentTo(["a.gcode", "sub/c.gcode"]);
+        _ = list.Should().BeEquivalentTo(["a.gcode", "sub/c.gcode"]);
     }
 
     [Fact]
     public async Task GetFileRootsAsync_ReturnsRootsAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/server/files/roots");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/server/files/roots");
             return Json(new { result = new[] { new { name = "gcodes", path = "/gcodes", permissions = "rw" } } });
         });
 
         FileRoot[] roots = await client.GetFileRootsAsync(Base);
-        roots.Should().HaveCount(1);
-        roots[0].Name.Should().Be("gcodes");
-        roots[0].Path.Should().Be("/gcodes");
+        _ = roots.Should().HaveCount(1);
+        _ = roots[0].Name.Should().Be("gcodes");
+        _ = roots[0].Path.Should().Be("/gcodes");
     }
 
     [Fact]
     public async Task GetDirectoryAsync_ReturnsDirectoryInfoAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
-            req.RequestUri!.Query.Should().Contain("path=gcodes");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
+            _ = req.RequestUri!.Query.Should().Contain("path=gcodes");
             return Json(new { result = new { path = "gcodes", dirs = Array.Empty<object>(), files = Array.Empty<object>(), size = 0, modified = 0 } });
         });
 
         Api.Services.DirectoryInfo? dir = await client.GetDirectoryAsync(Base, "gcodes");
-        dir.Should().NotBeNull();
-        dir!.Path.Should().Be("gcodes");
+        _ = dir.Should().NotBeNull();
+        _ = dir!.Path.Should().Be("gcodes");
     }
 
     [Fact]
     public async Task CreateDirectoryAsync_PostsAndParsesResponseAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
-            req.Method.Should().Be(HttpMethod.Post);
-            req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
+            _ = req.Method.Should().Be(HttpMethod.Post);
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
             return Json(new { result = new { item = new { path = "gcodes/new", modified = 0, size = 0, permissions = "rw" }, action = "create_dir" } });
         });
 
         DirectoryCreateResponse? res = await client.CreateDirectoryAsync(Base, "gcodes/new");
-        res.Should().NotBeNull();
-        res!.Item.Path.Should().Be("gcodes/new");
+        _ = res.Should().NotBeNull();
+        _ = res!.Item.Path.Should().Be("gcodes/new");
         string body = await recorded.Single().Content!.ReadAsStringAsync();
-        body.Should().Contain("gcodes/new");
+        _ = body.Should().Contain("gcodes/new");
     }
 
     [Fact]
     public async Task DeleteFileOrDirectoryAsync_CallsDeleteWithForceFlagAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
-            req.Method.Should().Be(HttpMethod.Delete);
-            req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
-            req.RequestUri!.Query.Should().Contain("path=gcodes%2Fold");
-            req.RequestUri!.Query.Should().Contain("force=true");
+            _ = req.Method.Should().Be(HttpMethod.Delete);
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
+            _ = req.RequestUri!.Query.Should().Contain("path=gcodes%2Fold");
+            _ = req.RequestUri!.Query.Should().Contain("force=true");
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
         bool ok = await client.DeleteFileOrDirectoryAsync(Base, "gcodes/old", true);
-        ok.Should().BeTrue();
+        _ = ok.Should().BeTrue();
     }
 
     [Fact]
     public async Task MoveAndCopyFileAsync_PostsSourceAndDestAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
             if (req.RequestUri!.AbsolutePath.EndsWith("/server/files/move"))
             {
@@ -410,31 +410,31 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        (await client.MoveFileAsync(Base, "src.gcode", "dst.gcode")).Should().BeTrue();
-        (await client.CopyFileAsync(Base, "a.gcode", "b.gcode")).Should().BeTrue();
+        _ = (await client.MoveFileAsync(Base, "src.gcode", "dst.gcode")).Should().BeTrue();
+        _ = (await client.CopyFileAsync(Base, "a.gcode", "b.gcode")).Should().BeTrue();
         HttpRequestMessage moveReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/move"));
         HttpRequestMessage copyReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/copy"));
         string moveBody = await moveReq.Content!.ReadAsStringAsync();
         string copyBody = await copyReq.Content!.ReadAsStringAsync();
-        moveBody.Should().Contain("src.gcode");
-        moveBody.Should().Contain("dst.gcode");
-        copyBody.Should().Contain("a.gcode");
-        copyBody.Should().Contain("b.gcode");
+        _ = moveBody.Should().Contain("src.gcode");
+        _ = moveBody.Should().Contain("dst.gcode");
+        _ = copyBody.Should().Contain("a.gcode");
+        _ = copyBody.Should().Contain("b.gcode");
     }
 
     [Fact]
     public async Task GetFileMetadata_StartMetadataScan_AndGetThumbnailAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
             if (req.RequestUri!.AbsolutePath.EndsWith("/server/files/metadata"))
             {
-                req.RequestUri!.Query.Should().Contain("filename=benchy.gcode");
+                _ = req.RequestUri!.Query.Should().Contain("filename=benchy.gcode");
                 return Json(new { result = new { size = 1000, thumbnails = new[] { new { width = 120, height = 120, size = 1234, relative_path = "thumbs/benchy.png" } } } });
             }
             if (req.RequestUri!.AbsolutePath.EndsWith("/server/files/metascan"))
             {
-                req.Method.Should().Be(HttpMethod.Post);
+                _ = req.Method.Should().Be(HttpMethod.Post);
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
             if (req.RequestUri!.AbsolutePath.StartsWith("/server/files/thumbs/"))
@@ -445,22 +445,22 @@ public class MoonrakerClientTests
         });
 
         GCodeMetadata? meta = await client.GetFileMetadataAsync(Base, "benchy.gcode");
-        meta.Should().NotBeNull();
-        meta!.Size.Should().Be(1000);
-        (await client.StartMetadataScanAsync(Base, "benchy.gcode")).Should().BeTrue();
+        _ = meta.Should().NotBeNull();
+        _ = meta!.Size.Should().Be(1000);
+        _ = (await client.StartMetadataScanAsync(Base, "benchy.gcode")).Should().BeTrue();
         byte[]? thumb = await client.GetFileThumbnailAsync(Base, "benchy.gcode");
-        thumb.Should().NotBeNull();
-        thumb!.Length.Should().Be(2);
+        _ = thumb.Should().NotBeNull();
+        _ = thumb!.Length.Should().Be(2);
     }
 
     [Fact]
     public async Task DownloadAndDeleteAndStreamFile_WorkAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
             if (req.Method == HttpMethod.Delete)
             {
-                req.RequestUri!.AbsolutePath.Should().StartWith("/server/files/gcodes/");
+                _ = req.RequestUri!.AbsolutePath.Should().StartWith("/server/files/gcodes/");
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
             if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath.StartsWith("/server/files/gcodes/"))
@@ -471,32 +471,32 @@ public class MoonrakerClientTests
         });
 
         byte[]? bytes = await client.DownloadFileAsync(Base, "sub/benchy.gcode");
-        bytes.Should().NotBeNull();
-        bytes!.Length.Should().BeGreaterThan(0);
-        (await client.DeleteFileAsync(Base, "sub/benchy.gcode")).Should().BeTrue();
+        _ = bytes.Should().NotBeNull();
+        _ = bytes!.Length.Should().BeGreaterThan(0);
+        _ = (await client.DeleteFileAsync(Base, "sub/benchy.gcode")).Should().BeTrue();
         Stream? stream = await client.GetFileStreamAsync(Base, "sub/benchy.gcode");
-        stream.Should().NotBeNull();
+        _ = stream.Should().NotBeNull();
     }
 
     [Fact]
     public async Task GetDetailedFileListAsync_ReturnsExtendedEntriesAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
-            req.RequestUri!.AbsolutePath.Should().Be("/server/files/list");
-            req.RequestUri!.Query.Should().Contain("extended=true");
+            _ = req.RequestUri!.AbsolutePath.Should().Be("/server/files/list");
+            _ = req.RequestUri!.Query.Should().Contain("extended=true");
             return Json(new { result = new[] { new { filename = "a.gcode", size = 1, modified = 0 } } });
         });
 
         MoonrakerFileInfo[] items = await client.GetDetailedFileListAsync(Base, root: "gcodes", path: "/");
-        items.Should().HaveCount(1);
-        items[0].Path.Should().Be("a.gcode");
+        _ = items.Should().HaveCount(1);
+        _ = items[0].Path.Should().Be("a.gcode");
     }
 
     [Fact]
     public async Task HistoryEndpoints_WorkAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
             string url = req.RequestUri!.ToString();
             if (url.Contains("/server/history/list"))
@@ -528,20 +528,20 @@ public class MoonrakerClientTests
         });
 
         HistoryListResponse? list = await client.GetHistoryListAsync(Base, limit: 10);
-        list.Should().NotBeNull();
-        list!.Count.Should().Be(1);
+        _ = list.Should().NotBeNull();
+        _ = list!.Count.Should().Be(1);
         HistoryJob? job = await client.GetHistoryJobAsync(Base, "abc");
-        job.Should().NotBeNull();
-        (await client.DeleteHistoryJobAsync(Base, "abc")).Should().BeTrue();
+        _ = job.Should().NotBeNull();
+        _ = (await client.DeleteHistoryJobAsync(Base, "abc")).Should().BeTrue();
         HistoryTotals? totals = await client.GetHistoryTotalsAsync(Base);
-        totals.Should().NotBeNull();
-        (await client.ResetHistoryTotalsAsync(Base)).Should().BeTrue();
+        _ = totals.Should().NotBeNull();
+        _ = (await client.ResetHistoryTotalsAsync(Base)).Should().BeTrue();
     }
 
     [Fact]
     public async Task SpoolmanEndpoints_WorkAsync()
     {
-        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
+        (IMoonrakerClient? client, _, _) = CreateClient(req =>
         {
             string url = req.RequestUri!.ToString();
             if (url.Contains("/server/spoolman/status"))
@@ -568,11 +568,11 @@ public class MoonrakerClientTests
         });
 
         SpoolmanStatus? status = await client.GetSpoolmanStatusAsync(Base);
-        status.Should().NotBeNull();
-        status!.SpoolmanConnected.Should().BeTrue();
-        (await client.GetSpoolmanActiveSpoolAsync(Base)).Should().Be(7);
-        (await client.SetSpoolmanActiveSpoolAsync(Base, 9)).Should().BeTrue();
+        _ = status.Should().NotBeNull();
+        _ = status!.SpoolmanConnected.Should().BeTrue();
+        _ = (await client.GetSpoolmanActiveSpoolAsync(Base)).Should().Be(7);
+        _ = (await client.SetSpoolmanActiveSpoolAsync(Base, 9)).Should().BeTrue();
         string? proxy = await client.SpoolmanProxyRequestAsync(Base, "GET", "/api/v1/spool");
-        proxy.Should().Contain("ok");
+        _ = proxy.Should().Contain("ok");
     }
 }

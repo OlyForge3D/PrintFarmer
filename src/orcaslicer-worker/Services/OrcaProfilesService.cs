@@ -505,7 +505,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             return true;
         }
 
-        visited.Add(filePath);
+        _ = visited.Add(filePath);
 
         // Load this profile JSON (from cache or disk)
         string? profileJson = LoadProfileJsonFromDisk(filePath);
@@ -637,20 +637,20 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             // Reconstruct as JSON string
-            StringBuilder sb = new System.Text.StringBuilder("{");
+            StringBuilder sb = new StringBuilder("{");
             bool first = true;
             foreach (KeyValuePair<string, string> kvp in allProps.OrderBy(x => x.Key)) // Order for consistency
             {
                 if (!first)
                 {
-                    sb.Append(',');
+                    _ = sb.Append(',');
                 }
 
-                sb.Append('"').Append(EscapeJsonKey(kvp.Key)).Append("\":");
-                sb.Append(kvp.Value);
+                _ = sb.Append('"').Append(EscapeJsonKey(kvp.Key)).Append("\":");
+                _ = sb.Append(kvp.Value);
                 first = false;
             }
-            sb.Append('}');
+            _ = sb.Append('}');
 
             // Validate by parsing
             using JsonDocument validationDoc = JsonDocument.Parse(sb.ToString());

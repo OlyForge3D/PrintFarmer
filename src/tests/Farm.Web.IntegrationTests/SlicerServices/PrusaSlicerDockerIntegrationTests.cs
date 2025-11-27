@@ -38,7 +38,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         try
         {
-            await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "down", "--volumes", "--remove-orphans");
+            _ = await DockerTestHelpers.RunDockerComposeCommandAsync(_output, _dockerComposeFile, _baseDirectory, "down", "--volumes", "--remove-orphans");
         }
         catch (Exception ex)
         {

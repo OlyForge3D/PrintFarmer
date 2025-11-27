@@ -1,4 +1,6 @@
 ﻿using System.Collections.Concurrent;
+// PRESUBMIT: SKIP-DBHEAVY - This is a test factory class, not a test class itself
+using System.Data;
 using System.Data.Common;
 using System.Net;
 using System.Net.Http;
@@ -23,8 +25,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
-
-// PRESUBMIT: SKIP-DBHEAVY - This is a test factory class, not a test class itself
 namespace Farm.Web.Api.Tests;
 
 public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
@@ -147,7 +147,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     // Minimal IDbContextFactory implementation used only in tests as a safety-net
     // to satisfy DI validation for singletons that depend on IDbContextFactory<T>.
-    private sealed class SimpleTestDbContextFactory : Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>
+    private sealed class SimpleTestDbContextFactory : IDbContextFactory<AppDbContext>
     {
         private readonly string _connectionString;
         public SimpleTestDbContextFactory(string connectionString)
@@ -155,17 +155,17 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             _connectionString = connectionString;
         }
 
-        public Farm.Infrastructure.Data.AppDbContext CreateDbContext()
+        public AppDbContext CreateDbContext()
         {
-            DbContextOptionsBuilder<AppDbContext> options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>();
+            DbContextOptionsBuilder<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>();
             // Add TestSqlitePragmaEnforcer as a defensive interceptor for any early-created contexts
             try
             {
-                options.AddInterceptors(new TestSqlitePragmaEnforcer());
+                _ = options.AddInterceptors(new TestSqlitePragmaEnforcer());
             }
             catch { }
-            options.UseSqlite(_connectionString);
-            return new Farm.Infrastructure.Data.AppDbContext(options.Options);
+            _ = options.UseSqlite(_connectionString);
+            return new AppDbContext(options.Options);
         }
     }
 
@@ -178,12 +178,12 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // and raise the minimum level to Warning so only important messages are emitted.
         try
         {
-            builder.ConfigureLogging(logging =>
+            _ = builder.ConfigureLogging(logging =>
             {
                 try
                 {
-                    logging.ClearProviders();
-                    logging.SetMinimumLevel(LogLevel.Warning);
+                    _ = logging.ClearProviders();
+                    _ = logging.SetMinimumLevel(LogLevel.Warning);
                 }
                 catch { }
             });
@@ -223,11 +223,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             if (string.IsNullOrEmpty(current))
             {
                 Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
-                builder.UseEnvironment("Testing");
+                _ = builder.UseEnvironment("Testing");
             }
             else
             {
-                builder.UseEnvironment(current);
+                _ = builder.UseEnvironment(current);
             }
         }
         else if (useSharedSqlite)
@@ -238,18 +238,18 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             string? existing = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
             if (!string.IsNullOrEmpty(existing))
             {
-                builder.UseEnvironment(existing);
+                _ = builder.UseEnvironment(existing);
             }
             else
             {
-                builder.UseEnvironment("Testing");
+                _ = builder.UseEnvironment("Testing");
             }
         }
         else
         {
-            builder.UseEnvironment("Testing");
+            _ = builder.UseEnvironment("Testing");
         }
-        builder.ConfigureAppConfiguration((context, config) =>
+        _ = builder.ConfigureAppConfiguration((context, config) =>
         {
             Dictionary<string, string?> dict = new Dictionary<string, string?>
             {
@@ -258,10 +258,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 // Avoid running EF Core Migrate() in tests when using ad-hoc SQLite files; rely on startup safety + EnsureCreated
                 ["DISABLE_EF_MIGRATIONS"] = "true"
             };
-            config.AddInMemoryCollection(dict!);
+            _ = config.AddInMemoryCollection(dict!);
         });
 
-        builder.ConfigureServices(services =>
+        _ = builder.ConfigureServices(services =>
         {
             // Remove any OpenTelemetry / OTLP service registrations that the application may add
             try
@@ -276,7 +276,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 {
                     try
                     {
-                        services.Remove(d);
+                        _ = services.Remove(d);
                     }
                     catch
                     {
@@ -293,7 +293,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     ?? Environment.GetEnvironmentVariable("TEST_SHARED_SQLITE_CONN");
                 if (!string.IsNullOrEmpty(earlyConnStr))
                 {
-                    services.TryAddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>(sp =>
+                    services.TryAddSingleton<IDbContextFactory<AppDbContext>>(sp =>
                         new SimpleTestDbContextFactory(earlyConnStr));
                 }
             }
@@ -331,7 +331,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                             earlyConn = new SqliteConnection(connStr);
                         }
 
-                        if (earlyConn.State != System.Data.ConnectionState.Open)
+                        if (earlyConn.State != ConnectionState.Open)
                         {
                             earlyConn.Open();
                         }
@@ -343,8 +343,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // Register into DI if not already present
                     try
                     {
-                        services.AddSingleton<Microsoft.Data.Sqlite.SqliteConnection>(earlyConn);
-                        services.AddSingleton<System.Data.Common.DbConnection>(earlyConn);
+                        _ = services.AddSingleton(earlyConn);
+                        _ = services.AddSingleton<DbConnection>(earlyConn);
                     }
                     catch { }
                 }
@@ -359,10 +359,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
             }
             // Test authentication: provide a deterministic authenticated user so tests don't get 401
-            services.AddAuthentication("Test")
-                .AddScheme<AuthenticationSchemeOptions, Farm.Web.Api.Tests.TestInfrastructure.TestAuthHandler>("Test", options => { });
+            _ = services.AddAuthentication("Test")
+                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", options => { });
 
-            services.AddAuthorization(options =>
+            _ = services.AddAuthorization(options =>
             {
                 options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
                     .AddAuthenticationSchemes("Test")
@@ -387,30 +387,30 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     ).ToList();
                     foreach (ServiceDescriptor d in descriptors)
                     {
-                        services.Remove(d);
+                        _ = services.Remove(d);
                     }
 
                     {
                         // Use a deterministic in-memory database name and register a DbContextFactory.
                         string inmemoryName = $"unittest_inmemory_{Guid.NewGuid():N}";
-                        services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>(opts =>
+                        _ = services.AddDbContextFactory<AppDbContext>(opts =>
                         {
                             // Add a small interceptor to ensure any SQLite connections used by EF
                             // during tests get PRAGMA foreign_keys=ON. This is a no-op for InMemory
                             // provider but safe to register here as a guard.
-                            opts.AddInterceptors(new TestSqlitePragmaEnforcer());
-                            opts.UseInMemoryDatabase(inmemoryName);
+                            _ = opts.AddInterceptors(new TestSqlitePragmaEnforcer());
+                            _ = opts.UseInMemoryDatabase(inmemoryName);
                         });
                         // Resolve AppDbContext from the factory per-scope so scoped consumers still work.
-                        services.AddScoped(sp => sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>().CreateDbContext());
+                        _ = services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
                     }
 
                     // Optionally replace DatabaseInitializer with a no-op implementation to avoid heavy seeding in InMemory tests.
-                    ServiceDescriptor? dbInitDesc = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Services.DatabaseInitializer));
+                    ServiceDescriptor? dbInitDesc = services.SingleOrDefault(d => d.ServiceType == typeof(DatabaseInitializer));
                     if (dbInitDesc != null)
                     {
-                        services.Remove(dbInitDesc);
-                        services.AddScoped<Farm.Web.Api.Services.DatabaseInitializer, Farm.Web.Api.Tests.TestInfrastructure.NoOpDatabaseInitializer>();
+                        _ = services.Remove(dbInitDesc);
+                        _ = services.AddScoped<DatabaseInitializer, NoOpDatabaseInitializer>();
                     }
                 }
                 catch
@@ -463,25 +463,25 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
                     foreach (ServiceDescriptor d in descriptorsToRemove)
                     {
-                        services.Remove(d);
+                        _ = services.Remove(d);
                     }
 
                     // Register AppDbContext to use the opened SqliteConnection instance
                     // Register a DbContextFactory that targets the opened in-memory Sqlite connection
-                    services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>(opts =>
+                    _ = services.AddDbContextFactory<AppDbContext>(opts =>
                     {
                         // Ensure every EF connection enables SQLite foreign keys via interceptor
-                        opts.AddInterceptors(new TestSqlitePragmaEnforcer());
+                        _ = opts.AddInterceptors(new TestSqlitePragmaEnforcer());
                         // Use the connection string so EF creates its own connections
                         // to the shared in-memory database. Passing the same open
                         // SqliteConnection instance to EF can cause overlapping
                         // readers and "reader is closed" errors when commands run
                         // concurrently. The keeper connection (opened above) stays
                         // open to keep the in-memory DB alive.
-                        opts.UseSqlite(_inMemorySqliteConnection.ConnectionString);
+                        _ = opts.UseSqlite(_inMemorySqliteConnection.ConnectionString);
                     });
                     // Provide AppDbContext per-scope resolved from the factory
-                    services.AddScoped(sp => sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>().CreateDbContext());
+                    _ = services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
                 }
                 catch
                 {
@@ -532,7 +532,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                             }
 
                             // Only open if not already open
-                            if (_sharedSqliteConnection.State != System.Data.ConnectionState.Open)
+                            if (_sharedSqliteConnection.State != ConnectionState.Open)
                             {
                                 _sharedSqliteConnection.Open();
                             }
@@ -549,11 +549,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                             // and will be overridden later if needed.
                             try
                             {
-                                services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>(opts =>
+                                _ = services.AddDbContextFactory<AppDbContext>(opts =>
                                 {
                                     // Ensure foreign keys are enabled on every SQLite connection
-                                    opts.AddInterceptors(new TestSqlitePragmaEnforcer());
-                                    opts.UseSqlite(_sharedSqliteConnection.ConnectionString);
+                                    _ = opts.AddInterceptors(new TestSqlitePragmaEnforcer());
+                                    _ = opts.UseSqlite(_sharedSqliteConnection.ConnectionString);
                                 });
                             }
                             catch
@@ -571,8 +571,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         // even when the static connection was created by a different factory.
                         try
                         {
-                            services.AddSingleton<Microsoft.Data.Sqlite.SqliteConnection>(_sharedSqliteConnection!);
-                            services.AddSingleton<System.Data.Common.DbConnection>(_sharedSqliteConnection!);
+                            _ = services.AddSingleton(_sharedSqliteConnection!);
+                            _ = services.AddSingleton<DbConnection>(_sharedSqliteConnection!);
                         }
                         catch { }
                     }
@@ -584,21 +584,21 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     ).ToList();
                     foreach (ServiceDescriptor d in descriptors)
                     {
-                        services.Remove(d);
+                        _ = services.Remove(d);
                     }
 
                     // Register AppDbContext to pick up the SqliteConnection from DI so every context uses the
                     // same open connection instance. Use factory overload so we can resolve the connection.
                     // Register a DbContextFactory that resolves the shared connection from DI
-                    services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>((sp, options) =>
+                    _ = services.AddDbContextFactory<AppDbContext>((sp, options) =>
                     {
-                        SqliteConnection conn = sp.GetRequiredService<Microsoft.Data.Sqlite.SqliteConnection>();
+                        SqliteConnection conn = sp.GetRequiredService<SqliteConnection>();
                         // Pass the connection string so EF Core will open its own
                         // physical DbConnections to the shared in-memory database.
-                        options.UseSqlite(conn.ConnectionString);
+                        _ = options.UseSqlite(conn.ConnectionString);
                     });
                     // Register the AppDbContext to be created from the factory per-scope
-                    services.AddScoped(sp => sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>().CreateDbContext());
+                    _ = services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
 
                     // As a safety net for DI validation during temporary provider builds, ensure an
                     // IDbContextFactory<AppDbContext> is available as a singleton. Some singleton
@@ -608,7 +608,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     try
                     {
                         string connStr = _sharedSqliteConnection.ConnectionString;
-                        services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>(sp =>
+                        _ = services.AddSingleton<IDbContextFactory<AppDbContext>>(sp =>
                         {
                             return new SimpleTestDbContextFactory(connStr);
                         });
@@ -625,7 +625,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // temporary provider creation resilient.
                     try
                     {
-                        services.TryAddSingleton<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, Farm.Web.Api.Tests.TestInfrastructure.NoOpUnifiedLoggingService>();
+                        services.TryAddSingleton<Farm.Infrastructure.Telemetry.IUnifiedLoggingService, NoOpUnifiedLoggingService>();
                     }
                     catch { }
 
@@ -640,10 +640,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         ServiceProvider tempProvider = services.BuildServiceProvider();
                         using (IServiceScope scope = tempProvider.CreateScope())
                         {
-                            AppDbContext tempDb = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-                            tempDb.Database.EnsureCreated();
+                            AppDbContext tempDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                            _ = tempDb.Database.EnsureCreated();
 
-                            DatabaseInitializer? initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
+                            DatabaseInitializer? initializer = scope.ServiceProvider.GetService<DatabaseInitializer>();
                             if (initializer != null)
                             {
                                 try
@@ -673,7 +673,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                         ServiceDescriptor? migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
                         if (migrationDesc == null)
                         {
-                            services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
+                            _ = services.AddScoped<Api.Infrastructure.Database.IMigrationStatusProvider, Api.Infrastructure.Database.MigrationStatusProvider>();
                         }
                     }
                     catch { }
@@ -693,29 +693,29 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 foreach (ServiceDescriptor d in hostedDescriptors)
                 {
                     try
-                    { services.Remove(d); }
+                    { _ = services.Remove(d); }
                     catch { }
                 }
 
                 // Register a single no-op hosted service so the host still has an IHostedService but it does nothing
                 try
                 {
-                    services.AddSingleton<IHostedService, NoOpHostedService>();
+                    _ = services.AddSingleton<IHostedService, NoOpHostedService>();
                 }
                 catch { }
 
                 // Remove network/HTTP client descriptors that would otherwise create real connections
                 ServiceDescriptor? moonrakerDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IMoonrakerClient));
                 if (moonrakerDescriptor != null)
-                { services.Remove(moonrakerDescriptor); }
+                { _ = services.Remove(moonrakerDescriptor); }
 
                 ServiceDescriptor? prusaDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPrusaLinkClient));
                 if (prusaDescriptor != null)
-                { services.Remove(prusaDescriptor); }
+                { _ = services.Remove(prusaDescriptor); }
 
                 ServiceDescriptor? sdcpDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ISdcpClient));
                 if (sdcpDescriptor != null)
-                { services.Remove(sdcpDescriptor); }
+                { _ = services.Remove(sdcpDescriptor); }
             }
 
             // Also remove any descriptors that reference the concrete SdcpClient type
@@ -734,7 +734,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 {
                     try
                     {
-                        services.Remove(d);
+                        _ = services.Remove(d);
                     }
                     catch { }
                 }
@@ -744,22 +744,22 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // Register mocked services (use explicit service interfaces so they override
             // any existing typed-client / concrete registrations that may otherwise
             // attempt to construct real implementations during DI activation).
-            services.AddSingleton<IMoonrakerClient>(MockMoonrakerClient.Object);
-            services.AddSingleton<IPrusaLinkClient>(MockPrusaLinkClient.Object);
-            services.AddSingleton<ISdcpClient>(MockSdcpClient.Object);
-            services.AddSingleton<IOctoPrintClient>(MockOctoPrintClient.Object);
-            services.AddSingleton<ISpoolmanService>(MockSpoolmanService.Object);
+            _ = services.AddSingleton(MockMoonrakerClient.Object);
+            _ = services.AddSingleton(MockPrusaLinkClient.Object);
+            _ = services.AddSingleton(MockSdcpClient.Object);
+            _ = services.AddSingleton(MockOctoPrintClient.Object);
+            _ = services.AddSingleton(MockSpoolmanService.Object);
 
             // Provide named HttpClients used by SpoolmanController so tests can intercept
             // probe requests. Localhost/127.0.0.1 requests are forwarded to the real
             // network (allowing in-test stub servers). Other hosts simulate DNS failure
             // to make tests deterministic and avoid real external network calls.
-            services.AddHttpClient("SpoolmanTestProbe").ConfigurePrimaryHttpMessageHandler(() => new TestSpoolmanMessageHandler());
-            services.AddHttpClient("SpoolmanHealthProbe").ConfigurePrimaryHttpMessageHandler(() => new TestSpoolmanMessageHandler());
+            _ = services.AddHttpClient("SpoolmanTestProbe").ConfigurePrimaryHttpMessageHandler(() => new TestSpoolmanMessageHandler());
+            _ = services.AddHttpClient("SpoolmanHealthProbe").ConfigurePrimaryHttpMessageHandler(() => new TestSpoolmanMessageHandler());
 
             // Provide a no-op ModelAnalysisService for tests to avoid DI activation failures when
             // the real analysis service is not desirable in unit/integration tests.
-            services.AddSingleton<IModelAnalysisService>(MockModelAnalysisService.Object);
+            _ = services.AddSingleton(MockModelAnalysisService.Object);
 
             // Ensure IMigrationStatusProvider is available in the test host. Some startup
             // paths (depending on environment variables and registration order) may not
@@ -770,35 +770,35 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ServiceDescriptor? migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
                 if (migrationDesc == null)
                 {
-                    services.TryAddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
+                    services.TryAddScoped<Api.Infrastructure.Database.IMigrationStatusProvider, Api.Infrastructure.Database.MigrationStatusProvider>();
                 }
             }
             catch { }
 
             // Replace temp path provider with test-specific implementation confined to repo
-            ServiceDescriptor? existingTemp = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Infrastructure.Temp.ITempPathProvider));
+            ServiceDescriptor? existingTemp = services.SingleOrDefault(d => d.ServiceType == typeof(Api.Infrastructure.Temp.ITempPathProvider));
             if (existingTemp != null)
             {
-                services.Remove(existingTemp);
+                _ = services.Remove(existingTemp);
             }
-            services.AddSingleton<Farm.Web.Api.Infrastructure.Temp.ITempPathProvider>(new TestInfrastructure.TestTempPathProvider());
+            _ = services.AddSingleton<Api.Infrastructure.Temp.ITempPathProvider>(new TestTempPathProvider());
 
             // Slicer service registrations: in-process engines removed; only orchestrator + queue abstractions used.
             // File storage is fully mocked; still register options for any resolution paths
-            services.Configure<LocalFileStorageOptions>(o =>
+            _ = services.Configure<LocalFileStorageOptions>(o =>
             {
                 o.BasePath = Path.Combine(Farm.Web.Api.Tests.TestInfrastructure.TestPaths.RepoTempRoot, "slicer-test-storage");
             });
 
-            services.AddSingleton(MockSlicerJobQueue.Object);
-            services.AddSingleton(MockSlicerFileStorage.Object);
-            services.AddSingleton(MockSlicerProgressNotifier.Object);
-            services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
+            _ = services.AddSingleton(MockSlicerJobQueue.Object);
+            _ = services.AddSingleton(MockSlicerFileStorage.Object);
+            _ = services.AddSingleton(MockSlicerProgressNotifier.Object);
+            _ = services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
         });
 
         // Set up default mock behaviors
-        MockPrusaLinkClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Farm.Web.Api.Services.PrusaCompositeStatus(
+        _ = MockPrusaLinkClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrusaCompositeStatus(
                 IsOnline: true,
                 State: "Idle",
                 Progress: 0,
@@ -808,8 +808,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 CameraSnapshotUrl: null
             ));
 
-        MockMoonrakerClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Farm.Web.Api.Services.PrinterCompositeStatus(
+        _ = MockMoonrakerClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(
                 IsOnline: true,
                 State: "Idle",
                 Progress: 0,
@@ -819,8 +819,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 CameraSnapshotUrl: null
             ));
 
-        MockSdcpClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Farm.Web.Api.Services.PrinterCompositeStatus(
+        _ = MockSdcpClient.Setup(x => x.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(
                 IsOnline: true,
                 State: "Idle",
                 Progress: 0,
@@ -831,7 +831,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             ));
 
         // Default analysis behavior: return null (analysis optional) to keep tests deterministic
-        MockModelAnalysisService.Setup(x => x.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockModelAnalysisService.Setup(x => x.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ModelAnalysisResult?)null);
         // Before building the host, ensure the database schema exists on the exact
         // provider/connection we configured above. This prevents a race where the
@@ -845,21 +845,21 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // DbContext using that connection and ensure schema is created now.
             if (_inMemorySqliteConnection != null)
             {
-                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
                     .UseSqlite(_inMemorySqliteConnection)
                     .Options;
-                using AppDbContext temp = new Farm.Infrastructure.Data.AppDbContext(opts);
-                temp.Database.EnsureCreated();
+                using AppDbContext temp = new AppDbContext(opts);
+                _ = temp.Database.EnsureCreated();
             }
 
             // If a shared SQLite connection was prepared, ensure its schema exists as well
             if (_sharedSqliteConnection != null)
             {
-                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
                     .UseSqlite(_sharedSqliteConnection)
                     .Options;
-                using AppDbContext temp = new Farm.Infrastructure.Data.AppDbContext(opts);
-                temp.Database.EnsureCreated();
+                using AppDbContext temp = new AppDbContext(opts);
+                _ = temp.Database.EnsureCreated();
             }
 
             // If tests opted to use EF InMemory, ensure a DB instance with the same name is created.
@@ -879,11 +879,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // to avoid double-seeding and provider lock races.
                     Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
                 }
-                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
                     .UseInMemoryDatabase(inmemoryName)
                     .Options;
-                using AppDbContext temp = new Farm.Infrastructure.Data.AppDbContext(opts);
-                temp.Database.EnsureCreated();
+                using AppDbContext temp = new AppDbContext(opts);
+                _ = temp.Database.EnsureCreated();
             }
         }
         catch
@@ -903,11 +903,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // and register our mocks so tests reliably use the mocked clients.
         try
         {
-            builder.ConfigureServices(services =>
+            _ = builder.ConfigureServices(services =>
             {
                 try
                 {
-                    services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(sp => new TestServiceOverrideStartupFilter(this));
+                    _ = services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(sp => new TestServiceOverrideStartupFilter(this));
                 }
                 catch { }
             });
@@ -931,11 +931,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         try
         {
             using IServiceScope scope = host.Services.CreateScope();
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-            db.Database.EnsureCreated();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            _ = db.Database.EnsureCreated();
 
             // Run DatabaseInitializer explicitly on the host's services so seeding occurs
-            DatabaseInitializer? initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
+            DatabaseInitializer? initializer = scope.ServiceProvider.GetService<DatabaseInitializer>();
             if (initializer != null)
             {
                 try
@@ -1014,8 +1014,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         {
             using (IServiceScope checkScope = host.Services.CreateScope())
             {
-                IAuthAuditService? svc = checkScope.ServiceProvider.GetService<Farm.Web.Api.Services.Authentication.IAuthAuditService>();
-                AppDbContext? db = checkScope.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
+                IAuthAuditService? svc = checkScope.ServiceProvider.GetService<IAuthAuditService>();
+                AppDbContext? db = checkScope.ServiceProvider.GetService<AppDbContext>();
                 if (svc != null && db != null)
                 {
                     string marker = "tests-selfcheck-" + Guid.NewGuid().ToString("N");
@@ -1024,7 +1024,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
                     // Create a new scope to verify visibility from an independent resolve
                     using IServiceScope verify = host.Services.CreateScope();
-                    AppDbContext? verifyDb = verify.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
+                    AppDbContext? verifyDb = verify.ServiceProvider.GetService<AppDbContext>();
                     if (verifyDb != null)
                     {
                         bool found = verifyDb.AuthAuditLogs.AnyAsync(a => a.FailureReason == "selfcheck" || (a.Metadata != null && a.Metadata.Contains(marker))).GetAwaiter().GetResult();
@@ -1058,18 +1058,18 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     private void SetupDefaultMockBehaviors()
     {
         // Set up default Spoolman behaviors so controller endpoints and health checks are deterministic
-        MockSpoolmanService.Setup(s => s.GetConfig()).Returns(() => null);
-        MockSpoolmanService.Setup(s => s.SetConfig(It.IsAny<Farm.Web.Shared.SpoolmanConfigDto>())).Callback<Farm.Web.Shared.SpoolmanConfigDto>((cfg) => { /* no-op for tests */ });
-        MockSpoolmanService.Setup(s => s.ClearConfig()).Callback(() => { /* no-op */ });
-        MockSpoolmanService.Setup(s => s.ListMaterialsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<Farm.Web.Shared.SpoolmanMaterialDto>());
-        MockSpoolmanService.Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<Farm.Web.Shared.SpoolmanSpoolDto>());
-        MockSpoolmanService.Setup(s => s.ScanNetworkForSpoolmanAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(Enumerable.Empty<Farm.Web.Shared.SpoolmanDiscoveryResult>());
+        _ = MockSpoolmanService.Setup(s => s.GetConfig()).Returns(() => null);
+        _ = MockSpoolmanService.Setup(s => s.SetConfig(It.IsAny<SpoolmanConfigDto>())).Callback<SpoolmanConfigDto>((cfg) => { /* no-op for tests */ });
+        _ = MockSpoolmanService.Setup(s => s.ClearConfig()).Callback(() => { /* no-op */ });
+        _ = MockSpoolmanService.Setup(s => s.ListMaterialsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<SpoolmanMaterialDto>());
+        _ = MockSpoolmanService.Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<SpoolmanSpoolDto>());
+        _ = MockSpoolmanService.Setup(s => s.ScanNetworkForSpoolmanAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(Enumerable.Empty<SpoolmanDiscoveryResult>());
     }
 
     private void SetupSlicerServiceMocks()
     {
         // Basic deterministic queue stats
-        MockSlicerJobQueue.Setup(q => q.GetQueueStatsAsync(It.IsAny<SlicerEngineType?>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerJobQueue.Setup(q => q.GetQueueStatsAsync(It.IsAny<SlicerEngineType?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SlicerEngineType? engine, CancellationToken _) => new SlicerQueueStats
             {
                 Engine = engine ?? SlicerEngineType.OrcaSlicer,
@@ -1084,7 +1084,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             });
 
         // Capture jobs enqueued so status queries work
-        MockSlicerJobQueue.Setup(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerJobQueue.Setup(q => q.EnqueueAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<CancellationToken>()))
             .Callback<DistributedSlicingJob, CancellationToken>((job, _) =>
             {
                 job.Status = SlicingJobStatus.Queued;
@@ -1092,13 +1092,13 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             })
             .Returns(Task.CompletedTask);
 
-        MockSlicerJobQueue.Setup(q => q.GetJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerJobQueue.Setup(q => q.GetJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid id, CancellationToken _) => _slicerJobs.TryGetValue(id, out DistributedSlicingJob? job) ? job : null);
 
-        MockSlicerJobQueue.Setup(q => q.FindExistingJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerJobQueue.Setup(q => q.FindExistingJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid cid, string checksum, CancellationToken _) => _slicerJobs.Values.FirstOrDefault(j => j.CorrelationId == cid && j.Checksum == checksum));
 
-        MockSlicerJobQueue.Setup(q => q.GetUserJobsAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerJobQueue.Setup(q => q.GetUserJobsAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid userId, int? limit, CancellationToken _) =>
             {
                 IEnumerable<DistributedSlicingJob> list = _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50);
@@ -1106,31 +1106,31 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             });
 
         // File storage mocks (accept any path & simulate existence)
-        MockSlicerFileStorage.Setup(fs => fs.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerFileStorage.Setup(fs => fs.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
-        MockSlicerFileStorage.Setup(fs => fs.GetFileMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerFileStorage.Setup(fs => fs.GetFileMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SlicerFileMetadata { SizeBytes = 1024, ContentType = "application/octet-stream" });
-        MockSlicerFileStorage.Setup(fs => fs.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerFileStorage.Setup(fs => fs.DownloadFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(new byte[128]));
-        MockSlicerFileStorage.Setup(fs => fs.DownloadFileBytesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerFileStorage.Setup(fs => fs.DownloadFileBytesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new byte[128]);
-        MockSlicerFileStorage.Setup(fs => fs.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerFileStorage.Setup(fs => fs.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string key, Stream _, string _, CancellationToken _) => $"memory://{key}");
-        MockSlicerFileStorage.Setup(fs => fs.UploadFileAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerFileStorage.Setup(fs => fs.UploadFileAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string key, byte[] _, string _, CancellationToken _) => $"memory://{key}");
-        MockSlicerFileStorage.Setup(fs => fs.GenerateSignedUrlAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerFileStorage.Setup(fs => fs.GenerateSignedUrlAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string key, TimeSpan _, CancellationToken _) => $"memory://{key}?sig=dev-test");
 
         // Progress notifier no-ops
-        MockSlicerProgressNotifier.Setup(p => p.NotifyProgressAsync(It.IsAny<SlicingProgressUpdate>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerProgressNotifier.Setup(p => p.NotifyProgressAsync(It.IsAny<SlicingProgressUpdate>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        MockSlicerProgressNotifier.Setup(p => p.NotifyCompletionAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<SlicingResult>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerProgressNotifier.Setup(p => p.NotifyCompletionAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<SlicingResult>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        MockSlicerProgressNotifier.Setup(p => p.NotifyFailureAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerProgressNotifier.Setup(p => p.NotifyFailureAsync(It.IsAny<DistributedSlicingJob>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        MockSlicerProgressNotifier.Setup(p => p.SubscribeToJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerProgressNotifier.Setup(p => p.SubscribeToJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        MockSlicerProgressNotifier.Setup(p => p.UnsubscribeFromJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _ = MockSlicerProgressNotifier.Setup(p => p.UnsubscribeFromJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
     }
 
@@ -1147,10 +1147,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     }
 
     // Fail-fast verification to ensure critical parent tables were seeded during pre-seed.
-    private static void VerifySeededParents(Farm.Infrastructure.Data.AppDbContext db)
+    private static void VerifySeededParents(AppDbContext db)
     {
         DbConnection conn = db.Database.GetDbConnection();
-        if (conn.State != System.Data.ConnectionState.Open)
+        if (conn.State != ConnectionState.Open)
         {
             try
             {
@@ -1203,14 +1203,14 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     }
 
     // Diagnostic helper used during test factory pre-seed to print basic table counts and samples.
-    private static void DumpDatabaseState(Farm.Infrastructure.Data.AppDbContext db)
+    private static void DumpDatabaseState(AppDbContext db)
     {
         try
         {
-            StringBuilder sb = new System.Text.StringBuilder();
+            StringBuilder sb = new StringBuilder();
             void W(string s)
             {
-                sb.AppendLine(s);
+                _ = sb.AppendLine(s);
                 try
                 { Console.WriteLine(s); }
                 catch { }
@@ -1219,7 +1219,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             W("--- Database state dump start ---");
 
             DbConnection conn = db.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
+            if (conn.State != ConnectionState.Open)
             {
                 try
                 { conn.Open(); }
@@ -1284,7 +1284,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 string baseDir = AppContext.BaseDirectory ?? Directory.GetCurrentDirectory();
                 string projectTestResults = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "TestResults"));
                 try
-                { Directory.CreateDirectory(projectTestResults); }
+                { _ = Directory.CreateDirectory(projectTestResults); }
                 catch { }
                 string fname = Path.Combine(projectTestResults, $"dbdump_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}.log");
                 try
@@ -1384,7 +1384,7 @@ internal sealed class TestServiceOverrideStartupFilter : Microsoft.AspNetCore.Ho
             try
             {
                 IServiceProvider sp = app.ApplicationServices;
-                PropertyInfo? servicesField = sp.GetType().GetProperty("Services", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                PropertyInfo? servicesField = sp.GetType().GetProperty("Services", BindingFlags.NonPublic | BindingFlags.Instance);
                 // Best-effort: register mocks into the root provider via scoped factories
             }
             catch { }

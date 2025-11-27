@@ -23,11 +23,11 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GetProfileAsync_ReturnsDto_WhenExists()
         {
             Guid id = Guid.NewGuid();
-            ProcessProfile profile = new Farm.Infrastructure.Domain.ProcessProfile { Id = id, Name = "p", Description = "d", RawJson = "{}" };
+            ProcessProfile profile = new ProcessProfile { Id = id, Name = "p", Description = "d", RawJson = "{}" };
 
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(MockBehavior.Loose);
-            mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
 
             ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
 
@@ -42,8 +42,8 @@ namespace Farm.Web.Api.Tests.Services
         {
             Guid id = Guid.NewGuid();
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(MockBehavior.Loose);
-            mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.ProcessProfile?)null);
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((ProcessProfile?)null);
 
             ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
 
@@ -54,14 +54,14 @@ namespace Farm.Web.Api.Tests.Services
         [Fact]
         public async Task GetProfilesAsync_ReturnsList()
         {
-            List<ProcessProfile> list = new List<Farm.Infrastructure.Domain.ProcessProfile>
+            List<ProcessProfile> list = new List<ProcessProfile>
             {
                 new() { Id = Guid.NewGuid(), Name = "A", RawJson = "{}" },
                 new() { Id = Guid.NewGuid(), Name = "B", RawJson = "{}" }
             };
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(MockBehavior.Loose);
-            mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(list);
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(list);
 
             ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
             IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
@@ -72,8 +72,8 @@ namespace Farm.Web.Api.Tests.Services
         public async Task GetProfilesAsync_ReturnsEmptyList_WhenNoProfiles()
         {
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(MockBehavior.Loose);
-            mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<Farm.Infrastructure.Domain.ProcessProfile>());
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<ProcessProfile>());
 
             ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
             IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
@@ -84,11 +84,11 @@ namespace Farm.Web.Api.Tests.Services
         public async Task DeleteProfileAsync_Deletes_WhenExists()
         {
             Guid id = Guid.NewGuid();
-            ProcessProfile profile = new Farm.Infrastructure.Domain.ProcessProfile { Id = id, Name = "test" };
+            ProcessProfile profile = new ProcessProfile { Id = id, Name = "test" };
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(MockBehavior.Loose);
-            mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
-            mockRepo.Setup(r => r.RemoveAsync(profile, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
+            _ = mockRepo.Setup(r => r.RemoveAsync(profile, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
             await svc.DeleteProfileAsync(id, CancellationToken.None);
@@ -101,12 +101,12 @@ namespace Farm.Web.Api.Tests.Services
         {
             Guid id = Guid.NewGuid();
             Mock<IProfilesRepository> mockRepo = new Mock<IProfilesRepository>(MockBehavior.Strict);
-            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>(MockBehavior.Loose);
-            mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.ProcessProfile?)null);
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+            _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((ProcessProfile?)null);
 
             ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
 
-            await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteProfileAsync(id, CancellationToken.None));
+            _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteProfileAsync(id, CancellationToken.None));
         }
     }
 }

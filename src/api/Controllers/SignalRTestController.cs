@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
+using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 
@@ -11,14 +12,14 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/signalr-test")]
 public class SignalRTestController(
-    Farm.Web.Api.Services.SignalR.ISignalRTestService testService,
+    Services.SignalR.ISignalRTestService testService,
     IUnifiedLoggingService logger) : ControllerBase
 {
     /// <summary>
     /// Test endpoint to verify SignalR hub can send messages
     /// </summary>
     [HttpPost("send-test-message")]
-    public async Task<IActionResult> SendTestMessageAsync([FromBody] Farm.Web.Shared.Contracts.SignalR.SignalRTestRequest request)
+    public async Task<IActionResult> SendTestMessageAsync([FromBody] Shared.Contracts.SignalR.SignalRTestRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         try
@@ -37,7 +38,7 @@ public class SignalRTestController(
     /// Test discovery group functionality specifically
     /// </summary>
     [HttpPost("test-discovery-group")]
-    public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] Farm.Web.Shared.Contracts.SignalR.DiscoveryTestRequest request)
+    public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] Shared.Contracts.SignalR.DiscoveryTestRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         try
@@ -72,5 +73,3 @@ public class SignalRTestController(
         }
     }
 }
-
-// DTOs moved to Farm.Web.Shared.Contracts.SignalR.SignalRTestDtos.cs

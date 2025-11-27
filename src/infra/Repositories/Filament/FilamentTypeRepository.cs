@@ -35,7 +35,7 @@ public class FilamentTypeRepository : IFilamentTypeRepository
 
     public Task AddFilamentTypeAsync(FilamentType ft, CancellationToken ct = default)
     {
-        _db.FilamentTypes.Add(ft);
+        _ = _db.FilamentTypes.Add(ft);
         return Task.CompletedTask;
     }
 
@@ -47,13 +47,13 @@ public class FilamentTypeRepository : IFilamentTypeRepository
 
     public Task UpdateFilamentTypeAsync(FilamentType ft, CancellationToken ct = default)
     {
-        _db.FilamentTypes.Update(ft);
+        _ = _db.FilamentTypes.Update(ft);
         return Task.CompletedTask;
     }
 
     public Task DeleteFilamentTypeAsync(Guid id, CancellationToken ct = default)
     {
-        _db.FilamentTypes.Remove(new FilamentType { Id = id });
+        _ = _db.FilamentTypes.Remove(new FilamentType { Id = id });
         return Task.CompletedTask;
     }
 

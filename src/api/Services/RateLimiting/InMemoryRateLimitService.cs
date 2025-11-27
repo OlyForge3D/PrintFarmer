@@ -116,7 +116,7 @@ public class InMemoryRateLimitService : IRateLimitService
         lock (attemptList)
         {
             // Remove old attempts (older than 24 hours)
-            attemptList.RemoveAll(a => (now - a).TotalHours > 24);
+            _ = attemptList.RemoveAll(a => (now - a).TotalHours > 24);
 
             int attemptsInLastHour = attemptList.Count(a => (now - a).TotalHours < 1);
             int attemptsInLastDay = attemptList.Count;
@@ -182,7 +182,7 @@ public class InMemoryRateLimitService : IRateLimitService
 
         lock (attemptList)
         {
-            attemptList.RemoveAll(a => (now - a).TotalHours > 24);
+            _ = attemptList.RemoveAll(a => (now - a).TotalHours > 24);
             int attemptsInLastHour = attemptList.Count(a => (now - a).TotalHours < 1);
             int attemptsInLastDay = attemptList.Count;
 
@@ -208,7 +208,7 @@ public class InMemoryRateLimitService : IRateLimitService
     private void RecordGuidAttempt(Guid key, ConcurrentDictionary<Guid, List<DateTime>> attempts)
     {
         DateTime now = DateTime.UtcNow;
-        attempts.AddOrUpdate(
+        _ = attempts.AddOrUpdate(
             key,
             _ => [now],
             (_, existing) =>
@@ -227,7 +227,7 @@ public class InMemoryRateLimitService : IRateLimitService
         string normalizedKey = key.ToLowerInvariant();
         DateTime now = DateTime.UtcNow;
 
-        attempts.AddOrUpdate(
+        _ = attempts.AddOrUpdate(
             normalizedKey,
             _ => [now],
             (_, existing) =>
@@ -260,7 +260,7 @@ public class InMemoryRateLimitService : IRateLimitService
         lock (attemptList)
         {
             // Remove old attempts (outside the window)
-            attemptList.RemoveAll(a => (now - a) > window);
+            _ = attemptList.RemoveAll(a => (now - a) > window);
 
             int attemptsInWindow = attemptList.Count;
 

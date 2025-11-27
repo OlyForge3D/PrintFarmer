@@ -64,7 +64,7 @@ public class SpoolmanController(
     /// <response code="204">If the configuration was successfully updated</response>
     /// <response code="400">If the configuration data is invalid</response>
     [HttpPost("config")]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")]
+    [Authorize(Policy = "RequireAdmin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult SetConfig([FromBody] SpoolmanConfigDto? config)

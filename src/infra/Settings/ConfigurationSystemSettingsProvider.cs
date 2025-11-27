@@ -15,8 +15,8 @@ namespace Farm.Infrastructure.Settings
         public T Get<T>() where T : class, new()
         {
             // Try to find a public constant/field or static property named SectionName on the type T
-            FieldInfo? field = typeof(T).GetField("SectionName", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            PropertyInfo? prop = typeof(T).GetProperty("SectionName", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            FieldInfo? field = typeof(T).GetField("SectionName", BindingFlags.Public | BindingFlags.Static);
+            PropertyInfo? prop = typeof(T).GetProperty("SectionName", BindingFlags.Public | BindingFlags.Static);
             string? section = null;
             try
             {
@@ -63,12 +63,12 @@ namespace Farm.Infrastructure.Settings
 
     internal static class ReflectionExtensions
     {
-        public static bool IsStatic(this System.Reflection.MemberInfo mi)
+        public static bool IsStatic(this MemberInfo mi)
         {
             return mi switch
             {
-                System.Reflection.FieldInfo fi => fi.IsStatic,
-                System.Reflection.PropertyInfo pi => (pi.GetMethod ?? pi.SetMethod)?.IsStatic ?? false,
+                FieldInfo fi => fi.IsStatic,
+                PropertyInfo pi => (pi.GetMethod ?? pi.SetMethod)?.IsStatic ?? false,
                 _ => false
             };
         }

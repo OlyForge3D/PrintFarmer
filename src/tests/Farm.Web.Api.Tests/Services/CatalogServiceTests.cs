@@ -20,12 +20,12 @@ namespace Farm.Web.Api.Tests.Services
         {
             Mock<ICatalogCache> mockCache = new Mock<ICatalogCache>();
             (IReadOnlyList<ManufacturerDto>, string) expected = (new List<ManufacturerDto> { new ManufacturerDto(Guid.NewGuid(), "Test") } as IReadOnlyList<ManufacturerDto>, "etag1");
-            mockCache.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+            _ = mockCache.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             // Minimal dependencies: use NullLogger implementations and an in-memory AppDbContext is not required for this test
-            Mock<INormalizationEventLogger> normLogger = new Moq.Mock<Farm.Infrastructure.Normalization.INormalizationEventLogger>();
-            Mock<IUnifiedLoggingService> unifiedLogging = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            Mock<ICatalogRepository> mockRepo = new Moq.Mock<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository>();
+            Mock<INormalizationEventLogger> normLogger = new Mock<INormalizationEventLogger>();
+            Mock<IUnifiedLoggingService> unifiedLogging = new Mock<IUnifiedLoggingService>();
+            Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
 
             CatalogService svc = new CatalogService(mockRepo.Object, normLogger.Object, mockCache.Object, unifiedLogging.Object);
             (IReadOnlyList<ManufacturerDto>? list, string? etag) = await svc.GetManufacturersAsync(CancellationToken.None);

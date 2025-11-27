@@ -1,4 +1,5 @@
-﻿using System.Net.WebSockets;
+﻿using System.Net.Http.Headers;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -825,7 +826,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient
 
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(fileContent);
-            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
 
             using HttpClient client = _httpClientFactory.CreateClient();

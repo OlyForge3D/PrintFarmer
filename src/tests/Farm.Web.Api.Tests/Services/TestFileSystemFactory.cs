@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 
 namespace Farm.Web.Api.Tests.Services
@@ -16,7 +17,7 @@ namespace Farm.Web.Api.Tests.Services
         public static TestFileSystem WithFile(string filePath, byte[]? content = null)
         {
             TestFileSystem fs = new TestFileSystem();
-            string dir = System.IO.Path.GetDirectoryName(filePath) ?? string.Empty;
+            string dir = Path.GetDirectoryName(filePath) ?? string.Empty;
             if (!string.IsNullOrEmpty(dir))
             {
                 fs.CreateDirectory(dir);
@@ -39,7 +40,7 @@ namespace Farm.Web.Api.Tests.Services
             TestFileSystem fs = new TestFileSystem();
             foreach (KeyValuePair<string, byte[]> kv in files)
             {
-                string dir = System.IO.Path.GetDirectoryName(kv.Key) ?? string.Empty;
+                string dir = Path.GetDirectoryName(kv.Key) ?? string.Empty;
                 if (!string.IsNullOrEmpty(dir))
                 {
                     fs.CreateDirectory(dir);

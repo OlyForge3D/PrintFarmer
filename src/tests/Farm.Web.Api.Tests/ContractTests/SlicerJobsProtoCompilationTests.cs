@@ -88,7 +88,7 @@ public class SlicerJobsProtoCompilationTests
         Assert.Equal(45, response.ProgressPercentage);
         Assert.True(response.StartedAt > 0);
         Assert.Equal("worker-01", response.WorkerId);
-        Assert.Single(response.Metadata);
+        _ = Assert.Single(response.Metadata);
 
         // Test serialization
         byte[] bytes = response.ToByteArray();

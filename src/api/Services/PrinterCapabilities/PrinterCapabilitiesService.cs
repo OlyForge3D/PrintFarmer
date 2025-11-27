@@ -15,9 +15,9 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
     {
         private readonly IPrinterCapabilitiesRepository _repo;
         private readonly IUnifiedLoggingService _logger;
-        private readonly Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService _discovery;
+        private readonly IPrinterCapabilityDiscoveryService _discovery;
 
-        public PrinterCapabilitiesService(IPrinterCapabilitiesRepository repo, IUnifiedLoggingService logger, Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService discovery)
+        public PrinterCapabilitiesService(IPrinterCapabilitiesRepository repo, IUnifiedLoggingService logger, IPrinterCapabilityDiscoveryService discovery)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -404,18 +404,18 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
             return (dto, isNew);
         }
 
-        public async Task<Farm.Web.Api.Services.Interfaces.CapabilityValidationResult> ValidateAsync(Guid printerId, CancellationToken ct = default)
+        public async Task<CapabilityValidationResult> ValidateAsync(Guid printerId, CancellationToken ct = default)
         {
             Printer? printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
             if (printer == null)
             {
-                return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
+                return new CapabilityValidationResult { IsValid = false };
             }
 
             Farm.Infrastructure.Domain.PrinterCapabilities? cap = await _repo.GetByPrinterIdAsync(printerId, ct);
             if (cap == null)
             {
-                return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
+                return new CapabilityValidationResult { IsValid = false };
             }
 
             CapabilityValidationResult res = await _discovery.ValidateCapabilitiesAsync(cap, printer);

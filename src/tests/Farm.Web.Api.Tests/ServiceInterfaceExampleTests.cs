@@ -24,7 +24,7 @@ public class ServiceInterfaceExampleTests
         Mock<IMoonrakerClient> mockMoonraker = new Mock<IMoonrakerClient>();
         PrinterStatus expectedStatus = new PrinterStatus(IsOnline: true, State: "ready");
 
-        mockMoonraker
+        _ = mockMoonraker
             .Setup(m => m.GetStatusAsync("http://test-printer", It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedStatus);
 
@@ -87,7 +87,7 @@ public class ServiceInterfaceExampleTests
             )
         };
 
-        mockSpoolman
+        _ = mockSpoolman
             .Setup(s => s.ListSpoolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedSpools);
 

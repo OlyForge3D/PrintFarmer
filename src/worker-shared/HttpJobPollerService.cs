@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
@@ -70,7 +71,7 @@ public abstract class HttpJobPollerService(
 
                 HttpResponseMessage claimResponse = await httpClient.PostAsJsonAsync("/api/slice/claim", claimRequest, stoppingToken);
 
-                if (claimResponse.StatusCode == System.Net.HttpStatusCode.NoContent)
+                if (claimResponse.StatusCode == HttpStatusCode.NoContent)
                 {
                     // No jobs available, wait before polling again
                     await Task.Delay(TimeSpan.FromSeconds(pollIntervalSeconds), stoppingToken);
@@ -151,7 +152,7 @@ public abstract class HttpJobPollerService(
                     {
                         try
                         {
-                            RenewLeaseRequest renewReq = new Farm.Web.Shared.Contracts.Slicing.RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
+                            RenewLeaseRequest renewReq = new RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
                             HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew", renewReq, localLinkedCts.Token);
                             if (!resp.IsSuccessStatusCode)
                             {

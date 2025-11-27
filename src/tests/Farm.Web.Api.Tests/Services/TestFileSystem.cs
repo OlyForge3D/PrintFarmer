@@ -27,7 +27,7 @@ namespace Farm.Web.Api.Tests.Services
 
         public void DeleteFile(string path)
         {
-            _files.TryRemove(path, out _);
+            _ = _files.TryRemove(path, out _);
         }
 
         public void MoveFile(string sourceFileName, string destFileName, bool overwrite = false)
@@ -74,7 +74,7 @@ namespace Farm.Web.Api.Tests.Services
             throw new FileNotFoundException(path);
         }
 
-        public System.Threading.Tasks.Task<byte[]> ReadAllBytesAsync(string path, System.Threading.CancellationToken ct = default)
+        public Task<byte[]> ReadAllBytesAsync(string path, CancellationToken ct = default)
         {
             if (_files.TryGetValue(path, out byte[]? data))
             {
@@ -83,7 +83,7 @@ namespace Farm.Web.Api.Tests.Services
             return System.Threading.Tasks.Task.FromResult(File.ReadAllBytes(path));
         }
 
-        public System.Threading.Tasks.Task WriteAllBytesAsync(string path, byte[] data, System.Threading.CancellationToken ct = default)
+        public Task WriteAllBytesAsync(string path, byte[] data, CancellationToken ct = default)
         {
             Commit(path, data);
             return System.Threading.Tasks.Task.CompletedTask;
@@ -132,7 +132,7 @@ namespace Farm.Web.Api.Tests.Services
                 (DateTime Creation, DateTime LastWrite) times = _times.GetOrAdd(path, _ => (DateTime.UtcNow, DateTime.UtcNow));
                 return new FileInfoData { Length = data.Length, CreationTimeUtc = times.Creation, LastWriteTimeUtc = times.LastWrite, Extension = Path.GetExtension(path) };
             }
-            FileInfo fi = new System.IO.FileInfo(path);
+            FileInfo fi = new FileInfo(path);
             return new FileInfoData { Length = fi.Length, CreationTimeUtc = fi.CreationTimeUtc, LastWriteTimeUtc = fi.LastWriteTimeUtc, Extension = fi.Extension };
         }
 
@@ -150,12 +150,12 @@ namespace Farm.Web.Api.Tests.Services
 
         internal void SetCreationTimeUtc(string path, DateTime when)
         {
-            _times.AddOrUpdate(path, _ => (when, when), (k, v) => (when, v.LastWrite));
+            _ = _times.AddOrUpdate(path, _ => (when, when), (k, v) => (when, v.LastWrite));
         }
 
         internal void SetLastWriteTimeUtc(string path, DateTime when)
         {
-            _times.AddOrUpdate(path, _ => (when, when), (k, v) => (v.Creation, when));
+            _ = _times.AddOrUpdate(path, _ => (when, when), (k, v) => (v.Creation, when));
         }
 
         public void DeleteDirectory(string path)
@@ -165,12 +165,12 @@ namespace Farm.Web.Api.Tests.Services
             string[] keys = _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
             foreach (string? k in keys)
             {
-                _files.TryRemove(k, out _);
+                _ = _files.TryRemove(k, out _);
             }
             string[] dirs = _dirs.Keys.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
             foreach (string? d in dirs)
             {
-                _dirs.TryRemove(d, out _);
+                _ = _dirs.TryRemove(d, out _);
             }
         }
 

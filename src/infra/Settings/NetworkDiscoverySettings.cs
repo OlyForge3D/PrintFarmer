@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel.DataAnnotations;
+using System.Net;
 using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Settings;
@@ -46,7 +47,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     /// Used to determine if the discovery service is actively running.
     /// </summary>
     [JsonPropertyName("lastHeartbeat")]
-    [System.Text.Json.Serialization.JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? LastHeartbeat { get; set; }
 
     public void Validate()
@@ -94,7 +95,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             return false;
         }
-        if (!System.Net.IPAddress.TryParse(parts[0], out _))
+        if (!IPAddress.TryParse(parts[0], out _))
         {
             return false;
         }

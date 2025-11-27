@@ -22,7 +22,7 @@ public sealed class ConsoleEmailService(IUnifiedLoggingService logger, IEmailTem
             ["ExpirationMinutes"] = "60"
         };
         (string? subject, string? plain, string? html) = _renderer.Render("PasswordReset", model);
-        await SendAsync(new EmailMessage(email, subject, plain, html, "PasswordReset"), ct);
+        _ = await SendAsync(new EmailMessage(email, subject, plain, html, "PasswordReset"), ct);
         return true;
     }
 
@@ -34,7 +34,7 @@ public sealed class ConsoleEmailService(IUnifiedLoggingService logger, IEmailTem
             ["ExpirationHours"] = "24"
         };
         (string? subject, string? plain, string? html) = _renderer.Render("EmailConfirmation", model);
-        await SendAsync(new EmailMessage(email, subject, plain, html, "EmailConfirmation"), ct);
+        _ = await SendAsync(new EmailMessage(email, subject, plain, html, "EmailConfirmation"), ct);
         return true;
     }
 }

@@ -38,15 +38,15 @@ public class SliceJobTimeoutScannerIntegrationTests : IClassFixture<CustomWebApp
             CreatedAt = DateTime.UtcNow.AddMinutes(-30)
         };
 
-        db.SliceJobs.Add(job);
-        await db.SaveChangesAsync();
+        _ = db.SliceJobs.Add(job);
+        _ = await db.SaveChangesAsync();
 
         // Resolve the scanner from DI if available, otherwise construct one manually
         JobTimeoutScannerHostedService scanner = scope.ServiceProvider.GetService<JobTimeoutScannerHostedService>()
             ?? new JobTimeoutScannerHostedService(
                 scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<JobTimeoutScannerHostedService>>(),
                 scope.ServiceProvider,
-                scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Web.Api.Services.Workers.JobDispatchRetrySettings>>());
+                scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<JobDispatchRetrySettings>>());
 
         await scanner.ProcessStuckJobsOnceAsync(CancellationToken.None);
 
@@ -60,7 +60,7 @@ public class SliceJobTimeoutScannerIntegrationTests : IClassFixture<CustomWebApp
         Assert.True(updated.Status == SliceJobStatus.Queued || updated.Status == SliceJobStatus.Failed, "Job was not requeued or failed as expected");
 
         // Metrics: resolve metrics and ensure at least one retry and one timeout were recorded
-        SliceJobMetrics? metrics = verifyScope.ServiceProvider.GetService<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
+        SliceJobMetrics? metrics = verifyScope.ServiceProvider.GetService<SliceJobMetrics>();
         // Metrics may be null when telemetry disabled for tests; if present, ensure counters > 0
         if (metrics != null)
         {

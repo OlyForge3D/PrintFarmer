@@ -20,7 +20,7 @@ namespace Farm.Web.Api.Controllers.Slicing;
 [Authorize] // All endpoints require authentication
 public class ProfilesController(
     IUnifiedLoggingService logger,
-    Farm.Web.Api.Services.Slicing.IProfilesService profilesService,
+    IProfilesService profilesService,
     IProcessProfileRepository processProfileRepo,
     IMachineProfileRepository machineProfileRepo,
     IFilamentProfileRepository filamentProfileRepo,
@@ -28,7 +28,7 @@ public class ProfilesController(
     IWorkerRepository workerRepository) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
-    private readonly Farm.Web.Api.Services.Slicing.IProfilesService _profilesService = profilesService;
+    private readonly IProfilesService _profilesService = profilesService;
     private readonly IProcessProfileRepository _processProfileRepo = processProfileRepo;
     private readonly IMachineProfileRepository _machineProfileRepo = machineProfileRepo;
     private readonly IFilamentProfileRepository _filamentProfileRepo = filamentProfileRepo;
@@ -50,7 +50,7 @@ public class ProfilesController(
         {
             return BadRequest("rawJson is required");
         }
-        if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse<SlicerType>(request.SlicerType, true, out SlicerType slicerType))
+        if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse(request.SlicerType, true, out SlicerType slicerType))
         {
             return BadRequest("Invalid slicerType");
         }
@@ -96,7 +96,7 @@ public class ProfilesController(
                 SlicerType = slicerType,
                 LayerHeight = layerHeight,
                 InfillPercentage = infillPct,
-                Quality = Enum.TryParse<ProfileQuality>(quality, true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                Quality = Enum.TryParse(quality, true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                 RawJson = sanitizedRaw,
                 MetadataJson = metadataJson,
                 Hash = hash,
@@ -314,17 +314,17 @@ public class ProfilesController(
             {
                 return BadRequest("Name is required");
             }
-            if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse<SlicerType>(request.SlicerType, true, out SlicerType slicerType))
+            if (string.IsNullOrWhiteSpace(request.SlicerType) || !Enum.TryParse(request.SlicerType, true, out SlicerType slicerType))
             {
                 return BadRequest("Invalid slicer type");
             }
             ProfileQuality quality = ProfileQuality.Standard;
-            if (!string.IsNullOrWhiteSpace(request.Quality) && !Enum.TryParse<ProfileQuality>(request.Quality, true, out quality))
+            if (!string.IsNullOrWhiteSpace(request.Quality) && !Enum.TryParse(request.Quality, true, out quality))
             {
                 return BadRequest("Invalid quality setting");
             }
             // Map to service request and delegate creation
-            CreateProcessProfileDto createReq = new Farm.Web.Shared.CreateProcessProfileDto
+            CreateProcessProfileDto createReq = new CreateProcessProfileDto
             {
                 Name = request.Name,
                 Description = request.Description,
@@ -672,7 +672,7 @@ public class ProfilesController(
                         Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
                         Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
                         SlicerType = SlicerType.OrcaSlicer,
-                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                        Quality = Enum.TryParse(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                         LayerHeight = profile.LayerHeight,
                         InfillPercentage = profile.InfillPercentage,
                         PrintSpeed = profile.PrintSpeed,
@@ -941,7 +941,7 @@ public class ProfilesController(
                     await _machineProfileRepo.AddAsync(systemProfile, ct);
                     machineImported++;
                     imported++;
-                    importedMachineNames.Add(profile.Name ?? string.Empty);
+                    _ = importedMachineNames.Add(profile.Name ?? string.Empty);
                 }
                 catch (Exception ex)
                 {
@@ -967,7 +967,7 @@ public class ProfilesController(
                         Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
                         Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
                         SlicerType = SlicerType.OrcaSlicer,
-                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                        Quality = Enum.TryParse(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                         LayerHeight = profile.LayerHeight,
                         InfillPercentage = profile.InfillPercentage,
                         PrintSpeed = profile.PrintSpeed,
@@ -1224,7 +1224,7 @@ public class ProfilesController(
                     UpdatedAt = DateTime.UtcNow
                 };
 
-                await _processProfileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
+                _ = await _processProfileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
                 imported++;
             }
             catch (Exception ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException ||
@@ -1323,7 +1323,7 @@ public class ProfilesController(
                     InfillPercentage = processProfile.InfillPercentage,
                     PrintSpeed = processProfile.PrintSpeed,
                     EnableSupports = processProfile.Supports,
-                    Quality = Enum.TryParse<ProfileQuality>(quality, true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                    Quality = Enum.TryParse(quality, true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                     IsSystem = false,
                     IsDefault = false,
                     IsPublic = request.MakePublic ?? false,
@@ -1332,7 +1332,7 @@ public class ProfilesController(
                     UpdatedAt = DateTime.UtcNow
                 };
 
-                await _processProfileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
+                _ = await _processProfileRepo.AddOrUpdateFromImportAsync(userProfile, allowSystemOverride: false, ct);
                 imported++;
             }
             catch (Exception ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException ||

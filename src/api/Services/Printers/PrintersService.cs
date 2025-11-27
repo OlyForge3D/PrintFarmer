@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -24,7 +27,7 @@ namespace Farm.Web.Api.Services.Printers
     public class PrintersService : IPrintersService
     {
         private readonly Farm.Infrastructure.Repositories.Printers.IPrintersRepository _repo;
-        private readonly Farm.Web.Api.Services.Catalog.ICatalogService _catalogService;
+        private readonly Catalog.ICatalogService _catalogService;
         private readonly IMoonrakerClient _moon;
         private readonly IPrusaLinkClient _prusa;
         private readonly ISdcpClient _sdcp;
@@ -36,9 +39,9 @@ namespace Farm.Web.Api.Services.Printers
         private readonly INetworkUrlRewriteService _urlRewriter;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
         private readonly AutoMapper.IMapper _mapper;
-        private readonly IHubContext<Farm.Web.Api.Hubs.PrinterHub> _hubContext;
+        private readonly IHubContext<Hubs.PrinterHub> _hubContext;
 
-        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Farm.Web.Api.Services.Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, INetworkUrlRewriteService urlRewriter, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper, IHubContext<Farm.Web.Api.Hubs.PrinterHub> hubContext)
+        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, INetworkUrlRewriteService urlRewriter, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper, IHubContext<Hubs.PrinterHub> hubContext)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _moon = moon ?? throw new ArgumentNullException(nameof(moon));
@@ -57,7 +60,7 @@ namespace Farm.Web.Api.Services.Printers
         }
 
         // History helpers moved from controller: call Moonraker client and map to shared DTOs
-        public async Task<Farm.Web.Shared.HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
+        public async Task<Shared.HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
         {
             Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
             if (printer == null)
@@ -67,28 +70,28 @@ namespace Farm.Web.Api.Services.Printers
 
             if (printer.Backend != (int)Farm.Web.Shared.PrinterBackend.Moonraker)
             {
-                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+                return new Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Shared.HistoryJob>() };
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
-            Services.HistoryListResponse? moonrakerResponse = await _moon.GetHistoryListAsync(moonrakerUrl, limit, start, since, before, order, ct).ConfigureAwait(false);
+            HistoryListResponse? moonrakerResponse = await _moon.GetHistoryListAsync(moonrakerUrl, limit, start, since, before, order, ct).ConfigureAwait(false);
             if (moonrakerResponse == null)
             {
-                return new Farm.Web.Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Farm.Web.Shared.HistoryJob>() };
+                return new Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Shared.HistoryJob>() };
             }
 
             Shared.HistoryJob[] jobs = moonrakerResponse.Jobs.Select(j =>
             {
-                Shared.HistoryJob mapped = _mapper.Map<Farm.Web.Shared.HistoryJob>(j);
+                Shared.HistoryJob mapped = _mapper.Map<Shared.HistoryJob>(j);
                 // set ThumbnailUrl using existing service helper
                 mapped.ThumbnailUrl = ExtractThumbnailUrl(j.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
                 return mapped;
             }).ToArray();
 
-            return new Farm.Web.Shared.HistoryListResponse { Count = moonrakerResponse.Count, Jobs = jobs };
+            return new Shared.HistoryListResponse { Count = moonrakerResponse.Count, Jobs = jobs };
         }
 
-        public async Task<Farm.Web.Shared.HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct)
+        public async Task<Shared.HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(jobId))
             {
@@ -107,18 +110,18 @@ namespace Farm.Web.Api.Services.Printers
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
-            Services.HistoryJob? moonrakerJob = await _moon.GetHistoryJobAsync(moonrakerUrl, jobId, ct).ConfigureAwait(false);
+            HistoryJob? moonrakerJob = await _moon.GetHistoryJobAsync(moonrakerUrl, jobId, ct).ConfigureAwait(false);
             if (moonrakerJob == null)
             {
                 throw new KeyNotFoundException($"History job {jobId} not found");
             }
 
-            Shared.HistoryJob mapped = _mapper.Map<Farm.Web.Shared.HistoryJob>(moonrakerJob);
+            Shared.HistoryJob mapped = _mapper.Map<Shared.HistoryJob>(moonrakerJob);
             mapped.ThumbnailUrl = ExtractThumbnailUrl(moonrakerJob.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
             return mapped;
         }
 
-        public async Task<Farm.Web.Shared.HistoryTotals> GetHistoryTotalsAsync(Guid printerId, CancellationToken ct)
+        public async Task<Shared.HistoryTotals> GetHistoryTotalsAsync(Guid printerId, CancellationToken ct)
         {
             Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
             if (printer == null)
@@ -128,17 +131,17 @@ namespace Farm.Web.Api.Services.Printers
 
             if (printer.Backend != (int)Farm.Web.Shared.PrinterBackend.Moonraker)
             {
-                return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
+                return new Shared.HistoryTotals { JobTotals = new Shared.JobTotals() };
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
-            Services.HistoryTotals? moonrakerTotals = await _moon.GetHistoryTotalsAsync(moonrakerUrl, ct).ConfigureAwait(false);
+            HistoryTotals? moonrakerTotals = await _moon.GetHistoryTotalsAsync(moonrakerUrl, ct).ConfigureAwait(false);
             if (moonrakerTotals == null)
             {
-                return new Farm.Web.Shared.HistoryTotals { JobTotals = new Farm.Web.Shared.JobTotals() };
+                return new Shared.HistoryTotals { JobTotals = new Shared.JobTotals() };
             }
 
-            Shared.HistoryTotals mapped = _mapper.Map<Farm.Web.Shared.HistoryTotals>(moonrakerTotals);
+            Shared.HistoryTotals mapped = _mapper.Map<Shared.HistoryTotals>(moonrakerTotals);
             return mapped;
         }
 
@@ -210,14 +213,14 @@ namespace Farm.Web.Api.Services.Printers
         }
 
         // ----- Orchestration methods -----
-        public async Task<Farm.Web.Shared.PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct)
+        public async Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
 
             using CancellationTokenSource fastTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             fastTimeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
 
-            Farm.Web.Shared.PrinterDto[] dtos = await Task.WhenAll(items.Select(async p =>
+            PrinterDto[] dtos = await Task.WhenAll(items.Select(async p =>
             {
                 try
                 {
@@ -268,7 +271,7 @@ namespace Farm.Web.Api.Services.Printers
             return dtos;
         }
 
-        public async Task<Farm.Web.Shared.PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct)
+        public async Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await _repo.FindByIdAsync(id, ct);
             if (p is null)
@@ -285,13 +288,13 @@ namespace Farm.Web.Api.Services.Printers
                 {
                     CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
                     PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct => await _prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), statusCts.Token);
-                    return new Farm.Web.Shared.PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl);
+                    return new PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl);
                 }
                 else if (p.Backend == (int)Farm.Web.Shared.PrinterBackend.SDCP)
                 {
                     CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{p.Id}");
                     PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), statusCts.Token);
-                    return new Farm.Web.Shared.PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl, X: status.X, Y: status.Y, Z: status.Z, HotendTemp: status.HotendTemp, BedTemp: status.BedTemp, HotendTarget: status.HotendTarget, BedTarget: status.BedTarget);
+                    return new PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl, X: status.X, Y: status.Y, Z: status.Z, HotendTemp: status.HotendTemp, BedTemp: status.BedTemp, HotendTarget: status.HotendTarget, BedTarget: status.BedTarget);
                 }
                 else
                 {
@@ -299,22 +302,22 @@ namespace Farm.Web.Api.Services.Printers
                     string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
                     PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _moon.GetCompositeStatusAsync(moonrakerUrl, ct), statusCts.Token);
                     PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(moonrakerUrl, statusCts.Token);
-                    return new Farm.Web.Shared.PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl, X: status.X, Y: status.Y, Z: status.Z, HotendTemp: status.HotendTemp, BedTemp: status.BedTemp, HotendTarget: status.HotendTarget, BedTarget: status.BedTarget, SpoolInfo: spoolInfo);
+                    return new PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl, X: status.X, Y: status.Y, Z: status.Z, HotendTemp: status.HotendTemp, BedTemp: status.BedTemp, HotendTarget: status.HotendTarget, BedTarget: status.BedTarget, SpoolInfo: spoolInfo);
                 }
             }
             catch (OperationCanceledException) when (statusCts.Token.IsCancellationRequested)
             {
                 _logger.LogWarning($"Status timeout for printer {p.Id}");
-                return new Farm.Web.Shared.PrinterStatusDto(Id: p.Id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
+                return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning($"Error getting status for printer {p.Id}: {ex.Message}");
-                return new Farm.Web.Shared.PrinterStatusDto(Id: p.Id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
+                return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
             }
         }
 
-        public async Task<Farm.Web.Shared.PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct)
+        public async Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await _repo.FindByIdWithIncludesAsync(id, ct);
             if (p is null)
@@ -344,10 +347,10 @@ namespace Farm.Web.Api.Services.Printers
             }
         }
 
-        public async Task<Farm.Web.Shared.PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
+        public async Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllAsync(ct);
-            Farm.Web.Shared.PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
+            PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
             {
                 string? streamUrl = null;
                 string? snapshotUrl = null;
@@ -371,7 +374,7 @@ namespace Farm.Web.Api.Services.Printers
                         snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.ServerUrl, ct);
                     }
                 }
-                return new Farm.Web.Shared.PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
+                return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
             }));
             return dtos;
         }
@@ -391,15 +394,15 @@ namespace Farm.Web.Api.Services.Printers
             return await _repo.ExistsByNameOrServerUrlAsync(name, serverUrl, ct);
         }
 
-        public async Task<Farm.Web.Shared.PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
+        public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
-            return items.Select(p => new Farm.Web.Shared.PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == (int)Farm.Web.Shared.PrinterBackend.PrusaLink ? Farm.Web.Shared.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Web.Shared.PrinterBackend.SDCP ? Farm.Web.Shared.PrinterBackend.SDCP : Farm.Web.Shared.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, IsEnabled: p.IsEnabled)).ToArray();
+            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == (int)Farm.Web.Shared.PrinterBackend.PrusaLink ? Farm.Web.Shared.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Web.Shared.PrinterBackend.SDCP ? Farm.Web.Shared.PrinterBackend.SDCP : Farm.Web.Shared.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, IsEnabled: p.IsEnabled)).ToArray();
         }
 
         private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
         {
-            TypeInfoResolver = new Farm.Web.Api.Serialization.ImportExportTypeInfoResolver(),
+            TypeInfoResolver = new Serialization.ImportExportTypeInfoResolver(),
         };
 
         public async Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct)
@@ -410,15 +413,15 @@ namespace Farm.Web.Api.Services.Printers
             List<string> headerParts = new() { "Name", "IpAddress", "Backend", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
 
             StringBuilder csv = new();
-            csv.AppendLine(string.Join(',', headerParts));
+            _ = csv.AppendLine(string.Join(',', headerParts));
 
             foreach (Printer printer in printers)
             {
                 string backendName = printer.Backend == (int)Farm.Web.Shared.PrinterBackend.PrusaLink ? "PrusaLink" : printer.Backend == (int)Farm.Web.Shared.PrinterBackend.SDCP ? "SDCP" : "Moonraker";
-                csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{printer.IsEnabled}");
+                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{printer.IsEnabled}");
             }
 
-            return System.Text.Encoding.UTF8.GetBytes(csv.ToString());
+            return Encoding.UTF8.GetBytes(csv.ToString());
         }
 
         public async Task StreamExportToResponseAsync(Guid[]? ids, string format, HttpResponse response, CancellationToken ct)
@@ -441,7 +444,7 @@ namespace Farm.Web.Api.Services.Printers
 
             List<string> headerParts = new() { "Name", "IpAddress", "Backend", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
 
-            await using StreamWriter writer = new System.IO.StreamWriter(response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new StreamWriter(response.Body, Encoding.UTF8, leaveOpen: true);
             await writer.WriteLineAsync(string.Join(',', headerParts));
 
             foreach (Printer p in query)
@@ -453,7 +456,7 @@ namespace Farm.Web.Api.Services.Printers
             }
         }
 
-        public async Task<Farm.Web.Shared.PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct)
+        public async Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
             List<Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await GetCapabilitiesListAsync(ids, ct);
@@ -461,7 +464,7 @@ namespace Farm.Web.Api.Services.Printers
             PrinterWithCapabilitiesDto[] results = printers.Select(p =>
             {
                 Farm.Infrastructure.Domain.PrinterCapabilities? cap = capabilities.Find(c => c.PrinterId == p.Id);
-                return new Farm.Web.Shared.PrinterWithCapabilitiesDto
+                return new PrinterWithCapabilitiesDto
                 {
                     PrinterId = p.Id,
                     PrinterName = p.Name,
@@ -473,7 +476,7 @@ namespace Farm.Web.Api.Services.Printers
                     ServerUrl = p.ServerUrl,
                     ApiKey = p.ApiKey,
                     Notes = p.Notes,
-                    Capabilities = cap == null ? null : new Farm.Web.Shared.PrinterCapabilitiesExportDto
+                    Capabilities = cap == null ? null : new PrinterCapabilitiesExportDto
                     {
                         Id = cap.Id,
                         NozzleDiameter = cap.NozzleDiameter,
@@ -516,7 +519,7 @@ namespace Farm.Web.Api.Services.Printers
             return raw;
         }
 
-        private static bool PropertySuppressedForExport(System.Reflection.PropertyInfo? pi)
+        private static bool PropertySuppressedForExport(PropertyInfo? pi)
         {
             if (pi == null)
             {
@@ -533,7 +536,7 @@ namespace Farm.Web.Api.Services.Printers
             string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
             response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
 
-            await using StreamWriter writer = new System.IO.StreamWriter(response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new StreamWriter(response.Body, Encoding.UTF8, leaveOpen: true);
             await writer.WriteAsync("[");
             bool first = true;
             await foreach (Printer? p in query.AsAsyncEnumerable().WithCancellation(ct))
@@ -546,7 +549,7 @@ namespace Farm.Web.Api.Services.Printers
                 first = false;
                 _ = capabilities.TryGetValue(p.Id, out Farm.Infrastructure.Domain.PrinterCapabilities? cap);
                 Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p, cap);
-                string json = System.Text.Json.JsonSerializer.Serialize(dtoDict, _exportJsonOptions);
+                string json = JsonSerializer.Serialize(dtoDict, _exportJsonOptions);
                 await writer.WriteAsync(json);
                 await writer.FlushAsync();
             }
@@ -572,7 +575,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (cap != null)
             {
-                foreach (PropertyInfo prop in typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                foreach (PropertyInfo prop in typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(BindingFlags.Public | BindingFlags.Instance))
                 {
                     if (PropertySuppressedForExport(prop))
                     {
@@ -620,7 +623,7 @@ namespace Farm.Web.Api.Services.Printers
                 httpClient.Timeout = TimeSpan.FromSeconds(2);
                 using HttpRequestMessage request = new(HttpMethod.Head, snapshotUrl);
                 using HttpResponseMessage response = await httpClient.SendAsync(request, ct);
-                return response.StatusCode < System.Net.HttpStatusCode.InternalServerError;
+                return response.StatusCode < HttpStatusCode.InternalServerError;
             }
             catch (Exception ex)
             {
@@ -629,9 +632,9 @@ namespace Farm.Web.Api.Services.Printers
             }
         }
 
-        private static Farm.Web.Shared.PrinterDto CreateOfflinePrinterDto(Printer p)
+        private static PrinterDto CreateOfflinePrinterDto(Printer p)
         {
-            return new Farm.Web.Shared.PrinterDto(
+            return new PrinterDto(
                 Id: p.Id,
                 Name: p.Name,
                 ServerUrl: p.ServerUrl,
@@ -648,20 +651,20 @@ namespace Farm.Web.Api.Services.Printers
         }
 
         // Reuse controller's GetSpoolInfoAsync logic adapted for service
-        private async Task<Farm.Web.Shared.PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
+        private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
         {
             try
             {
                 int? activeSpoolId = await _moon.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
                 if (activeSpoolId == null)
                 {
-                    return new Farm.Web.Shared.PrinterSpoolInfoDto(HasActiveSpool: false);
+                    return new PrinterSpoolInfoDto(HasActiveSpool: false);
                 }
 
                 string? spoolDetailsJson = await _moon.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
                 if (string.IsNullOrWhiteSpace(spoolDetailsJson))
                 {
-                    return new Farm.Web.Shared.PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
+                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
                 }
 
                 try
@@ -683,20 +686,20 @@ namespace Farm.Web.Api.Services.Printers
                         }
                     }
 
-                    return new Farm.Web.Shared.PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId, SpoolName: spoolName, Material: material, ColorHex: colorHex, FilamentName: filamentName, Vendor: vendor, RemainingWeightG: remainingWeight, SpoolInUse: true);
+                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId, SpoolName: spoolName, Material: material, ColorHex: colorHex, FilamentName: filamentName, Vendor: vendor, RemainingWeightG: remainingWeight, SpoolInUse: true);
                 }
                 catch
                 {
-                    return new Farm.Web.Shared.PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
+                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
                 }
             }
             catch
             {
-                return new Farm.Web.Shared.PrinterSpoolInfoDto(HasActiveSpool: false);
+                return new PrinterSpoolInfoDto(HasActiveSpool: false);
             }
         }
 
-        public async Task<Farm.Web.Shared.PrinterDto> CreatePrinterFromDtoAsync(Farm.Web.Shared.CreatePrinterDto dto, CancellationToken ct)
+        public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
         {
             // resolve or create manufacturer/model
             Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
@@ -708,7 +711,7 @@ namespace Farm.Web.Api.Services.Printers
                     ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct).ConfigureAwait(false);
                     manufacturerId = created.Id;
                 }
-                catch (Farm.Web.Api.Infrastructure.Exceptions.DuplicateEntityException ex)
+                catch (Infrastructure.Exceptions.DuplicateEntityException ex)
                 {
                     // Manufacturer already exists, use its ID
                     if (ex.ExistingDto is ManufacturerDto existingMfg)
@@ -722,7 +725,7 @@ namespace Farm.Web.Api.Services.Printers
             if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
             {
                 string mname = dto.NewModelName!.Trim();
-                CreateModelRequest createReq = new Farm.Web.Api.Controllers.Requests.CreateModelRequest(
+                CreateModelRequest createReq = new CreateModelRequest(
                     ManufacturerId: manufacturerId,
                     Name: mname,
                     Type: null,
@@ -736,7 +739,7 @@ namespace Farm.Web.Api.Services.Printers
                     PrinterModelDto createdModel = await _catalogService.CreateModelAsync(createReq, ct).ConfigureAwait(false);
                     modelId = createdModel.Id;
                 }
-                catch (Farm.Web.Api.Infrastructure.Exceptions.DuplicateEntityException ex)
+                catch (Infrastructure.Exceptions.DuplicateEntityException ex)
                 {
                     // Model already exists, use its ID
                     if (ex.ExistingDto is PrinterModelDto existingModel)
@@ -767,11 +770,11 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 Uri uri = new(normalizedInput);
-                if (!System.Net.IPAddress.TryParse(uri.Host, out _))
+                if (!IPAddress.TryParse(uri.Host, out _))
                 {
                     string hostToResolve = EnsureLocalSuffix(uri.Host);
-                    System.Net.IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct).ConfigureAwait(false);
-                    System.Net.IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
+                    IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct).ConfigureAwait(false);
+                    IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
                     if (firstIp is not null)
                     {
                         UriBuilder ub = new(uri) { Host = firstIp.ToString() };
@@ -885,7 +888,7 @@ namespace Farm.Web.Api.Services.Printers
                 if (!string.IsNullOrWhiteSpace(apiKey))
                 {
                     // Typical servers expect the API key in X-Api-Key header
-                    req.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
+                    _ = req.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
                 }
 
                 using HttpResponseMessage resp = await client.SendAsync(req, ct).ConfigureAwait(false);
@@ -1124,7 +1127,7 @@ namespace Farm.Web.Api.Services.Printers
             return false;
         }
 
-        public async Task<bool> UploadGcodeAsync(Guid id, string filename, System.IO.Stream stream, CancellationToken ct)
+        public async Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
             if (p == null)
@@ -1162,7 +1165,7 @@ namespace Farm.Web.Api.Services.Printers
             };
         }
 
-        public async Task<Farm.Web.Shared.ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, Farm.Web.Shared.PrinterBackend backend, CancellationToken ct)
+        public async Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct)
         {
             // First normalize with port for internal operations (URL comparison, parsing)
             int defaultPort = backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : backend == Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125;
@@ -1173,11 +1176,11 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 Uri uri = new(normalizedWithPort);
-                if (!System.Net.IPAddress.TryParse(uri.Host, out _))
+                if (!IPAddress.TryParse(uri.Host, out _))
                 {
                     string hostToResolve = EnsureLocalSuffix(uri.Host);
-                    System.Net.IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct).ConfigureAwait(false);
-                    System.Net.IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
+                    IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(hostToResolve, ct).ConfigureAwait(false);
+                    IPAddress? firstIp = Array.Find(addresses, a => a.AddressFamily == AddressFamily.InterNetwork) ?? (addresses.Length > 0 ? addresses[0] : null);
                     if (firstIp is not null)
                     {
                         UriBuilder ub = new(uri) { Host = firstIp.ToString() };
@@ -1194,7 +1197,7 @@ namespace Farm.Web.Api.Services.Printers
 
             // ServerUrl is already normalized without explicit port by NormalizeServerUrl()
             // Port is managed separately via FrontendPort field
-            return new Farm.Web.Shared.ResolveHostnameResponse(normalizedWithPort, resolvedIp, resolvedBase);
+            return new ResolveHostnameResponse(normalizedWithPort, resolvedIp, resolvedBase);
         }
 
         public string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
@@ -1219,7 +1222,7 @@ namespace Farm.Web.Api.Services.Printers
                         return $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailStr}";
                     }
 
-                    if (thumbnailValue is System.Text.Json.JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    if (thumbnailValue is JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
                     {
                         List<JsonElement> array = jsonElement.EnumerateArray().ToList();
                         if (array.Count > 0)
@@ -1274,7 +1277,7 @@ namespace Farm.Web.Api.Services.Printers
             {
                 return host;
             }
-            return System.Net.IPAddress.TryParse(host, out _) ?
+            return IPAddress.TryParse(host, out _) ?
                 host :
                 host.Contains('.', StringComparison.Ordinal) ? host : host + ".local";
         }
@@ -1432,7 +1435,7 @@ namespace Farm.Web.Api.Services.Printers
         /// Supports multiple printer backends: Moonraker, PrusaLink (OctoPrint), and SDCP.
         /// Returns null if no active job or if status cannot be retrieved.
         /// </summary>
-        public async Task<Farm.Web.Shared.PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
+        public async Task<PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
         {
             try
             {
@@ -1455,7 +1458,7 @@ namespace Farm.Web.Api.Services.Printers
                         PrinterJob? job = await _moon.GetJobAsync(moonrakerUrl, ct).ConfigureAwait(false);
                         if (job != null)
                         {
-                            return new Farm.Web.Shared.PrintJobStatusDto
+                            return new PrintJobStatusDto
                             {
                                 State = job.PrintState,
                                 Progress = job.Progress,
@@ -1479,7 +1482,7 @@ namespace Farm.Web.Api.Services.Printers
                         PrinterJob job = await _sdcp.GetJobAsync(printer.ServerUrl, ct).ConfigureAwait(false);
                         if (job != null)
                         {
-                            return new Farm.Web.Shared.PrintJobStatusDto
+                            return new PrintJobStatusDto
                             {
                                 State = job.PrintState,
                                 Progress = job.Progress,
@@ -1524,7 +1527,7 @@ namespace Farm.Web.Api.Services.Printers
                 throw new ArgumentException("File cannot be empty");
             }
 
-            string fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
+            string fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (fileExtension != ".csv" && fileExtension != ".json")
             {
                 throw new ArgumentException("File must be CSV or JSON format");
@@ -1575,7 +1578,7 @@ namespace Farm.Web.Api.Services.Printers
 
             try
             {
-                using (StreamReader reader = new System.IO.StreamReader(file.OpenReadStream()))
+                using (StreamReader reader = new StreamReader(file.OpenReadStream()))
                 {
                     string? headerLine = await reader.ReadLineAsync(ct);
                     if (string.IsNullOrWhiteSpace(headerLine))
@@ -1627,7 +1630,7 @@ namespace Farm.Web.Api.Services.Printers
                             }
 
                             // Validate backend
-                            if (!Enum.TryParse<PrinterBackend>(values[backendIdx], true, out PrinterBackend backendEnum))
+                            if (!Enum.TryParse(values[backendIdx], true, out PrinterBackend backendEnum))
                             {
                                 errors.Add($"Line {lineNumber}: Invalid backend '{values[backendIdx]}' (must be Moonraker, PrusaLink, or SDCP)");
                                 continue;
@@ -1694,7 +1697,7 @@ namespace Farm.Web.Api.Services.Printers
         {
             try
             {
-                using (StreamReader reader = new System.IO.StreamReader(file.OpenReadStream()))
+                using (StreamReader reader = new StreamReader(file.OpenReadStream()))
                 {
                     string content = await reader.ReadToEndAsync(ct);
 
@@ -1707,7 +1710,7 @@ namespace Farm.Web.Api.Services.Printers
                     {
                         PropertyNameCaseInsensitive = true,
                         WriteIndented = false,
-                        TypeInfoResolver = new Farm.Web.Api.Serialization.ImportExportTypeInfoResolver()
+                        TypeInfoResolver = new Serialization.ImportExportTypeInfoResolver()
                     };
 
                     CreatePrinterDto[]? printers = JsonSerializer.Deserialize<CreatePrinterDto[]>(content, options);

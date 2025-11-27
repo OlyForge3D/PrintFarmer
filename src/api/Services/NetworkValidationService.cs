@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Net;
+using System.Net.Sockets;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Shared;
 
@@ -98,7 +99,7 @@ public static class NetworkValidationService
             return new CidrValidationResult { IsValid = false, Error = "Invalid IP address format" };
         }
 
-        if (ipAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        if (ipAddress.AddressFamily != AddressFamily.InterNetwork)
         {
             return new CidrValidationResult { IsValid = false, Error = "Only IPv4 addresses are supported" };
         }

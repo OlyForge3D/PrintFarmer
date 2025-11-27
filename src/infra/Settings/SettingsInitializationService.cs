@@ -96,7 +96,7 @@ namespace Farm.Infrastructure.Settings
                 }
 
                 // Check for non-empty collections
-                if (value is System.Collections.IEnumerable enumerable && value is not string)
+                if (value is IEnumerable enumerable && value is not string)
                 {
                     IEnumerator enumerator = enumerable.GetEnumerator();
                     if (enumerator.MoveNext())

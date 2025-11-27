@@ -38,9 +38,9 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         HttpResponseMessage response3 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert - All should process (may fail auth, but not rate limited)
-        response1.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
-        response2.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
-        response3.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
+        _ = response1.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
+        _ = response2.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
+        _ = response3.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
 
         // Act - Make 11 rapid login attempts (exceeds 10/minute limit)
         List<HttpResponseMessage> responses = new List<HttpResponseMessage>();
-        client.DefaultRequestHeaders.Remove("X-Forwarded-For");
+        _ = client.DefaultRequestHeaders.Remove("X-Forwarded-For");
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.2");
         for (int i = 0; i < 11; i++)
         {
@@ -65,17 +65,17 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
 
         // Assert - At least one should be rate limited
         List<HttpResponseMessage> rateLimitedResponses = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
-        rateLimitedResponses.Should().NotBeEmpty("at least one request should be rate limited");
+        _ = rateLimitedResponses.Should().NotBeEmpty("at least one request should be rate limited");
 
         // Check the rate limited response
         HttpResponseMessage rateLimitedResponse = rateLimitedResponses.First();
-        rateLimitedResponse.Headers.Should().ContainKey("Retry-After");
+        _ = rateLimitedResponse.Headers.Should().ContainKey("Retry-After");
 
         RateLimitErrorResponse? content = await rateLimitedResponse.Content.ReadFromJsonAsync<RateLimitErrorResponse>();
-        content.Should().NotBeNull();
-        content!.Error.Should().Be("Too Many Requests");
-        content.Message.Should().Contain("login");
-        content.RetryAfterSeconds.Should().BeGreaterThan(0);
+        _ = content.Should().NotBeNull();
+        _ = content!.Error.Should().Be("Too Many Requests");
+        _ = content.Message.Should().Contain("login");
+        _ = content.RetryAfterSeconds.Should().BeGreaterThan(0);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
 
         // Act - Make 11 rapid registration attempts (exceeds 10/minute limit)
         List<HttpResponseMessage> responses = new List<HttpResponseMessage>();
-        client.DefaultRequestHeaders.Remove("X-Forwarded-For");
+        _ = client.DefaultRequestHeaders.Remove("X-Forwarded-For");
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.3");
         for (int i = 0; i < 11; i++)
         {
@@ -104,16 +104,16 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
 
         // Assert - At least one should be rate limited
         List<HttpResponseMessage> rateLimitedResponses = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
-        rateLimitedResponses.Should().NotBeEmpty("at least one request should be rate limited");
+        _ = rateLimitedResponses.Should().NotBeEmpty("at least one request should be rate limited");
 
         // Check the rate limited response
         HttpResponseMessage rateLimitedResponse = rateLimitedResponses.First();
-        rateLimitedResponse.Headers.Should().ContainKey("Retry-After");
+        _ = rateLimitedResponse.Headers.Should().ContainKey("Retry-After");
 
         RateLimitErrorResponse? content = await rateLimitedResponse.Content.ReadFromJsonAsync<RateLimitErrorResponse>();
-        content.Should().NotBeNull();
-        content!.Error.Should().Be("Too Many Requests");
-        content.Message.Should().Contain("register");
+        _ = content.Should().NotBeNull();
+        _ = content!.Error.Should().Be("Too Many Requests");
+        _ = content.Message.Should().Contain("register");
     }
 
     [Fact]
@@ -130,15 +130,15 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         // Act - Exhaust login rate limit
         for (int i = 0; i < 11; i++)
         {
-            await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+            _ = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
         }
 
         // Try to access a different endpoint (health check)
         HttpResponseMessage healthResponse = await client.GetAsync("/health");
 
         // Assert - Health endpoint should still work
-        healthResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
-        healthResponse.IsSuccessStatusCode.Should().BeTrue();
+        _ = healthResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
+        _ = healthResponse.IsSuccessStatusCode.Should().BeTrue();
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         // Act - Exhaust login rate limit
         for (int i = 0; i < 11; i++)
         {
-            await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+            _ = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
         }
 
         // Try to register (different rate limit counter)
@@ -168,12 +168,12 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
             FirstName = "New",
             LastName = "User"
         };
-        client.DefaultRequestHeaders.Remove("X-Forwarded-For");
+        _ = client.DefaultRequestHeaders.Remove("X-Forwarded-For");
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.4");
         HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
         // Assert - Register should not be rate limited (independent counter)
-        registerResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
+        _ = registerResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
     }
 
     private record RateLimitErrorResponse(

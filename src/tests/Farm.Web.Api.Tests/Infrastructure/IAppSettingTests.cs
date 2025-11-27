@@ -72,7 +72,7 @@ public class IAppSettingTests
         {
             Exception ex = Record.Exception(() => validatable.Validate());
             Assert.NotNull(ex);
-            Assert.IsType<ValidationException>(ex);
+            _ = Assert.IsType<ValidationException>(ex);
         }
     }
 

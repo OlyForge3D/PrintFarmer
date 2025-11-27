@@ -1,4 +1,6 @@
-﻿using System.Text;
+﻿using System.IO;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
@@ -781,7 +783,7 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
 
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(fileContent);
-            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
             formContent.Add(new StringContent("gcodes"), "root"); // Upload to gcodes directory
 
@@ -1258,7 +1260,7 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
 
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(content);
-            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", filename);
             formContent.Add(new StringContent(root), "root");
 
@@ -1297,9 +1299,9 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
 
             using MultipartFormDataContent formContent = new();
             using StreamContent streamContent = new(content);
-            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
-            string filename = System.IO.Path.GetFileName(path);
+            string filename = Path.GetFileName(path);
             formContent.Add(streamContent, "file", filename);
             formContent.Add(new StringContent(path), "path");
 

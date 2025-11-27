@@ -11,10 +11,10 @@ namespace Farm.Web.Api.Services.Authentication;
 /// </summary>
 public class AuthAuditService : IAuthAuditService
 {
-    private readonly Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext> _dbFactory;
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IUnifiedLoggingService _logging;
 
-    public AuthAuditService(Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext> dbFactory, IUnifiedLoggingService logging)
+    public AuthAuditService(IDbContextFactory<AppDbContext> dbFactory, IUnifiedLoggingService logging)
     {
         _dbFactory = dbFactory;
         _logging = logging;
@@ -24,8 +24,8 @@ public class AuthAuditService : IAuthAuditService
     private async Task SaveAuditAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)
     {
         using AppDbContext ctx = _dbFactory.CreateDbContext();
-        ctx.AuthAuditLogs.Add(auditLog);
-        await ctx.SaveChangesAsync(cancellationToken);
+        _ = ctx.AuthAuditLogs.Add(auditLog);
+        _ = await ctx.SaveChangesAsync(cancellationToken);
         _logging.LogInformation($"[AuthAudit] Saved audit {auditLog.EventType} Id={auditLog.Id}");
         try
         {

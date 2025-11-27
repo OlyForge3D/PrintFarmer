@@ -1,4 +1,6 @@
 ﻿using System.Security.Claims;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
@@ -28,10 +30,10 @@ public class SliceJobController : ControllerBase
     private readonly IHostEnvironment _env;
     private readonly IProcessProfileRepository _profileRepository;
     private readonly IArtifactsService _artifactsService;
-    private readonly Farm.Web.Api.Services.Slicing.SliceJobMetrics _metrics;
-    private readonly Farm.Web.Api.Services.RateLimiting.IRateLimitService _rateLimitService;
-    private readonly Farm.Web.Api.Services.Workers.IWorkerAuthService _workerAuth;
-    private readonly Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService? _circuitBreaker;
+    private readonly SliceJobMetrics _metrics;
+    private readonly IRateLimitService _rateLimitService;
+    private readonly Services.Workers.IWorkerAuthService _workerAuth;
+    private readonly Services.Workers.IWorkerCircuitBreakerService? _circuitBreaker;
 
     public SliceJobController(
         ISliceJobRepository jobRepository,
@@ -40,10 +42,10 @@ public class SliceJobController : ControllerBase
         IHostEnvironment env,
         IProcessProfileRepository profileRepository,
         IArtifactsService artifactsService,
-        Farm.Web.Api.Services.RateLimiting.IRateLimitService rateLimitService,
-        Farm.Web.Api.Services.Slicing.SliceJobMetrics metrics,
-        Farm.Web.Api.Services.Workers.IWorkerAuthService workerAuth,
-        Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService? circuitBreaker = null)
+        IRateLimitService rateLimitService,
+        SliceJobMetrics metrics,
+        Services.Workers.IWorkerAuthService workerAuth,
+        Services.Workers.IWorkerCircuitBreakerService? circuitBreaker = null)
     {
         _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
@@ -71,7 +73,7 @@ public class SliceJobController : ControllerBase
         }
         try
         {
-            string[]? parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(capabilitiesJson);
+            string[]? parsed = JsonSerializer.Deserialize<string[]>(capabilitiesJson);
             if (parsed == null)
             {
                 error = "Capabilities must be a JSON string array.";
@@ -91,7 +93,7 @@ public class SliceJobController : ControllerBase
                 error = "Duplicate capabilities are not allowed.";
                 return false;
             }
-            List<string> invalid = canonical.Where(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[a-z0-9][a-z0-9\-_/]{0,63}$")).ToList();
+            List<string> invalid = canonical.Where(c => !Regex.IsMatch(c, @"^[a-z0-9][a-z0-9\-_/]{0,63}$")).ToList();
             if (invalid.Count > 0)
             {
                 error = $"Invalid capability slug(s): {string.Join(", ", invalid)}";
@@ -168,7 +170,7 @@ public class SliceJobController : ControllerBase
         {
             try
             {
-                referencedProfile = await _profileRepository.GetDefaultAsync((Farm.Infrastructure.Domain.SlicerType)request.SlicerEngine, null, HttpContext.RequestAborted);
+                referencedProfile = await _profileRepository.GetDefaultAsync((SlicerType)request.SlicerEngine, null, HttpContext.RequestAborted);
             }
             catch (Exception ex)
             {
@@ -200,7 +202,7 @@ public class SliceJobController : ControllerBase
             SlicerEngine = referencedProfile != null ? (int)referencedProfile.SlicerType : request.SlicerEngine,
             SlicerProfileJson = referencedProfile?.RawJson ?? request.SlicerProfileJson ?? "{}",
             SlicerProfileId = referencedProfile?.Id,
-            RequiredCapabilitiesJson = capabilityList.Length == 0 ? "[]" : System.Text.Json.JsonSerializer.Serialize(capabilityList),
+            RequiredCapabilitiesJson = capabilityList.Length == 0 ? "[]" : JsonSerializer.Serialize(capabilityList),
             Status = SliceJobStatus.Queued,
             Priority = request.Priority,
             QueuedAt = DateTime.UtcNow,
@@ -645,7 +647,7 @@ public class SliceJobController : ControllerBase
         // Record successful completion in circuit breaker
         if (job.WorkerId.HasValue && job.WorkerId.Value != Guid.Empty && _circuitBreaker != null)
         {
-            IWorkerRepository workerRepo = HttpContext.RequestServices.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
+            IWorkerRepository workerRepo = HttpContext.RequestServices.GetRequiredService<IWorkerRepository>();
             await _circuitBreaker.RecordJobSuccessAsync(job.WorkerId.Value, workerRepo, HttpContext.RequestAborted);
         }
 

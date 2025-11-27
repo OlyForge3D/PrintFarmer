@@ -161,8 +161,8 @@ public class FileConsistencyAuditService : BackgroundService
                 CreatedAt = DateTime.UtcNow
             };
 
-            dbContext.FileHealthAudits.Add(auditEntry);
-            await dbContext.SaveChangesAsync(ct);
+            _ = dbContext.FileHealthAudits.Add(auditEntry);
+            _ = await dbContext.SaveChangesAsync(ct);
 
             _logger.LogInformation($"Audit results saved for {auditType}: {auditEntry.SummaryMessage}");
         }

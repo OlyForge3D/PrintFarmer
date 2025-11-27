@@ -32,11 +32,11 @@ public class RegistrationBackgroundService : BackgroundService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
 
-        _heartbeatIntervalSeconds = configuration.GetValue<int>("SlicerRegistry:HeartbeatIntervalSeconds", 30);
-        _maxConcurrentJobs = configuration.GetValue<int>("Worker:MaxConcurrentJobs", 1);
+        _heartbeatIntervalSeconds = configuration.GetValue("SlicerRegistry:HeartbeatIntervalSeconds", 30);
+        _maxConcurrentJobs = configuration.GetValue("Worker:MaxConcurrentJobs", 1);
 
         // Register for shutdown to deregister cleanly
-        _lifetime.ApplicationStopping.Register(OnShutdown);
+        _ = _lifetime.ApplicationStopping.Register(OnShutdown);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -62,7 +62,7 @@ public class RegistrationBackgroundService : BackgroundService
                 // If not registered, try to register again
                 if (!_isRegistered)
                 {
-                    await TryRegisterAsync(stoppingToken);
+                    _ = await TryRegisterAsync(stoppingToken);
                     continue;
                 }
 

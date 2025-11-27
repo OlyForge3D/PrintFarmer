@@ -19,9 +19,9 @@ public class NetworkDiscoveryServiceTests
         DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.ServerUrl.Should().Be("http://192.168.1.100");
-        result.BackendPort.Should().Be(80);
-        result.Backend.Should().Be(PrinterBackend.Moonraker);
+        _ = result.ServerUrl.Should().Be("http://192.168.1.100");
+        _ = result.BackendPort.Should().Be(80);
+        _ = result.Backend.Should().Be(PrinterBackend.Moonraker);
     }
 
     [Fact]
@@ -37,9 +37,9 @@ public class NetworkDiscoveryServiceTests
         DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.ServerUrl.Should().Be("http://192.168.1.100:7125");
-        result.BackendPort.Should().Be(7125);
-        result.Backend.Should().Be(PrinterBackend.Moonraker);
+        _ = result.ServerUrl.Should().Be("http://192.168.1.100:7125");
+        _ = result.BackendPort.Should().Be(7125);
+        _ = result.Backend.Should().Be(PrinterBackend.Moonraker);
     }
 
     [Fact]
@@ -55,9 +55,9 @@ public class NetworkDiscoveryServiceTests
         DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.ServerUrl.Should().Be("http://192.168.1.100:80");
-        result.BackendPort.Should().Be(80);
-        result.Backend.Should().Be(PrinterBackend.PrusaLink);
+        _ = result.ServerUrl.Should().Be("http://192.168.1.100:80");
+        _ = result.BackendPort.Should().Be(80);
+        _ = result.Backend.Should().Be(PrinterBackend.PrusaLink);
     }
 
     private static object CreatePrinterInfo(string name)
@@ -79,8 +79,8 @@ public class NetworkDiscoveryServiceTests
         DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
-        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+        _ = result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
+        _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
     [Fact]
@@ -102,21 +102,21 @@ public class NetworkDiscoveryServiceTests
         PropertyInfo? mfgProp = pit.GetProperty("Manufacturer");
         if (mfgProp != null)
         {
-            result.Manufacturer.Should().Be("Test Manufacturer", "because manufacturer is not Unknown");
+            _ = result.Manufacturer.Should().Be("Test Manufacturer", "because manufacturer is not Unknown");
         }
         else
         {
-            result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
+            _ = result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
         }
 
         PropertyInfo? modelProp = pit.GetProperty("Model");
         if (modelProp != null)
         {
-            result.Model.Should().BeNull("because Unknown model should not be set");
+            _ = result.Model.Should().BeNull("because Unknown model should not be set");
         }
         else
         {
-            result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
+            _ = result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
         }
     }
 
@@ -133,8 +133,8 @@ public class NetworkDiscoveryServiceTests
         DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
-        result.Model.Should().BeNull("because Unknown model should not be set");
+        _ = result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
+        _ = result.Model.Should().BeNull("because Unknown model should not be set");
     }
 
     private static object CreatePrinterInfoWithUnknownManufacturer(string name)
@@ -169,21 +169,21 @@ public class NetworkDiscoveryServiceTests
         PropertyInfo? mfgProp2 = pit2.GetProperty("Manufacturer");
         if (mfgProp2 != null)
         {
-            result.Manufacturer.Should().Be("MyUnknown Manufacturer", "because it doesn't start with Unknown");
+            _ = result.Manufacturer.Should().Be("MyUnknown Manufacturer", "because it doesn't start with Unknown");
         }
         else
         {
-            result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
+            _ = result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
         }
 
         PropertyInfo? modelProp2 = pit2.GetProperty("Model");
         if (modelProp2 != null)
         {
-            result.Model.Should().Be("Model Unknown Type", "because it doesn't start with Unknown");
+            _ = result.Model.Should().Be("Model Unknown Type", "because it doesn't start with Unknown");
         }
         else
         {
-            result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
+            _ = result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
         }
     }
 
@@ -209,21 +209,21 @@ public class NetworkDiscoveryServiceTests
         PropertyInfo? mfgProp3 = pit3.GetProperty("Manufacturer");
         if (mfgProp3 != null)
         {
-            result.Manufacturer.Should().Be("Prusa Research", "because manufacturer is known");
+            _ = result.Manufacturer.Should().Be("Prusa Research", "because manufacturer is known");
         }
         else
         {
-            result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
+            _ = result.Manufacturer.Should().BeNull("runtime PrinterInfo type doesn't expose Manufacturer");
         }
 
         PropertyInfo? modelProp3 = pit3.GetProperty("Model");
         if (modelProp3 != null)
         {
-            result.Model.Should().BeNull("because Unknown Prusa should not be set");
+            _ = result.Model.Should().BeNull("because Unknown Prusa should not be set");
         }
         else
         {
-            result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
+            _ = result.Model.Should().BeNull("runtime PrinterInfo type doesn't expose Model");
         }
     }
 
@@ -240,8 +240,8 @@ public class NetworkDiscoveryServiceTests
         DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because manufacturer is null");
-        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+        _ = result.Manufacturer.Should().BeNull("because manufacturer is null");
+        _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
     [Fact]
@@ -257,8 +257,8 @@ public class NetworkDiscoveryServiceTests
         DiscoveredPrinterDto result = InvokeCreateDiscoveredPrinter(ipAddress, port, backend, printerInfo);
 
         // Assert
-        result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
-        result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
+        _ = result.Manufacturer.Should().BeNull("because Unknown manufacturer should not be set");
+        _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
     private static object CreatePrinterInfoWithUnknownPrusa(string name)

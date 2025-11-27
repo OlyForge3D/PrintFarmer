@@ -40,7 +40,7 @@ public class SliceJobRateLimitTests
         }
         RateLimitResult finalCheck = await svc.CheckSliceJobSubmitLimitAsync(userId);
         Assert.False(finalCheck.IsAllowed);
-        Assert.NotNull(finalCheck.RetryAfter);
+        _ = Assert.NotNull(finalCheck.RetryAfter);
     }
 
     [Fact]

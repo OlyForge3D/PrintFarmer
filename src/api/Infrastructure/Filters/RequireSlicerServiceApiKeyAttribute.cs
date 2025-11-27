@@ -56,6 +56,6 @@ public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActio
             return;
         }
 
-        await next();
+        _ = await next();
     }
 }

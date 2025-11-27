@@ -52,7 +52,7 @@ public class MoonrakerDiagnosticsService : IMoonrakerDiagnosticsService
         return ExecuteWithRetriesAsync(() => _moonrakerClient.GetFileRootsAsync(url));
     }
 
-    public Task<Farm.Web.Api.Services.DirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes")
+    public Task<DirectoryInfo?> GetDirectoryAsync(string url, string path = "gcodes")
     {
         return ExecuteWithRetriesAsync(() => _moonrakerClient.GetDirectoryAsync(url, path, extended: true));
     }

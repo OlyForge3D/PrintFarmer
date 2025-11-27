@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
@@ -77,7 +78,7 @@ public class JobDispatcherService : IJobDispatcherService
 
     public async Task<bool> DispatchJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+        Stopwatch sw = Stopwatch.StartNew();
         try
         {
             // Get job details
@@ -99,9 +100,9 @@ public class JobDispatcherService : IJobDispatcherService
             if (worker == null)
             {
                 _logger.LogDebug($"No suitable worker found for job {jobId}");
-                TagList noWorkerTags = new System.Diagnostics.TagList { { "outcome", "failed" } };
+                TagList noWorkerTags = new TagList { { "outcome", "failed" } };
                 _dispatchDurationMs.Record(sw.ElapsedMilliseconds, noWorkerTags);
-                TagList noWorkerReasonTags = new System.Diagnostics.TagList { { "reason", "no_worker" } };
+                TagList noWorkerReasonTags = new TagList { { "reason", "no_worker" } };
                 _jobsDispatchFailed.Add(1, noWorkerReasonTags);
                 return false;
             }
@@ -111,9 +112,9 @@ public class JobDispatcherService : IJobDispatcherService
             if (!success)
             {
                 _logger.LogWarning($"Failed to send job {jobId} to worker {worker.Id}");
-                TagList sendFailedTags = new System.Diagnostics.TagList { { "outcome", "failed" } };
+                TagList sendFailedTags = new TagList { { "outcome", "failed" } };
                 _dispatchDurationMs.Record(sw.ElapsedMilliseconds, sendFailedTags);
-                TagList sendFailedReasonTags = new System.Diagnostics.TagList { { "reason", "send_failed" } };
+                TagList sendFailedReasonTags = new TagList { { "reason", "send_failed" } };
                 _jobsDispatchFailed.Add(1, sendFailedReasonTags);
                 return false;
             }
@@ -134,7 +135,7 @@ public class JobDispatcherService : IJobDispatcherService
             }
 
             _logger.LogInformation($"Job {jobId} dispatched to worker {worker.Id} ({worker.Name})");
-            TagList successTags = new System.Diagnostics.TagList { { "outcome", "success" } };
+            TagList successTags = new TagList { { "outcome", "success" } };
             _dispatchDurationMs.Record(sw.ElapsedMilliseconds, successTags);
             _jobsDispatched.Add(1);
             return true;
@@ -142,9 +143,9 @@ public class JobDispatcherService : IJobDispatcherService
         catch (Exception ex)
         {
             _logger.LogError($"Error dispatching job {jobId}: {ex.Message}");
-            TagList errorTags = new System.Diagnostics.TagList { { "outcome", "error" } };
+            TagList errorTags = new TagList { { "outcome", "error" } };
             _dispatchDurationMs.Record(sw.ElapsedMilliseconds, errorTags);
-            TagList exceptionReasonTags = new System.Diagnostics.TagList { { "reason", "exception" } };
+            TagList exceptionReasonTags = new TagList { { "reason", "exception" } };
             _jobsDispatchFailed.Add(1, exceptionReasonTags);
             return false;
         }
@@ -326,7 +327,7 @@ public class JobDispatcherService : IJobDispatcherService
                     _logger.LogDebug($"Successfully sent job {job.Id} to worker {worker.Id} at {endpoint} (attempt {attempt})");
                     return true;
                 }
-                else if ((int)response.StatusCode >= 500 || response.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+                else if ((int)response.StatusCode >= 500 || response.StatusCode == HttpStatusCode.RequestTimeout)
                 {
                     // Transient error - retry
                     string error = await response.Content.ReadAsStringAsync(cancellationToken);

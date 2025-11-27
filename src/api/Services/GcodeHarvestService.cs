@@ -1,6 +1,8 @@
 ﻿// ...existing code...
 using System.Collections.Concurrent;
+using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Domain;
@@ -32,8 +34,8 @@ public partial class GcodeHarvestService(
     IServiceScopeFactory serviceScopeFactory,
     IHarvestQueue harvestQueue,
     IHubContext<HarvestHub> harvestHub,
-    Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService metadataExtractor,
-    Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService,
+    Gcode.IGcodeMetadataExtractorService metadataExtractor,
+    StorageManagement.IStoragePathService storagePathService,
     IOptions<GcodeHarvestSettings> harvestOptions) : IGcodeHarvestService
 {
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
@@ -113,8 +115,8 @@ public partial class GcodeHarvestService(
     private readonly IHarvestQueue _harvestQueue = harvestQueue;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
     private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
-    private readonly Farm.Web.Api.Services.Gcode.IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor;
-    private readonly Farm.Web.Api.Services.StorageManagement.IStoragePathService _storagePathService = storagePathService;
+    private readonly Gcode.IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor;
+    private readonly StorageManagement.IStoragePathService _storagePathService = storagePathService;
     private readonly GcodeHarvestSettings _harvestSettings = harvestOptions.Value;
 
     private static readonly string[] sourceArray = { "gcode" };
@@ -728,14 +730,14 @@ public partial class GcodeHarvestService(
                     .SendAsync("HarvestFileUpdated", MapToDto(discoveredFile), ct);
 
                 // Extract metadata from gcode as fallback for incomplete API data
-                Farm.Web.Api.Services.Gcode.GcodeMetadataExtracted? extractedMetadata = null;
+                Gcode.GcodeMetadataExtracted? extractedMetadata = null;
                 string? thumbnailPath = null;
                 if (gcodeContent.Length > 0)
                 {
                     try
                     {
                         gcodeContent.Position = 0;
-                        using StreamReader reader = new(gcodeContent, System.Text.Encoding.UTF8, leaveOpen: true);
+                        using StreamReader reader = new(gcodeContent, Encoding.UTF8, leaveOpen: true);
                         string gcodeText = await reader.ReadToEndAsync(ct);
                         extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
 
@@ -818,7 +820,7 @@ public partial class GcodeHarvestService(
             finally
             {
                 // Release the semaphore slot so another file can begin importing
-                semaphore.Release();
+                _ = semaphore.Release();
             }
         }).ToList();
 
@@ -968,7 +970,7 @@ public partial class GcodeHarvestService(
         });
 
         // Track the task
-        _activeTasks.TryAdd(operationId, backgroundTask);
+        _ = _activeTasks.TryAdd(operationId, backgroundTask);
 
         return true;
     }
@@ -997,7 +999,7 @@ public partial class GcodeHarvestService(
     public async Task<GcodeHarvestOperationDto[]> GetHarvestOperationsAsync(Guid? printerId = null, string? status = null, int limit = 100, int offset = 0, CancellationToken ct = default)
     {
         GcodeHarvestStatus? statusEnum = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<GcodeHarvestStatus>(status, true, out GcodeHarvestStatus parsedStatus))
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse(status, true, out GcodeHarvestStatus parsedStatus))
         {
             statusEnum = parsedStatus;
         }
@@ -1137,7 +1139,7 @@ public partial class GcodeHarvestService(
             {
                 PrinterFileInfo printerFileInfo = new()
                 {
-                    Name = System.IO.Path.GetFileName(file.Path),
+                    Name = Path.GetFileName(file.Path),
                     Path = file.Path,
                     Size = file.Size,
                     ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
@@ -1206,7 +1208,7 @@ public partial class GcodeHarvestService(
                 try
                 {
                     // Use the dirname field from Moonraker response for directory names
-                    string dirName = !string.IsNullOrEmpty(subDir.Dirname) ? subDir.Dirname : System.IO.Path.GetFileName(subDir.Path);
+                    string dirName = !string.IsNullOrEmpty(subDir.Dirname) ? subDir.Dirname : Path.GetFileName(subDir.Path);
                     string subDirPath = $"{basePath}/{dirName}";
                     log.LogInformation("🔍 Processing subdirectory {DirName} -> {SubDirPath}", dirName, subDirPath);
 
@@ -1250,7 +1252,7 @@ public partial class GcodeHarvestService(
             {
                 files.Add(new PrinterFileInfo
                 {
-                    Name = System.IO.Path.GetFileName(file.Path),
+                    Name = Path.GetFileName(file.Path),
                     Path = file.Path,
                     Size = file.Size,
                     ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
@@ -1289,7 +1291,7 @@ public partial class GcodeHarvestService(
             {
                 files.Add(new PrinterFileInfo
                 {
-                    Name = System.IO.Path.GetFileName(file.Path),
+                    Name = Path.GetFileName(file.Path),
                     Path = file.Path,
                     Size = file.Size,
                     ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime

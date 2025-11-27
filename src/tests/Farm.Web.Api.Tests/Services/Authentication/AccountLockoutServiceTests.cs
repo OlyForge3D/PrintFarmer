@@ -60,14 +60,14 @@ public class AccountLockoutServiceTests : IDisposable
             FailedLoginAttempts = 0,
             LockoutEnd = null
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         bool result = await _service.IsLockedOutAsync(userId);
 
         // Assert
-        result.Should().BeFalse();
+        _ = result.Should().BeFalse();
     }
 
     [Fact]
@@ -84,14 +84,14 @@ public class AccountLockoutServiceTests : IDisposable
             FailedLoginAttempts = 5,
             LockoutEnd = DateTime.UtcNow.AddMinutes(10) // Locked for 10 more minutes
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         bool result = await _service.IsLockedOutAsync(userId);
 
         // Assert
-        result.Should().BeTrue();
+        _ = result.Should().BeTrue();
     }
 
     [Fact]
@@ -108,14 +108,14 @@ public class AccountLockoutServiceTests : IDisposable
             FailedLoginAttempts = 5,
             LockoutEnd = DateTime.UtcNow.AddMinutes(-5) // Expired 5 minutes ago
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         bool result = await _service.IsLockedOutAsync(userId);
 
         // Assert
-        result.Should().BeFalse();
+        _ = result.Should().BeFalse();
     }
 
     [Fact]
@@ -131,16 +131,16 @@ public class AccountLockoutServiceTests : IDisposable
             PasswordHash = "hash",
             FailedLoginAttempts = 2
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         await _service.RecordFailedLoginAsync(userId, "testuser", "192.168.1.1", "Invalid password");
 
         // Assert
         User? updatedUser = await _context.Users.FindAsync(userId);
-        updatedUser.Should().NotBeNull();
-        updatedUser!.FailedLoginAttempts.Should().Be(3);
+        _ = updatedUser.Should().NotBeNull();
+        _ = updatedUser!.FailedLoginAttempts.Should().Be(3);
     }
 
     [Fact]
@@ -156,18 +156,18 @@ public class AccountLockoutServiceTests : IDisposable
             PasswordHash = "hash",
             FailedLoginAttempts = 4 // One away from threshold of 5
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         await _service.RecordFailedLoginAsync(userId, "testuser", "192.168.1.1", "Invalid password");
 
         // Assert
         User? updatedUser = await _context.Users.FindAsync(userId);
-        updatedUser.Should().NotBeNull();
-        updatedUser!.FailedLoginAttempts.Should().Be(5);
-        updatedUser.LockoutEnd.Should().NotBeNull();
-        updatedUser.LockoutEnd.Should().BeAfter(DateTime.UtcNow);
+        _ = updatedUser.Should().NotBeNull();
+        _ = updatedUser!.FailedLoginAttempts.Should().Be(5);
+        _ = updatedUser.LockoutEnd.Should().NotBeNull();
+        _ = updatedUser.LockoutEnd.Should().BeAfter(DateTime.UtcNow);
     }
 
     [Fact]
@@ -183,8 +183,8 @@ public class AccountLockoutServiceTests : IDisposable
             PasswordHash = "hash",
             FailedLoginAttempts = 0
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         await _service.RecordFailedLoginAsync(userId, "testuser", "192.168.1.1", "Invalid password");
@@ -193,9 +193,9 @@ public class AccountLockoutServiceTests : IDisposable
         List<FailedLoginAttempt> auditEntries = await _context.FailedLoginAttempts
             .Where(f => f.Identifier == "testuser")
             .ToListAsync();
-        auditEntries.Should().HaveCount(1);
-        auditEntries[0].IpAddress.Should().Be("192.168.1.1");
-        auditEntries[0].FailureReason.Should().Be("Invalid password");
+        _ = auditEntries.Should().HaveCount(1);
+        _ = auditEntries[0].IpAddress.Should().Be("192.168.1.1");
+        _ = auditEntries[0].FailureReason.Should().Be("Invalid password");
     }
 
     [Fact]
@@ -208,8 +208,8 @@ public class AccountLockoutServiceTests : IDisposable
         List<FailedLoginAttempt> auditEntries = await _context.FailedLoginAttempts
             .Where(f => f.Identifier == "nonexistent")
             .ToListAsync();
-        auditEntries.Should().HaveCount(1);
-        auditEntries[0].FailureReason.Should().Be("User not found");
+        _ = auditEntries.Should().HaveCount(1);
+        _ = auditEntries[0].FailureReason.Should().Be("User not found");
     }
 
     [Fact]
@@ -227,18 +227,18 @@ public class AccountLockoutServiceTests : IDisposable
             LockoutEnd = DateTime.UtcNow.AddMinutes(10),
             LastFailedLogin = DateTime.UtcNow
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         await _service.ResetFailedLoginCountAsync(userId);
 
         // Assert
         User? updatedUser = await _context.Users.FindAsync(userId);
-        updatedUser.Should().NotBeNull();
-        updatedUser!.FailedLoginAttempts.Should().Be(0);
-        updatedUser.LockoutEnd.Should().BeNull();
-        updatedUser.LastFailedLogin.Should().BeNull();
+        _ = updatedUser.Should().NotBeNull();
+        _ = updatedUser!.FailedLoginAttempts.Should().Be(0);
+        _ = updatedUser.LockoutEnd.Should().BeNull();
+        _ = updatedUser.LastFailedLogin.Should().BeNull();
     }
 
     [Fact]
@@ -254,14 +254,14 @@ public class AccountLockoutServiceTests : IDisposable
             PasswordHash = "hash",
             FailedLoginAttempts = 3
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         int count = await _service.GetFailedLoginCountAsync(userId);
 
         // Assert
-        count.Should().Be(3);
+        _ = count.Should().Be(3);
     }
 
     [Fact]
@@ -278,15 +278,15 @@ public class AccountLockoutServiceTests : IDisposable
             PasswordHash = "hash",
             LockoutEnd = lockoutEnd
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         DateTime? result = await _service.GetLockoutEndAsync(userId);
 
         // Assert
-        result.Should().NotBeNull();
-        result.Should().BeCloseTo(lockoutEnd, TimeSpan.FromSeconds(1));
+        _ = result.Should().NotBeNull();
+        _ = result.Should().BeCloseTo(lockoutEnd, TimeSpan.FromSeconds(1));
     }
 
     [Fact]
@@ -302,17 +302,17 @@ public class AccountLockoutServiceTests : IDisposable
             PasswordHash = "hash",
             FailedLoginAttempts = 0
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         await _service.ManuallyLockAccountAsync(userId, 30);
 
         // Assert
         User? updatedUser = await _context.Users.FindAsync(userId);
-        updatedUser.Should().NotBeNull();
-        updatedUser!.LockoutEnd.Should().NotBeNull();
-        updatedUser.LockoutEnd.Should().BeAfter(DateTime.UtcNow.AddMinutes(29));
+        _ = updatedUser.Should().NotBeNull();
+        _ = updatedUser!.LockoutEnd.Should().NotBeNull();
+        _ = updatedUser.LockoutEnd.Should().BeAfter(DateTime.UtcNow.AddMinutes(29));
     }
 
     [Fact]
@@ -329,16 +329,16 @@ public class AccountLockoutServiceTests : IDisposable
             FailedLoginAttempts = 5,
             LockoutEnd = DateTime.UtcNow.AddMinutes(15)
         };
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        _ = _context.Users.Add(user);
+        _ = await _context.SaveChangesAsync();
 
         // Act
         await _service.UnlockAccountAsync(userId);
 
         // Assert
         User? updatedUser = await _context.Users.FindAsync(userId);
-        updatedUser.Should().NotBeNull();
-        updatedUser!.FailedLoginAttempts.Should().Be(0);
-        updatedUser.LockoutEnd.Should().BeNull();
+        _ = updatedUser.Should().NotBeNull();
+        _ = updatedUser!.FailedLoginAttempts.Should().Be(0);
+        _ = updatedUser.LockoutEnd.Should().BeNull();
     }
 }

@@ -20,7 +20,7 @@ public class EfWorkerRepository : IWorkerRepository
     public async Task AddAsync(Worker worker)
     {
         ArgumentNullException.ThrowIfNull(worker);
-        await _context.Workers.AddAsync(worker);
+        _ = await _context.Workers.AddAsync(worker);
     }
 
     public async Task<Worker?> GetByIdAsync(Guid id)
@@ -251,12 +251,12 @@ public class EfWorkerRepository : IWorkerRepository
         Worker? worker = await _context.Workers.FindAsync(id);
         if (worker != null)
         {
-            _context.Workers.Remove(worker);
+            _ = _context.Workers.Remove(worker);
         }
     }
 
     public async Task SaveChangesAsync()
     {
-        await _context.SaveChangesAsync();
+        _ = await _context.SaveChangesAsync();
     }
 }

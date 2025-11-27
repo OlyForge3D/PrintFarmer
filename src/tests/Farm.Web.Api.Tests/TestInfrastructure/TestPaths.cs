@@ -59,7 +59,7 @@ public static class TestPaths
     {
         if (!Directory.Exists(path))
         {
-            Directory.CreateDirectory(path);
+            _ = Directory.CreateDirectory(path);
         }
         return path;
     }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
@@ -206,7 +207,7 @@ public class PrintersController(
             return BadRequest(new { message = "No file provided or file is empty" });
         }
 
-        string fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
+        string fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
         if (fileExtension != ".csv" && fileExtension != ".json")
         {
             return BadRequest(new { message = "File must be CSV or JSON format" });
@@ -255,7 +256,7 @@ public class PrintersController(
     /// <response code="404">If the printer with the specified ID was not found</response>
     /// <response code="500">If there was an error retrieving job status</response>
     [HttpGet("{id:guid}/printjob")]
-    [ProducesResponseType(typeof(Farm.Web.Shared.PrintJobStatusDto), 200)]
+    [ProducesResponseType(typeof(PrintJobStatusDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<IActionResult> GetPrintJobStatusAsync(Guid id, CancellationToken ct)
@@ -499,7 +500,7 @@ public class PrintersController(
         // Parse input - could be single DiscoveredPrinterDto or array
         List<DiscoveredPrinterDto> printers = new();
 
-        if (discoveredPrinters is System.Collections.Generic.List<DiscoveredPrinterDto> list)
+        if (discoveredPrinters is List<DiscoveredPrinterDto> list)
         {
             printers.AddRange(list);
         }
@@ -507,15 +508,15 @@ public class PrintersController(
         {
             printers.Add(single);
         }
-        else if (discoveredPrinters is System.Text.Json.JsonElement jsonElem)
+        else if (discoveredPrinters is JsonElement jsonElem)
         {
             // Handle JSON deserialization
             try
             {
-                JsonSerializerOptions options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                JsonSerializerOptions options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 if (jsonElem.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
-                    DiscoveredPrinterDto[]? array = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto[]>(jsonElem.GetRawText(), options);
+                    DiscoveredPrinterDto[]? array = JsonSerializer.Deserialize<DiscoveredPrinterDto[]>(jsonElem.GetRawText(), options);
                     if (array != null)
                     {
                         printers.AddRange(array);
@@ -523,14 +524,14 @@ public class PrintersController(
                 }
                 else
                 {
-                    DiscoveredPrinterDto? obj = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto>(jsonElem.GetRawText(), options);
+                    DiscoveredPrinterDto? obj = JsonSerializer.Deserialize<DiscoveredPrinterDto>(jsonElem.GetRawText(), options);
                     if (obj != null)
                     {
                         printers.Add(obj);
                     }
                 }
             }
-            catch (System.Text.Json.JsonException ex)
+            catch (JsonException ex)
             {
                 _logger.LogWarning(ex, "Failed to parse discovered printers JSON");
                 return BadRequest("Invalid printer data format");
@@ -699,7 +700,7 @@ public class PrintersController(
         if ((dto.ModelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName)) && manufacturerId != Guid.Empty)
         {
             string mname = dto.NewModelName!.Trim();
-            CreateModelRequest createReq = new Requests.CreateModelRequest(
+            CreateModelRequest createReq = new CreateModelRequest(
                 ManufacturerId: manufacturerId,
                 Name: mname,
                 Type: null,
@@ -1165,7 +1166,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] Requests.StartPrintRequest request, CancellationToken ct)
+    public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] StartPrintRequest request, CancellationToken ct)
     {
         if (request is null)
         {
@@ -1586,9 +1587,9 @@ public class PrintersController(
             }
 
             // Parse configuration updates from JSON
-            if (config is System.Text.Json.JsonElement jsonElement)
+            if (config is JsonElement jsonElement)
             {
-                Dictionary<string, object>? configDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText());
+                Dictionary<string, object>? configDict = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText());
                 if (configDict == null)
                 {
                     return BadRequest(new { message = "Invalid configuration format" });

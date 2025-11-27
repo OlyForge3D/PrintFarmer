@@ -19,7 +19,7 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
         if (string.IsNullOrEmpty(required))
         {
             // not configured - allow through
-            await next();
+            _ = await next();
             return;
         }
 
@@ -35,6 +35,6 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
             return;
         }
 
-        await next();
+        _ = await next();
     }
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -23,12 +24,12 @@ public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactor
     public async Task Artifact_Upload_And_File_Persisted()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         Guid jobId = Guid.NewGuid();
         // Minimal job row required to satisfy FK-less artifact (jobId stored but SliceJob not strictly required yet)
-        SliceJob sliceJob = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob sliceJob = new SliceJob
         {
             Id = jobId,
             UserId = Guid.NewGuid(),
@@ -39,24 +40,24 @@ public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactor
             ModelFileName = "model.stl",
             ModelFileUrl = "http://example/model.stl"
         };
-        db.SliceJobs.Add(sliceJob);
-        await db.SaveChangesAsync();
+        _ = db.SliceJobs.Add(sliceJob);
+        _ = await db.SaveChangesAsync();
 
         string kind = "gcode";
-        byte[] data = System.Text.Encoding.UTF8.GetBytes("G1 X0 Y0 Z0 F1500 ; test gcode");
+        byte[] data = Encoding.UTF8.GetBytes("G1 X0 Y0 Z0 F1500 ; test gcode");
         TestFormFile formFile = new TestFormFile(data, "test.gcode", "text/plain");
         Artifact artifact = await artifactsService.UploadAsync(formFile, jobId, null, kind, default);
 
-        artifact.Kind.Should().Be(kind);
-        artifact.SizeBytes.Should().Be(data.Length);
-        artifact.FileName.Should().Be("test.gcode");
+        _ = artifact.Kind.Should().Be(kind);
+        _ = artifact.SizeBytes.Should().Be(data.Length);
+        _ = artifact.FileName.Should().Be("test.gcode");
 
         (Artifact artifact, string fullPath)? pathInfo = await artifactsService.GetWithPathAsync(artifact.Id, default);
-        pathInfo.Should().NotBeNull();
+        _ = pathInfo.Should().NotBeNull();
         string fullPath = pathInfo!.Value.fullPath;
-        File.Exists(fullPath).Should().BeTrue();
+        _ = File.Exists(fullPath).Should().BeTrue();
         byte[] fileBytes = await File.ReadAllBytesAsync(fullPath);
-        fileBytes.Length.Should().Be(data.Length);
+        _ = fileBytes.Length.Should().Be(data.Length);
     }
 
     private sealed class TestFormFile : Microsoft.AspNetCore.Http.IFormFile

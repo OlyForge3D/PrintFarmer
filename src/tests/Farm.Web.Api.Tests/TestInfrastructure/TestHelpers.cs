@@ -40,14 +40,14 @@ public static class TestHelpers
     /// </summary>
     public static AppDbContext CreateSqliteInMemoryDb()
     {
-        SqliteConnection connection = new Microsoft.Data.Sqlite.SqliteConnection("DataSource=:memory:");
+        SqliteConnection connection = new SqliteConnection("DataSource=:memory:");
         connection.Open();
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(connection)
             .Options;
 
         AppDbContext ctx = new AppDbContext(opts);
-        ctx.Database.EnsureCreated();
+        _ = ctx.Database.EnsureCreated();
         return ctx;
     }
 }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -55,7 +56,7 @@ public class ArtifactsService : IArtifactsService
         string root = ResolveRootPath();
         DateTime now = DateTime.UtcNow;
         string folder = Path.Combine(root, now.Year.ToString(), now.Month.ToString("00"), now.Day.ToString("00"), jobId.ToString());
-        Directory.CreateDirectory(folder);
+        _ = Directory.CreateDirectory(folder);
         Guid artifactId = Guid.NewGuid();
         string targetFileName = artifactId.ToString() + "-" + sanitized; // ensure uniqueness even if same original name
         string fullPath = Path.Combine(folder, targetFileName);
@@ -83,8 +84,8 @@ public class ArtifactsService : IArtifactsService
             CreatedAt = now
         };
 
-        _db.Set<Artifact>().Add(artifact);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.Set<Artifact>().Add(artifact);
+        _ = await _db.SaveChangesAsync(ct);
         _metrics.RecordUpload(file.Length);
 
         // Increment worker artifact counters if available
@@ -95,7 +96,7 @@ public class ArtifactsService : IArtifactsService
             {
                 worker.ArtifactsProduced++;
                 worker.ArtifactBytesProduced += file.Length;
-                await _db.SaveChangesAsync(ct);
+                _ = await _db.SaveChangesAsync(ct);
             }
         }
 
@@ -109,7 +110,7 @@ public class ArtifactsService : IArtifactsService
             content = string.Empty;
         }
 
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        byte[] bytes = Encoding.UTF8.GetBytes(content);
         if (bytes.Length == 0)
         {
             throw new InvalidOperationException("Empty content not allowed.");
@@ -129,7 +130,7 @@ public class ArtifactsService : IArtifactsService
         string root = ResolveRootPath();
         DateTime now = DateTime.UtcNow;
         string folder = Path.Combine(root, now.Year.ToString(), now.Month.ToString("00"), now.Day.ToString("00"), jobId.ToString());
-        Directory.CreateDirectory(folder);
+        _ = Directory.CreateDirectory(folder);
         Guid artifactId = Guid.NewGuid();
         string targetFileName = artifactId.ToString() + "-" + sanitized;
         string fullPath = Path.Combine(folder, targetFileName);
@@ -139,9 +140,9 @@ public class ArtifactsService : IArtifactsService
         using (SHA256 hasher = SHA256.Create())
         {
             // Write and hash
-            hasher.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            _ = hasher.TransformBlock(bytes, 0, bytes.Length, null, 0);
             await target.WriteAsync(bytes.AsMemory(0, bytes.Length), ct);
-            hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+            _ = hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
             sha256 = Convert.ToHexString(hasher.Hash!);
         }
 
@@ -160,8 +161,8 @@ public class ArtifactsService : IArtifactsService
             CreatedAt = now
         };
 
-        _db.Set<Artifact>().Add(artifact);
-        await _db.SaveChangesAsync(ct);
+        _ = _db.Set<Artifact>().Add(artifact);
+        _ = await _db.SaveChangesAsync(ct);
         _metrics.RecordUpload(bytes.Length);
 
         if (workerId.HasValue)
@@ -171,7 +172,7 @@ public class ArtifactsService : IArtifactsService
             {
                 worker.ArtifactsProduced++;
                 worker.ArtifactBytesProduced += bytes.Length;
-                await _db.SaveChangesAsync(ct);
+                _ = await _db.SaveChangesAsync(ct);
             }
         }
 
@@ -240,9 +241,9 @@ public class ArtifactsService : IArtifactsService
         while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
         {
             await target.WriteAsync(buffer.AsMemory(0, read), ct);
-            hasher.TransformBlock(buffer, 0, read, null, 0);
+            _ = hasher.TransformBlock(buffer, 0, read, null, 0);
         }
-        hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        _ = hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
         return Convert.ToHexString(hasher.Hash!);
     }
 }

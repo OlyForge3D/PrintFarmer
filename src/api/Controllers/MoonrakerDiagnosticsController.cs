@@ -62,10 +62,10 @@ public class MoonrakerDiagnosticsController(
     /// Test endpoint to invoke GetDirectoryAsync directly
     /// </summary>
     [HttpGet("directory")]
-    [ProducesResponseType(typeof(Farm.Web.Api.Services.DirectoryInfo), 200)]
+    [ProducesResponseType(typeof(Services.DirectoryInfo), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Farm.Web.Api.Services.DirectoryInfo>> GetDirectoryAsync(string url, string path = "gcodes")
+    public async Task<ActionResult<Services.DirectoryInfo>> GetDirectoryAsync(string url, string path = "gcodes")
     {
         if (string.IsNullOrWhiteSpace(url))
         {

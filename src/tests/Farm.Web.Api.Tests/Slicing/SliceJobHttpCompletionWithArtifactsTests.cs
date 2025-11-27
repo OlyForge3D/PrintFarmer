@@ -38,8 +38,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
     {
         // Arrange - create a processing job
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
         SliceJob job = new SliceJob
         {
@@ -60,13 +60,13 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Generated G-code\nG28 ; Home\nG1 X10 Y10 Z0.2 F3000\n; End");
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "output.gcode", "application/gcode");
         Artifact primaryArtifact = await artifactsService.UploadAsync(gcodeForm, job.Id, null, "gcode", default);
-        primaryArtifact.Should().NotBeNull();
+        _ = primaryArtifact.Should().NotBeNull();
 
         // Upload thumbnail artifact (additional) using service
         byte[] thumbnailBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }; // PNG header stub
         TestFormFile thumbnailForm = new TestFormFile(thumbnailBytes, "thumbnail.png", "image/png");
         Artifact thumbnailArtifact = await artifactsService.UploadAsync(thumbnailForm, job.Id, null, "thumbnail", default);
-        thumbnailArtifact.Should().NotBeNull();
+        _ = thumbnailArtifact.Should().NotBeNull();
 
         // Complete job with primary, additional artifact, and inline log text
         CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
@@ -88,43 +88,43 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
         // Assert - Response
-        completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         CompleteSliceJobResponse? completeResult = await completeResponse.Content.ReadFromJsonAsync<CompleteSliceJobResponse>();
-        completeResult.Should().NotBeNull();
-        completeResult!.JobId.Should().Be(job.Id);
-        completeResult.Status.Should().Be("Completed");
-        completeResult.CompletedAt.Should().NotBeNull();
-        completeResult.ResultFileUrl.Should().NotBeNullOrEmpty();
-        completeResult.EstimatedPrintTimeSeconds.Should().Be(3600);
-        completeResult.FilamentUsedGrams.Should().Be(25.5m);
+        _ = completeResult.Should().NotBeNull();
+        _ = completeResult!.JobId.Should().Be(job.Id);
+        _ = completeResult.Status.Should().Be("Completed");
+        _ = completeResult.CompletedAt.Should().NotBeNull();
+        _ = completeResult.ResultFileUrl.Should().NotBeNullOrEmpty();
+        _ = completeResult.EstimatedPrintTimeSeconds.Should().Be(3600);
+        _ = completeResult.FilamentUsedGrams.Should().Be(25.5m);
 
         // Should have 3 artifacts: primary G-code, thumbnail, and auto-created log
-        completeResult.ArtifactIds.Should().HaveCount(3);
-        completeResult.ArtifactIds.Should().Contain(primaryArtifact.Id);
-        completeResult.ArtifactIds.Should().Contain(thumbnailArtifact.Id);
-        completeResult.LogArtifactId.Should().NotBeNull();
-        completeResult.ArtifactIds.Should().Contain(completeResult.LogArtifactId!.Value);
+        _ = completeResult.ArtifactIds.Should().HaveCount(3);
+        _ = completeResult.ArtifactIds.Should().Contain(primaryArtifact.Id);
+        _ = completeResult.ArtifactIds.Should().Contain(thumbnailArtifact.Id);
+        _ = completeResult.LogArtifactId.Should().NotBeNull();
+        _ = completeResult.ArtifactIds.Should().Contain(completeResult.LogArtifactId!.Value);
 
         // Assert - Job state persisted (query DB directly to bypass any EF caching issues)
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
         SliceJob? updatedJob = await verifyDb.SliceJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
-        updatedJob.Should().NotBeNull();
-        updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
-        updatedJob.CompletedAt.Should().NotBeNull();
-        updatedJob.ResultFileUrl.Should().NotBeNullOrEmpty();
-        updatedJob.EstimatedPrintTimeSeconds.Should().Be(3600);
-        updatedJob.FilamentUsedGrams.Should().Be(25.5m);
-        updatedJob.ArtifactsCount.Should().Be(3);
-        updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(0);
+        _ = updatedJob.Should().NotBeNull();
+        _ = updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
+        _ = updatedJob.CompletedAt.Should().NotBeNull();
+        _ = updatedJob.ResultFileUrl.Should().NotBeNullOrEmpty();
+        _ = updatedJob.EstimatedPrintTimeSeconds.Should().Be(3600);
+        _ = updatedJob.FilamentUsedGrams.Should().Be(25.5m);
+        _ = updatedJob.ArtifactsCount.Should().Be(3);
+        _ = updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(0);
 
         // Assert - Artifacts retrievable
-        IArtifactsService verifyArtifactsService = verifyScope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        IArtifactsService verifyArtifactsService = verifyScope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IReadOnlyList<Artifact> artifacts = await verifyArtifactsService.ListByJobAsync(job.Id, default);
-        artifacts.Should().HaveCount(3);
-        artifacts.Should().Contain(a => a.Id == primaryArtifact.Id && a.Kind == "gcode");
-        artifacts.Should().Contain(a => a.Id == thumbnailArtifact.Id && a.Kind == "thumbnail");
-        artifacts.Should().Contain(a => a.Kind == "log" && a.FileName == "slicer-log.txt");
+        _ = artifacts.Should().HaveCount(3);
+        _ = artifacts.Should().Contain(a => a.Id == primaryArtifact.Id && a.Kind == "gcode");
+        _ = artifacts.Should().Contain(a => a.Id == thumbnailArtifact.Id && a.Kind == "thumbnail");
+        _ = artifacts.Should().Contain(a => a.Kind == "log" && a.FileName == "slicer-log.txt");
     }
 
     [Fact(DisplayName = "Complete job with only G-code (minimal artifacts)")]
@@ -132,8 +132,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
     {
         // Arrange
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
         SliceJob job = new SliceJob
         {
@@ -171,21 +171,21 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
         // Assert
-        completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         CompleteSliceJobResponse? completeResult = await completeResponse.Content.ReadFromJsonAsync<CompleteSliceJobResponse>();
-        completeResult.Should().NotBeNull();
-        completeResult!.ArtifactIds.Should().HaveCount(1);
-        completeResult.ArtifactIds.Should().Contain(artifact.Id);
-        completeResult.LogArtifactId.Should().BeNull();
-        completeResult.EstimatedPrintTimeSeconds.Should().BeNull();
-        completeResult.FilamentUsedGrams.Should().BeNull();
+        _ = completeResult.Should().NotBeNull();
+        _ = completeResult!.ArtifactIds.Should().HaveCount(1);
+        _ = completeResult.ArtifactIds.Should().Contain(artifact.Id);
+        _ = completeResult.LogArtifactId.Should().BeNull();
+        _ = completeResult.EstimatedPrintTimeSeconds.Should().BeNull();
+        _ = completeResult.FilamentUsedGrams.Should().BeNull();
 
         // Query DB directly to bypass EF caching issues
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
         SliceJob? updatedJob = await verifyDb.SliceJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
-        updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
-        updatedJob.ArtifactsCount.Should().Be(1);
+        _ = updatedJob!.Status.Should().Be(SliceJobStatus.Completed);
+        _ = updatedJob.ArtifactsCount.Should().Be(1);
     }
 
     [Fact(DisplayName = "Complete job fails with 401 when auth header missing")]
@@ -193,8 +193,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
     {
         // Arrange
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
         SliceJob job = new SliceJob
         {
@@ -226,12 +226,12 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         HttpResponseMessage completeResponse = await _client.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest);
 
         // Assert
-        completeResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _ = completeResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         // Job should still be in Processing state
         SliceJob? unchangedJob = await jobRepo.GetByIdAsync(job.Id);
-        unchangedJob!.Status.Should().Be(SliceJobStatus.Processing);
-        unchangedJob.CompletedAt.Should().BeNull();
+        _ = unchangedJob!.Status.Should().Be(SliceJobStatus.Processing);
+        _ = unchangedJob.CompletedAt.Should().BeNull();
     }
 
     [Fact(DisplayName = "Complete job with large log text and multiple thumbnails")]
@@ -239,8 +239,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
     {
         // Arrange
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
         SliceJob job = new SliceJob
         {
@@ -276,11 +276,11 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         StringBuilder logBuilder = new StringBuilder();
         for (int i = 1; i <= 1000; i++)
         {
-            logBuilder.AppendLine($"[{i:D4}] Processing layer {i}/1000 - progress {i / 10.0:F1}%");
+            _ = logBuilder.AppendLine($"[{i:D4}] Processing layer {i}/1000 - progress {i / 10.0:F1}%");
         }
-        logBuilder.AppendLine("Slicing completed successfully");
-        logBuilder.AppendLine("Total layers: 1000");
-        logBuilder.AppendLine("Estimated time: 14h 35m");
+        _ = logBuilder.AppendLine("Slicing completed successfully");
+        _ = logBuilder.AppendLine("Total layers: 1000");
+        _ = logBuilder.AppendLine("Estimated time: 14h 35m");
 
         // Complete with all artifacts and large log
         CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
@@ -302,26 +302,26 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
         // Assert
-        completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         CompleteSliceJobResponse? completeResult = await completeResponse.Content.ReadFromJsonAsync<CompleteSliceJobResponse>();
 
         // Should have 4 artifacts: gcode + 2 thumbnails + auto-created log
-        completeResult!.ArtifactIds.Should().HaveCount(4);
-        completeResult.LogArtifactId.Should().NotBeNull();
+        _ = completeResult!.ArtifactIds.Should().HaveCount(4);
+        _ = completeResult.LogArtifactId.Should().NotBeNull();
 
         // Verify all artifacts persisted (use fresh scope to avoid stale tracking)
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        IArtifactsService verifyArtifactsService = verifyScope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IArtifactsService verifyArtifactsService = verifyScope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IReadOnlyList<Artifact> artifacts = await verifyArtifactsService.ListByJobAsync(job.Id, default);
-        artifacts.Should().HaveCount(4);
+        _ = artifacts.Should().HaveCount(4);
 
         Artifact logArtifact = artifacts.Should().ContainSingle(a => a.Kind == "log").Subject;
-        logArtifact.SizeBytes.Should().BeGreaterThan(5000); // Large log should be >5KB
+        _ = logArtifact.SizeBytes.Should().BeGreaterThan(5000); // Large log should be >5KB
 
         SliceJob? updatedJob = await verifyDb.SliceJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
-        updatedJob!.ArtifactsCount.Should().Be(4);
-        updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(5000);
+        _ = updatedJob!.ArtifactsCount.Should().Be(4);
+        _ = updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(5000);
     }
 
     private sealed class TestFormFile : IFormFile
@@ -341,12 +341,12 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         public long Length { get; }
         public string Name { get; }
         public string FileName { get; }
-        public void CopyTo(System.IO.Stream target) => target.Write(_data, 0, _data.Length);
-        public Task CopyToAsync(System.IO.Stream target, CancellationToken cancellationToken = default)
+        public void CopyTo(Stream target) => target.Write(_data, 0, _data.Length);
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
         {
             target.Write(_data, 0, _data.Length);
             return Task.CompletedTask;
         }
-        public System.IO.Stream OpenReadStream() => new System.IO.MemoryStream(_data, writable: false);
+        public Stream OpenReadStream() => new MemoryStream(_data, writable: false);
     }
 }

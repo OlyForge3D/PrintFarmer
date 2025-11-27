@@ -45,10 +45,10 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Setup test storage directories
         _modelStoragePath = Path.Combine(Path.GetTempPath(), "test_models_" + Guid.NewGuid());
         _gcodeStoragePath = Path.Combine(Path.GetTempPath(), "test_gcode_" + Guid.NewGuid());
-        Directory.CreateDirectory(_modelStoragePath);
-        Directory.CreateDirectory(_gcodeStoragePath);
+        _ = Directory.CreateDirectory(_modelStoragePath);
+        _ = Directory.CreateDirectory(_gcodeStoragePath);
 
-        await _dbContext.Database.EnsureCreatedAsync();
+        _ = await _dbContext.Database.EnsureCreatedAsync();
     }
 
     public async Task DisposeAsync()
@@ -75,21 +75,21 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         Model3D model1 = CreateAndPersistModel3D("test-model-1.stl", FileHealthStatus.Healthy);
         Model3D model2 = CreateAndPersistModel3D("test-model-2.stl", FileHealthStatus.Healthy);
         GcodeFile gcode1 = CreateAndPersistGcodeFile("test-print.gcode", FileHealthStatus.Healthy);
-        await _dbContext.SaveChangesAsync();
+        _ = await _dbContext.SaveChangesAsync();
 
         // Act
         HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/health/summary");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string json = await response.Content.ReadAsStringAsync();
         JsonDocument doc = JsonDocument.Parse(json);
         JsonElement root = doc.RootElement;
-        root.GetProperty("totalModel3DFiles").GetInt32().Should().Be(2);
-        root.GetProperty("model3DHealthy").GetInt32().Should().Be(2);
-        root.GetProperty("totalGcodeFiles").GetInt32().Should().Be(1);
-        root.GetProperty("gcodeHealthy").GetInt32().Should().Be(1);
-        root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(100.0);
+        _ = root.GetProperty("totalModel3DFiles").GetInt32().Should().Be(2);
+        _ = root.GetProperty("model3DHealthy").GetInt32().Should().Be(2);
+        _ = root.GetProperty("totalGcodeFiles").GetInt32().Should().Be(1);
+        _ = root.GetProperty("gcodeHealthy").GetInt32().Should().Be(1);
+        _ = root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(100.0);
     }
 
 
@@ -100,19 +100,19 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         Model3D model = CreateAndPersistModel3D("test.stl", FileHealthStatus.Healthy);
         model.LastHealthCheckDate = DateTime.UtcNow.AddMinutes(-5);
         model.LastVerificationResult = "{\"verified\": true, \"hash_match\": true}";
-        await _dbContext.SaveChangesAsync();
+        _ = await _dbContext.SaveChangesAsync();
 
         // Act
         HttpResponseMessage response = await _client.GetAsync($"/api/fileconsistency/model3d/{model.Id}/health");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string json = await response.Content.ReadAsStringAsync();
         JsonDocument doc = JsonDocument.Parse(json);
         JsonElement root = doc.RootElement;
-        root.GetProperty("fileId").GetString().Should().Be(model.Id.ToString());
-        root.GetProperty("healthStatus").GetString().Should().Be("Healthy");
-        root.GetProperty("fileSize").GetInt64().Should().Be(model.FileSizeBytes);
+        _ = root.GetProperty("fileId").GetString().Should().Be(model.Id.ToString());
+        _ = root.GetProperty("healthStatus").GetString().Should().Be("Healthy");
+        _ = root.GetProperty("fileSize").GetInt64().Should().Be(model.FileSizeBytes);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         HttpResponseMessage response = await _client.GetAsync($"/api/fileconsistency/gcode/{Guid.NewGuid()}/health");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -159,22 +159,22 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             CreatedAt = DateTime.UtcNow.AddHours(-1)
         };
 
-        _dbContext.FileHealthAudits.Add(audit1);
-        _dbContext.FileHealthAudits.Add(audit2);
-        await _dbContext.SaveChangesAsync();
+        _ = _dbContext.FileHealthAudits.Add(audit1);
+        _ = _dbContext.FileHealthAudits.Add(audit2);
+        _ = await _dbContext.SaveChangesAsync();
 
         // Act
         HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/audits/history?pageSize=10");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string json = await response.Content.ReadAsStringAsync();
         JsonDocument doc = JsonDocument.Parse(json);
         JsonElement root = doc.RootElement;
-        root.GetArrayLength().Should().Be(2);
+        _ = root.GetArrayLength().Should().Be(2);
         DateTime audit1Date = DateTime.Parse(root[0].GetProperty("auditDate").GetString() ?? "");
         DateTime audit2Date = DateTime.Parse(root[1].GetProperty("auditDate").GetString() ?? "");
-        audit1Date.Should().BeAfter(audit2Date);
+        _ = audit1Date.Should().BeAfter(audit2Date);
     }
 
     [Fact]
@@ -182,7 +182,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     {
         // Arrange
         Model3D model = CreateAndPersistModel3D("test-model.stl", FileHealthStatus.Unknown);
-        await _dbContext.SaveChangesAsync();
+        _ = await _dbContext.SaveChangesAsync();
 
         // Create audit result manually (simulating background service)
         FileHealthAudit auditResult = new FileHealthAudit
@@ -202,15 +202,15 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         };
 
         // Act
-        _dbContext.FileHealthAudits.Add(auditResult);
-        await _dbContext.SaveChangesAsync();
+        _ = _dbContext.FileHealthAudits.Add(auditResult);
+        _ = await _dbContext.SaveChangesAsync();
 
         // Assert
         FileHealthAudit? savedAudit = await _dbContext.FileHealthAudits
             .FirstOrDefaultAsync(a => a.Id == auditResult.Id);
-        savedAudit.Should().NotBeNull();
-        savedAudit!.MissingFiles.Should().Be(1);
-        savedAudit.HasIssues.Should().BeTrue();
+        _ = savedAudit.Should().NotBeNull();
+        _ = savedAudit!.MissingFiles.Should().Be(1);
+        _ = savedAudit.HasIssues.Should().BeTrue();
     }
 
     [Fact]
@@ -229,8 +229,8 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             "SHA256");
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.FailureReason.Should().Be("Missing");
+        _ = result.IsValid.Should().BeFalse();
+        _ = result.FailureReason.Should().Be("Missing");
     }
 
     [Fact]
@@ -250,30 +250,30 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             "SHA256");
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.FailureReason.Should().Be("SizeMismatch");
+        _ = result.IsValid.Should().BeFalse();
+        _ = result.FailureReason.Should().Be("SizeMismatch");
     }
 
     [Fact]
     public async Task GetHealthSummary_WithMixedStatus_CalculatesCorrectPercentage()
     {
         // Arrange - Create 4 files: 2 healthy, 1 missing, 1 corrupted
-        CreateAndPersistModel3D("m1.stl", FileHealthStatus.Healthy);
-        CreateAndPersistModel3D("m2.stl", FileHealthStatus.Healthy);
-        CreateAndPersistModel3D("m3.stl", FileHealthStatus.Missing);
-        CreateAndPersistGcodeFile("g1.gcode", FileHealthStatus.Corrupted);
-        await _dbContext.SaveChangesAsync();
+        _ = CreateAndPersistModel3D("m1.stl", FileHealthStatus.Healthy);
+        _ = CreateAndPersistModel3D("m2.stl", FileHealthStatus.Healthy);
+        _ = CreateAndPersistModel3D("m3.stl", FileHealthStatus.Missing);
+        _ = CreateAndPersistGcodeFile("g1.gcode", FileHealthStatus.Corrupted);
+        _ = await _dbContext.SaveChangesAsync();
 
         // Act
         HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/health/summary");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string json = await response.Content.ReadAsStringAsync();
         JsonDocument doc = JsonDocument.Parse(json);
         JsonElement root = doc.RootElement;
         // 2 healthy out of 4 files = 50%
-        root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(50.0);
+        _ = root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(50.0);
     }
 
     [Fact(Skip = "Factory always adds test authentication via FallbackPolicy; endpoint authorization is verified via [Authorize] attribute inspection")]
@@ -288,7 +288,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         HttpResponseMessage response = await clientWithoutAuth.GetAsync("/api/fileconsistency/health/summary");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         factoryWithoutAuth.Dispose();
         clientWithoutAuth.Dispose();
     }
@@ -314,7 +314,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        _dbContext.Models3D.Add(model);
+        _ = _dbContext.Models3D.Add(model);
         return model;
     }
 
@@ -336,7 +336,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         };
 
-        _dbContext.GcodeFiles.Add(gcode);
+        _ = _dbContext.GcodeFiles.Add(gcode);
         return gcode;
     }
 }

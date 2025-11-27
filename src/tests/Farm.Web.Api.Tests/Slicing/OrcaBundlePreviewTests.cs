@@ -78,7 +78,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
         HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string responseBody = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(responseBody, new JsonSerializerOptions
@@ -86,19 +86,19 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(1);
-        preview.Printers[0].Name.Should().Be("Test Printer");
-        preview.Printers[0].PrinterModel.Should().Be("Generic FDM");
-        preview.Printers[0].NozzleDiameter.Should().Be(0.4);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(1);
+        _ = preview.Printers[0].Name.Should().Be("Test Printer");
+        _ = preview.Printers[0].PrinterModel.Should().Be("Generic FDM");
+        _ = preview.Printers[0].NozzleDiameter.Should().Be(0.4);
 
-        preview.Filaments.Should().HaveCount(1);
-        preview.Filaments[0].Name.Should().Be("Generic PLA");
-        preview.Filaments[0].FilamentType.Should().Be("PLA");
+        _ = preview.Filaments.Should().HaveCount(1);
+        _ = preview.Filaments[0].Name.Should().Be("Generic PLA");
+        _ = preview.Filaments[0].FilamentType.Should().Be("PLA");
 
-        preview.Processes.Should().HaveCount(1);
-        preview.Processes[0].Name.Should().Be("Standard Quality");
-        preview.Processes[0].LayerHeight.Should().Be(0.2);
+        _ = preview.Processes.Should().HaveCount(1);
+        _ = preview.Processes[0].Name.Should().Be("Standard Quality");
+        _ = preview.Processes[0].LayerHeight.Should().Be(0.2);
     }
 
     [Fact(DisplayName = "Preview with invalid bundle format returns 400")]
@@ -121,7 +121,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
         HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact(DisplayName = "Preview with empty bundle JSON returns 400")]
@@ -144,7 +144,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
         HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact(DisplayName = "Preview handles multiple presets per section")]
@@ -179,16 +179,16 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
         HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
         string responseBody = await response.Content.ReadAsStringAsync();
         OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(responseBody, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
 
-        preview.Should().NotBeNull();
-        preview!.Printers.Should().HaveCount(2);
-        preview.Filaments.Should().HaveCount(3);
-        preview.Processes.Should().HaveCount(3);
+        _ = preview.Should().NotBeNull();
+        _ = preview!.Printers.Should().HaveCount(2);
+        _ = preview.Filaments.Should().HaveCount(3);
+        _ = preview.Processes.Should().HaveCount(3);
     }
 }

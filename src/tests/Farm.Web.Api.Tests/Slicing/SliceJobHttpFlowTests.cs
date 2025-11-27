@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Farm.Web.Shared.Contracts.Slicing;
@@ -39,11 +40,11 @@ public class SliceJobHttpFlowTests : IClassFixture<CustomWebApplicationFactory>
         };
 
         HttpResponseMessage submitResp = await client.PostAsJsonAsync("/api/slice", submit);
-        submitResp.StatusCode.Should().Be(System.Net.HttpStatusCode.Accepted);
+        _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Accepted);
         SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
-        submitted.Should().NotBeNull();
-        submitted!.JobId.Should().NotBe(Guid.Empty);
-        submitted.Status.Should().Be("Queued");
+        _ = submitted.Should().NotBeNull();
+        _ = submitted!.JobId.Should().NotBe(Guid.Empty);
+        _ = submitted.Status.Should().Be("Queued");
 
         // 2. Claim via worker endpoint
         ClaimJobRequest claimReq = new ClaimJobRequest
@@ -54,20 +55,20 @@ public class SliceJobHttpFlowTests : IClassFixture<CustomWebApplicationFactory>
         };
         HttpResponseMessage claimResp = await client.PostAsJsonAsync("/api/slice/claim", claimReq);
         string claimBody = await claimResp.Content.ReadAsStringAsync();
-        claimResp.StatusCode.Should().Be(System.Net.HttpStatusCode.OK, $"Claim failed. Status {(int)claimResp.StatusCode}. Body: {claimBody}");
+        _ = claimResp.StatusCode.Should().Be(HttpStatusCode.OK, $"Claim failed. Status {(int)claimResp.StatusCode}. Body: {claimBody}");
         SliceJobStatusResponse? claimed = await claimResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        claimed.Should().NotBeNull();
-        claimed!.Id.Should().Be(submitted.JobId);
-        claimed.Status.Should().Be("Processing");
-        claimed.WorkerId.Should().NotBeNull();
+        _ = claimed.Should().NotBeNull();
+        _ = claimed!.Id.Should().Be(submitted.JobId);
+        _ = claimed.Status.Should().Be("Processing");
+        _ = claimed.WorkerId.Should().NotBeNull();
 
         // 3. Fetch status directly
         HttpResponseMessage statusResp = await client.GetAsync($"/api/slice/{submitted.JobId}");
-        statusResp.EnsureSuccessStatusCode();
+        _ = statusResp.EnsureSuccessStatusCode();
         SliceJobStatusResponse? status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        status.Should().NotBeNull();
-        status!.Id.Should().Be(submitted.JobId);
-        status.Status.Should().Be("Processing");
-        status.WorkerId.Should().Be(claimed.WorkerId);
+        _ = status.Should().NotBeNull();
+        _ = status!.Id.Should().Be(submitted.JobId);
+        _ = status.Status.Should().Be("Processing");
+        _ = status.WorkerId.Should().Be(claimed.WorkerId);
     }
 }

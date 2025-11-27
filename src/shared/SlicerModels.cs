@@ -82,13 +82,13 @@ public class SlicingJobRequest
     /// Message envelope for idempotency and tracking
     /// Optional - will be generated if not provided
     /// </summary>
-    public Slicer.Messaging.MessageEnvelope? Envelope { get; set; }
+    public MessageEnvelope? Envelope { get; set; }
 
     /// <summary>
     /// Get or create message envelope for this request
     /// </summary>
     /// <returns>Message envelope for idempotency</returns>
-    public Slicer.Messaging.MessageEnvelope GetOrCreateEnvelope()
+    public MessageEnvelope GetOrCreateEnvelope()
     {
         if (Envelope != null)
         {
@@ -150,7 +150,7 @@ public class DistributedSlicingJob : SlicingJobDto
     /// <param name="request">Slicing job request</param>
     /// <param name="envelope">Message envelope</param>
     /// <returns>Distributed slicing job</returns>
-    public static DistributedSlicingJob FromRequest(SlicingJobRequest request, Slicer.Messaging.MessageEnvelope envelope)
+    public static DistributedSlicingJob FromRequest(SlicingJobRequest request, MessageEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(envelope);
@@ -190,9 +190,9 @@ public class DistributedSlicingJob : SlicingJobDto
     /// Get message envelope from job fields
     /// </summary>
     /// <returns>Message envelope</returns>
-    public Slicer.Messaging.MessageEnvelope CreateEnvelope()
+    public MessageEnvelope CreateEnvelope()
     {
-        return new Slicer.Messaging.MessageEnvelope
+        return new MessageEnvelope
         {
             JobId = Id,
             SlicerType = EngineType,
@@ -212,7 +212,7 @@ public class DistributedSlicingJob : SlicingJobDto
         JobId = baseJob.JobId;
         Status = baseJob.Status;
         Progress = baseJob.Progress;
-        EngineType = Enum.TryParse<SlicerEngineType>(baseJob.SlicerEngine, true, out SlicerEngineType engine) ? engine : SlicerEngineType.OrcaSlicer;
+        EngineType = Enum.TryParse(baseJob.SlicerEngine, true, out SlicerEngineType engine) ? engine : SlicerEngineType.OrcaSlicer;
         PrinterId = baseJob.PrinterId;
         ModelFilePath = baseJob.ModelFilePath;
         GcodeFilePath = baseJob.GcodeFilePath;

@@ -33,14 +33,14 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _dbContext = new AppDbContext(_dbOptions);
-        await _dbContext.Database.EnsureCreatedAsync();
+        _ = await _dbContext.Database.EnsureCreatedAsync();
 
         _harvestRepository = new EfHarvestRepository(_dbContext);
     }
 
     public async Task DisposeAsync()
     {
-        await _dbContext.Database.EnsureDeletedAsync();
+        _ = await _dbContext.Database.EnsureDeletedAsync();
         _dbContext.Dispose();
     }
 
@@ -68,8 +68,8 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         GcodeHarvestOperation? detachedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
 
         // Assert - Entity is detached, so modifying and saving won't work
-        detachedOp.Should().NotBeNull();
-        detachedOp!.Status.Should().Be(GcodeHarvestStatus.Running);
+        _ = detachedOp.Should().NotBeNull();
+        _ = detachedOp!.Status.Should().Be(GcodeHarvestStatus.Running);
 
         // Modifying and saving should NOT persist changes
         detachedOp.Status = GcodeHarvestStatus.Cancelled;
@@ -78,7 +78,7 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
 
         // Verify status was NOT saved (entity was detached)
         GcodeHarvestOperation? fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
-        fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Running); // Still running!
+        _ = fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Running); // Still running!
     }
 
     [Fact]
@@ -105,8 +105,8 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         GcodeHarvestOperation? trackedOp = await _harvestRepository.GetOperationByIdTrackedAsync(operationId);
 
         // Assert - Entity is tracked, so modifying and saving WILL work
-        trackedOp.Should().NotBeNull();
-        trackedOp!.Status.Should().Be(GcodeHarvestStatus.Running);
+        _ = trackedOp.Should().NotBeNull();
+        _ = trackedOp!.Status.Should().Be(GcodeHarvestStatus.Running);
 
         // Modifying and saving SHOULD persist changes
         trackedOp.Status = GcodeHarvestStatus.Cancelled;
@@ -115,8 +115,8 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
 
         // Verify status WAS saved (entity was tracked)
         GcodeHarvestOperation? fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
-        fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled); // Now cancelled!
-        fetchedOp.CompletedAt.Should().NotBeNull();
+        _ = fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled); // Now cancelled!
+        _ = fetchedOp.CompletedAt.Should().NotBeNull();
     }
 
     [Fact]
@@ -150,9 +150,9 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         EfHarvestRepository newRepo = new EfHarvestRepository(newContext);
 
         GcodeHarvestOperation? persistedOp = await newRepo.GetOperationByIdAsync(operationId);
-        persistedOp.Should().NotBeNull();
-        persistedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled);
-        persistedOp.CompletedAt.Should().NotBeNull();
+        _ = persistedOp.Should().NotBeNull();
+        _ = persistedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled);
+        _ = persistedOp.CompletedAt.Should().NotBeNull();
 
         newContext.Dispose();
     }

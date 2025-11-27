@@ -13,7 +13,7 @@ public sealed class TestTempPathProvider : ITempPathProvider
     public TestTempPathProvider()
     {
         _root = Path.Combine(TestPaths.RepoTempRoot, "runtime");
-        Directory.CreateDirectory(_root);
+        _ = Directory.CreateDirectory(_root);
     }
 
     public string GetTempRoot() => _root;

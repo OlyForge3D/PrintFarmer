@@ -22,7 +22,7 @@ public class HeartbeatBackgroundService : BackgroundService
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _apiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245";
-        _heartbeatIntervalSeconds = config.GetValue<int>("Discovery:HeartbeatIntervalSeconds", 30);
+        _heartbeatIntervalSeconds = config.GetValue("Discovery:HeartbeatIntervalSeconds", 30);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
