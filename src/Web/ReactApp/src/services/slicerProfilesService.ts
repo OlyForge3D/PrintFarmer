@@ -90,6 +90,27 @@ export interface SlicerProfileExportDto {
   metadata: Record<string, unknown>;
 }
 
+// Hierarchy structures for organized profile display
+export interface PrinterModelProfilesDto {
+  name: string;
+  modelId: string;
+  machineProfiles: MachineProfileListItem[];
+  filamentProfiles: FilamentProfileListItem[];
+  processProfiles: ProcessProfileListItem[];
+}
+
+export interface ManufacturerProfilesDto {
+  name: string;
+  models: Record<string, PrinterModelProfilesDto>;
+}
+
+export interface HierarchicalProfilesResponse {
+  byHierarchy: Record<string, ManufacturerProfilesDto>;
+  machineProfiles: Record<string, MachineProfileListItem[]>;
+  filamentProfiles: Record<string, FilamentProfileListItem[]>;
+  processProfiles: Record<string, ProcessProfileListItem[]>;
+}
+
 const base = `${getApiBaseUrl()}/slicer/profiles`;
 
 async function handle<T>(res: Response): Promise<T> {
@@ -117,6 +138,12 @@ export const slicerProfilesService = {
       headers: getAuthHeaders()
     });
     return handle<ExtendedProfilesResponse>(res);
+  },
+  async listHierarchical(): Promise<HierarchicalProfilesResponse> {
+    const res = await fetch(`${base}`, {
+      headers: getAuthHeaders()
+    });
+    return handle<HierarchicalProfilesResponse>(res);
   },
   async importProfile(req: ImportSlicerProfileRequest): Promise<SlicerProfileExtended> {
     const res = await fetch(`${base}/import`, {

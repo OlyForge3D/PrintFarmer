@@ -2,7 +2,7 @@ import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
-import slicerProfilesService, { SlicerProfileListItem } from '@/services/slicerProfilesService';
+import slicerProfilesService, { SlicerProfileListItem, HierarchicalProfilesResponse } from '@/services/slicerProfilesService';
 import workersService from '@/services/workersService';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
@@ -12,6 +12,7 @@ import * as signalR from '@microsoft/signalr';
 import { getHubUrl, getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
 import { PrinterSelectorModal } from '@/components/PrinterSelectorModal';
+import { ProfileSelector } from '@/components/ProfileSelector';
 
 // Lazy load the 3D model viewer for better performance
 const ModelViewer3D = React.lazy(() =>
@@ -219,9 +220,16 @@ export const NewSliceJobPage: React.FC = () => {
     return { url: undefined, format: undefined };
   }, [selectedPrinterWithDetails?.manufacturerName, selectedPrinterWithDetails?.modelName]);
 
-  // Fetch process profiles - filter by selected printer
+  // Fetch hierarchical profiles with manufacturer/model organization
+  const { data: hierarchyProfiles } = useQuery<HierarchicalProfilesResponse, Error>({
+    queryKey: ['slicerProfilesHierarchy'],
+    queryFn: () => slicerProfilesService.listHierarchical(),
+    staleTime: 15_000
+  });
+
+  // Fetch flat process profiles for backward compatibility
   const { data: profiles = [] } = useQuery<SlicerProfileListItem[], Error>({
-    queryKey: ['slicerProfilesExtended', selectedPrinterId],
+    queryKey: ['slicerProfilesExtended'],
     queryFn: () => slicerProfilesService.listExtended(),
     staleTime: 15_000
   });
@@ -551,17 +559,26 @@ export const NewSliceJobPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Process Presets Dropdown - Filtered by printer */}
-            <Select
-              value={selectedProcessPresetId}
-              onChange={e => setSelectedProcessPresetId(e.target.value)}
-              className="w-full mb-3"
-            >
-              <option value="">-- Select Process Profile --</option>
-              {printerProcessProfiles.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </Select>
+            {/* Process Presets Dropdown - Organized by Manufacturer/Model Hierarchy */}
+            {hierarchyProfiles ? (
+              <ProfileSelector
+                hierarchyData={hierarchyProfiles}
+                selectedProfileId={selectedProcessPresetId}
+                onChange={setSelectedProcessPresetId}
+                className="mb-3"
+              />
+            ) : (
+              <Select
+                value={selectedProcessPresetId}
+                onChange={e => setSelectedProcessPresetId(e.target.value)}
+                className="w-full mb-3"
+              >
+                <option value="">-- Select Process Profile --</option>
+                {printerProcessProfiles.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            )}
 
             {/* Advanced Settings - Only shown if Advanced toggle is ON */}
             {showAdvancedSettings && (
