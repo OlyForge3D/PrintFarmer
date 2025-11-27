@@ -21,6 +21,8 @@ export interface ProcessProfileListItem extends IProfileListItem {
   quality: string;
   layerHeight: number;
   infillPercentage: number;
+  nozzleDiameter?: number;
+  material?: string;
 }
 
 // Filament profile list item

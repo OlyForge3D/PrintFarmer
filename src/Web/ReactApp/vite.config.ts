@@ -19,6 +19,8 @@ export default defineConfig({
     // mirrors the tsconfig path mapping for '@/...' -> './src/...'
     alias: [
       { find: '@', replacement: resolve(__dirname, 'src') },
+      // OrcaSlicer workspace package
+      { find: '@farm/slicers-orcaslicer-v2_3_1', replacement: resolve(__dirname, '../../Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/index.ts') },
       // Ensure all peerDependencies from OrcaSlicer workspace package resolve from root node_modules
       // npm symlinks these but in Docker build context, Rollup needs explicit paths
       { find: /^react\/jsx-runtime$/, replacement: resolve(__dirname, '../../../node_modules/react/jsx-runtime.js') },

@@ -100,7 +100,9 @@ export const ImportOfficialProfilesPage: React.FC = () => {
     // Group profiles by material and quality
     const groupedProfiles = useMemo(() => {
         const groups: { [key: string]: AvailableProfile[] } = {};
-        officialProfiles.forEach((profile: AvailableProfile) => {
+        // Filter to only process profiles
+        const processProfiles = officialProfiles.filter(p => p.profileType === 'process') as AvailableProfile[];
+        processProfiles.forEach((profile: AvailableProfile) => {
             const key = `${profile.material} • ${profile.quality}`;
             if (!groups[key]) groups[key] = [];
             groups[key].push(profile);
@@ -151,7 +153,9 @@ export const ImportOfficialProfilesPage: React.FC = () => {
     };
 
     const selectAllProfiles = () => {
-        setSelectedProfileIds(new Set(officialProfiles.map((p: AvailableProfile) => p.id)));
+        // Filter to only process profiles
+        const processProfiles = officialProfiles.filter(p => p.profileType === 'process') as AvailableProfile[];
+        setSelectedProfileIds(new Set(processProfiles.map((p: AvailableProfile) => p.id)));
     };
 
     const clearSelection = () => {
