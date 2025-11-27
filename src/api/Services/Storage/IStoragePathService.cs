@@ -139,7 +139,7 @@ public class StoragePathService : IStoragePathService
     {
         try
         {
-            var directories = new[]
+            string[] directories = new[]
             {
                 GetGcodeStorageDirectory(),
                 GetThumbnailDirectory(),
@@ -147,7 +147,7 @@ public class StoragePathService : IStoragePathService
                 GetSlicerProfilesDirectory()
             };
 
-            foreach (var dir in directories)
+            foreach (string? dir in directories)
             {
                 if (!Directory.Exists(dir))
                 {

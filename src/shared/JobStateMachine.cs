@@ -98,7 +98,7 @@ public static class JobStateMachine
     /// <returns>True if transition is valid</returns>
     public static bool IsValidTransition(JobState fromState, JobState toState)
     {
-        return ValidTransitions.TryGetValue(fromState, out var validStates) && validStates.Contains(toState);
+        return ValidTransitions.TryGetValue(fromState, out HashSet<JobState>? validStates) && validStates.Contains(toState);
     }
 
     /// <summary>
@@ -122,7 +122,7 @@ public static class JobStateMachine
     /// <returns>True if state is terminal</returns>
     public static bool IsTerminal(JobState state)
     {
-        return ValidTransitions.TryGetValue(state, out var validStates) && validStates.Count == 0;
+        return ValidTransitions.TryGetValue(state, out HashSet<JobState>? validStates) && validStates.Count == 0;
     }
 
     /// <summary>
@@ -132,7 +132,7 @@ public static class JobStateMachine
     /// <returns>Collection of valid next states</returns>
     public static IReadOnlyCollection<JobState> GetValidNextStates(JobState currentState)
     {
-        return ValidTransitions.TryGetValue(currentState, out var validStates)
+        return ValidTransitions.TryGetValue(currentState, out HashSet<JobState>? validStates)
             ? validStates.ToList().AsReadOnly()
             : Array.Empty<JobState>();
     }

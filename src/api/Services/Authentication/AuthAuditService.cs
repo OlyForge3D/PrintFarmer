@@ -23,13 +23,13 @@ public class AuthAuditService : IAuthAuditService
     // Centralized save helper so writes always use a factory-created context
     private async Task SaveAuditAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)
     {
-        using var ctx = _dbFactory.CreateDbContext();
+        using AppDbContext ctx = _dbFactory.CreateDbContext();
         ctx.AuthAuditLogs.Add(auditLog);
         await ctx.SaveChangesAsync(cancellationToken);
         _logging.LogInformation($"[AuthAudit] Saved audit {auditLog.EventType} Id={auditLog.Id}");
         try
         {
-            var provider = ctx.Database.ProviderName;
+            string? provider = ctx.Database.ProviderName;
             string? conn = null;
             try
             { conn = ctx.Database.GetConnectionString(); }
@@ -41,7 +41,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogLoginAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -60,7 +60,7 @@ public class AuthAuditService : IAuthAuditService
     {
         var metadata = new { UsernameOrEmail = usernameOrEmail };
 
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = null, // User doesn't exist or credentials invalid
@@ -80,7 +80,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogLogoutAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -98,7 +98,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogRegisterAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -116,7 +116,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogPasswordChangeAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -136,7 +136,7 @@ public class AuthAuditService : IAuthAuditService
     {
         var metadata = new { Email = email };
 
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = null, // Could lookup user by email, but keeping null for simplicity
@@ -155,7 +155,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogPasswordResetAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -179,7 +179,7 @@ public class AuthAuditService : IAuthAuditService
             LockoutDurationMinutes = lockoutDuration.TotalMinutes
         };
 
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -200,7 +200,7 @@ public class AuthAuditService : IAuthAuditService
     {
         var metadata = new { Reason = reason };
 
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -219,7 +219,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task LogRefreshTokenAsync(Guid userId, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -243,7 +243,7 @@ public class AuthAuditService : IAuthAuditService
             Reason = reason
         };
 
-        var auditLog = new AuthAuditLog
+        AuthAuditLog auditLog = new AuthAuditLog
         {
             Id = Guid.NewGuid(),
             UserId = userId,
@@ -262,7 +262,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)
     {
-        using var ctx = _dbFactory.CreateDbContext();
+        using AppDbContext ctx = _dbFactory.CreateDbContext();
         return await ctx.AuthAuditLogs
             .Where(aal => aal.UserId == userId)
             .OrderByDescending(aal => aal.Timestamp)
@@ -273,7 +273,7 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task<List<AuthAuditLog>> GetRecentFailedLoginsAsync(int count = 100, CancellationToken cancellationToken = default)
     {
-        using var ctx = _dbFactory.CreateDbContext();
+        using AppDbContext ctx = _dbFactory.CreateDbContext();
         return await ctx.AuthAuditLogs
             .Where(aal => aal.EventType == AuthEventType.LoginFailed)
             .OrderByDescending(aal => aal.Timestamp)
@@ -283,8 +283,8 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task<List<AuthAuditLog>> GetSecurityEventsAsync(DateTime? since = null, int pageSize = 100, CancellationToken cancellationToken = default)
     {
-        using var ctx = _dbFactory.CreateDbContext();
-        var query = ctx.AuthAuditLogs
+        using AppDbContext ctx = _dbFactory.CreateDbContext();
+        IQueryable<AuthAuditLog> query = ctx.AuthAuditLogs
             .Where(aal => aal.EventType == AuthEventType.AccountLocked ||
                          aal.EventType == AuthEventType.AccountUnlocked ||
                          aal.EventType == AuthEventType.PasswordReset ||

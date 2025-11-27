@@ -197,7 +197,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
                 return Task.FromResult<SlicerFileMetadata?>(null);
             }
 
-            var fileInfo = _fileSystem.GetFileInfo(filePath);
+            FileInfoData fileInfo = _fileSystem.GetFileInfo(filePath);
             string key = GetKeyFromFilePath(filePath);
             string? storedContentType = TryReadSidecarContentType(filePath);
             SlicerFileMetadata meta = new()
@@ -248,7 +248,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
             {
                 try
                 {
-                    var fi = _fileSystem.GetFileInfo(file);
+                    FileInfoData fi = _fileSystem.GetFileInfo(file);
                     if (fi.LastWriteTimeUtc < cutoffTime)
                     {
                         _fileSystem.DeleteFile(file);

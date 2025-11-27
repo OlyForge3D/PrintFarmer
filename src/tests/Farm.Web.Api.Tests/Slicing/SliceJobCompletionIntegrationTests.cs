@@ -3,6 +3,10 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -26,13 +30,13 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
     [Fact(DisplayName = "Slice job completion repository/service flow succeeds (single artifact)")]
     public async Task SliceJob_Service_Completion_Flow_Succeeds()
     {
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
         // 1. Create processing job
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -48,9 +52,9 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         await jobRepo.SaveChangesAsync();
 
         // 2. Upload artifact via service
-        var bytes = System.Text.Encoding.UTF8.GetBytes("; G-code test contents");
-        var formFile = new TestFormFile(bytes, "output.gcode", "application/gcode");
-        var artifact = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("; G-code test contents");
+        TestFormFile formFile = new TestFormFile(bytes, "output.gcode", "application/gcode");
+        Artifact artifact = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
         artifact.Id.Should().NotBe(Guid.Empty);
         artifact.JobId.Should().Be(job.Id);
         artifact.Kind.Should().Be("gcode");
@@ -61,7 +65,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         await jobRepo.SaveChangesAsync();
 
         // 4. Reload and assert
-        var updated = await jobRepo.GetByIdAsync(job.Id);
+        SliceJob? updated = await jobRepo.GetByIdAsync(job.Id);
         updated.Should().NotBeNull();
         updated!.Status.Should().Be(Farm.Infrastructure.Domain.SliceJobStatus.Completed);
         updated.ResultFileUrl.Should().Be(resultUrl);
@@ -73,7 +77,7 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         updated.ArtifactIdsCsv.Should().Contain(artifact.Id.ToString());
 
         // Parse CSV correctness
-        var ids = updated.ArtifactIdsCsv!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[] ids = updated.ArtifactIdsCsv!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         ids.Should().HaveCount(1);
         Guid.Parse(ids[0]).Should().Be(artifact.Id);
     }
@@ -81,11 +85,11 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
     [Fact(DisplayName = "Slice job completion persists multi-artifact summary")]
     public async Task SliceJob_Completion_MultiArtifact_Summary()
     {
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -101,16 +105,16 @@ public class SliceJobCompletionIntegrationTests : IClassFixture<CustomWebApplica
         await jobRepo.SaveChangesAsync();
 
         // Upload multiple artifacts
-        var gcode = await artifactsService.UploadAsync(new TestFormFile(System.Text.Encoding.UTF8.GetBytes(";gcode"), "a.gcode", "application/gcode"), job.Id, null, "gcode", default);
-        var preview = await artifactsService.UploadAsync(new TestFormFile(new byte[] { 1, 2, 3, 4, 5 }, "preview.png", "image/png"), job.Id, null, "preview", default);
-        var log = await artifactsService.UploadTextAsync("Log line A\nLog line B", "log.txt", job.Id, null, "log", default);
+        Artifact gcode = await artifactsService.UploadAsync(new TestFormFile(System.Text.Encoding.UTF8.GetBytes(";gcode"), "a.gcode", "application/gcode"), job.Id, null, "gcode", default);
+        Artifact preview = await artifactsService.UploadAsync(new TestFormFile(new byte[] { 1, 2, 3, 4, 5 }, "preview.png", "image/png"), job.Id, null, "preview", default);
+        Artifact log = await artifactsService.UploadTextAsync("Log line A\nLog line B", "log.txt", job.Id, null, "log", default);
 
-        var artifactIds = new[] { gcode.Id, preview.Id, log.Id };
+        Guid[] artifactIds = new[] { gcode.Id, preview.Id, log.Id };
         string resultUrl = $"/api/artifacts/{gcode.Id}/download";
         await jobRepo.MarkCompletedWithArtifactsAsync(job.Id, resultUrl, artifactIds, 999, 3.2m);
         await jobRepo.SaveChangesAsync();
 
-        var updated = await jobRepo.GetByIdAsync(job.Id);
+        SliceJob? updated = await jobRepo.GetByIdAsync(job.Id);
         updated.Should().NotBeNull();
         updated!.ArtifactsCount.Should().Be(3);
         updated.ArtifactIdsCsv.Should().NotBeNull();

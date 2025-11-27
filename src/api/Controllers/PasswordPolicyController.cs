@@ -14,7 +14,7 @@ public class PasswordPolicyController(Farm.Web.Api.Services.PasswordPolicy.IPass
     [HttpGet]
     public async Task<ActionResult<PasswordPolicyDto>> GetAsync(CancellationToken ct)
     {
-        var dto = await svc.GetAsync(ct);
+        PasswordPolicyDto dto = await svc.GetAsync(ct);
         return Ok(dto);
     }
 
@@ -26,7 +26,7 @@ public class PasswordPolicyController(Farm.Web.Api.Services.PasswordPolicy.IPass
             return BadRequest("Request body required");
         }
         // The service enforces validation and persists changes via repository
-        var updated = await svc.UpdateAsync(request, ct);
+        PasswordPolicyDto updated = await svc.UpdateAsync(request, ct);
         return Ok(updated);
     }
 }

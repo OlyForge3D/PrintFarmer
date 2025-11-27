@@ -1,4 +1,5 @@
 ﻿using AutoMapper;
+using Farm.Web.Api.Services.JobDispatch;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -82,8 +83,8 @@ public static class ApiApplicationServiceCollectionExtensions
         _ = services.AddScoped<Farm.Web.Api.Services.JobDispatch.IJobDispatcherService, Farm.Web.Api.Services.JobDispatch.JobDispatcherService>();
         _ = services.AddSingleton(sp =>
         {
-            var cfg = sp.GetRequiredService<IConfiguration>();
-            var opts = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
+            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
+            RetryOptions opts = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
             cfg.GetSection("JobDispatchRetry").Bind(opts);
             return opts;
         });

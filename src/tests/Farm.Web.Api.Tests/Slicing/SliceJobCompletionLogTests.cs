@@ -1,6 +1,13 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Web.Api.Controllers.Slicing;
+using Farm.Web.Api.Services.Artifacts;
+using Farm.Web.Api.Services.RateLimiting;
+using Farm.Web.Api.Services.Slicing;
+using Farm.Web.Api.Services.Workers;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -24,29 +31,29 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
     [Fact(DisplayName = "Completion endpoint persists log text as artifact when provided")]
     public async Task Completion_Persists_Log_Text_As_Artifact()
     {
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
         // Manually construct controller (controllers aren't added to root service provider in this test host)
-        var repo = jobRepo;
-        var evtSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Slicing.ISliceJobEventService>();
-        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+        ISliceJobRepository repo = jobRepo;
+        ISliceJobEventService evtSvc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Slicing.ISliceJobEventService>();
+        ILoggerFactory loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
         ILogger<Farm.Web.Api.Controllers.Slicing.SliceJobController> logger = loggerFactory.CreateLogger<Farm.Web.Api.Controllers.Slicing.SliceJobController>();
-        var hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
-        var profileRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository>();
-        var rateLimit = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.RateLimiting.IRateLimitService>();
-        var metrics = new Farm.Web.Api.Services.Slicing.SliceJobMetrics();
-        var workerAuth = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Workers.IWorkerAuthService>();
-        var httpContext = new DefaultHttpContext();
+        IHostEnvironment hostEnv = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
+        IProcessProfileRepository profileRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.IProcessProfileRepository>();
+        IRateLimitService rateLimit = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.RateLimiting.IRateLimitService>();
+        SliceJobMetrics metrics = new Farm.Web.Api.Services.Slicing.SliceJobMetrics();
+        IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Workers.IWorkerAuthService>();
+        DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
-        var controller = new Farm.Web.Api.Controllers.Slicing.SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth)
+        SliceJobController controller = new Farm.Web.Api.Controllers.Slicing.SliceJobController(repo, evtSvc, logger, hostEnv, profileRepo, artifactsService, rateLimit, metrics, workerAuth)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
 
         // Create job in Processing state
-        var job = new SliceJob
+        SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
             Status = SliceJobStatus.Processing,
@@ -61,29 +68,29 @@ public class SliceJobCompletionLogTests : IClassFixture<CustomWebApplicationFact
         await jobRepo.SaveChangesAsync();
 
         // Upload primary gcode artifact
-        var bytes = System.Text.Encoding.UTF8.GetBytes("; gcode content");
-        var formFile = new TestFormFile(bytes, "primary.gcode", "application/gcode");
-        var primary = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("; gcode content");
+        TestFormFile formFile = new TestFormFile(bytes, "primary.gcode", "application/gcode");
+        Artifact primary = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
 
         // Complete with log text
-        var request = new CompleteSliceJobRequest
+        CompleteSliceJobRequest request = new CompleteSliceJobRequest
         {
             PrimaryArtifactId = primary.Id,
             LogText = "Layer 1 OK\nLayer 2 OK"
         };
-        var result = await controller.CompleteJobAsync(job.Id, request);
+        IActionResult result = await controller.CompleteJobAsync(job.Id, request);
 
         // Validate response
-        var ok = result as OkObjectResult;
+        OkObjectResult? ok = result as OkObjectResult;
         ok.Should().NotBeNull();
-        var response = ok!.Value as CompleteSliceJobResponse;
+        CompleteSliceJobResponse? response = ok!.Value as CompleteSliceJobResponse;
         response.Should().NotBeNull();
         response!.ArtifactIds.Should().Contain(primary.Id);
         response.LogArtifactId.Should().NotBeNull();
         response.ArtifactIds.Should().Contain(response.LogArtifactId!.Value);
 
         // Verify artifact persisted
-        var artifacts = await artifactsService.ListByJobAsync(job.Id, default);
+        IReadOnlyList<Artifact> artifacts = await artifactsService.ListByJobAsync(job.Id, default);
         artifacts.Should().HaveCount(2);
         artifacts.Should().Contain(a => a.Kind == "log" && a.Id == response.LogArtifactId);
     }

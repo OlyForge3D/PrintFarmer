@@ -1,4 +1,6 @@
 ﻿using System;
+using Farm.Infrastructure.Data;
+using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -37,8 +39,8 @@ namespace Farm.Web.IntegrationTests
             // the application startup code will run EnsureCreated + seeding as it
             // would in a normal host. This keeps integration behavior consistent
             // with the main test factory without pulling in extra complexity.
-            var memDbName = $"integ_shared_{Guid.NewGuid():N}";
-            var connStr = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
+            string memDbName = $"integ_shared_{Guid.NewGuid():N}";
+            string connStr = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
 
             // Override connection strings and test flags used by Program startup
             Environment.SetEnvironmentVariable("ConnectionStrings__Default", connStr);
@@ -58,17 +60,17 @@ namespace Farm.Web.IntegrationTests
             // Ensure host runs in Testing environment to match other test factories
             builder.UseEnvironment("Testing");
 
-            var host = base.CreateHost(builder);
+            IHost host = base.CreateHost(builder);
 
             // Best-effort: run a host-scoped EnsureCreated + DatabaseInitializer.SeedAllAsync
             // so integration tests see the same seed data and schema as other factories.
             try
             {
-                using var scope = host.Services.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+                using IServiceScope scope = host.Services.CreateScope();
+                AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
                 db.Database.EnsureCreated();
 
-                var initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
+                DatabaseInitializer? initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
                 if (initializer != null)
                 {
                     try

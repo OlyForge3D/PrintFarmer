@@ -61,15 +61,15 @@ public class ArtifactsService : IArtifactsService
         string fullPath = Path.Combine(folder, targetFileName);
 
         string sha256;
-        await using (var target = File.Create(fullPath))
-        await using (var input = file.OpenReadStream())
-        using (var hasher = SHA256.Create())
+        await using (FileStream target = File.Create(fullPath))
+        await using (Stream input = file.OpenReadStream())
+        using (SHA256 hasher = SHA256.Create())
         {
             sha256 = await CopyAndHashAsync(input, target, hasher, ct);
         }
 
-        var relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
-        var artifact = new Artifact
+        string relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+        Artifact artifact = new Artifact
         {
             Id = artifactId,
             JobId = jobId,
@@ -90,7 +90,7 @@ public class ArtifactsService : IArtifactsService
         // Increment worker artifact counters if available
         if (workerId.HasValue)
         {
-            var worker = await _db.Set<Worker>().FirstOrDefaultAsync(w => w.Id == workerId.Value, ct);
+            Worker? worker = await _db.Set<Worker>().FirstOrDefaultAsync(w => w.Id == workerId.Value, ct);
             if (worker != null)
             {
                 worker.ArtifactsProduced++;
@@ -109,7 +109,7 @@ public class ArtifactsService : IArtifactsService
             content = string.Empty;
         }
 
-        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(content);
         if (bytes.Length == 0)
         {
             throw new InvalidOperationException("Empty content not allowed.");
@@ -135,8 +135,8 @@ public class ArtifactsService : IArtifactsService
         string fullPath = Path.Combine(folder, targetFileName);
 
         string sha256;
-        await using (var target = File.Create(fullPath))
-        using (var hasher = SHA256.Create())
+        await using (FileStream target = File.Create(fullPath))
+        using (SHA256 hasher = SHA256.Create())
         {
             // Write and hash
             hasher.TransformBlock(bytes, 0, bytes.Length, null, 0);
@@ -145,8 +145,8 @@ public class ArtifactsService : IArtifactsService
             sha256 = Convert.ToHexString(hasher.Hash!);
         }
 
-        var relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
-        var artifact = new Artifact
+        string relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+        Artifact artifact = new Artifact
         {
             Id = artifactId,
             JobId = jobId,
@@ -166,7 +166,7 @@ public class ArtifactsService : IArtifactsService
 
         if (workerId.HasValue)
         {
-            var worker = await _db.Set<Worker>().FirstOrDefaultAsync(w => w.Id == workerId.Value, ct);
+            Worker? worker = await _db.Set<Worker>().FirstOrDefaultAsync(w => w.Id == workerId.Value, ct);
             if (worker != null)
             {
                 worker.ArtifactsProduced++;
@@ -190,7 +190,7 @@ public class ArtifactsService : IArtifactsService
 
     public async Task<(Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
     {
-        var artifact = await _db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == id, ct);
+        Artifact? artifact = await _db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == id, ct);
         if (artifact == null)
         {
             return null;
@@ -229,7 +229,7 @@ public class ArtifactsService : IArtifactsService
             return false;
         }
 
-        var allowed = _settings.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[] allowed = _settings.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return allowed.Contains(kind, StringComparer.OrdinalIgnoreCase);
     }
 

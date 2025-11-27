@@ -48,7 +48,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         // scenarios register or mutate DbContextFactory registration at test-host
         // build time; resolving lazily avoids forcing the factory to exist during
         // singleton validation/build-time checks.
-        var dbFactory = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
+        IDbContextFactory<AppDbContext> dbFactory = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory.CreateDbContext();
         List<ManufacturerDto> list = await db.Manufacturers.AsNoTracking().OrderBy(m => m.Name)
             .Select(m => new ManufacturerDto(m.Id, m.Name)).ToListAsync(ct);
@@ -65,7 +65,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
             return cached;
         }
 
-        var dbFactory2 = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
+        IDbContextFactory<AppDbContext> dbFactory2 = _dbFactory ??= _services.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory2.CreateDbContext();
 
         IQueryable<PrinterModel> q = db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();

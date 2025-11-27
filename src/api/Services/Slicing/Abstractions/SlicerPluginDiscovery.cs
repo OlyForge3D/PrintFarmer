@@ -36,19 +36,19 @@ public static class SlicerPluginDiscovery
         try
         {
             // Get all assemblies in the current domain
-            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
 
-            foreach (var assembly in assemblies)
+            foreach (Assembly assembly in assemblies)
             {
                 try
                 {
                     // Look for SlicerPluginAttribute on the assembly
-                    var pluginAttributes = assembly
+                    List<SlicerPluginAttribute> pluginAttributes = assembly
                         .GetCustomAttributes(typeof(SlicerPluginAttribute), inherit: false)
                         .OfType<SlicerPluginAttribute>()
                         .ToList();
 
-                    foreach (var attribute in pluginAttributes)
+                    foreach (SlicerPluginAttribute attribute in pluginAttributes)
                     {
                         try
                         {
@@ -66,11 +66,11 @@ public static class SlicerPluginDiscovery
                             }
 
                             // Instantiate library and UI provider
-                            var library = (ISlicerLibrary?)Activator.CreateInstance(attribute.LibraryType)
+                            ISlicerLibrary library = (ISlicerLibrary?)Activator.CreateInstance(attribute.LibraryType)
                                 ?? throw new InvalidOperationException(
                                     $"Failed to instantiate slicer library type {attribute.LibraryType.FullName}");
 
-                            var uiProvider = (ISlicerUIProvider?)Activator.CreateInstance(attribute.UIProviderType)
+                            ISlicerUIProvider uiProvider = (ISlicerUIProvider?)Activator.CreateInstance(attribute.UIProviderType)
                                 ?? throw new InvalidOperationException(
                                     $"Failed to instantiate slicer UI provider type {attribute.UIProviderType.FullName}");
 
@@ -115,7 +115,7 @@ public static class SlicerPluginDiscovery
     /// <returns>The service collection for chaining</returns>
     public static IServiceCollection AddSlicerRegistry(this IServiceCollection services)
     {
-        var registry = new SlicerRegistry(RegisteredLibraries, RegisteredUIProviders);
+        SlicerRegistry registry = new SlicerRegistry(RegisteredLibraries, RegisteredUIProviders);
         return services.AddSingleton<ISlicerRegistry>(registry);
     }
 }

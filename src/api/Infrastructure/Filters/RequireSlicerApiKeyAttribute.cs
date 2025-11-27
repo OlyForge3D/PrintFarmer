@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Infrastructure.Filters;
 
@@ -14,7 +15,7 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
 
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        var required = Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY");
+        string? required = Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY");
         if (string.IsNullOrEmpty(required))
         {
             // not configured - allow through
@@ -22,7 +23,7 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
             return;
         }
 
-        if (!context.HttpContext.Request.Headers.TryGetValue(HeaderName, out var provided) || string.IsNullOrWhiteSpace(provided))
+        if (!context.HttpContext.Request.Headers.TryGetValue(HeaderName, out StringValues provided) || string.IsNullOrWhiteSpace(provided))
         {
             context.Result = new UnauthorizedObjectResult(new { error = "Missing X-Slicer-ApiKey header" });
             return;

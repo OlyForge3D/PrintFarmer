@@ -23,6 +23,7 @@ using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
@@ -119,7 +120,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi(options =>
 {
     // Configure OpenAPI document with JWT Bearer security
-    var securityScheme = new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    OpenApiSecurityScheme securityScheme = new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
         Name = "Authorization",
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
@@ -390,11 +391,11 @@ builder.Services.AddSingleton<IAssetService, AssetService>();
 // Runs hourly to detect orphaned/missing/corrupted files
 builder.Services.AddHostedService(sp =>
 {
-    var scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
-    var logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-    var config = sp.GetRequiredService<IConfiguration>();
-    var modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
-    var gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
+    IServiceScopeFactory scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
+    IUnifiedLoggingService logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+    IConfiguration config = sp.GetRequiredService<IConfiguration>();
+    string modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
+    string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
     return new Farm.Web.Api.Services.FileManagement.FileConsistencyAuditService(
         scopeFactory,
         logger,
@@ -484,7 +485,7 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 // result in "server has not been started" errors in CreateClient().
 try
 {
-    var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+    string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
     if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
     {
         builder.WebHost.UseUrls("http://0.0.0.0:5245");
@@ -515,7 +516,7 @@ catch (Exception ex)
 {
     try
     {
-        var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
         if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
@@ -547,8 +548,8 @@ catch
 // Configure artifact storage metrics thresholds and alerts
 try
 {
-    var artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
-    var artifactMetrics = app.Services.GetRequiredService<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
+    ArtifactStorageSettings artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
+    ArtifactsMetrics artifactMetrics = app.Services.GetRequiredService<Farm.Web.Api.Services.Artifacts.ArtifactsMetrics>();
 
     if (artifactSettings.EnableStorageAlerts)
     {
@@ -557,8 +558,8 @@ try
         // Subscribe to threshold events for logging
         artifactMetrics.ThresholdExceeded += (sender, e) =>
         {
-            var logger = app.Services.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
-            var levelStr = e.Level switch
+            ILogger<Program>? logger = app.Services.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+            string levelStr = e.Level switch
             {
                 Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Warning => "WARNING",
                 Farm.Web.Api.Services.Artifacts.StorageThresholdLevel.Critical => "CRITICAL",
@@ -888,10 +889,10 @@ if (isMonolithicDeployment)
 // Configure static file serving for artifacts if enabled
 try
 {
-    var artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
+    ArtifactStorageSettings artifactSettings = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<ArtifactStorageSettings>>().Value;
     if (artifactSettings.EnableStaticServing)
     {
-        var artifactPath = Path.IsPathRooted(artifactSettings.RootPath)
+        string artifactPath = Path.IsPathRooted(artifactSettings.RootPath)
             ? artifactSettings.RootPath
             : Path.Combine(app.Environment.ContentRootPath, artifactSettings.RootPath);
 

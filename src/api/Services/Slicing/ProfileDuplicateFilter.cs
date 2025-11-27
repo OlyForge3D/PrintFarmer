@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -45,12 +46,12 @@ namespace Farm.Web.Api.Services.Slicing
             var existingKeyTuples = await _db.ProcessProfiles
                 .Select(p => new { p.Name, p.SlicerType, p.PrinterModelId })
                 .ToListAsync(ct);
-            var existingHashSet = (await _db.ProcessProfiles
+            HashSet<string> existingHashSet = (await _db.ProcessProfiles
                 .Where(p => !string.IsNullOrWhiteSpace(p.Hash))
                 .Select(p => p.Hash!)
                 .ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var existingKeySet = existingKeyTuples
+            HashSet<(string Name, SlicerType SlicerType, Guid? PrinterModelId)> existingKeySet = existingKeyTuples
                 .Select(k => (k.Name, k.SlicerType, k.PrinterModelId))
                 .ToHashSet();
 
@@ -61,10 +62,10 @@ namespace Farm.Web.Api.Services.Slicing
             List<ProcessProfile> filtered = new();
             int skipped = 0;
 
-            foreach (var profile in list)
+            foreach (ProcessProfile profile in list)
             {
                 string name = profile.Name ?? string.Empty;
-                var composite = (name, profile.SlicerType, profile.PrinterModelId);
+                (string name, SlicerType SlicerType, Guid? PrinterModelId) composite = (name, profile.SlicerType, profile.PrinterModelId);
 
                 // If hash missing but RawJson present, compute deterministic SHA256
                 if (string.IsNullOrWhiteSpace(profile.Hash) && !string.IsNullOrWhiteSpace(profile.RawJson))
@@ -105,7 +106,7 @@ namespace Farm.Web.Api.Services.Slicing
 
         private static string ComputeSha256(string input)
         {
-            using var sha = System.Security.Cryptography.SHA256.Create();
+            using SHA256 sha = System.Security.Cryptography.SHA256.Create();
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(input);
             byte[] hash = sha.ComputeHash(bytes);
             return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();

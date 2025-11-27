@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -42,13 +43,13 @@ public class ArtifactCleanupService : IArtifactCleanupService
             _settings.MaxAgeDays,
             _settings.MaxTotalBytes);
 
-        var candidatesForDeletion = new System.Collections.Generic.List<Farm.Infrastructure.Domain.Artifact>();
+        List<Artifact> candidatesForDeletion = new System.Collections.Generic.List<Farm.Infrastructure.Domain.Artifact>();
 
         // Age-based cleanup: find artifacts older than MaxAgeDays
         if (_settings.MaxAgeDays.HasValue && _settings.MaxAgeDays.Value > 0)
         {
-            var cutoffDate = DateTime.UtcNow.AddDays(-_settings.MaxAgeDays.Value);
-            var oldArtifacts = await _db.Artifacts
+            DateTime cutoffDate = DateTime.UtcNow.AddDays(-_settings.MaxAgeDays.Value);
+            List<Artifact> oldArtifacts = await _db.Artifacts
                 .Where(a => a.CreatedAt < cutoffDate)
                 .OrderBy(a => a.CreatedAt)
                 .ToListAsync(ct);
@@ -60,18 +61,18 @@ public class ArtifactCleanupService : IArtifactCleanupService
         // Size-based cleanup: if total storage exceeds MaxTotalBytes, delete oldest until under threshold
         if (_settings.MaxTotalBytes.HasValue && _settings.MaxTotalBytes.Value > 0)
         {
-            var totalSize = await _db.Artifacts.SumAsync(a => (long?)a.SizeBytes, ct) ?? 0;
+            long totalSize = await _db.Artifacts.SumAsync(a => (long?)a.SizeBytes, ct) ?? 0;
             if (totalSize > _settings.MaxTotalBytes.Value)
             {
                 _logger.LogInformation("Total storage {TotalSize} exceeds threshold {MaxTotalBytes}, selecting oldest artifacts for cleanup",
                     totalSize, _settings.MaxTotalBytes.Value);
 
-                var allArtifacts = await _db.Artifacts
+                List<Artifact> allArtifacts = await _db.Artifacts
                     .OrderBy(a => a.CreatedAt)
                     .ToListAsync(ct);
 
                 long runningTotal = totalSize;
-                foreach (var artifact in allArtifacts)
+                foreach (Artifact? artifact in allArtifacts)
                 {
                     if (runningTotal <= _settings.MaxTotalBytes.Value)
                     {
@@ -102,7 +103,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
         if (_settings.EnableCleanupDryRun)
         {
             // Dry-run mode: log what would be deleted
-            foreach (var artifact in candidatesForDeletion)
+            foreach (Artifact artifact in candidatesForDeletion)
             {
                 _logger.LogInformation(
                     "[DRY RUN] Would delete artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
@@ -116,7 +117,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
 
         // Actual deletion
         int deletedCount = 0;
-        foreach (var artifact in candidatesForDeletion)
+        foreach (Artifact artifact in candidatesForDeletion)
         {
             try
             {

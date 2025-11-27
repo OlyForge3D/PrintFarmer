@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,14 +21,14 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
     [Fact(DisplayName = "Complete E2E flow: queue, artifacts, log, completion, ownership verification")]
     public async Task SliceJob_E2E_Completion_Flow_With_Authorization()
     {
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
-        var userId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
 
         // 1. Enqueue job
-        var job = new SliceJob
+        SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
             Status = SliceJobStatus.Queued,
@@ -45,33 +47,33 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
         await jobRepo.SaveChangesAsync();
 
         // 3. Upload bulk artifacts (gcode, thumbnail, preview)
-        var gcodeBytes = System.Text.Encoding.UTF8.GetBytes("; Example G-code\nG28\nG1 X10 Y10");
-        var thumbnailBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG header
-        var previewBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }; // JPEG header
+        byte[] gcodeBytes = System.Text.Encoding.UTF8.GetBytes("; Example G-code\nG28\nG1 X10 Y10");
+        byte[] thumbnailBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG header
+        byte[] previewBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }; // JPEG header
 
-        var gcode = await artifactsService.UploadAsync(
+        Artifact gcode = await artifactsService.UploadAsync(
             new TestFormFile(gcodeBytes, "output.gcode", "application/gcode"),
             job.Id, null, "gcode", default);
-        var thumbnail = await artifactsService.UploadAsync(
+        Artifact thumbnail = await artifactsService.UploadAsync(
             new TestFormFile(thumbnailBytes, "thumb.png", "image/png"),
             job.Id, null, "thumbnail", default);
-        var preview = await artifactsService.UploadAsync(
+        Artifact preview = await artifactsService.UploadAsync(
             new TestFormFile(previewBytes, "preview.jpg", "image/jpeg"),
             job.Id, null, "preview", default);
 
         // 4. Upload inline log text
-        var log = await artifactsService.UploadTextAsync(
+        Artifact log = await artifactsService.UploadTextAsync(
             "Slicing started\nLayer 1/100\nSlicing complete",
             "slicer.log",
             job.Id, null, "log", default);
 
         // 5. Mark job completed with all artifacts
-        var allArtifactIds = new[] { gcode.Id, thumbnail.Id, preview.Id, log.Id };
+        Guid[] allArtifactIds = new[] { gcode.Id, thumbnail.Id, preview.Id, log.Id };
         await jobRepo.MarkCompletedWithArtifactsAsync(job.Id, $"/api/artifacts/{gcode.Id}/download", allArtifactIds, 1500, 25.3m);
         await jobRepo.SaveChangesAsync();
 
         // 6. Verify completion state
-        var completed = await jobRepo.GetByIdAsync(job.Id);
+        SliceJob? completed = await jobRepo.GetByIdAsync(job.Id);
         completed.Should().NotBeNull();
         completed!.Status.Should().Be(SliceJobStatus.Completed);
         completed.ArtifactsCount.Should().Be(4);
@@ -83,7 +85,7 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
         completed.FilamentUsedGrams.Should().Be(25.3m);
 
         // 7. Verify artifacts accessible
-        var artifacts = await artifactsService.ListByJobAsync(job.Id, default);
+        IReadOnlyList<Artifact> artifacts = await artifactsService.ListByJobAsync(job.Id, default);
         artifacts.Should().HaveCount(4);
         artifacts.Should().Contain(a => a.Kind == "gcode");
         artifacts.Should().Contain(a => a.Kind == "thumbnail");
@@ -91,11 +93,11 @@ public class SliceJobCompletionE2ETests : IClassFixture<CustomWebApplicationFact
         artifacts.Should().Contain(a => a.Kind == "log");
 
         // 8. Verify artifact files exist on disk
-        foreach (var artifact in artifacts)
+        foreach (Artifact artifact in artifacts)
         {
-            var result = await artifactsService.GetWithPathAsync(artifact.Id, default);
+            (Artifact artifact, string fullPath)? result = await artifactsService.GetWithPathAsync(artifact.Id, default);
             result.Should().NotBeNull();
-            var (a, path) = result!.Value;
+            (Artifact? a, string? path) = result!.Value;
             System.IO.File.Exists(path).Should().BeTrue($"artifact file should exist at {path}");
         }
     }

@@ -3,7 +3,11 @@ using System.Data.Common;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Reflection;
+using System.Text;
+using Farm.Infrastructure.Data;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -44,8 +48,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     public CustomWebApplicationFactory()
     {
-        var dbFile = $"farm_test_{Guid.NewGuid():N}.db"; // repository-local temp db file
-        var tempDir = Farm.Web.Api.Tests.TestInfrastructure.TestPaths.GetUniqueTempDirectory();
+        string dbFile = $"farm_test_{Guid.NewGuid():N}.db"; // repository-local temp db file
+        string tempDir = Farm.Web.Api.Tests.TestInfrastructure.TestPaths.GetUniqueTempDirectory();
         _dbPath = Path.Combine(tempDir, dbFile);
         TryDelete();
 
@@ -153,7 +157,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         public Farm.Infrastructure.Data.AppDbContext CreateDbContext()
         {
-            var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>();
+            DbContextOptionsBuilder<AppDbContext> options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>();
             // Add TestSqlitePragmaEnforcer as a defensive interceptor for any early-created contexts
             try
             {
@@ -197,10 +201,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // (commonly 'Testing') so tests that assert environment-gated behavior remain
         // stable.
         // Default to per-factory in-memory SQLite unless the environment explicitly requests otherwise.
-        var envUseInMemory = Environment.GetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY");
-        var useInMemorySqlite = string.IsNullOrEmpty(envUseInMemory) ? true : string.Equals(envUseInMemory, "true", StringComparison.OrdinalIgnoreCase);
-        var envUseShared = Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE");
-        var useSharedSqlite = !string.IsNullOrEmpty(envUseShared) && string.Equals(envUseShared, "true", StringComparison.OrdinalIgnoreCase);
+        string? envUseInMemory = Environment.GetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY");
+        bool useInMemorySqlite = string.IsNullOrEmpty(envUseInMemory) ? true : string.Equals(envUseInMemory, "true", StringComparison.OrdinalIgnoreCase);
+        string? envUseShared = Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE");
+        bool useSharedSqlite = !string.IsNullOrEmpty(envUseShared) && string.Equals(envUseShared, "true", StringComparison.OrdinalIgnoreCase);
         // If a shared fixture already prepared a global SqliteConnection, mark the
         // startup to skip its own DB initialization as early as possible so the
         // application won't race with the fixture's pre-seed.
@@ -215,7 +219,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         if (useInMemorySqlite)
         {
             // Per-factory in-memory SQLite: prefer the 'Testing' environment to avoid runtime dev-only telemetry
-            var current = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            string? current = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
             if (string.IsNullOrEmpty(current))
             {
                 Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
@@ -231,7 +235,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // Shared-keeper SQLite: prefer preserving any existing environment setting
             // (so tests that expect 'Testing' continue to behave). If none is set,
             // default to Testing rather than Development to keep behavior conservative.
-            var existing = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            string? existing = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
             if (!string.IsNullOrEmpty(existing))
             {
                 builder.UseEnvironment(existing);
@@ -247,7 +251,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         }
         builder.ConfigureAppConfiguration((context, config) =>
         {
-            var dict = new Dictionary<string, string?>
+            Dictionary<string, string?> dict = new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = $"Data Source={_dbPath}",
                 ["ConnectionStrings:Sqlite"] = $"Data Source={_dbPath}",
@@ -262,13 +266,13 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // Remove any OpenTelemetry / OTLP service registrations that the application may add
             try
             {
-                var otelCandidates = services.Where(d =>
+                List<ServiceDescriptor> otelCandidates = services.Where(d =>
                     (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("OpenTelemetry") || d.ServiceType.FullName.Contains("TracerProvider") || d.ServiceType.FullName.Contains("MeterProvider") || d.ServiceType.FullName.Contains("Otlp"))) ||
                     (d.ImplementationType != null && d.ImplementationType.FullName != null && (d.ImplementationType.FullName.Contains("OpenTelemetry") || d.ImplementationType.FullName.Contains("TracerProvider") || d.ImplementationType.FullName.Contains("MeterProvider") || d.ImplementationType.FullName.Contains("Otlp"))) ||
                     (d.ImplementationFactory != null && d.ImplementationFactory.Method?.DeclaringType != null && (d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("OpenTelemetry") || d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("TracerProvider") || d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("MeterProvider") || d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains("Otlp")))
                 ).ToList();
 
-                foreach (var d in otelCandidates)
+                foreach (ServiceDescriptor d in otelCandidates)
                 {
                     try
                     {
@@ -285,7 +289,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // validation. Prefer an explicit connection string from environment if set.
             try
             {
-                var earlyConnStr = Environment.GetEnvironmentVariable("ConnectionStrings__Default")
+                string? earlyConnStr = Environment.GetEnvironmentVariable("ConnectionStrings__Default")
                     ?? Environment.GetEnvironmentVariable("TEST_SHARED_SQLITE_CONN");
                 if (!string.IsNullOrEmpty(earlyConnStr))
                 {
@@ -307,7 +311,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 if (string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase))
                 {
                     // Prefer fixture-provided connection when available
-                    var global = Farm.Web.Api.Tests.TestInfrastructure.SharedSqliteFixture.GlobalConnection;
+                    SqliteConnection? global = Farm.Web.Api.Tests.TestInfrastructure.SharedSqliteFixture.GlobalConnection;
                     SqliteConnection earlyConn;
                     if (global != null)
                     {
@@ -315,15 +319,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     }
                     else
                     {
-                        var exported = Environment.GetEnvironmentVariable("TEST_SHARED_SQLITE_CONN");
+                        string? exported = Environment.GetEnvironmentVariable("TEST_SHARED_SQLITE_CONN");
                         if (!string.IsNullOrEmpty(exported))
                         {
                             earlyConn = new SqliteConnection(exported);
                         }
                         else
                         {
-                            var sharedName = $"early_shared_unittest_{Guid.NewGuid():N}";
-                            var connStr = $"Data Source=file:{sharedName}?mode=memory&cache=shared";
+                            string sharedName = $"early_shared_unittest_{Guid.NewGuid():N}";
+                            string connStr = $"Data Source=file:{sharedName}?mode=memory&cache=shared";
                             earlyConn = new SqliteConnection(connStr);
                         }
 
@@ -370,25 +374,25 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // Allow tests to opt into using EF Core's InMemory provider instead of SQLite.
             // This is useful to isolate tests from SQLite file/in-memory semantics when
             // table creation timing causes flakiness. Enable with TEST_USE_EF_INMEMORY=true.
-            var useEfInMemory = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_EF_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
+            bool useEfInMemory = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_EF_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
             if (useEfInMemory)
             {
                 // Replace AppDbContext registration with InMemory provider pointing to a unique DB name
                 try
                 {
                     // Remove any registration that may reference AppDbContext or its DbContextOptions
-                    var descriptors = services.Where(d =>
+                    List<ServiceDescriptor> descriptors = services.Where(d =>
                         (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase) || d.ServiceType.FullName.Contains("DbContextOptions", StringComparison.OrdinalIgnoreCase))) ||
                             (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase))
                     ).ToList();
-                    foreach (var d in descriptors)
+                    foreach (ServiceDescriptor d in descriptors)
                     {
                         services.Remove(d);
                     }
 
                     {
                         // Use a deterministic in-memory database name and register a DbContextFactory.
-                        var inmemoryName = $"unittest_inmemory_{Guid.NewGuid():N}";
+                        string inmemoryName = $"unittest_inmemory_{Guid.NewGuid():N}";
                         services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>(opts =>
                         {
                             // Add a small interceptor to ensure any SQLite connections used by EF
@@ -402,7 +406,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     }
 
                     // Optionally replace DatabaseInitializer with a no-op implementation to avoid heavy seeding in InMemory tests.
-                    var dbInitDesc = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Services.DatabaseInitializer));
+                    ServiceDescriptor? dbInitDesc = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Services.DatabaseInitializer));
                     if (dbInitDesc != null)
                     {
                         services.Remove(dbInitDesc);
@@ -423,15 +427,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // just adjusted for the host builder.
             // NOTE: keep this variable in sync with the check above.
             // (It will be re-evaluated only if not previously set.)
-            var useInMemorySqliteLocal = useInMemorySqlite || string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
+            bool useInMemorySqliteLocal = useInMemorySqlite || string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SQLITE_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
 
             if (useInMemorySqliteLocal)
             {
                 // Use a shared in-memory SQLite database by using a file: URI with shared cache.
                 // Keep one SqliteConnection open for the lifetime of the factory so the
                 // in-memory database is preserved across connections opened by EF Core.
-                var memDbName = $"unittest_{Guid.NewGuid():N}";
-                var memConnString = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
+                string memDbName = $"unittest_{Guid.NewGuid():N}";
+                string memConnString = $"Data Source=file:{memDbName}?mode=memory&cache=shared";
 
                 // Override connection strings so Program.cs registrations will use the in-memory DB
                 Environment.SetEnvironmentVariable("ConnectionStrings__Default", memConnString);
@@ -452,12 +456,12 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 {
                     // Remove any existing descriptors that reference AppDbContext or DbContextOptions so
                     // we can replace the registration reliably.
-                    var descriptorsToRemove = services.Where(d =>
+                    List<ServiceDescriptor> descriptorsToRemove = services.Where(d =>
                         (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase) || d.ServiceType.FullName.Contains("DbContextOptions", StringComparison.OrdinalIgnoreCase))) ||
                             (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase))
                     ).ToList();
 
-                    foreach (var d in descriptorsToRemove)
+                    foreach (ServiceDescriptor d in descriptorsToRemove)
                     {
                         services.Remove(d);
                     }
@@ -486,7 +490,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             }
 
             // Support a shared fixture-like SQLite connection across factories to avoid EnsureCreated races.
-            var useSharedSqlite = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase);
+            bool useSharedSqlite = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase);
             if (useSharedSqlite)
             {
                 // NOTE FOR MAINTAINERS:
@@ -514,15 +518,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                             }
                             else
                             {
-                                var exported = Environment.GetEnvironmentVariable("TEST_SHARED_SQLITE_CONN");
+                                string? exported = Environment.GetEnvironmentVariable("TEST_SHARED_SQLITE_CONN");
                                 if (!string.IsNullOrEmpty(exported))
                                 {
                                     _sharedSqliteConnection = new SqliteConnection(exported);
                                 }
                                 else
                                 {
-                                    var sharedName = $"shared_unittest_{Guid.NewGuid():N}";
-                                    var connStr = $"Data Source=file:{sharedName}?mode=memory&cache=shared";
+                                    string sharedName = $"shared_unittest_{Guid.NewGuid():N}";
+                                    string connStr = $"Data Source=file:{sharedName}?mode=memory&cache=shared";
                                     _sharedSqliteConnection = new SqliteConnection(connStr);
                                 }
                             }
@@ -574,11 +578,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     }
 
                     // Remove existing AppDbContext registrations so we can replace with the shared connection
-                    var descriptors = services.Where(d =>
+                    List<ServiceDescriptor> descriptors = services.Where(d =>
                         (d.ServiceType != null && d.ServiceType.FullName != null && (d.ServiceType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase) || d.ServiceType.FullName.Contains("DbContextOptions", StringComparison.OrdinalIgnoreCase))) ||
                             (d.ImplementationType != null && d.ImplementationType.FullName != null && d.ImplementationType.FullName.Contains("AppDbContext", StringComparison.OrdinalIgnoreCase))
                     ).ToList();
-                    foreach (var d in descriptors)
+                    foreach (ServiceDescriptor d in descriptors)
                     {
                         services.Remove(d);
                     }
@@ -588,7 +592,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // Register a DbContextFactory that resolves the shared connection from DI
                     services.AddDbContextFactory<Farm.Infrastructure.Data.AppDbContext>((sp, options) =>
                     {
-                        var conn = sp.GetRequiredService<Microsoft.Data.Sqlite.SqliteConnection>();
+                        SqliteConnection conn = sp.GetRequiredService<Microsoft.Data.Sqlite.SqliteConnection>();
                         // Pass the connection string so EF Core will open its own
                         // physical DbConnections to the shared in-memory database.
                         options.UseSqlite(conn.ConnectionString);
@@ -603,7 +607,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // that creates AppDbContext instances using the shared connection string.
                     try
                     {
-                        var connStr = _sharedSqliteConnection.ConnectionString;
+                        string connStr = _sharedSqliteConnection.ConnectionString;
                         services.AddSingleton<Microsoft.EntityFrameworkCore.IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>(sp =>
                         {
                             return new SimpleTestDbContextFactory(connStr);
@@ -633,13 +637,13 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // here as ConfigureServices is not async.
                     try
                     {
-                        var tempProvider = services.BuildServiceProvider();
-                        using (var scope = tempProvider.CreateScope())
+                        ServiceProvider tempProvider = services.BuildServiceProvider();
+                        using (IServiceScope scope = tempProvider.CreateScope())
                         {
-                            var tempDb = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+                            AppDbContext tempDb = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
                             tempDb.Database.EnsureCreated();
 
-                            var initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
+                            DatabaseInitializer? initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
                             if (initializer != null)
                             {
                                 try
@@ -666,7 +670,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // a test-friendly implementation that uses the AppDbContext.
                     try
                     {
-                        var migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
+                        ServiceDescriptor? migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
                         if (migrationDesc == null)
                         {
                             services.AddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
@@ -680,13 +684,13 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 }
             }
             // Optionally disable background hosted services to keep tests deterministic/noisy services off
-            var disableBg = string.Equals(Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES"), "true", StringComparison.OrdinalIgnoreCase)
+            bool disableBg = string.Equals(Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES"), "true", StringComparison.OrdinalIgnoreCase)
                             || string.Equals(Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES"), "1", StringComparison.OrdinalIgnoreCase);
             if (disableBg)
             {
                 // Remove any registered IHostedService implementations
-                var hostedDescriptors = services.Where(d => d.ServiceType == typeof(IHostedService)).ToList();
-                foreach (var d in hostedDescriptors)
+                List<ServiceDescriptor> hostedDescriptors = services.Where(d => d.ServiceType == typeof(IHostedService)).ToList();
+                foreach (ServiceDescriptor d in hostedDescriptors)
                 {
                     try
                     { services.Remove(d); }
@@ -701,15 +705,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 catch { }
 
                 // Remove network/HTTP client descriptors that would otherwise create real connections
-                var moonrakerDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IMoonrakerClient));
+                ServiceDescriptor? moonrakerDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IMoonrakerClient));
                 if (moonrakerDescriptor != null)
                 { services.Remove(moonrakerDescriptor); }
 
-                var prusaDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPrusaLinkClient));
+                ServiceDescriptor? prusaDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPrusaLinkClient));
                 if (prusaDescriptor != null)
                 { services.Remove(prusaDescriptor); }
 
-                var sdcpDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ISdcpClient));
+                ServiceDescriptor? sdcpDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ISdcpClient));
                 if (sdcpDescriptor != null)
                 { services.Remove(sdcpDescriptor); }
             }
@@ -718,15 +722,15 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // (e.g. typed HttpClient registrations or unintended concrete bindings)
             try
             {
-                var clientImplNames = new[] { "MoonrakerClient", "PrusaLinkClient", "OctoPrintClient", "SdcpClient", "SpoolmanService" };
+                string[] clientImplNames = new[] { "MoonrakerClient", "PrusaLinkClient", "OctoPrintClient", "SdcpClient", "SpoolmanService" };
 
-                var candidates = services.Where(d =>
+                List<ServiceDescriptor> candidates = services.Where(d =>
                     (d.ServiceType != null && d.ServiceType.FullName != null && clientImplNames.Any(n => d.ServiceType.FullName.Contains(n, StringComparison.OrdinalIgnoreCase))) ||
                     (d.ImplementationType != null && d.ImplementationType.FullName != null && clientImplNames.Any(n => d.ImplementationType.FullName.Contains(n, StringComparison.OrdinalIgnoreCase))) ||
                     (d.ImplementationFactory != null && d.ImplementationFactory.Method?.DeclaringType != null && clientImplNames.Any(n => d.ImplementationFactory.Method.DeclaringType!.FullName!.Contains(n, StringComparison.OrdinalIgnoreCase)))
                 ).ToList();
 
-                foreach (var d in candidates)
+                foreach (ServiceDescriptor d in candidates)
                 {
                     try
                     {
@@ -763,7 +767,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // so register a test-friendly fallback here to avoid 503s in integration tests.
             try
             {
-                var migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
+                ServiceDescriptor? migrationDesc = services.SingleOrDefault(d => d.ServiceType != null && d.ServiceType.FullName != null && d.ServiceType.FullName.Contains("IMigrationStatusProvider", StringComparison.OrdinalIgnoreCase));
                 if (migrationDesc == null)
                 {
                     services.TryAddScoped<Farm.Web.Api.Infrastructure.Database.IMigrationStatusProvider, Farm.Web.Api.Infrastructure.Database.MigrationStatusProvider>();
@@ -772,7 +776,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             catch { }
 
             // Replace temp path provider with test-specific implementation confined to repo
-            var existingTemp = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Infrastructure.Temp.ITempPathProvider));
+            ServiceDescriptor? existingTemp = services.SingleOrDefault(d => d.ServiceType == typeof(Farm.Web.Api.Infrastructure.Temp.ITempPathProvider));
             if (existingTemp != null)
             {
                 services.Remove(existingTemp);
@@ -841,30 +845,30 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // DbContext using that connection and ensure schema is created now.
             if (_inMemorySqliteConnection != null)
             {
-                var opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
                     .UseSqlite(_inMemorySqliteConnection)
                     .Options;
-                using var temp = new Farm.Infrastructure.Data.AppDbContext(opts);
+                using AppDbContext temp = new Farm.Infrastructure.Data.AppDbContext(opts);
                 temp.Database.EnsureCreated();
             }
 
             // If a shared SQLite connection was prepared, ensure its schema exists as well
             if (_sharedSqliteConnection != null)
             {
-                var opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
                     .UseSqlite(_sharedSqliteConnection)
                     .Options;
-                using var temp = new Farm.Infrastructure.Data.AppDbContext(opts);
+                using AppDbContext temp = new Farm.Infrastructure.Data.AppDbContext(opts);
                 temp.Database.EnsureCreated();
             }
 
             // If tests opted to use EF InMemory, ensure a DB instance with the same name is created.
-            var useEfInMemory = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_EF_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
+            bool useEfInMemory = string.Equals(Environment.GetEnvironmentVariable("TEST_USE_EF_INMEMORY"), "true", StringComparison.OrdinalIgnoreCase);
             if (useEfInMemory)
             {
                 // We used a unique name when registering the provider. Reconstruct a minimal
                 // in-memory options with the same name pattern and call EnsureCreated.
-                var inmemoryName = Environment.GetEnvironmentVariable("TEST_EF_INMEMORY_DBNAME") ?? null;
+                string? inmemoryName = Environment.GetEnvironmentVariable("TEST_EF_INMEMORY_DBNAME") ?? null;
                 if (string.IsNullOrEmpty(inmemoryName))
                 {
                     // Fall back to a deterministic name when not provided; the registration used a GUID,
@@ -875,10 +879,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // to avoid double-seeding and provider lock races.
                     Environment.SetEnvironmentVariable("TEST_SKIP_STARTUP_DB_INIT", "true");
                 }
-                var opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
+                DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<Farm.Infrastructure.Data.AppDbContext>()
                     .UseInMemoryDatabase(inmemoryName)
                     .Options;
-                using var temp = new Farm.Infrastructure.Data.AppDbContext(opts);
+                using AppDbContext temp = new Farm.Infrastructure.Data.AppDbContext(opts);
                 temp.Database.EnsureCreated();
             }
         }
@@ -921,17 +925,17 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         }
         catch { }
 
-        var host = base.CreateHost(builder);
+        IHost host = base.CreateHost(builder);
 
         // After host construction, run a deterministic pre-seed on the actual host's service provider
         try
         {
-            using var scope = host.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+            using IServiceScope scope = host.Services.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
             db.Database.EnsureCreated();
 
             // Run DatabaseInitializer explicitly on the host's services so seeding occurs
-            var initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
+            DatabaseInitializer? initializer = scope.ServiceProvider.GetService<Farm.Web.Api.Services.DatabaseInitializer>();
             if (initializer != null)
             {
                 try
@@ -968,19 +972,19 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             }
 
             // Verify that our test mocks are registered into the host's service provider
-            var resolvedSdcp = scope.ServiceProvider.GetService<ISdcpClient>();
+            ISdcpClient? resolvedSdcp = scope.ServiceProvider.GetService<ISdcpClient>();
             if (resolvedSdcp == null || !object.ReferenceEquals(resolvedSdcp, MockSdcpClient.Object))
             {
                 throw new InvalidOperationException("TestWebApplicationFactory: ISdcpClient was not properly registered to the test mock.");
             }
 
-            var resolvedOcto = scope.ServiceProvider.GetService<IOctoPrintClient>();
+            IOctoPrintClient? resolvedOcto = scope.ServiceProvider.GetService<IOctoPrintClient>();
             if (resolvedOcto == null || !object.ReferenceEquals(resolvedOcto, MockOctoPrintClient.Object))
             {
                 throw new InvalidOperationException("TestWebApplicationFactory: IOctoPrintClient was not properly registered to the test mock.");
             }
 
-            var resolvedSpool = scope.ServiceProvider.GetService<ISpoolmanService>();
+            ISpoolmanService? resolvedSpool = scope.ServiceProvider.GetService<ISpoolmanService>();
             if (resolvedSpool == null || !object.ReferenceEquals(resolvedSpool, MockSpoolmanService.Object))
             {
                 throw new InvalidOperationException("TestWebApplicationFactory: ISpoolmanService was not properly registered to the test mock.");
@@ -1008,22 +1012,22 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         // which previously caused integration tests to observe missing audit rows.
         try
         {
-            using (var checkScope = host.Services.CreateScope())
+            using (IServiceScope checkScope = host.Services.CreateScope())
             {
-                var svc = checkScope.ServiceProvider.GetService<Farm.Web.Api.Services.Authentication.IAuthAuditService>();
-                var db = checkScope.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
+                IAuthAuditService? svc = checkScope.ServiceProvider.GetService<Farm.Web.Api.Services.Authentication.IAuthAuditService>();
+                AppDbContext? db = checkScope.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
                 if (svc != null && db != null)
                 {
-                    var marker = "tests-selfcheck-" + Guid.NewGuid().ToString("N");
+                    string marker = "tests-selfcheck-" + Guid.NewGuid().ToString("N");
                     // Write a failed-login audit (username in metadata) to exercise LogLoginFailedAsync
                     svc.LogLoginFailedAsync(marker, "selfcheck", "127.0.0.1", null).GetAwaiter().GetResult();
 
                     // Create a new scope to verify visibility from an independent resolve
-                    using var verify = host.Services.CreateScope();
-                    var verifyDb = verify.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
+                    using IServiceScope verify = host.Services.CreateScope();
+                    AppDbContext? verifyDb = verify.ServiceProvider.GetService<Farm.Infrastructure.Data.AppDbContext>();
                     if (verifyDb != null)
                     {
-                        var found = verifyDb.AuthAuditLogs.AnyAsync(a => a.FailureReason == "selfcheck" || (a.Metadata != null && a.Metadata.Contains(marker))).GetAwaiter().GetResult();
+                        bool found = verifyDb.AuthAuditLogs.AnyAsync(a => a.FailureReason == "selfcheck" || (a.Metadata != null && a.Metadata.Contains(marker))).GetAwaiter().GetResult();
                         if (!found)
                         {
                             // Dump a short diagnostic to console to make failure obvious in CI/test logs
@@ -1089,7 +1093,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             .Returns(Task.CompletedTask);
 
         MockSlicerJobQueue.Setup(q => q.GetJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, CancellationToken _) => _slicerJobs.TryGetValue(id, out var job) ? job : null);
+            .ReturnsAsync((Guid id, CancellationToken _) => _slicerJobs.TryGetValue(id, out DistributedSlicingJob? job) ? job : null);
 
         MockSlicerJobQueue.Setup(q => q.FindExistingJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid cid, string checksum, CancellationToken _) => _slicerJobs.Values.FirstOrDefault(j => j.CorrelationId == cid && j.Checksum == checksum));
@@ -1097,7 +1101,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         MockSlicerJobQueue.Setup(q => q.GetUserJobsAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid userId, int? limit, CancellationToken _) =>
             {
-                var list = _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50);
+                IEnumerable<DistributedSlicingJob> list = _slicerJobs.Values.Where(j => j.UserId == userId).Take(limit ?? 50);
                 return [.. list];
             });
 
@@ -1145,7 +1149,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     // Fail-fast verification to ensure critical parent tables were seeded during pre-seed.
     private static void VerifySeededParents(Farm.Infrastructure.Data.AppDbContext db)
     {
-        var conn = db.Database.GetDbConnection();
+        DbConnection conn = db.Database.GetDbConnection();
         if (conn.State != System.Data.ConnectionState.Open)
         {
             try
@@ -1155,23 +1159,23 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             catch { }
         }
 
-        var missing = new List<string>();
+        List<string> missing = new List<string>();
         // EF maps PrinterModel entity to the "Models" table (DbSet Models).
-        var tableNames = new[] { "Manufacturers", "Models", "FilamentTypes" };
-        foreach (var t in tableNames)
+        string[] tableNames = new[] { "Manufacturers", "Models", "FilamentTypes" };
+        foreach (string? t in tableNames)
         {
             try
             {
-                using var cmd = conn.CreateCommand();
+                using DbCommand cmd = conn.CreateCommand();
                 cmd.CommandText = $"SELECT COUNT(*) FROM \"{t}\"";
-                var res = cmd.ExecuteScalar();
+                object? res = cmd.ExecuteScalar();
                 if (res == null)
                 {
                     missing.Add(t);
                 }
                 else
                 {
-                    if (int.TryParse(res.ToString(), out var cnt))
+                    if (int.TryParse(res.ToString(), out int cnt))
                     {
                         if (cnt == 0)
                         {
@@ -1192,7 +1196,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         if (missing.Count > 0)
         {
-            var msg = "Seed verification failing - empty or missing parent tables:\n" + string.Join("\n", missing);
+            string msg = "Seed verification failing - empty or missing parent tables:\n" + string.Join("\n", missing);
             Console.WriteLine(msg);
             throw new InvalidOperationException(msg);
         }
@@ -1203,7 +1207,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     {
         try
         {
-            var sb = new System.Text.StringBuilder();
+            StringBuilder sb = new System.Text.StringBuilder();
             void W(string s)
             {
                 sb.AppendLine(s);
@@ -1214,7 +1218,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
             W("--- Database state dump start ---");
 
-            var conn = db.Database.GetDbConnection();
+            DbConnection conn = db.Database.GetDbConnection();
             if (conn.State != System.Data.ConnectionState.Open)
             {
                 try
@@ -1223,13 +1227,13 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             }
 
             string[] tables = new[] { "Manufacturers", "PrinterModels", "Printers", "FilamentTypes", "PrintJobs", "GcodeFiles", "PrinterCapabilities" };
-            foreach (var t in tables)
+            foreach (string t in tables)
             {
                 try
                 {
-                    using var cmd = conn.CreateCommand();
+                    using DbCommand cmd = conn.CreateCommand();
                     cmd.CommandText = $"SELECT COUNT(*) FROM \"{t}\"";
-                    var res = cmd.ExecuteScalar();
+                    object? res = cmd.ExecuteScalar();
                     W($"Table {t}: {(res ?? "(null)")} rows");
                 }
                 catch (Exception ex)
@@ -1241,9 +1245,9 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // Small samples - prefer simple textual columns where available
             try
             {
-                using var cmd = conn.CreateCommand();
+                using DbCommand cmd = conn.CreateCommand();
                 cmd.CommandText = "SELECT Id, Name FROM \"Manufacturers\" LIMIT 5";
-                using var rdr = cmd.ExecuteReader();
+                using DbDataReader rdr = cmd.ExecuteReader();
                 W("Manufacturers sample:");
                 while (rdr.Read())
                 {
@@ -1257,10 +1261,10 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
             try
             {
-                using var cmd = conn.CreateCommand();
+                using DbCommand cmd = conn.CreateCommand();
                 // The table for PrinterModel entities is named "Models" in the database.
                 cmd.CommandText = "SELECT Id, Name, ManufacturerId FROM \"Models\" LIMIT 5";
-                using var rdr = cmd.ExecuteReader();
+                using DbDataReader rdr = cmd.ExecuteReader();
                 W("PrinterModels sample:");
                 while (rdr.Read())
                 {
@@ -1277,12 +1281,12 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             try
             {
                 // Prefer the test project's TestResults folder so artifacts are easy to find
-                var baseDir = AppContext.BaseDirectory ?? Directory.GetCurrentDirectory();
-                var projectTestResults = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "TestResults"));
+                string baseDir = AppContext.BaseDirectory ?? Directory.GetCurrentDirectory();
+                string projectTestResults = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "TestResults"));
                 try
                 { Directory.CreateDirectory(projectTestResults); }
                 catch { }
-                var fname = Path.Combine(projectTestResults, $"dbdump_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}.log");
+                string fname = Path.Combine(projectTestResults, $"dbdump_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}.log");
                 try
                 { File.WriteAllText(fname, sb.ToString()); }
                 catch (Exception ex) { W($"Failed to write DB dump file: {ex.Message}"); }
@@ -1329,16 +1333,16 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 throw new HttpRequestException("Request URI is null");
             }
 
-            var host = request.RequestUri.Host;
+            string host = request.RequestUri.Host;
             if (host == "localhost" || host == "127.0.0.1" || host == "[::1]")
             {
                 // Forward to real network stack for local stub servers
-                using var invoker = new HttpMessageInvoker(_inner, disposeHandler: false);
+                using HttpMessageInvoker invoker = new HttpMessageInvoker(_inner, disposeHandler: false);
                 return await invoker.SendAsync(request, cancellationToken).ConfigureAwait(false);
             }
 
             // Simulate DNS failure by throwing an HttpRequestException with an inner SocketException
-            var socketEx = new SocketException((int)SocketError.HostNotFound);
+            SocketException socketEx = new SocketException((int)SocketError.HostNotFound);
             throw new HttpRequestException("Simulated DNS failure for test host", socketEx);
         }
     }
@@ -1362,7 +1366,7 @@ internal sealed class TestServiceOverrideStartupFilter : Microsoft.AspNetCore.Ho
         {
             try
             {
-                var services = app.ApplicationServices.GetService<IServiceCollection>();
+                IServiceCollection? services = app.ApplicationServices.GetService<IServiceCollection>();
                 // IServiceCollection is not directly available from ApplicationServices; instead we rely on
                 // removing and replacing services via the IServiceProvider's service scope by using
                 // the IServiceCollection reference captured during ConfigureServices. As a pragmatic
@@ -1379,8 +1383,8 @@ internal sealed class TestServiceOverrideStartupFilter : Microsoft.AspNetCore.Ho
             // mocks already held on the factory instance.
             try
             {
-                var sp = app.ApplicationServices;
-                var servicesField = sp.GetType().GetProperty("Services", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                IServiceProvider sp = app.ApplicationServices;
+                PropertyInfo? servicesField = sp.GetType().GetProperty("Services", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 // Best-effort: register mocks into the root provider via scoped factories
             }
             catch { }

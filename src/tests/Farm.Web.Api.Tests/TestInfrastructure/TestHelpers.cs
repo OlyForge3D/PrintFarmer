@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
@@ -15,13 +17,13 @@ public static class TestHelpers
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var unknownManufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
+        Manufacturer? unknownManufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Unknown");
         Guid manufacturerId = unknownManufacturer != null ? unknownManufacturer.Id : Guid.Empty;
 
         Guid modelId = Guid.Empty;
         if (manufacturerId != Guid.Empty)
         {
-            var unknownModel = await db.Models.FirstOrDefaultAsync(m => m.Name == "Unknown Model" && m.ManufacturerId == manufacturerId);
+            PrinterModel? unknownModel = await db.Models.FirstOrDefaultAsync(m => m.Name == "Unknown Model" && m.ManufacturerId == manufacturerId);
             if (unknownModel != null)
             {
                 modelId = unknownModel.Id;
@@ -38,13 +40,13 @@ public static class TestHelpers
     /// </summary>
     public static AppDbContext CreateSqliteInMemoryDb()
     {
-        var connection = new Microsoft.Data.Sqlite.SqliteConnection("DataSource=:memory:");
+        SqliteConnection connection = new Microsoft.Data.Sqlite.SqliteConnection("DataSource=:memory:");
         connection.Open();
-        var opts = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(connection)
             .Options;
 
-        var ctx = new AppDbContext(opts);
+        AppDbContext ctx = new AppDbContext(opts);
         ctx.Database.EnsureCreated();
         return ctx;
     }

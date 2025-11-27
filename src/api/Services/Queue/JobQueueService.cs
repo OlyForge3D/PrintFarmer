@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
@@ -29,13 +30,13 @@ namespace Farm.Web.Api.Services.Queue
 
         public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct)
         {
-            var printers = await _dataService.GetAvailablePrintersAsync(ct);
-            var overview = new List<QueueOverviewDto>();
+            List<Printer> printers = await _dataService.GetAvailablePrintersAsync(ct);
+            List<QueueOverviewDto> overview = new List<QueueOverviewDto>();
 
-            foreach (var printer in printers)
+            foreach (Printer printer in printers)
             {
-                var queuedJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
-                var currentJob = await _dataService.GetCurrentJobForPrinterAsync(printer.Id, ct);
+                List<PrintJob> queuedJobs = await _dataService.GetPrintJobsForPrinterAsync(printer.Id, ct);
+                PrintJob? currentJob = await _dataService.GetCurrentJobForPrinterAsync(printer.Id, ct);
 
                 overview.Add(new QueueOverviewDto
                 {
@@ -55,9 +56,9 @@ namespace Farm.Web.Api.Services.Queue
 
         public async Task<IReadOnlyList<JobQueuePrintJobDto>> GetPrinterQueueAsync(Guid printerId, CancellationToken ct)
         {
-            var jobs = await _dataService.GetPrintJobsForPrinterAsync(printerId, ct);
+            List<PrintJob> jobs = await _dataService.GetPrintJobsForPrinterAsync(printerId, ct);
 
-            var dtos = jobs.Select(j => new JobQueuePrintJobDto
+            List<JobQueuePrintJobDto> dtos = jobs.Select(j => new JobQueuePrintJobDto
             {
                 Id = j.Id,
                 GcodeFileId = j.GcodeFileId,
@@ -80,7 +81,7 @@ namespace Farm.Web.Api.Services.Queue
                 AssignedPrinterName = j.AssignedPrinter?.Name ?? string.Empty
             }).ToList();
 
-            var queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Web.Shared.PrintJobStatus.Queued || d.Status.Value == Farm.Web.Shared.PrintJobStatus.Assigned)).ToList();
+            List<JobQueuePrintJobDto> queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Web.Shared.PrintJobStatus.Queued || d.Status.Value == Farm.Web.Shared.PrintJobStatus.Assigned)).ToList();
             for (int i = 0; i < queued.Count; i++)
             {
                 queued[i].QueuePosition = i + 1;
@@ -93,7 +94,7 @@ namespace Farm.Web.Api.Services.Queue
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            var gcode = await _dataService.GetGcodeFileAsync(request.GcodeFileId, ct);
+            GcodeFile? gcode = await _dataService.GetGcodeFileAsync(request.GcodeFileId, ct);
             if (gcode == null)
             {
                 return null;
@@ -109,7 +110,7 @@ namespace Farm.Web.Api.Services.Queue
                 }
             }
 
-            var job = new Farm.Infrastructure.Domain.PrintJob
+            PrintJob job = new Farm.Infrastructure.Domain.PrintJob
             {
                 Id = Guid.NewGuid(),
                 Name = gcode.DisplayName,
@@ -151,7 +152,7 @@ namespace Farm.Web.Api.Services.Queue
 
         public async Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct)
         {
-            var job = await _dataService.GetPrintJobByIdAsync(id, ct);
+            PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
             if (job == null)
             {
                 return null;
@@ -183,7 +184,7 @@ namespace Farm.Web.Api.Services.Queue
 
         public async Task<bool> RemoveJobAsync(Guid id, CancellationToken ct)
         {
-            var job = await _dataService.GetPrintJobByIdAsync(id, ct);
+            PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
             if (job == null)
             {
                 return false;
@@ -201,7 +202,7 @@ namespace Farm.Web.Api.Services.Queue
 
         public async Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct)
         {
-            var job = await _dataService.GetPrintJobByIdAsync(id, ct);
+            PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
             if (job == null)
             {
                 return null;
@@ -231,7 +232,7 @@ namespace Farm.Web.Api.Services.Queue
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            var job = await _dataService.GetPrintJobByIdAsync(id, ct);
+            PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
             if (job == null)
             {
                 return null;
@@ -250,9 +251,9 @@ namespace Farm.Web.Api.Services.Queue
 
             if (request.AssignedPrinterId.HasValue)
             {
-                var printer = await _dataService.GetAvailablePrintersAsync(ct);
+                List<Printer> printer = await _dataService.GetAvailablePrintersAsync(ct);
                 // Validate printer exists
-                var found = printer.Find(p => p.Id == request.AssignedPrinterId.Value);
+                Printer? found = printer.Find(p => p.Id == request.AssignedPrinterId.Value);
                 if (found == null)
                 {
                     return null; // caller will translate to BadRequest
@@ -306,9 +307,9 @@ namespace Farm.Web.Api.Services.Queue
 
         private async Task<Guid?> FindBestAvailablePrinterAsync(QueuePrintJobDto request, CancellationToken ct)
         {
-            var printers = await _dataService.GetAvailablePrintersAsync(ct);
+            List<Printer> printers = await _dataService.GetAvailablePrintersAsync(ct);
 
-            foreach (var printer in printers)
+            foreach (Printer printer in printers)
             {
                 if (request.RequiredNozzleDiameter.HasValue && printer.Capabilities?.NozzleDiameter.HasValue == true && Math.Abs(printer.Capabilities.NozzleDiameter.Value - (double)request.RequiredNozzleDiameter.Value) > 0.01)
                 {

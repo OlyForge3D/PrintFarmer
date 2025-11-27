@@ -14,14 +14,14 @@ public static class TestPaths
     {
         // Locate the repo root by walking up from the test assembly location until we find a marker
         // (farm-web.sln). As a fallback we use the current working directory.
-        var current = AppContext.BaseDirectory;
+        string? current = AppContext.BaseDirectory;
         while (current is not null)
         {
             if (File.Exists(Path.Combine(current, "farm-web.sln")))
             {
                 return current;
             }
-            var parent = Directory.GetParent(current);
+            DirectoryInfo? parent = Directory.GetParent(current);
             if (parent == null)
             {
                 break;
@@ -42,7 +42,7 @@ public static class TestPaths
     /// </summary>
     public static string GetUniqueTempDirectory([CallerMemberName] string? name = null)
     {
-        var dir = Path.Combine(RepoTempRoot, name ?? "unnamed", Guid.NewGuid().ToString("N"));
+        string dir = Path.Combine(RepoTempRoot, name ?? "unnamed", Guid.NewGuid().ToString("N"));
         return EnsureCreated(dir);
     }
 
@@ -51,7 +51,7 @@ public static class TestPaths
     /// </summary>
     public static string GetTempFilePath(string fileName, [CallerMemberName] string? name = null)
     {
-        var dir = EnsureCreated(Path.Combine(RepoTempRoot, name ?? "files"));
+        string dir = EnsureCreated(Path.Combine(RepoTempRoot, name ?? "files"));
         return Path.Combine(dir, fileName);
     }
 

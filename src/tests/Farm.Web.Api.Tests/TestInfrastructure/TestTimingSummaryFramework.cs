@@ -31,7 +31,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
 
     private static bool ShouldEnableAuto()
     {
-        var env = Environment.GetEnvironmentVariable("PF_TIMING_AUTO");
+        string? env = Environment.GetEnvironmentVariable("PF_TIMING_AUTO");
         if (string.IsNullOrEmpty(env))
         {
             return false; // opt-in only
@@ -52,35 +52,35 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
     {
         try
         {
-            var summaryEnabled = Environment.GetEnvironmentVariable("PF_TIMING_SUMMARY");
-            var timingEnabled = Environment.GetEnvironmentVariable("PF_TIMING");
+            string? summaryEnabled = Environment.GetEnvironmentVariable("PF_TIMING_SUMMARY");
+            string? timingEnabled = Environment.GetEnvironmentVariable("PF_TIMING");
             if (summaryEnabled == "0" || summaryEnabled == "false" || timingEnabled == "0" || timingEnabled == "false")
             {
                 return;
             }
-            var baseDir = AppContext.BaseDirectory;
-            var csvPath = Path.Combine(baseDir, "test-timings.csv");
+            string baseDir = AppContext.BaseDirectory;
+            string csvPath = Path.Combine(baseDir, "test-timings.csv");
             if (!File.Exists(csvPath))
             {
                 _sink.OnMessage(new DiagnosticMessage($"[TIMING-SUMMARY] No timing CSV found at {csvPath}; skipping."));
                 return;
             }
-            var allLines = File.ReadAllLines(csvPath)
+            List<string> allLines = File.ReadAllLines(csvPath)
                 .Where(l => !string.IsNullOrWhiteSpace(l))
                 .ToList();
-            var lastRunIndex = allLines.FindLastIndex(l => l.StartsWith("RUN,"));
+            int lastRunIndex = allLines.FindLastIndex(l => l.StartsWith("RUN,"));
             string runId = "<unknown>";
             string runStarted = "<unknown>";
             if (lastRunIndex >= 0)
             {
-                var runParts = allLines[lastRunIndex].Split(',');
+                string[] runParts = allLines[lastRunIndex].Split(',');
                 if (runParts.Length >= 3)
                 {
                     runId = runParts[1];
                     runStarted = runParts[2];
                 }
             }
-            var lines = allLines
+            List<string> lines = allLines
                 .SkipWhile((l, idx) => idx <= lastRunIndex || l.StartsWith("TimestampUtc,"))
                 .Where(l => !l.StartsWith("RUN,"))
                 .Where(l => !l.StartsWith("TimestampUtc,"))
@@ -90,15 +90,15 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] Timing CSV empty; skipping."));
                 return;
             }
-            var entries = new List<TimingEntry>(lines.Count);
-            foreach (var line in lines)
+            List<TimingEntry> entries = new List<TimingEntry>(lines.Count);
+            foreach (string? line in lines)
             {
-                var parts = line.Split(',');
+                string[] parts = line.Split(',');
                 if (parts.Length < 5)
                 {
                     continue;
                 }
-                if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var durMs))
+                if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double durMs))
                 {
                     continue;
                 }
@@ -109,31 +109,31 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] No valid entries parsed; skipping."));
                 return;
             }
-            var sorted = entries.OrderBy(e => e.DurationMs).ToList();
+            List<TimingEntry> sorted = entries.OrderBy(e => e.DurationMs).ToList();
             double Percentile(double p)
             {
                 if (sorted.Count == 1)
                 {
                     return sorted[0].DurationMs;
                 }
-                var rank = (p / 100d) * (sorted.Count - 1);
-                var lowIdx = (int)Math.Floor(rank);
-                var highIdx = (int)Math.Ceiling(rank);
+                double rank = (p / 100d) * (sorted.Count - 1);
+                int lowIdx = (int)Math.Floor(rank);
+                int highIdx = (int)Math.Ceiling(rank);
                 if (lowIdx == highIdx)
                 {
                     return sorted[lowIdx].DurationMs;
                 }
-                var frac = rank - lowIdx;
+                double frac = rank - lowIdx;
                 return sorted[lowIdx].DurationMs + (sorted[highIdx].DurationMs - sorted[lowIdx].DurationMs) * frac;
             }
-            var p50 = Percentile(50);
-            var p90 = Percentile(90);
-            var p95 = Percentile(95);
-            var p99 = Percentile(99);
-            var max = sorted[^1].DurationMs;
-            var min = sorted[0].DurationMs;
-            var mean = entries.Average(e => e.DurationMs);
-            var hotspots = entries.OrderByDescending(e => e.DurationMs).Take(10).ToList();
+            double p50 = Percentile(50);
+            double p90 = Percentile(90);
+            double p95 = Percentile(95);
+            double p99 = Percentile(99);
+            double max = sorted[^1].DurationMs;
+            double min = sorted[0].DurationMs;
+            double mean = entries.Average(e => e.DurationMs);
+            List<TimingEntry> hotspots = entries.OrderByDescending(e => e.DurationMs).Take(10).ToList();
             var byClass = entries
                 .GroupBy(e => e.Class)
                 .Select(g => new
@@ -149,7 +149,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 .ToList();
             static double PercentileForGroup(IGrouping<string, TimingEntry> g, double p)
             {
-                var arr = g.OrderBy(e => e.DurationMs).Select(e => e.DurationMs).ToList();
+                List<double> arr = g.OrderBy(e => e.DurationMs).Select(e => e.DurationMs).ToList();
                 if (arr.Count == 0)
                 {
                     return 0;
@@ -158,17 +158,17 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 {
                     return arr[0];
                 }
-                var rank = (p / 100d) * (arr.Count - 1);
-                var low = (int)Math.Floor(rank);
-                var high = (int)Math.Ceiling(rank);
+                double rank = (p / 100d) * (arr.Count - 1);
+                int low = (int)Math.Floor(rank);
+                int high = (int)Math.Ceiling(rank);
                 if (low == high)
                 {
                     return arr[low];
                 }
-                var frac = rank - low;
+                double frac = rank - low;
                 return arr[low] + (arr[high] - arr[low]) * frac;
             }
-            var summaryLines = new List<string>
+            List<string> summaryLines = new List<string>
             {
                 "==== Test Timing Summary ====",
                 $"Run Id: {runId}",
@@ -185,9 +185,9 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
             {
                 summaryLines.Add(string.Create(CultureInfo.InvariantCulture, $"  P90 {cls.P90,7:F2} ms  Max {cls.Max,7:F2} ms  Count {cls.Count,3}  {Truncate(cls.Class, 90)}"));
             }
-            var summaryPath = Path.Combine(baseDir, "test-timings-summary.txt");
+            string summaryPath = Path.Combine(baseDir, "test-timings-summary.txt");
             File.WriteAllLines(summaryPath, summaryLines);
-            foreach (var l in summaryLines)
+            foreach (string l in summaryLines)
             {
                 _sink.OnMessage(new DiagnosticMessage("[TIMING-SUMMARY] " + l));
             }
@@ -219,7 +219,7 @@ internal sealed class AutoTimingFrameworkExecutor : XunitTestFrameworkExecutor
 
     protected override void RunTestCases(IEnumerable<IXunitTestCase> testCases, IMessageSink executionMessageSink, ITestFrameworkExecutionOptions executionOptions)
     {
-        var timingSink = new AutoTimingMessageSink(executionMessageSink);
+        AutoTimingMessageSink timingSink = new AutoTimingMessageSink(executionMessageSink);
         base.RunTestCases(testCases, timingSink, executionOptions);
     }
 }
@@ -239,20 +239,20 @@ internal sealed class AutoTimingMessageSink : LongLivedMarshalByRefObject, IMess
                 _sw[ts.Test.DisplayName] = Stopwatch.StartNew();
                 break;
             case ITestFinished tf:
-                if (_sw.TryRemove(tf.Test.DisplayName, out var watch))
+                if (_sw.TryRemove(tf.Test.DisplayName, out Stopwatch? watch))
                 {
                     watch.Stop();
                     try
                     {
-                        var methodInfo = tf.Test.TestCase.TestMethod.Method.ToRuntimeMethod();
-                        var classType = tf.Test.TestCase.TestMethod.TestClass.Class.ToRuntimeType();
+                        MethodInfo methodInfo = tf.Test.TestCase.TestMethod.Method.ToRuntimeMethod();
+                        Type classType = tf.Test.TestCase.TestMethod.TestClass.Class.ToRuntimeType();
                         // Consider both method-level and class-level attributes. If either is present, skip auto logging.
-                        var hasAttr = (methodInfo?.IsDefined(typeof(TestTimingAttribute), false) ?? false)
+                        bool hasAttr = (methodInfo?.IsDefined(typeof(TestTimingAttribute), false) ?? false)
                                       || (classType?.IsDefined(typeof(TestTimingAttribute), false) ?? false);
                         if (!hasAttr)
                         {
-                            var cls = tf.Test.TestCase.TestMethod.TestClass.Class.ToRuntimeType()?.FullName ?? tf.Test.TestCase.TestMethod.TestClass.Class.Name;
-                            var method = tf.Test.TestCase.TestMethod.Method.Name;
+                            string cls = tf.Test.TestCase.TestMethod.TestClass.Class.ToRuntimeType()?.FullName ?? tf.Test.TestCase.TestMethod.TestClass.Class.Name;
+                            string method = tf.Test.TestCase.TestMethod.Method.Name;
                             TestTimingLog.Log("Auto", cls, method, watch.Elapsed.TotalMilliseconds);
                         }
                     }

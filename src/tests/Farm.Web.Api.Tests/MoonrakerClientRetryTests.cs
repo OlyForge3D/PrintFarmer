@@ -4,6 +4,7 @@ using System.Text.Json;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Tests.TestUtils;
+using FluentAssertions.Specialized;
 using Moq;
 using Moq.Protected;
 
@@ -16,7 +17,7 @@ public class MoonrakerClientRetryTests
     private static (IMoonrakerClient client, Mock<HttpMessageHandler> handler, int attempts) CreateFlakyClient(Func<int, HttpResponseMessage> responder)
     {
         int attempt = 0;
-        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        Mock<HttpMessageHandler> handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
@@ -25,7 +26,7 @@ public class MoonrakerClientRetryTests
                 return responder(attempt);
             });
 #pragma warning disable CA2000 // Dispose objects before losing scope - HttpClient is owned by the test client for test lifetime
-        var http = new HttpClient(handler.Object);
+        HttpClient http = new HttpClient(handler.Object);
 #pragma warning restore CA2000
         return (new MoonrakerClient(http, new TestLoggingService()), handler, attempt);
     }
@@ -33,7 +34,7 @@ public class MoonrakerClientRetryTests
     [Fact]
     public async Task ExecuteWithRetryAsync_SucceedsOnThirdAttemptAsync()
     {
-        var (client, _, _) = CreateFlakyClient(i =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, int _) = CreateFlakyClient(i =>
         {
             if (i < 3)
             {
@@ -47,10 +48,10 @@ public class MoonrakerClientRetryTests
         });
 
         int attempts = 0;
-        var status = await RetryPolicyHelper.ExecuteWithRetryAsync(async () =>
+        PrinterStatus status = await RetryPolicyHelper.ExecuteWithRetryAsync(async () =>
         {
             attempts++;
-            var s = await client.GetStatusAsync(Base);
+            PrinterStatus s = await client.GetStatusAsync(Base);
             if (!s.IsOnline)
             {
                 throw new HttpRequestException("offline");
@@ -66,7 +67,7 @@ public class MoonrakerClientRetryTests
     [Fact]
     public async Task ExecuteWithRetryAsync_FailsAfterMaxRetriesAsync()
     {
-        var (client, _, _) = CreateFlakyClient(i => throw new TaskCanceledException("timeout"));
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, int _) = CreateFlakyClient(i => throw new TaskCanceledException("timeout"));
 
         int attempts = 0;
         Func<Task> act = async () =>
@@ -74,7 +75,7 @@ public class MoonrakerClientRetryTests
             await RetryPolicyHelper.ExecuteWithRetryAsync(async () =>
             {
                 attempts++;
-                var s = await client.GetStatusAsync(Base);
+                PrinterStatus s = await client.GetStatusAsync(Base);
                 if (!s.IsOnline)
                 {
                     throw new HttpRequestException("offline");
@@ -85,7 +86,7 @@ public class MoonrakerClientRetryTests
         // Current RetryPolicyHelper wraps the final failure in InvalidOperationException when max retries are exceeded.
         // The underlying transient exception we simulate is TaskCanceledException (e.g. HTTP timeout). We assert on the
         // wrapper type and inner exception to prevent losing signal if RetryPolicyHelper implementation changes later.
-        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        ExceptionAssertions<InvalidOperationException> thrown = await act.Should().ThrowAsync<InvalidOperationException>();
         thrown.Which.InnerException.Should().BeOfType<TaskCanceledException>();
         attempts.Should().Be(3); // initial try + 2 retries
     }
@@ -93,7 +94,7 @@ public class MoonrakerClientRetryTests
     [Fact]
     public async Task DirectoryCall_WithTransient5xx_RetriesAndSucceedsAsync()
     {
-        var (client, _, _) = CreateFlakyClient(i =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, int _) = CreateFlakyClient(i =>
         {
             if (i == 1)
             {
@@ -116,10 +117,10 @@ public class MoonrakerClientRetryTests
         });
 
         int attempts = 0;
-        var dir = await RetryPolicyHelper.ExecuteWithRetryAsync(async () =>
+        Api.Services.DirectoryInfo dir = await RetryPolicyHelper.ExecuteWithRetryAsync(async () =>
         {
             attempts++;
-            var d = await client.GetDirectoryAsync(Base, "gcodes");
+            Api.Services.DirectoryInfo? d = await client.GetDirectoryAsync(Base, "gcodes");
             if (d is null)
             {
                 throw new HttpRequestException("dir null");

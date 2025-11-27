@@ -23,7 +23,7 @@ public class SdcpDiscoveryProbe : INetworkDiscoveryProbe
     {
         try
         {
-            using var client = new UdpClient();
+            using UdpClient client = new UdpClient();
             client.Client.SendTimeout = timeoutMs;
             client.Client.ReceiveTimeout = timeoutMs;
 
@@ -33,29 +33,29 @@ public class SdcpDiscoveryProbe : INetworkDiscoveryProbe
             await client.SendAsync(discoveryBytes, discoveryBytes.Length, ipAddress, SDCP_DISCOVERY_PORT);
 
             // Wait for response with timeout
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(timeoutMs);
 
-            var result = await client.ReceiveAsync(cts.Token);
+            UdpReceiveResult result = await client.ReceiveAsync(cts.Token);
             string responseText = Encoding.UTF8.GetString(result.Buffer);
 
             // Parse JSON response
-            using var doc = JsonDocument.Parse(responseText);
-            var root = doc.RootElement;
+            using JsonDocument doc = JsonDocument.Parse(responseText);
+            JsonElement root = doc.RootElement;
 
             // Expected structure: { "Id": "...", "Data": { "Attributes": { "MainboardIP": "...", ... } } }
-            if (root.TryGetProperty("Data", out var dataElement) &&
-                dataElement.TryGetProperty("Attributes", out var attributesElement))
+            if (root.TryGetProperty("Data", out JsonElement dataElement) &&
+                dataElement.TryGetProperty("Attributes", out JsonElement attributesElement))
             {
-                var mainboardIp = attributesElement.GetPropertyOrNull("MainboardIP")?.GetString();
-                var name = attributesElement.GetPropertyOrNull("Name")?.GetString()
+                string? mainboardIp = attributesElement.GetPropertyOrNull("MainboardIP")?.GetString();
+                string name = attributesElement.GetPropertyOrNull("Name")?.GetString()
                     ?? attributesElement.GetPropertyOrNull("MachineName")?.GetString()
                     ?? "SDCP Printer";
-                var protocolVersion = attributesElement.GetPropertyOrNull("ProtocolVersion")?.GetString();
-                var firmwareVersion = attributesElement.GetPropertyOrNull("FirmwareVersion")?.GetString();
-                var brandName = attributesElement.GetPropertyOrNull("BrandName")?.GetString();
+                string? protocolVersion = attributesElement.GetPropertyOrNull("ProtocolVersion")?.GetString();
+                string? firmwareVersion = attributesElement.GetPropertyOrNull("FirmwareVersion")?.GetString();
+                string? brandName = attributesElement.GetPropertyOrNull("BrandName")?.GetString();
 
-                var dto = new DiscoveredPrinterDto
+                DiscoveredPrinterDto dto = new DiscoveredPrinterDto
                 {
                     IpAddress = mainboardIp ?? ipAddress,
                     Name = name,
@@ -102,7 +102,7 @@ internal static class JsonElementExtensions
 {
     public static JsonElement? GetPropertyOrNull(this JsonElement element, string propertyName)
     {
-        if (element.TryGetProperty(propertyName, out var property))
+        if (element.TryGetProperty(propertyName, out JsonElement property))
         {
             return property;
         }

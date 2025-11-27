@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Farm.Web.Api.Services;
@@ -14,8 +15,8 @@ public class MoonrakerClientTests
 {
     private static (IMoonrakerClient client, Mock<HttpMessageHandler> handler, List<HttpRequestMessage> recorded) CreateClient(Func<HttpRequestMessage, HttpResponseMessage> responder)
     {
-        var recorded = new List<HttpRequestMessage>();
-        var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        List<HttpRequestMessage> recorded = new List<HttpRequestMessage>();
+        Mock<HttpMessageHandler> handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
@@ -25,15 +26,15 @@ public class MoonrakerClientTests
             });
 
 #pragma warning disable CA2000 // Dispose objects before losing scope - HttpClient is owned by the test client for test lifetime
-        var http = new HttpClient(handler.Object);
+        HttpClient http = new HttpClient(handler.Object);
 #pragma warning restore CA2000
-        var client = new MoonrakerClient(http, new TestUtils.TestLoggingService()) as IMoonrakerClient;
+        IMoonrakerClient client = new MoonrakerClient(http, new TestUtils.TestLoggingService()) as IMoonrakerClient;
         return (client, handler, recorded);
     }
 
     private static HttpResponseMessage Json(object obj, HttpStatusCode code = HttpStatusCode.OK)
     {
-        var json = JsonSerializer.Serialize(obj);
+        string json = JsonSerializer.Serialize(obj);
         return new HttpResponseMessage(code)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -45,13 +46,13 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetStatusAsync_ReturnsOnlineAndStateAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/printer/info");
             return Json(new { result = new { state = "ready" } });
         });
 
-        var status = await client.GetStatusAsync(Base);
+        PrinterStatus status = await client.GetStatusAsync(Base);
         status.IsOnline.Should().BeTrue();
         status.State.Should().Be("ready");
     }
@@ -59,13 +60,13 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetPrinterInfoAsync_ParsesWrappedInfoAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/printer/info");
             return Json(new { result = new { hostname = "mkr-01", state = "ready" } });
         });
 
-        var info = await client.GetPrinterInfoAsync(Base);
+        MoonrakerPrinterInfo? info = await client.GetPrinterInfoAsync(Base);
         info.Should().NotBeNull();
         info!.Hostname.Should().Be("mkr-01");
         info.State.Should().Be("ready");
@@ -74,7 +75,7 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetJobAsync_WhenPrinting_ReturnsProgressJobNameAndThumbAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             if (req.RequestUri!.ToString().Contains("/printer/objects/query?print_stats&display_status&job_queue"))
             {
@@ -101,7 +102,7 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var job = await client.GetJobAsync(Base);
+        PrinterJob? job = await client.GetJobAsync(Base);
         job.Should().NotBeNull();
         job!.PrintState.Should().Be("printing");
         job.Progress.Should().BeApproximately(42.0, 0.001);
@@ -114,9 +115,9 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetCompositeStatusAsync_AggregatesStateJobPositionTempsAndCameraAsync()
     {
-        var (client, _, recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
-            var url = req.RequestUri!.ToString();
+            string url = req.RequestUri!.ToString();
             if (url.EndsWith("/printer/info"))
             {
                 return Json(new { result = new { state = "ready" } });
@@ -145,7 +146,7 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var cs = await client.GetCompositeStatusAsync(Base);
+        PrinterCompositeStatus cs = await client.GetCompositeStatusAsync(Base);
         cs.IsOnline.Should().BeTrue();
         cs.State.Should().Be("standby"); // print_stats.state (job state) is used in composite status
         cs.X.Should().Be(10.0);
@@ -166,9 +167,9 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetCameraSnapshotAsync_FetchesSnapshotBytesAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
-            var url = req.RequestUri!.ToString();
+            string url = req.RequestUri!.ToString();
 
             // GetCameraSnapshotUrlAsync now constructs the URL directly instead of fetching from /server/webcams/list
             // It creates: /webcam/?action=snapshot
@@ -180,7 +181,7 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var bytes = await client.GetCameraSnapshotAsync(Base);
+        byte[]? bytes = await client.GetCameraSnapshotAsync(Base);
         bytes.Should().NotBeNull();
         bytes!.Length.Should().Be(3);
     }
@@ -188,9 +189,9 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetCompositeStatusAsync_NormalizesLoopbackCameraHostsToBaseAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
-            var url = req.RequestUri!.ToString();
+            string url = req.RequestUri!.ToString();
             if (url.EndsWith("/printer/info"))
             {
                 return Json(new { result = new { state = "ready" } });
@@ -219,7 +220,7 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var cs = await client.GetCompositeStatusAsync(Base);
+        PrinterCompositeStatus cs = await client.GetCompositeStatusAsync(Base);
         cs.IsOnline.Should().BeTrue();
         cs.CameraStreamUrl.Should().NotBeNullOrWhiteSpace();
         cs.CameraSnapshotUrl.Should().NotBeNullOrWhiteSpace();
@@ -240,7 +241,7 @@ public class MoonrakerClientTests
     [InlineData("M112", nameof(IMoonrakerClient.EmergencyStopAsync))]
     public async Task GcodeCommandEndpoints_SendExpectedScriptAsync(string expectedScript, string methodName)
     {
-        var (client, _, recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
             req.Method.Should().Be(HttpMethod.Post);
             req.RequestUri!.AbsolutePath.Should().Be("/printer/gcode/script");
@@ -248,23 +249,23 @@ public class MoonrakerClientTests
         });
 
         // Disambiguate overloads: explicitly select (string baseUrl, CancellationToken ct) signature
-        var mi = typeof(IMoonrakerClient).GetMethod(methodName, [typeof(string), typeof(CancellationToken)]);
+        MethodInfo? mi = typeof(IMoonrakerClient).GetMethod(methodName, [typeof(string), typeof(CancellationToken)]);
         mi.Should().NotBeNull();
-        var task = (Task<bool>)mi!.Invoke(client, [Base, CancellationToken.None])!;
-        var ok = await task;
+        Task<bool> task = (Task<bool>)mi!.Invoke(client, [Base, CancellationToken.None])!;
+        bool ok = await task;
         ok.Should().BeTrue();
-        var body = await recorded.Single().Content!.ReadAsStringAsync();
+        string body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain(expectedScript);
     }
 
     [Fact]
     public async Task SetTempsAsync_PostsM104AndM140Async()
     {
-        var (client, _, recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
-        var ok = await client.SetTempsAsync(Base, hotend: 210, bed: 60);
+        bool ok = await client.SetTempsAsync(Base, hotend: 210, bed: 60);
         ok.Should().BeTrue();
-        var body = await recorded.Single().Content!.ReadAsStringAsync();
+        string body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("M104 S210");
         body.Should().Contain("M140 S60");
     }
@@ -272,11 +273,11 @@ public class MoonrakerClientTests
     [Fact]
     public async Task MoveAsync_UsesRelativeModeAndResetsAbsoluteAsync()
     {
-        var (client, _, recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
-        var ok = await client.MoveAsync(Base, x: 1.5, y: -2.25, f: 1200);
+        bool ok = await client.MoveAsync(Base, x: 1.5, y: -2.25, f: 1200);
         ok.Should().BeTrue();
-        var body = await recorded.Single().Content!.ReadAsStringAsync();
+        string body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("G91 G0");
         body.Should().Contain("X1.5 Y-2.25 F1200");
         body.Should().Contain("G90");
@@ -285,33 +286,33 @@ public class MoonrakerClientTests
     [Fact]
     public async Task MoveToAsync_UsesAbsoluteMoveAsync()
     {
-        var (client, _, recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req => new HttpResponseMessage(HttpStatusCode.OK));
 
-        var ok = await client.MoveToAsync(Base, x: 100, z: 0.2, f: 3000);
+        bool ok = await client.MoveToAsync(Base, x: 100, z: 0.2, f: 3000);
         ok.Should().BeTrue();
-        var body = await recorded.Single().Content!.ReadAsStringAsync();
+        string body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("G90 G0 X100 Z0.2 F3000");
     }
 
     [Fact]
     public async Task StartPrintAsync_PostsFilenameAsync()
     {
-        var (client, _, recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/printer/print/start");
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        var ok = await client.StartPrintAsync(Base, "benchy.gcode");
+        bool ok = await client.StartPrintAsync(Base, "benchy.gcode");
         ok.Should().BeTrue();
-        var body = await recorded.Single().Content!.ReadAsStringAsync();
+        string body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("benchy.gcode");
     }
 
     [Fact]
     public async Task GetFileListAsync_ReturnsGcodeNamesAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/list");
             req.RequestUri!.Query.Should().Contain("root=gcodes");
@@ -326,20 +327,20 @@ public class MoonrakerClientTests
             });
         });
 
-        var list = await client.GetFileListAsync(Base);
+        string[] list = await client.GetFileListAsync(Base);
         list.Should().BeEquivalentTo(["a.gcode", "sub/c.gcode"]);
     }
 
     [Fact]
     public async Task GetFileRootsAsync_ReturnsRootsAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/roots");
             return Json(new { result = new[] { new { name = "gcodes", path = "/gcodes", permissions = "rw" } } });
         });
 
-        var roots = await client.GetFileRootsAsync(Base);
+        FileRoot[] roots = await client.GetFileRootsAsync(Base);
         roots.Should().HaveCount(1);
         roots[0].Name.Should().Be("gcodes");
         roots[0].Path.Should().Be("/gcodes");
@@ -348,14 +349,14 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetDirectoryAsync_ReturnsDirectoryInfoAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
             req.RequestUri!.Query.Should().Contain("path=gcodes");
             return Json(new { result = new { path = "gcodes", dirs = Array.Empty<object>(), files = Array.Empty<object>(), size = 0, modified = 0 } });
         });
 
-        var dir = await client.GetDirectoryAsync(Base, "gcodes");
+        Api.Services.DirectoryInfo? dir = await client.GetDirectoryAsync(Base, "gcodes");
         dir.Should().NotBeNull();
         dir!.Path.Should().Be("gcodes");
     }
@@ -363,24 +364,24 @@ public class MoonrakerClientTests
     [Fact]
     public async Task CreateDirectoryAsync_PostsAndParsesResponseAsync()
     {
-        var (client, _, recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
             req.Method.Should().Be(HttpMethod.Post);
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
             return Json(new { result = new { item = new { path = "gcodes/new", modified = 0, size = 0, permissions = "rw" }, action = "create_dir" } });
         });
 
-        var res = await client.CreateDirectoryAsync(Base, "gcodes/new");
+        DirectoryCreateResponse? res = await client.CreateDirectoryAsync(Base, "gcodes/new");
         res.Should().NotBeNull();
         res!.Item.Path.Should().Be("gcodes/new");
-        var body = await recorded.Single().Content!.ReadAsStringAsync();
+        string body = await recorded.Single().Content!.ReadAsStringAsync();
         body.Should().Contain("gcodes/new");
     }
 
     [Fact]
     public async Task DeleteFileOrDirectoryAsync_CallsDeleteWithForceFlagAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             req.Method.Should().Be(HttpMethod.Delete);
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/directory");
@@ -389,14 +390,14 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        var ok = await client.DeleteFileOrDirectoryAsync(Base, "gcodes/old", true);
+        bool ok = await client.DeleteFileOrDirectoryAsync(Base, "gcodes/old", true);
         ok.Should().BeTrue();
     }
 
     [Fact]
     public async Task MoveAndCopyFileAsync_PostsSourceAndDestAsync()
     {
-        var (client, _, recorded) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
         {
             if (req.RequestUri!.AbsolutePath.EndsWith("/server/files/move"))
             {
@@ -411,10 +412,10 @@ public class MoonrakerClientTests
 
         (await client.MoveFileAsync(Base, "src.gcode", "dst.gcode")).Should().BeTrue();
         (await client.CopyFileAsync(Base, "a.gcode", "b.gcode")).Should().BeTrue();
-        var moveReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/move"));
-        var copyReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/copy"));
-        var moveBody = await moveReq.Content!.ReadAsStringAsync();
-        var copyBody = await copyReq.Content!.ReadAsStringAsync();
+        HttpRequestMessage moveReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/move"));
+        HttpRequestMessage copyReq = recorded.Single(r => r.RequestUri!.AbsolutePath.EndsWith("/server/files/copy"));
+        string moveBody = await moveReq.Content!.ReadAsStringAsync();
+        string copyBody = await copyReq.Content!.ReadAsStringAsync();
         moveBody.Should().Contain("src.gcode");
         moveBody.Should().Contain("dst.gcode");
         copyBody.Should().Contain("a.gcode");
@@ -424,7 +425,7 @@ public class MoonrakerClientTests
     [Fact]
     public async Task GetFileMetadata_StartMetadataScan_AndGetThumbnailAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             if (req.RequestUri!.AbsolutePath.EndsWith("/server/files/metadata"))
             {
@@ -443,11 +444,11 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var meta = await client.GetFileMetadataAsync(Base, "benchy.gcode");
+        GCodeMetadata? meta = await client.GetFileMetadataAsync(Base, "benchy.gcode");
         meta.Should().NotBeNull();
         meta!.Size.Should().Be(1000);
         (await client.StartMetadataScanAsync(Base, "benchy.gcode")).Should().BeTrue();
-        var thumb = await client.GetFileThumbnailAsync(Base, "benchy.gcode");
+        byte[]? thumb = await client.GetFileThumbnailAsync(Base, "benchy.gcode");
         thumb.Should().NotBeNull();
         thumb!.Length.Should().Be(2);
     }
@@ -455,7 +456,7 @@ public class MoonrakerClientTests
     [Fact]
     public async Task DownloadAndDeleteAndStreamFile_WorkAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             if (req.Method == HttpMethod.Delete)
             {
@@ -469,25 +470,25 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var bytes = await client.DownloadFileAsync(Base, "sub/benchy.gcode");
+        byte[]? bytes = await client.DownloadFileAsync(Base, "sub/benchy.gcode");
         bytes.Should().NotBeNull();
         bytes!.Length.Should().BeGreaterThan(0);
         (await client.DeleteFileAsync(Base, "sub/benchy.gcode")).Should().BeTrue();
-        var stream = await client.GetFileStreamAsync(Base, "sub/benchy.gcode");
+        Stream? stream = await client.GetFileStreamAsync(Base, "sub/benchy.gcode");
         stream.Should().NotBeNull();
     }
 
     [Fact]
     public async Task GetDetailedFileListAsync_ReturnsExtendedEntriesAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
             req.RequestUri!.AbsolutePath.Should().Be("/server/files/list");
             req.RequestUri!.Query.Should().Contain("extended=true");
             return Json(new { result = new[] { new { filename = "a.gcode", size = 1, modified = 0 } } });
         });
 
-        var items = await client.GetDetailedFileListAsync(Base, root: "gcodes", path: "/");
+        MoonrakerFileInfo[] items = await client.GetDetailedFileListAsync(Base, root: "gcodes", path: "/");
         items.Should().HaveCount(1);
         items[0].Path.Should().Be("a.gcode");
     }
@@ -495,17 +496,17 @@ public class MoonrakerClientTests
     [Fact]
     public async Task HistoryEndpoints_WorkAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
-            var url = req.RequestUri!.ToString();
+            string url = req.RequestUri!.ToString();
             if (url.Contains("/server/history/list"))
             {
-                var json = "{\"result\":{\"count\":1,\"jobs\":[{\"job_id\":\"abc\",\"filename\":\"benchy.gcode\",\"start_time\":1.0,\"total_duration\":2.0,\"print_duration\":2.0,\"filament_used\":10.0,\"status\":\"completed\"}]}}";
+                string json = "{\"result\":{\"count\":1,\"jobs\":[{\"job_id\":\"abc\",\"filename\":\"benchy.gcode\",\"start_time\":1.0,\"total_duration\":2.0,\"print_duration\":2.0,\"filament_used\":10.0,\"status\":\"completed\"}]}}";
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
             }
             if (url.Contains("/server/history/job") && req.Method == HttpMethod.Get)
             {
-                var json = "{\"result\":{\"job_id\":\"abc\",\"filename\":\"benchy.gcode\",\"start_time\":1.0,\"total_duration\":2.0,\"print_duration\":2.0,\"filament_used\":10.0,\"status\":\"completed\"}}";
+                string json = "{\"result\":{\"job_id\":\"abc\",\"filename\":\"benchy.gcode\",\"start_time\":1.0,\"total_duration\":2.0,\"print_duration\":2.0,\"filament_used\":10.0,\"status\":\"completed\"}}";
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
             }
             if (url.Contains("/server/history/job") && req.Method == HttpMethod.Delete)
@@ -515,7 +516,7 @@ public class MoonrakerClientTests
 
             if (url.Contains("/server/history/totals"))
             {
-                var json = "{\"result\":{\"job_totals\":{\"total_jobs\":5,\"total_time\":100,\"total_print_time\":90,\"total_filament_used\":123,\"longest_job\":30,\"longest_print\":25}}}";
+                string json = "{\"result\":{\"job_totals\":{\"total_jobs\":5,\"total_time\":100,\"total_print_time\":90,\"total_filament_used\":123,\"longest_job\":30,\"longest_print\":25}}}";
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
             }
             if (url.Contains("/server/history/reset_totals"))
@@ -526,13 +527,13 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var list = await client.GetHistoryListAsync(Base, limit: 10);
+        HistoryListResponse? list = await client.GetHistoryListAsync(Base, limit: 10);
         list.Should().NotBeNull();
         list!.Count.Should().Be(1);
-        var job = await client.GetHistoryJobAsync(Base, "abc");
+        HistoryJob? job = await client.GetHistoryJobAsync(Base, "abc");
         job.Should().NotBeNull();
         (await client.DeleteHistoryJobAsync(Base, "abc")).Should().BeTrue();
-        var totals = await client.GetHistoryTotalsAsync(Base);
+        HistoryTotals? totals = await client.GetHistoryTotalsAsync(Base);
         totals.Should().NotBeNull();
         (await client.ResetHistoryTotalsAsync(Base)).Should().BeTrue();
     }
@@ -540,9 +541,9 @@ public class MoonrakerClientTests
     [Fact]
     public async Task SpoolmanEndpoints_WorkAsync()
     {
-        var (client, _, _) = CreateClient(req =>
+        (IMoonrakerClient? client, Mock<HttpMessageHandler> _, List<HttpRequestMessage> _) = CreateClient(req =>
         {
-            var url = req.RequestUri!.ToString();
+            string url = req.RequestUri!.ToString();
             if (url.Contains("/server/spoolman/status"))
             {
                 return Json(new { result = new { spoolman_connected = true, spool_id = 7 } });
@@ -566,12 +567,12 @@ public class MoonrakerClientTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var status = await client.GetSpoolmanStatusAsync(Base);
+        SpoolmanStatus? status = await client.GetSpoolmanStatusAsync(Base);
         status.Should().NotBeNull();
         status!.SpoolmanConnected.Should().BeTrue();
         (await client.GetSpoolmanActiveSpoolAsync(Base)).Should().Be(7);
         (await client.SetSpoolmanActiveSpoolAsync(Base, 9)).Should().BeTrue();
-        var proxy = await client.SpoolmanProxyRequestAsync(Base, "GET", "/api/v1/spool");
+        string? proxy = await client.SpoolmanProxyRequestAsync(Base, "GET", "/api/v1/spool");
         proxy.Should().Contain("ok");
     }
 }

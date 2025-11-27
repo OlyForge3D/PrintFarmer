@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
+﻿using System.Diagnostics;
+using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
@@ -122,7 +123,7 @@ public static class Program
 
         _ = app.MapGet("/version", async (IOrcaBinaryDetector detector) =>
         {
-            var orcaVersion = await detector.GetVersionAsync();
+            string? orcaVersion = await detector.GetVersionAsync();
             return Results.Ok(new
             {
                 orcaslicerVersion = orcaVersion,
@@ -143,17 +144,17 @@ public static class Program
             try
             {
                 app.Logger.LogInformation("Starting OrcaSlicer profile preload for catalog manufacturers...");
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-                var profileService = app.Services.GetRequiredService<ISlicerProfilesService>();
+                ISlicerProfilesService profileService = app.Services.GetRequiredService<ISlicerProfilesService>();
 
                 // First load all machines to get the list of available manufacturers
-                var machineStart = System.Diagnostics.Stopwatch.StartNew();
-                var machines = await profileService.ListAvailableMachineProfilesAsync();
+                Stopwatch machineStart = System.Diagnostics.Stopwatch.StartNew();
+                IList<MachineProfileDto> machines = await profileService.ListAvailableMachineProfilesAsync();
                 machineStart.Stop();
 
                 // Get the set of manufacturers available in OrcaSlicer profiles
-                var availableManufacturers = machines
+                HashSet<string> availableManufacturers = machines
                     .Where(m => !string.IsNullOrEmpty(m.Manufacturer))
                     .Select(m => m.Manufacturer!)
                     .Distinct()
@@ -162,35 +163,35 @@ public static class Program
                 app.Logger.LogInformation("Found {ManufacturerCount} manufacturers with {MachineCount} machine profiles in {ElapsedMilliseconds}ms", availableManufacturers.Count, machines.Count, machineStart.ElapsedMilliseconds);
 
                 // Load catalog manufacturers via HTTP (call the API)
-                var httpClient = app.Services.GetRequiredService<IHttpClientFactory>().CreateClient();
-                var catalogUrl = Environment.GetEnvironmentVariable("CATALOG_API_URL") ?? "http://localhost:5245";
+                HttpClient httpClient = app.Services.GetRequiredService<IHttpClientFactory>().CreateClient();
+                string catalogUrl = Environment.GetEnvironmentVariable("CATALOG_API_URL") ?? "http://localhost:5245";
 
                 try
                 {
-                    var response = await httpClient.GetAsync($"{catalogUrl}/api/catalog/manufacturers");
+                    HttpResponseMessage response = await httpClient.GetAsync($"{catalogUrl}/api/catalog/manufacturers");
                     if (response.IsSuccessStatusCode)
                     {
-                        var content = await response.Content.ReadAsStringAsync();
-                        var manufacturerDtos = System.Text.Json.JsonSerializer.Deserialize<List<ManufacturerDto>>(
+                        string content = await response.Content.ReadAsStringAsync();
+                        List<ManufacturerDto>? manufacturerDtos = System.Text.Json.JsonSerializer.Deserialize<List<ManufacturerDto>>(
                             content,
                             new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
                         );
 
-                        var catalogManufacturers = manufacturerDtos?
+                        HashSet<string> catalogManufacturers = manufacturerDtos?
                             .Select(m => m.Name)
                             .ToHashSet() ?? new HashSet<string>();
 
                         app.Logger.LogInformation("Catalog has {CatalogManufacturerCount} manufacturers", catalogManufacturers.Count);
 
                         // Load filament and process profiles only for manufacturers in catalog
-                        var filamentStart = System.Diagnostics.Stopwatch.StartNew();
-                        var filaments = await profileService.ListAvailableFilamentProfilesAsync();
-                        var catalogFilaments = filaments
+                        Stopwatch filamentStart = System.Diagnostics.Stopwatch.StartNew();
+                        IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync();
+                        int catalogFilaments = filaments
                             .Count(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer));
                         filamentStart.Stop();
 
-                        var processStart = System.Diagnostics.Stopwatch.StartNew();
-                        var processes = await profileService.ListAvailableProcessProfilesAsync();
+                        Stopwatch processStart = System.Diagnostics.Stopwatch.StartNew();
+                        IList<ProcessProfileDto> processes = await profileService.ListAvailableProcessProfilesAsync();
                         processStart.Stop();
 
                         stopwatch.Stop();
@@ -217,12 +218,12 @@ public static class Program
                     app.Logger.LogWarning("Error fetching catalog manufacturers: {Exception}. Loading all profiles instead.", ex.Message);
 
                     // Fallback: load all profiles if catalog API is unavailable
-                    var filamentStart = System.Diagnostics.Stopwatch.StartNew();
-                    var filaments = await profileService.ListAvailableFilamentProfilesAsync();
+                    Stopwatch filamentStart = System.Diagnostics.Stopwatch.StartNew();
+                    IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync();
                     filamentStart.Stop();
 
-                    var processStart = System.Diagnostics.Stopwatch.StartNew();
-                    var processes = await profileService.ListAvailableProcessProfilesAsync();
+                    Stopwatch processStart = System.Diagnostics.Stopwatch.StartNew();
+                    IList<ProcessProfileDto> processes = await profileService.ListAvailableProcessProfilesAsync();
                     processStart.Stop();
 
                     stopwatch.Stop();

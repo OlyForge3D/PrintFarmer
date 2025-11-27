@@ -37,8 +37,8 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
             // Deterministic test identity. Allow tests to override roles via
             // the X-Test-Roles request header (comma-separated). This lets tests
             // simulate non-admin users while still using the Test auth scheme.
-            var roleHeader = Request.Headers.ContainsKey("X-Test-Roles") ? Request.Headers["X-Test-Roles"].ToString() : null;
-            var roles = new List<string>();
+            string? roleHeader = Request.Headers.ContainsKey("X-Test-Roles") ? Request.Headers["X-Test-Roles"].ToString() : null;
+            List<string> roles = new List<string>();
             if (!string.IsNullOrWhiteSpace(roleHeader))
             {
                 roles.AddRange(roleHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
@@ -50,19 +50,19 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
                 roles.Add("farm_admin");
             }
 
-            var claims = new List<Claim>
+            List<Claim> claims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-000000000001"),
                 new Claim(ClaimTypes.Name, "testuser")
             };
-            foreach (var r in roles)
+            foreach (string r in roles)
             {
                 claims.Add(new Claim(ClaimTypes.Role, r));
             }
 
-            var identity = new ClaimsIdentity(claims, SchemeName);
-            var principal = new ClaimsPrincipal(identity);
-            var ticket = new AuthenticationTicket(principal, SchemeName);
+            ClaimsIdentity identity = new ClaimsIdentity(claims, SchemeName);
+            ClaimsPrincipal principal = new ClaimsPrincipal(identity);
+            AuthenticationTicket ticket = new AuthenticationTicket(principal, SchemeName);
 
             return Task.FromResult(AuthenticateResult.Success(ticket));
         }

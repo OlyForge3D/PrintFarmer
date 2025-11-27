@@ -39,14 +39,14 @@ public class HeartbeatBackgroundService : BackgroundService
                 try
                 {
                     // Send heartbeat to API
-                    var heartbeatUrl = $"{_apiBaseUrl}/api/settings/NetworkDiscovery/heartbeat";
+                    string heartbeatUrl = $"{_apiBaseUrl}/api/settings/NetworkDiscovery/heartbeat";
 
                     _logger.LogDebug("Sending heartbeat to {Url}", heartbeatUrl);
 
-                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                     cts.CancelAfter(TimeSpan.FromSeconds(10)); // 10 second timeout for heartbeat
 
-                    var response = await _httpClient.PostAsJsonAsync(
+                    HttpResponseMessage response = await _httpClient.PostAsJsonAsync(
                         heartbeatUrl,
                         new { timestamp = DateTime.UtcNow },
                         cts.Token);

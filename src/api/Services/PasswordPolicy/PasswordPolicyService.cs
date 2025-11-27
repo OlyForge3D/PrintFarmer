@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Repositories.PasswordPolicy;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.PasswordPolicy;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.PasswordPolicy;
@@ -14,7 +15,7 @@ public class PasswordPolicyService : IPasswordPolicyService
 
     public async Task<PasswordPolicyDto> GetAsync(CancellationToken ct = default)
     {
-        var entity = await _repo.GetAsync(ct);
+        PasswordPolicyEntity? entity = await _repo.GetAsync(ct);
         if (entity == null)
         {
             return new PasswordPolicyDto();
@@ -31,7 +32,7 @@ public class PasswordPolicyService : IPasswordPolicyService
 
     public async Task<PasswordPolicyDto> UpdateAsync(Shared.UpdatePasswordPolicyRequest request, CancellationToken ct = default)
     {
-        var entity = await _repo.GetAsync(ct) ?? new Farm.Infrastructure.Domain.PasswordPolicyEntity();
+        PasswordPolicyEntity entity = await _repo.GetAsync(ct) ?? new Farm.Infrastructure.Domain.PasswordPolicyEntity();
         if (request.MinLength.HasValue)
         {
             entity.MinLength = request.MinLength.Value;

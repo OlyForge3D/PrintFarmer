@@ -21,7 +21,7 @@ public class EfUsersRepository : IUsersRepository
 
     public async Task<IReadOnlyList<UserDto>> GetUsersAsync(CancellationToken ct = default)
     {
-        var users = await _db.Users
+        List<User> users = await _db.Users
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .AsNoTracking()
@@ -76,7 +76,7 @@ public class EfUsersRepository : IUsersRepository
 
     public async Task UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default)
     {
-        var existingRoles = await _db.UserRoles.Where(ur => ur.UserId == userId).ToListAsync(ct);
+        List<UserRole> existingRoles = await _db.UserRoles.Where(ur => ur.UserId == userId).ToListAsync(ct);
         _db.UserRoles.RemoveRange(existingRoles);
         foreach (Guid roleId in roleIds)
         {
@@ -97,19 +97,19 @@ public class EfUsersRepository : IUsersRepository
 
     public async Task DeleteUserAsync(Guid id, CancellationToken ct = default)
     {
-        var user = await _db.Users.FindAsync(new object[] { id }, cancellationToken: ct);
+        User? user = await _db.Users.FindAsync(new object[] { id }, cancellationToken: ct);
         if (user == null)
         {
             return;
         }
-        var userRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
+        List<UserRole> userRoles = await _db.UserRoles.Where(ur => ur.UserId == id).ToListAsync(ct);
         _db.UserRoles.RemoveRange(userRoles);
         _ = _db.Users.Remove(user);
     }
 
     public async Task<IReadOnlyList<RoleDto>> GetRolesAsync(CancellationToken ct = default)
     {
-        var roles = await _db.Roles
+        List<Role> roles = await _db.Roles
             .Include(r => r.RolePermissions)
             .ThenInclude(rp => rp.Resource)
             .Include(r => r.RolePermissions)
@@ -231,8 +231,8 @@ public class EfUsersRepository : IUsersRepository
             return false;
         }
         // Current password check is done in service; repository only updates if hash differs
-        var existingPreview = user.PasswordHash is not null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : (user.PasswordHash ?? "(null)");
-        var newPreview = newPasswordHash is not null && newPasswordHash.Length > 10 ? newPasswordHash.Substring(0, 10) : (newPasswordHash ?? "(null)");
+        string existingPreview = user.PasswordHash is not null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : (user.PasswordHash ?? "(null)");
+        string newPreview = newPasswordHash is not null && newPasswordHash.Length > 10 ? newPasswordHash.Substring(0, 10) : (newPasswordHash ?? "(null)");
         Console.WriteLine($"[EfUsersRepository] ExistingHashPreview={existingPreview} NewHashPreview={newPreview}");
         if (user.PasswordHash == newPasswordHash)
         {

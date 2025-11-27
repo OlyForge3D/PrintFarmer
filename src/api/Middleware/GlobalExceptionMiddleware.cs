@@ -64,7 +64,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
 
     private static (HttpStatusCode StatusCode, string Message, string? Details) MapExceptionToResponse(Exception ex)
     {
-        var result = ex switch
+        (HttpStatusCode, string, string?) result = ex switch
         {
             // Domain-specific exceptions
             PrinterNotFoundException => (HttpStatusCode.NotFound, "Printer not found", ex.Message),

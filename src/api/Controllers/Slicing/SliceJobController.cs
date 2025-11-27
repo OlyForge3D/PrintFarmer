@@ -1,7 +1,9 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Services.Artifacts;
+using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.Slicing;
 // ClaimJobRequest now lives in shared contracts
 using Farm.Web.Shared.Contracts.Slicing;
@@ -69,7 +71,7 @@ public class SliceJobController : ControllerBase
         }
         try
         {
-            var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(capabilitiesJson);
+            string[]? parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(capabilitiesJson);
             if (parsed == null)
             {
                 error = "Capabilities must be a JSON string array.";
@@ -80,7 +82,7 @@ public class SliceJobController : ControllerBase
                 error = "Too many capabilities (max 32).";
                 return false;
             }
-            var canonical = parsed
+            string[] canonical = parsed
                 .Where(c => !string.IsNullOrWhiteSpace(c))
                 .Select(c => c.Trim().ToLowerInvariant())
                 .ToArray();
@@ -89,7 +91,7 @@ public class SliceJobController : ControllerBase
                 error = "Duplicate capabilities are not allowed.";
                 return false;
             }
-            var invalid = canonical.Where(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[a-z0-9][a-z0-9\-_/]{0,63}$")).ToList();
+            List<string> invalid = canonical.Where(c => !System.Text.RegularExpressions.Regex.IsMatch(c, @"^[a-z0-9][a-z0-9\-_/]{0,63}$")).ToList();
             if (invalid.Count > 0)
             {
                 error = $"Invalid capability slug(s): {string.Join(", ", invalid)}";
@@ -175,14 +177,14 @@ public class SliceJobController : ControllerBase
         }
 
         // Rate limit per authenticated user (or test user fallback)
-        var rateResult = await _rateLimitService.CheckSliceJobSubmitLimitAsync(userId, HttpContext.RequestAborted);
+        RateLimitResult rateResult = await _rateLimitService.CheckSliceJobSubmitLimitAsync(userId, HttpContext.RequestAborted);
         if (!rateResult.IsAllowed)
         {
             return StatusCode(StatusCodes.Status429TooManyRequests, rateResult.Message ?? "Too many slice job submissions. Please retry later.");
         }
 
         // Capabilities validation (optional requirement)
-        if (!TryValidateCapabilities(request.RequiredCapabilitiesJson, out var capabilityList, out var capabilityError))
+        if (!TryValidateCapabilities(request.RequiredCapabilitiesJson, out string[]? capabilityList, out string? capabilityError))
         {
             return BadRequest(capabilityError);
         }
@@ -295,7 +297,7 @@ public class SliceJobController : ControllerBase
         {
             return BadRequest("ProgressPercent must be between 0 and 100");
         }
-        var job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
+        SliceJob? job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
         if (job == null)
         {
             return NotFound($"Job {id} not found");
@@ -310,7 +312,7 @@ public class SliceJobController : ControllerBase
         await _jobRepository.SaveChangesAsync(HttpContext.RequestAborted);
 
         // Reload for broadcasting enriched event
-        var updated = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
+        SliceJob? updated = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
         if (updated != null)
         {
             await _eventService.NotifyJobProgressAsync(updated, HttpContext.RequestAborted);
@@ -366,7 +368,7 @@ public class SliceJobController : ControllerBase
             return Unauthorized("Worker API key missing or invalid");
         }
 
-        var job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
+        SliceJob? job = await _jobRepository.GetByIdAsync(id, HttpContext.RequestAborted);
         if (job == null)
         {
             return NotFound($"Job {id} not found");
@@ -574,7 +576,7 @@ public class SliceJobController : ControllerBase
         {
             return Unauthorized("Worker API key missing or invalid");
         }
-        var job = await _jobRepository.GetByIdAsync(id);
+        SliceJob? job = await _jobRepository.GetByIdAsync(id);
         if (job == null)
         {
             return NotFound($"Job {id} not found");
@@ -586,7 +588,7 @@ public class SliceJobController : ControllerBase
         }
 
         // Fetch primary artifact
-        var primary = await _artifactsService.GetAsync(request.PrimaryArtifactId, HttpContext.RequestAborted);
+        Artifact? primary = await _artifactsService.GetAsync(request.PrimaryArtifactId, HttpContext.RequestAborted);
         if (primary == null)
         {
             return BadRequest($"Primary artifact {request.PrimaryArtifactId} not found");
@@ -597,13 +599,13 @@ public class SliceJobController : ControllerBase
         }
 
         // Validate additional artifacts if provided
-        var allArtifactIds = new List<Guid> { primary.Id };
+        List<Guid> allArtifactIds = new List<Guid> { primary.Id };
         Guid? logArtifactId = null;
         if (request.AdditionalArtifactIds != null)
         {
-            foreach (var aid in request.AdditionalArtifactIds.Distinct())
+            foreach (Guid aid in request.AdditionalArtifactIds.Distinct())
             {
-                var extra = await _artifactsService.GetAsync(aid, HttpContext.RequestAborted);
+                Artifact? extra = await _artifactsService.GetAsync(aid, HttpContext.RequestAborted);
                 if (extra == null)
                 {
                     return BadRequest($"Artifact {aid} not found");
@@ -622,7 +624,7 @@ public class SliceJobController : ControllerBase
             bool hasLogArtifactReferenced = request.AdditionalArtifactIds?.Any(aid => aid == primary.Id) == true; // simplistic; actual log detection can be added later
             if (!hasLogArtifactReferenced)
             {
-                var logArtifact = await _artifactsService.UploadTextAsync(request.LogText, "slicer-log.txt", job.Id, job.WorkerId, "log", HttpContext.RequestAborted);
+                Artifact logArtifact = await _artifactsService.UploadTextAsync(request.LogText, "slicer-log.txt", job.Id, job.WorkerId, "log", HttpContext.RequestAborted);
                 allArtifactIds.Add(logArtifact.Id);
                 logArtifactId = logArtifact.Id;
             }
@@ -643,18 +645,18 @@ public class SliceJobController : ControllerBase
         // Record successful completion in circuit breaker
         if (job.WorkerId.HasValue && job.WorkerId.Value != Guid.Empty && _circuitBreaker != null)
         {
-            var workerRepo = HttpContext.RequestServices.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
+            IWorkerRepository workerRepo = HttpContext.RequestServices.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
             await _circuitBreaker.RecordJobSuccessAsync(job.WorkerId.Value, workerRepo, HttpContext.RequestAborted);
         }
 
         // Reload updated job for broadcasting
-        var updated = await _jobRepository.GetByIdAsync(job.Id, HttpContext.RequestAborted);
+        SliceJob? updated = await _jobRepository.GetByIdAsync(job.Id, HttpContext.RequestAborted);
         if (updated != null)
         {
             await _eventService.NotifyJobCompletedAsync(updated, HttpContext.RequestAborted);
         }
 
-        var response = new CompleteSliceJobResponse
+        CompleteSliceJobResponse response = new CompleteSliceJobResponse
         {
             JobId = job.Id,
             Status = SliceJobStatus.Completed,
@@ -676,7 +678,7 @@ public class SliceJobController : ControllerBase
         // Record completion metrics
         bool hasLog = logArtifactId.HasValue || (request.AdditionalArtifactIds?.Any(aid =>
         {
-            var a = _artifactsService.GetAsync(aid, HttpContext.RequestAborted).Result;
+            Artifact? a = _artifactsService.GetAsync(aid, HttpContext.RequestAborted).Result;
             return a?.Kind == "log";
         }) ?? false);
         _metrics.RecordJobCompletion(allArtifactIds.Count, hasLog);

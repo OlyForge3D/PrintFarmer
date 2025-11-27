@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -30,7 +31,7 @@ public class SlicerManagementController : ControllerBase
     public async Task<IActionResult> ListAllAsync()
     {
         _logger.LogInformation("Admin listing all slicer services");
-        var list = await _service.ListAsync(HttpContext?.RequestAborted ?? CancellationToken.None);
+        IReadOnlyList<SlicerService> list = await _service.ListAsync(HttpContext?.RequestAborted ?? CancellationToken.None);
         return Ok(list);
     }
 
@@ -41,8 +42,8 @@ public class SlicerManagementController : ControllerBase
     public async Task<IActionResult> AdminRotateApiKeyAsync(Guid id)
     {
         _logger.LogWarning("Admin forcing API key rotation for slicer service {ServiceId}", id);
-        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var newApiKey = await _service.RotateApiKeyAsync(id, ct, isAdminForced: true);
+        CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        string? newApiKey = await _service.RotateApiKeyAsync(id, ct, isAdminForced: true);
         if (newApiKey == null)
         {
             return NotFound();
@@ -57,8 +58,8 @@ public class SlicerManagementController : ControllerBase
     public async Task<IActionResult> AdminDeregisterAsync(Guid id)
     {
         _logger.LogWarning("Admin forcibly deregistering slicer service {ServiceId}", id);
-        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var ok = await _service.DeregisterAsync(id, ct);
+        CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        bool ok = await _service.DeregisterAsync(id, ct);
         if (!ok)
         {
             return NotFound();

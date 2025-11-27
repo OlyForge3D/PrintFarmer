@@ -22,7 +22,7 @@ public class JobStateMachineTests
     public void IsValidTransition_ValidTransitions_ShouldReturnTrue(JobState fromState, JobState toState)
     {
         // Act
-        var isValid = JobStateMachine.IsValidTransition(fromState, toState);
+        bool isValid = JobStateMachine.IsValidTransition(fromState, toState);
 
         // Assert
         isValid.Should().BeTrue($"transition from {fromState} to {toState} should be valid");
@@ -41,7 +41,7 @@ public class JobStateMachineTests
     public void ValidateTransition_ValidTransitions_ShouldNotThrow(JobState fromState, JobState toState)
     {
         // Act & Assert
-        var action = () => JobStateMachine.ValidateTransition(fromState, toState);
+        Action action = () => JobStateMachine.ValidateTransition(fromState, toState);
         action.Should().NotThrow($"transition from {fromState} to {toState} should be valid");
     }
 
@@ -58,7 +58,7 @@ public class JobStateMachineTests
     public void Transition_ValidTransitions_ShouldReturnNewState(JobState fromState, JobState toState)
     {
         // Act
-        var resultState = JobStateMachine.Transition(fromState, toState);
+        JobState resultState = JobStateMachine.Transition(fromState, toState);
 
         // Assert
         resultState.Should().Be(toState);
@@ -109,7 +109,7 @@ public class JobStateMachineTests
     public void IsValidTransition_InvalidTransitions_ShouldReturnFalse(JobState fromState, JobState toState)
     {
         // Act
-        var isValid = JobStateMachine.IsValidTransition(fromState, toState);
+        bool isValid = JobStateMachine.IsValidTransition(fromState, toState);
 
         // Assert
         isValid.Should().BeFalse($"transition from {fromState} to {toState} should be invalid");
@@ -136,7 +136,7 @@ public class JobStateMachineTests
     public void ValidateTransition_InvalidTransitions_ShouldThrowException(JobState fromState, JobState toState)
     {
         // Act & Assert
-        var action = () => JobStateMachine.ValidateTransition(fromState, toState);
+        Action action = () => JobStateMachine.ValidateTransition(fromState, toState);
         action.Should().Throw<InvalidJobStateTransitionException>()
               .WithMessage($"Invalid transition from {fromState} to {toState}");
     }
@@ -152,7 +152,7 @@ public class JobStateMachineTests
     public void Transition_InvalidTransitions_ShouldThrowException(JobState fromState, JobState toState)
     {
         // Act & Assert
-        var action = () => JobStateMachine.Transition(fromState, toState);
+        Func<JobState> action = () => JobStateMachine.Transition(fromState, toState);
         action.Should().Throw<InvalidJobStateTransitionException>()
               .WithMessage($"Invalid transition from {fromState} to {toState}")
               .Which.FromState.Should().Be(fromState);
@@ -173,7 +173,7 @@ public class JobStateMachineTests
     public void IsTerminal_TerminalStates_ShouldReturnTrue(JobState state)
     {
         // Act
-        var isTerminal = JobStateMachine.IsTerminal(state);
+        bool isTerminal = JobStateMachine.IsTerminal(state);
 
         // Assert
         isTerminal.Should().BeTrue($"{state} should be a terminal state");
@@ -186,7 +186,7 @@ public class JobStateMachineTests
     public void IsTerminal_NonTerminalStates_ShouldReturnFalse(JobState state)
     {
         // Act
-        var isTerminal = JobStateMachine.IsTerminal(state);
+        bool isTerminal = JobStateMachine.IsTerminal(state);
 
         // Assert
         isTerminal.Should().BeFalse($"{state} should not be a terminal state");
@@ -196,7 +196,7 @@ public class JobStateMachineTests
     public void GetTerminalStates_ShouldReturnAllTerminalStates()
     {
         // Act
-        var terminalStates = JobStateMachine.GetTerminalStates();
+        IReadOnlyCollection<JobState> terminalStates = JobStateMachine.GetTerminalStates();
 
         // Assert
         terminalStates.Should().BeEquivalentTo(new[]
@@ -216,7 +216,7 @@ public class JobStateMachineTests
     public void GetValidNextStates_FromQueued_ShouldReturnExpectedStates()
     {
         // Act
-        var validStates = JobStateMachine.GetValidNextStates(JobState.Queued);
+        IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Queued);
 
         // Assert
         validStates.Should().BeEquivalentTo(new[] { JobState.Dispatched, JobState.Cancelled });
@@ -226,7 +226,7 @@ public class JobStateMachineTests
     public void GetValidNextStates_FromDispatched_ShouldReturnExpectedStates()
     {
         // Act
-        var validStates = JobStateMachine.GetValidNextStates(JobState.Dispatched);
+        IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Dispatched);
 
         // Assert
         validStates.Should().BeEquivalentTo(new[] { JobState.Processing, JobState.Cancelled, JobState.DeadLetter });
@@ -236,7 +236,7 @@ public class JobStateMachineTests
     public void GetValidNextStates_FromProcessing_ShouldReturnExpectedStates()
     {
         // Act
-        var validStates = JobStateMachine.GetValidNextStates(JobState.Processing);
+        IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Processing);
 
         // Assert
         validStates.Should().BeEquivalentTo(new[]
@@ -256,7 +256,7 @@ public class JobStateMachineTests
     public void GetValidNextStates_FromTerminalStates_ShouldReturnEmptyCollection(JobState terminalState)
     {
         // Act
-        var validStates = JobStateMachine.GetValidNextStates(terminalState);
+        IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(terminalState);
 
         // Assert
         validStates.Should().BeEmpty($"{terminalState} is terminal and should have no valid next states");
@@ -270,11 +270,11 @@ public class JobStateMachineTests
     public void InvalidJobStateTransitionException_ShouldContainCorrectStates()
     {
         // Arrange
-        var fromState = JobState.Succeeded;
-        var toState = JobState.Processing;
+        JobState fromState = JobState.Succeeded;
+        JobState toState = JobState.Processing;
 
         // Act
-        var exception = new InvalidJobStateTransitionException(fromState, toState);
+        InvalidJobStateTransitionException exception = new InvalidJobStateTransitionException(fromState, toState);
 
         // Assert
         exception.FromState.Should().Be(fromState);
@@ -297,7 +297,7 @@ public class JobStateMachineTests
     public void IsValidTransition_SameState_ShouldReturnFalse(JobState state, JobState sameState)
     {
         // Act
-        var isValid = JobStateMachine.IsValidTransition(state, sameState);
+        bool isValid = JobStateMachine.IsValidTransition(state, sameState);
 
         // Assert
         isValid.Should().BeFalse("transitioning to the same state should be invalid");
@@ -307,7 +307,7 @@ public class JobStateMachineTests
     public void GetValidNextStates_ShouldReturnReadOnlyCollection()
     {
         // Act
-        var validStates = JobStateMachine.GetValidNextStates(JobState.Queued);
+        IReadOnlyCollection<JobState> validStates = JobStateMachine.GetValidNextStates(JobState.Queued);
 
         // Assert
         validStates.Should().BeAssignableTo<IReadOnlyCollection<JobState>>();
@@ -317,7 +317,7 @@ public class JobStateMachineTests
     public void GetTerminalStates_ShouldReturnReadOnlyCollection()
     {
         // Act
-        var terminalStates = JobStateMachine.GetTerminalStates();
+        IReadOnlyCollection<JobState> terminalStates = JobStateMachine.GetTerminalStates();
 
         // Assert
         terminalStates.Should().BeAssignableTo<IReadOnlyCollection<JobState>>();
@@ -331,7 +331,7 @@ public class JobStateMachineTests
     public void FullWorkflow_QueuedToSucceeded_ShouldWork()
     {
         // Arrange
-        var currentState = JobState.Queued;
+        JobState currentState = JobState.Queued;
 
         // Act & Assert - Full successful workflow
         currentState = JobStateMachine.Transition(currentState, JobState.Dispatched);
@@ -351,7 +351,7 @@ public class JobStateMachineTests
     public void FullWorkflow_QueuedToFailed_ShouldWork()
     {
         // Arrange
-        var currentState = JobState.Queued;
+        JobState currentState = JobState.Queued;
 
         // Act & Assert - Workflow ending in failure
         currentState = JobStateMachine.Transition(currentState, JobState.Dispatched);
@@ -366,7 +366,7 @@ public class JobStateMachineTests
     public void FullWorkflow_QueuedToCancelled_ShouldWork()
     {
         // Arrange & Act - Job cancelled while queued
-        var currentState = JobState.Queued;
+        JobState currentState = JobState.Queued;
         currentState = JobStateMachine.Transition(currentState, JobState.Cancelled);
 
         // Assert
@@ -378,7 +378,7 @@ public class JobStateMachineTests
     public void FullWorkflow_DispatchedToDeadLetter_ShouldWork()
     {
         // Arrange & Act - Job becomes dead letter before processing
-        var currentState = JobState.Queued;
+        JobState currentState = JobState.Queued;
         currentState = JobStateMachine.Transition(currentState, JobState.Dispatched);
         currentState = JobStateMachine.Transition(currentState, JobState.DeadLetter);
 

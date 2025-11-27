@@ -9,7 +9,10 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Services.Email;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services.JobDispatch;
+using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Slicing.Abstractions;
@@ -55,7 +58,7 @@ public static class ServiceCollectionExtensions
         // Also register a DbContextFactory for creating short-lived AppDbContext instances from singletons
         // Build a DbContextOptions<AppDbContext> instance configured for the selected provider and
         // register it as a Singleton so the factory and other singletons can consume it safely.
-        var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+        DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
         if (provider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase))
         {
             _ = optionsBuilder.UseSqlServer(connectionString);
@@ -165,7 +168,7 @@ public static class ServiceCollectionExtensions
         bool disableBg = false;
         try
         {
-            var env = Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES");
+            string? env = Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES");
             disableBg = !string.IsNullOrEmpty(env) && (string.Equals(env, "true", StringComparison.OrdinalIgnoreCase) || env == "1");
         }
         catch { }
@@ -244,16 +247,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Farm.Web.Api.Services.Email.IEmailTemplateRenderer, Farm.Web.Api.Services.Email.EmailTemplateRenderer>();
         services.AddSingleton(sp =>
         {
-            var cfg = sp.GetRequiredService<IConfiguration>();
-            var opts = new Farm.Web.Api.Services.Email.EmailOptions();
+            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
+            EmailOptions opts = new Farm.Web.Api.Services.Email.EmailOptions();
             cfg.GetSection("Email").Bind(opts);
             return opts;
         });
         services.AddScoped<Farm.Web.Api.Services.Email.IEmailService>(sp =>
         {
-            var logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            var opts = sp.GetRequiredService<Farm.Web.Api.Services.Email.EmailOptions>();
-            var renderer = sp.GetRequiredService<Farm.Web.Api.Services.Email.IEmailTemplateRenderer>();
+            IUnifiedLoggingService logger = sp.GetRequiredService<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            EmailOptions opts = sp.GetRequiredService<Farm.Web.Api.Services.Email.EmailOptions>();
+            IEmailTemplateRenderer renderer = sp.GetRequiredService<Farm.Web.Api.Services.Email.IEmailTemplateRenderer>();
             return opts.Provider?.Equals("mailjet", StringComparison.OrdinalIgnoreCase) == true
                 ? new Farm.Web.Api.Services.Email.MailjetEmailService(logger, opts, renderer)
                 : new Farm.Web.Api.Services.Email.ConsoleEmailService(logger, renderer);
@@ -262,8 +265,8 @@ public static class ServiceCollectionExtensions
         // Rate Limiting
         services.AddSingleton(sp =>
         {
-            var cfg = sp.GetRequiredService<IConfiguration>();
-            var opts = new Farm.Web.Api.Services.RateLimiting.RateLimitOptions();
+            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
+            RateLimitOptions opts = new Farm.Web.Api.Services.RateLimiting.RateLimitOptions();
             cfg.GetSection("RateLimiting").Bind(opts);
             return opts;
         });
@@ -272,8 +275,8 @@ public static class ServiceCollectionExtensions
         // Job dispatch retry options
         services.AddSingleton(sp =>
         {
-            var cfg = sp.GetRequiredService<IConfiguration>();
-            var opts = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
+            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
+            RetryOptions opts = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
             cfg.GetSection("JobDispatchRetry").Bind(opts);
             return opts;
         });

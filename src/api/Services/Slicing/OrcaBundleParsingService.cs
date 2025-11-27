@@ -38,7 +38,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
             }
 
             // Check if at least one expected section exists
-            foreach (var key in OrcaBundleKeys)
+            foreach (string key in OrcaBundleKeys)
             {
                 if (obj.ContainsKey(key))
                 {
@@ -81,34 +81,34 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
             throw new FormatException("JSON does not match OrcaSlicer bundle format (missing expected preset sections)");
         }
 
-        var preview = new OrcaBundlePreviewDto();
+        OrcaBundlePreviewDto preview = new OrcaBundlePreviewDto();
 
         // Parse printer presets (can be "printer" or "machine")
-        if (obj.TryGetPropertyValue("printer", out var printerNode) && printerNode is JsonArray printerArray)
+        if (obj.TryGetPropertyValue("printer", out JsonNode? printerNode) && printerNode is JsonArray printerArray)
         {
             preview.Printers = ParsePrinterPresets(printerArray);
         }
-        else if (obj.TryGetPropertyValue("machine", out var machineNode) && machineNode is JsonArray machineArray)
+        else if (obj.TryGetPropertyValue("machine", out JsonNode? machineNode) && machineNode is JsonArray machineArray)
         {
             preview.Printers = ParsePrinterPresets(machineArray);
         }
 
         // Parse filament presets (can be "filament" or "material")
-        if (obj.TryGetPropertyValue("filament", out var filamentNode) && filamentNode is JsonArray filamentArray)
+        if (obj.TryGetPropertyValue("filament", out JsonNode? filamentNode) && filamentNode is JsonArray filamentArray)
         {
             preview.Filaments = ParseFilamentPresets(filamentArray);
         }
-        else if (obj.TryGetPropertyValue("material", out var materialNode) && materialNode is JsonArray materialArray)
+        else if (obj.TryGetPropertyValue("material", out JsonNode? materialNode) && materialNode is JsonArray materialArray)
         {
             preview.Filaments = ParseFilamentPresets(materialArray);
         }
 
         // Parse process presets (can be "process" or "print")
-        if (obj.TryGetPropertyValue("process", out var processNode) && processNode is JsonArray processArray)
+        if (obj.TryGetPropertyValue("process", out JsonNode? processNode) && processNode is JsonArray processArray)
         {
             preview.Processes = ParseProcessPresets(processArray);
         }
-        else if (obj.TryGetPropertyValue("print", out var printNode) && printNode is JsonArray printArray)
+        else if (obj.TryGetPropertyValue("print", out JsonNode? printNode) && printNode is JsonArray printArray)
         {
             preview.Processes = ParseProcessPresets(printArray);
         }
@@ -121,9 +121,9 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private List<OrcaPrinterPresetDto> ParsePrinterPresets(JsonArray printerArray)
     {
-        var printers = new List<OrcaPrinterPresetDto>();
+        List<OrcaPrinterPresetDto> printers = new List<OrcaPrinterPresetDto>();
 
-        foreach (var node in printerArray)
+        foreach (JsonNode? node in printerArray)
         {
             if (node is not JsonObject printerObj)
             {
@@ -140,7 +140,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                 throw new FormatException("Printer preset missing required field 'nozzle_diameter'");
             }
 
-            var printer = new OrcaPrinterPresetDto
+            OrcaPrinterPresetDto printer = new OrcaPrinterPresetDto
             {
                 Name = GetStringValue(printerObj, "name") ?? "Unknown Printer",
                 InherentFrom = GetStringValue(printerObj, "inherits", "from"),
@@ -171,16 +171,16 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private List<OrcaFilamentPresetDto> ParseFilamentPresets(JsonArray filamentArray)
     {
-        var filaments = new List<OrcaFilamentPresetDto>();
+        List<OrcaFilamentPresetDto> filaments = new List<OrcaFilamentPresetDto>();
 
-        foreach (var node in filamentArray)
+        foreach (JsonNode? node in filamentArray)
         {
             if (node is not JsonObject filamentObj)
             {
                 continue;
             }
 
-            var filament = new OrcaFilamentPresetDto
+            OrcaFilamentPresetDto filament = new OrcaFilamentPresetDto
             {
                 Name = GetStringValue(filamentObj, "name") ?? "Unknown Filament",
                 InherentFrom = GetStringValue(filamentObj, "inherits", "from"),
@@ -202,16 +202,16 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private List<OrcaProcessPresetDto> ParseProcessPresets(JsonArray processArray)
     {
-        var processes = new List<OrcaProcessPresetDto>();
+        List<OrcaProcessPresetDto> processes = new List<OrcaProcessPresetDto>();
 
-        foreach (var node in processArray)
+        foreach (JsonNode? node in processArray)
         {
             if (node is not JsonObject processObj)
             {
                 continue;
             }
 
-            var process = new OrcaProcessPresetDto
+            OrcaProcessPresetDto process = new OrcaProcessPresetDto
             {
                 Name = GetStringValue(processObj, "name") ?? "Unknown Process",
                 InherentFrom = GetStringValue(processObj, "inherits", "from"),
@@ -257,20 +257,20 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private Dictionary<string, string> ExtractBundleMetadata(JsonObject obj)
     {
-        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // Extract version, generated date, or other top-level bundle metadata
-        if (obj.TryGetPropertyValue("version", out var version) && version is JsonValue versionValue)
+        if (obj.TryGetPropertyValue("version", out JsonNode? version) && version is JsonValue versionValue)
         {
             metadata["version"] = versionValue.ToString();
         }
 
-        if (obj.TryGetPropertyValue("generated", out var generated) && generated is JsonValue generatedValue)
+        if (obj.TryGetPropertyValue("generated", out JsonNode? generated) && generated is JsonValue generatedValue)
         {
             metadata["generated"] = generatedValue.ToString();
         }
 
-        if (obj.TryGetPropertyValue("app_version", out var appVersion) && appVersion is JsonValue appVersionValue)
+        if (obj.TryGetPropertyValue("app_version", out JsonNode? appVersion) && appVersion is JsonValue appVersionValue)
         {
             metadata["app_version"] = appVersionValue.ToString();
         }
@@ -280,16 +280,16 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private Dictionary<string, object?> ExtractRawParameters(JsonObject obj)
     {
-        var parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, object?> parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var prop in obj)
+        foreach (KeyValuePair<string, JsonNode?> prop in obj)
         {
             parameters[prop.Key] = prop.Value switch
             {
-                JsonValue v when v.TryGetValue<string>(out var str) => str,
-                JsonValue v when v.TryGetValue<long>(out var lng) => lng,
-                JsonValue v when v.TryGetValue<double>(out var dbl) => dbl,
-                JsonValue v when v.TryGetValue<bool>(out var bln) => bln,
+                JsonValue v when v.TryGetValue<string>(out string? str) => str,
+                JsonValue v when v.TryGetValue<long>(out long lng) => lng,
+                JsonValue v when v.TryGetValue<double>(out double dbl) => dbl,
+                JsonValue v when v.TryGetValue<bool>(out bool bln) => bln,
                 _ => prop.Value?.ToJsonString()
             };
         }
@@ -300,11 +300,11 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
     // Helper methods to extract values with multiple key aliases
     private string? GetStringValue(JsonObject obj, params string[] keys)
     {
-        foreach (var key in keys)
+        foreach (string key in keys)
         {
-            if (obj.TryGetPropertyValue(key, out var node) && node is JsonValue value)
+            if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<string>(out var str))
+                if (value.TryGetValue<string>(out string? str))
                 {
                     return str;
                 }
@@ -315,16 +315,16 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private double? GetDoubleValue(JsonObject obj, params string[] keys)
     {
-        foreach (var key in keys)
+        foreach (string key in keys)
         {
-            if (obj.TryGetPropertyValue(key, out var node) && node is JsonValue value)
+            if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<double>(out var dbl))
+                if (value.TryGetValue<double>(out double dbl))
                 {
                     return dbl;
                 }
                 // Also handle string representations of numbers
-                if (value.TryGetValue<string>(out var str) && double.TryParse(str, out dbl))
+                if (value.TryGetValue<string>(out string? str) && double.TryParse(str, out dbl))
                 {
                     return dbl;
                 }
@@ -335,20 +335,20 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private int? GetIntValue(JsonObject obj, params string[] keys)
     {
-        foreach (var key in keys)
+        foreach (string key in keys)
         {
-            if (obj.TryGetPropertyValue(key, out var node) && node is JsonValue value)
+            if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<int>(out var intVal))
+                if (value.TryGetValue<int>(out int intVal))
                 {
                     return intVal;
                 }
-                if (value.TryGetValue<long>(out var lng))
+                if (value.TryGetValue<long>(out long lng))
                 {
                     return (int)lng;
                 }
                 // Handle string representations
-                if (value.TryGetValue<string>(out var str) && int.TryParse(str, out intVal))
+                if (value.TryGetValue<string>(out string? str) && int.TryParse(str, out intVal))
                 {
                     return intVal;
                 }
@@ -359,16 +359,16 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
 
     private bool? GetBoolValue(JsonObject obj, params string[] keys)
     {
-        foreach (var key in keys)
+        foreach (string key in keys)
         {
-            if (obj.TryGetPropertyValue(key, out var node) && node is JsonValue value)
+            if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
             {
-                if (value.TryGetValue<bool>(out var bln))
+                if (value.TryGetValue<bool>(out bool bln))
                 {
                     return bln;
                 }
                 // Handle string representations ("true", "false", "1", "0")
-                if (value.TryGetValue<string>(out var str))
+                if (value.TryGetValue<string>(out string? str))
                 {
                     if (bool.TryParse(str, out bln))
                     {
@@ -385,7 +385,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
                     }
                 }
                 // Handle numeric representations (1 = true, 0 = false)
-                if (value.TryGetValue<int>(out var intVal))
+                if (value.TryGetValue<int>(out int intVal))
                 {
                     return intVal != 0;
                 }

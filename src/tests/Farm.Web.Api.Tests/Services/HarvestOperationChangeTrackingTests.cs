@@ -48,10 +48,10 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
     public async Task GetOperationByIdAsync_WithAsNoTracking_ReturnsDetachedEntity()
     {
         // Arrange
-        var printerId = Guid.NewGuid();
-        var operationId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
 
-        var operation = new GcodeHarvestOperation
+        GcodeHarvestOperation operation = new GcodeHarvestOperation
         {
             Id = operationId,
             PrinterId = printerId,
@@ -65,7 +65,7 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         await _harvestRepository.SaveChangesAsync();
 
         // Act - Get with AsNoTracking (returns detached entity)
-        var detachedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
+        GcodeHarvestOperation? detachedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
 
         // Assert - Entity is detached, so modifying and saving won't work
         detachedOp.Should().NotBeNull();
@@ -77,7 +77,7 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         await _harvestRepository.SaveChangesAsync();
 
         // Verify status was NOT saved (entity was detached)
-        var fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
+        GcodeHarvestOperation? fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
         fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Running); // Still running!
     }
 
@@ -85,10 +85,10 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
     public async Task GetOperationByIdTrackedAsync_ReturnsTrackedEntity()
     {
         // Arrange
-        var printerId = Guid.NewGuid();
-        var operationId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
 
-        var operation = new GcodeHarvestOperation
+        GcodeHarvestOperation operation = new GcodeHarvestOperation
         {
             Id = operationId,
             PrinterId = printerId,
@@ -102,7 +102,7 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         await _harvestRepository.SaveChangesAsync();
 
         // Act - Get with tracking enabled
-        var trackedOp = await _harvestRepository.GetOperationByIdTrackedAsync(operationId);
+        GcodeHarvestOperation? trackedOp = await _harvestRepository.GetOperationByIdTrackedAsync(operationId);
 
         // Assert - Entity is tracked, so modifying and saving WILL work
         trackedOp.Should().NotBeNull();
@@ -114,7 +114,7 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         await _harvestRepository.SaveChangesAsync();
 
         // Verify status WAS saved (entity was tracked)
-        var fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
+        GcodeHarvestOperation? fetchedOp = await _harvestRepository.GetOperationByIdAsync(operationId);
         fetchedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled); // Now cancelled!
         fetchedOp.CompletedAt.Should().NotBeNull();
     }
@@ -123,10 +123,10 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
     public async Task CancelOperation_WithTrackedEntity_PersistsToDatabase()
     {
         // Arrange - Create an operation
-        var printerId = Guid.NewGuid();
-        var operationId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
 
-        var operation = new GcodeHarvestOperation
+        GcodeHarvestOperation operation = new GcodeHarvestOperation
         {
             Id = operationId,
             PrinterId = printerId,
@@ -140,16 +140,16 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         await _harvestRepository.SaveChangesAsync();
 
         // Act - Simulate cancel: fetch with tracking, modify, save
-        var trackedOp = await _harvestRepository.GetOperationByIdTrackedAsync(operationId);
+        GcodeHarvestOperation? trackedOp = await _harvestRepository.GetOperationByIdTrackedAsync(operationId);
         trackedOp!.Status = GcodeHarvestStatus.Cancelled;
         trackedOp.CompletedAt = DateTime.UtcNow;
         await _harvestRepository.SaveChangesAsync();
 
         // Assert - Verify persistence in new context to ensure actual DB save
-        var newContext = new AppDbContext(_dbOptions);
-        var newRepo = new EfHarvestRepository(newContext);
+        AppDbContext newContext = new AppDbContext(_dbOptions);
+        EfHarvestRepository newRepo = new EfHarvestRepository(newContext);
 
-        var persistedOp = await newRepo.GetOperationByIdAsync(operationId);
+        GcodeHarvestOperation? persistedOp = await newRepo.GetOperationByIdAsync(operationId);
         persistedOp.Should().NotBeNull();
         persistedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled);
         persistedOp.CompletedAt.Should().NotBeNull();

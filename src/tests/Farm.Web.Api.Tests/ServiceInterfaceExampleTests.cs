@@ -21,15 +21,15 @@ public class ServiceInterfaceExampleTests
     public async Task MockedMoonrakerClient_CanReturnPredefinedStatusAsync()
     {
         // Arrange
-        var mockMoonraker = new Mock<IMoonrakerClient>();
-        var expectedStatus = new PrinterStatus(IsOnline: true, State: "ready");
+        Mock<IMoonrakerClient> mockMoonraker = new Mock<IMoonrakerClient>();
+        PrinterStatus expectedStatus = new PrinterStatus(IsOnline: true, State: "ready");
 
         mockMoonraker
             .Setup(m => m.GetStatusAsync("http://test-printer", It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedStatus);
 
         // Act
-        var result = await mockMoonraker.Object.GetStatusAsync("http://test-printer");
+        PrinterStatus result = await mockMoonraker.Object.GetStatusAsync("http://test-printer");
 
         // Assert
         Assert.True(result.IsOnline);
@@ -46,8 +46,8 @@ public class ServiceInterfaceExampleTests
     public async Task MockedSpoolmanService_CanReturnSpoolListAsync()
     {
         // Arrange
-        var mockSpoolman = new Mock<ISpoolmanService>();
-        var expectedSpools = new List<SpoolmanSpoolDto>
+        Mock<ISpoolmanService> mockSpoolman = new Mock<ISpoolmanService>();
+        List<SpoolmanSpoolDto> expectedSpools = new List<SpoolmanSpoolDto>
         {
             new SpoolmanSpoolDto(
                 Id: 1,
@@ -92,7 +92,7 @@ public class ServiceInterfaceExampleTests
             .ReturnsAsync(expectedSpools);
 
         // Act
-        var result = await mockSpoolman.Object.ListSpoolsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanSpoolDto> result = await mockSpoolman.Object.ListSpoolsAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(2, result.Count);

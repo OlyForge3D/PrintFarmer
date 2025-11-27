@@ -30,7 +30,7 @@ public class GcodeLibraryController(Farm.Web.Api.Services.Gcode.IGcodeLibrarySer
     {
         try
         {
-            var result = await gcodeService.QueryLibraryAsync(search, material, nozzleDiameter, targetPrinterId, CancellationToken.None);
+            IReadOnlyList<GcodeFileDto> result = await gcodeService.QueryLibraryAsync(search, material, nozzleDiameter, targetPrinterId, CancellationToken.None);
             return Ok(result);
         }
         catch (Exception ex)
@@ -51,7 +51,7 @@ public class GcodeLibraryController(Farm.Web.Api.Services.Gcode.IGcodeLibrarySer
     {
         try
         {
-            var dto = await gcodeService.GetFileAsync(id, CancellationToken.None);
+            GcodeFileDto? dto = await gcodeService.GetFileAsync(id, CancellationToken.None);
             if (dto is null)
             {
                 return NotFound($"G-code file with ID {id} not found");
@@ -91,7 +91,7 @@ public class GcodeLibraryController(Farm.Web.Api.Services.Gcode.IGcodeLibrarySer
                 return BadRequest("File must be a .gcode file");
             }
 
-            var created = await gcodeService.UploadFileAsync(file, metadata, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
+            GcodeFileDto created = await gcodeService.UploadFileAsync(file, metadata, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
             return CreatedAtAction(nameof(GetFileAsync), new { id = created.Id }, created);
         }
         catch (InvalidOperationException inv) when (string.Equals(inv.Message, "duplicate", StringComparison.OrdinalIgnoreCase))
@@ -122,7 +122,7 @@ public class GcodeLibraryController(Farm.Web.Api.Services.Gcode.IGcodeLibrarySer
                 return BadRequest("Request body is required");
             }
             // Delegate update entirely to the service
-            var updated = await gcodeService.UpdateFileAsync(id, request, CancellationToken.None);
+            GcodeFileDto updated = await gcodeService.UpdateFileAsync(id, request, CancellationToken.None);
             if (updated == null)
             {
                 return NotFound($"G-code file with ID {id} not found");
@@ -176,13 +176,13 @@ public class GcodeLibraryController(Farm.Web.Api.Services.Gcode.IGcodeLibrarySer
     {
         try
         {
-            var dto = await gcodeService.GetFileAsync(id, CancellationToken.None);
+            GcodeFileDto? dto = await gcodeService.GetFileAsync(id, CancellationToken.None);
             if (dto == null)
             {
                 return NotFound($"G-code file with ID {id} not found");
             }
 
-            var bytes = await gcodeService.DownloadFileAsync(id, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
+            byte[]? bytes = await gcodeService.DownloadFileAsync(id, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
             if (bytes == null)
             {
                 return NotFound("Physical file not found on disk");

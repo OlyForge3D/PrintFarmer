@@ -215,7 +215,7 @@ namespace Farm.Web.Api
                         token ??= context.SecurityToken?.ToString();
                         if (!string.IsNullOrEmpty(token))
                         {
-                            var tokenRevocationService = context.HttpContext.RequestServices.GetService<ITokenRevocationService>();
+                            ITokenRevocationService? tokenRevocationService = context.HttpContext.RequestServices.GetService<ITokenRevocationService>();
                             if (tokenRevocationService != null)
                             {
                                 bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token);

@@ -50,13 +50,13 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
     public async Task PrusaSlicerWorker_ShouldBuildDockerImage_Successfully()
     {
         _output.WriteLine("Building PrusaSlicer worker Docker image...");
-        var dockerfilePath = Path.Combine(_baseDirectory, "Dockerfile.prusaslicer");
+        string dockerfilePath = Path.Combine(_baseDirectory, "Dockerfile.prusaslicer");
         if (!File.Exists(dockerfilePath))
         {
             _output.WriteLine("Dockerfile.prusaslicer not found, skipping Docker build test on this host.");
             return;
         }
-        var result = await DockerTestHelpers.RunDockerCommandAsync(_output, _baseDirectory, "build", "-f", "Dockerfile.prusaslicer", "-t", "prusaslicer-worker-test", ".");
+        (bool Success, string Output, string ErrorOutput) result = await DockerTestHelpers.RunDockerCommandAsync(_output, _baseDirectory, "build", "-f", "Dockerfile.prusaslicer", "-t", "prusaslicer-worker-test", ".");
         // If Docker build fails due to platform manifest mismatch (common on some CI/host setups), treat as skipped
         if (!result.Success && (result.ErrorOutput?.Contains("no match for platform in manifest", StringComparison.OrdinalIgnoreCase) == true || result.ErrorOutput?.Contains("manifest", StringComparison.OrdinalIgnoreCase) == true))
         {
@@ -72,7 +72,7 @@ public class PrusaSlicerDockerIntegrationTests : IAsyncLifetime
 
     private static ILogger<PrusaSlicerDockerIntegrationTests> CreateLogger()
     {
-        using var loggerFactory = LoggerFactory.Create(builder =>
+        using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
             builder.AddConsole().SetMinimumLevel(LogLevel.Information));
         return loggerFactory.CreateLogger<PrusaSlicerDockerIntegrationTests>();
     }

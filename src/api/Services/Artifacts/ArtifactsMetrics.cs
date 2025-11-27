@@ -78,14 +78,14 @@ public sealed class ArtifactsMetrics : IDisposable
     {
         s_uploadedCount.Add(1);
         s_uploadBytes.Record(sizeBytes);
-        var newTotal = Interlocked.Add(ref s_storageBytes, sizeBytes);
+        long newTotal = Interlocked.Add(ref s_storageBytes, sizeBytes);
         CheckThresholds(newTotal);
     }
 
     private void CheckThresholds(long currentBytes)
     {
-        var warning = Interlocked.Read(ref s_warningThreshold);
-        var critical = Interlocked.Read(ref s_criticalThreshold);
+        long warning = Interlocked.Read(ref s_warningThreshold);
+        long critical = Interlocked.Read(ref s_criticalThreshold);
 
         if (warning <= 0 && critical <= 0)
         {
@@ -106,7 +106,7 @@ public sealed class ArtifactsMetrics : IDisposable
             level = StorageThresholdLevel.Warning;
         }
 
-        var oldState = Interlocked.Exchange(ref s_currentState, newState);
+        int oldState = Interlocked.Exchange(ref s_currentState, newState);
         if (newState > oldState && newState > 0)
         {
             // Threshold crossed upward - raise event

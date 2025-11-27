@@ -37,8 +37,8 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService
         try
         {
             // Create a scope for the scoped service
-            using var scope = _serviceScopeFactory.CreateScope();
-            var discoveryService = scope.ServiceProvider.GetRequiredService<INetworkDiscoveryService>();
+            using IServiceScope scope = _serviceScopeFactory.CreateScope();
+            INetworkDiscoveryService discoveryService = scope.ServiceProvider.GetRequiredService<INetworkDiscoveryService>();
 
             await discoveryService.StartPeriodicDiscoveryAsync(stoppingToken);
         }

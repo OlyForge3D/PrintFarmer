@@ -9,6 +9,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.DTOs.Artifacts;
 using Farm.Web.Api.Services.Artifacts;
+using Farm.Web.Api.Tests.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -31,17 +32,17 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
     public async Task Bulk_Upload_Multiple_Artifacts_Succeeds()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        var settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail,log" });
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail,log" });
         // Provide stub slice job repository + settings to satisfy new controller signature
-        var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
-        var controller = new ArtifactsController(service, jobRepo, settings);
+        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
-        var jobId = Guid.NewGuid();
-        var workerId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        Guid workerId = Guid.NewGuid();
 
-        var files = new FormFileCollection
+        FormFileCollection files = new FormFileCollection
         {
             CreateFormFile(Encoding.UTF8.GetBytes("G1 X10 Y10"), "test.gcode", "application/x-gcode"),
             CreateFormFile(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, "preview.png", "image/png"),
@@ -49,12 +50,12 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
         };
 
         // Act
-        var result = await controller.BulkUploadAsync(jobId, workerId, files, CancellationToken.None);
+        IActionResult result = await controller.BulkUploadAsync(jobId, workerId, files, CancellationToken.None);
 
         // Assert
         result.Should().BeOfType<OkObjectResult>();
-        var okResult = (OkObjectResult)result;
-        var artifacts = okResult.Value as IEnumerable<ArtifactDto>;
+        OkObjectResult okResult = (OkObjectResult)result;
+        IEnumerable<ArtifactDto>? artifacts = okResult.Value as IEnumerable<ArtifactDto>;
         artifacts.Should().NotBeNull();
         artifacts.Should().HaveCount(3);
         artifacts!.Select(a => a.Kind).Should().Contain(new[] { "gcode", "thumbnail", "log" });
@@ -64,16 +65,16 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
     public async Task Bulk_Upload_With_No_Files_Returns_BadRequest()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        var settings = Options.Create(new ArtifactStorageSettings());
-        var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
-        var controller = new ArtifactsController(service, jobRepo, settings);
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings());
+        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
-        var files = new FormFileCollection();
+        FormFileCollection files = new FormFileCollection();
 
         // Act
-        var result = await controller.BulkUploadAsync(Guid.NewGuid(), null, files, CancellationToken.None);
+        IActionResult result = await controller.BulkUploadAsync(Guid.NewGuid(), null, files, CancellationToken.None);
 
         // Assert
         result.Should().BeOfType<BadRequestObjectResult>();
@@ -83,33 +84,33 @@ public class ArtifactsBulkUploadTests : IClassFixture<CustomWebApplicationFactor
     public async Task Bulk_Upload_Infers_Kind_From_Extension()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        var settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
-        var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
-        var controller = new ArtifactsController(service, jobRepo, settings);
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        IOptions<ArtifactStorageSettings> settings = Options.Create(new ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
+        JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+        ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
 
-        var jobId = Guid.NewGuid();
-        var files = new FormFileCollection
+        Guid jobId = Guid.NewGuid();
+        FormFileCollection files = new FormFileCollection
         {
             CreateFormFile(Encoding.UTF8.GetBytes("gcode"), "model.gcode", "application/octet-stream"),
             CreateFormFile(new byte[] { 1, 2, 3 }, "thumb.png", "application/octet-stream")
         };
 
         // Act
-        var result = await controller.BulkUploadAsync(jobId, null, files, CancellationToken.None);
+        IActionResult result = await controller.BulkUploadAsync(jobId, null, files, CancellationToken.None);
 
         // Assert
         result.Should().BeOfType<OkObjectResult>();
-        var okResult = (OkObjectResult)result;
-        var artifacts = okResult.Value as IEnumerable<ArtifactDto>;
+        OkObjectResult okResult = (OkObjectResult)result;
+        IEnumerable<ArtifactDto>? artifacts = okResult.Value as IEnumerable<ArtifactDto>;
         artifacts.Should().HaveCount(2);
         artifacts!.Select(a => a.Kind).Should().Contain(new[] { "gcode", "thumbnail" });
     }
 
     private static IFormFile CreateFormFile(byte[] content, string fileName, string contentType)
     {
-        var stream = new MemoryStream(content);
+        MemoryStream stream = new MemoryStream(content);
         return new FormFile(stream, 0, content.Length, "file", fileName)
         {
             Headers = new HeaderDictionary(),

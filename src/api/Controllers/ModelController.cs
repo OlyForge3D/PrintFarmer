@@ -91,7 +91,7 @@ public class ModelController : ControllerBase
 
         try
         {
-            var result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
+            Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
             return CreatedAtRoute("GetModel", new { id = result.Id }, result);
         }
         catch (Exception ex)
@@ -111,7 +111,7 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var models = await _modelService.ListModelsAsync(CancellationToken.None);
+            IReadOnlyList<Model3DDto> models = await _modelService.ListModelsAsync(CancellationToken.None);
             return Ok(models);
         }
         catch (Exception ex)
@@ -131,7 +131,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelAsync(Guid id)
     {
-        var dto = await _modelService.GetModelAsync(id, CancellationToken.None);
+        Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
         if (dto == null)
         {
             return NotFound();
@@ -152,13 +152,13 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var model = await _modelRepo.GetByIdWithTagsAsync(id, ct);
+            Model3D? model = await _modelRepo.GetByIdWithTagsAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
             }
 
-            var dto = new Model3DDto
+            Model3DDto dto = new Model3DDto
             {
                 Id = model.Id,
                 Name = model.DisplayName,
@@ -196,7 +196,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelFileAsync(Guid id)
     {
-        var path = await _modelService.GetModelFilePathAsync(id, CancellationToken.None);
+        string? path = await _modelService.GetModelFilePathAsync(id, CancellationToken.None);
         if (string.IsNullOrEmpty(path) || !_fileSystem.FileExists(path) || !_fileManagementService.IsSafePath(path, _modelsPath))
         {
             return NotFound();
@@ -214,7 +214,7 @@ public class ModelController : ControllerBase
 
         // Lookup original name to set Content-Disposition filename
         // For performance, fetch model DTO
-        var dto = await _modelService.GetModelAsync(id, CancellationToken.None);
+        Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
         string fileName = dto?.FileName ?? Path.GetFileName(path);
         return PhysicalFile(path, contentType, fileName);
     }
@@ -229,7 +229,7 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
     {
-        var thumbPath = await _modelService.GetModelThumbnailPathAsync(id, CancellationToken.None);
+        string? thumbPath = await _modelService.GetModelThumbnailPathAsync(id, CancellationToken.None);
         if (string.IsNullOrEmpty(thumbPath) || !_fileSystem.FileExists(thumbPath) || !_fileManagementService.IsSafePath(thumbPath, Path.GetDirectoryName(thumbPath) ?? string.Empty))
         {
             return NotFound("Thumbnail not available");
@@ -279,7 +279,7 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var model = await _modelRepo.GetByIdAsync(id, ct);
+            Model3D? model = await _modelRepo.GetByIdAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
@@ -313,7 +313,7 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var result = _modelService.ValidateModel(modelFile);
+            Model3DValidationResultDto result = _modelService.ValidateModel(modelFile);
             return Ok(result);
         }
         catch (ArgumentException ae)
@@ -332,7 +332,7 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var tags = await _tagService.GetAllTagsAsync(ct);
+            IReadOnlyList<Model3DTagDto> tags = await _tagService.GetAllTagsAsync(ct);
             return Ok(tags);
         }
         catch (Exception ex)
@@ -355,7 +355,7 @@ public class ModelController : ControllerBase
     {
         try
         {
-            var result = await _tagService.CreateTagAsync(dto, ct);
+            Model3DTagDto result = await _tagService.CreateTagAsync(dto, ct);
             // Return 201 Created with the location of the created resource
             return Created($"/api/3d-models/tags/{result.Id}", result);
         }
@@ -528,9 +528,9 @@ public class ModelController : ControllerBase
             }
 
             int skip = (request.Page - 1) * request.PageSize;
-            var totalCount = await _modelRepo.CountValidAsync(ct);
+            int totalCount = await _modelRepo.CountValidAsync(ct);
 
-            var models = await _modelRepo.SearchAsync(
+            IReadOnlyList<Model3D> models = await _modelRepo.SearchAsync(
                 request.Query,
                 request.TagIds,
                 request.SortBy ?? "uploadedAt",
@@ -539,7 +539,7 @@ public class ModelController : ControllerBase
                 request.PageSize,
                 ct);
 
-            var modelDtos = models.Select(m => new Model3DDto
+            List<Model3DDto> modelDtos = models.Select(m => new Model3DDto
             {
                 Id = m.Id,
                 Name = m.DisplayName,
@@ -558,7 +558,7 @@ public class ModelController : ControllerBase
                 }).ToArray()
             }).ToList();
 
-            var result = new Model3DSearchResultDto
+            Model3DSearchResultDto result = new Model3DSearchResultDto
             {
                 Models = modelDtos.ToArray(),
                 TotalCount = totalCount,

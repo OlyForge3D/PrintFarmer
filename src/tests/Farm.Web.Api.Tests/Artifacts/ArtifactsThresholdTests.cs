@@ -15,7 +15,7 @@ public class ArtifactsThresholdTests
     public void Warning_Threshold_Event_Fires_When_Exceeded()
     {
         // Arrange
-        using var metrics = new ArtifactsMetrics();
+        using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
         StorageThresholdEventArgs? capturedEvent = null;
@@ -38,10 +38,10 @@ public class ArtifactsThresholdTests
     public void Critical_Threshold_Event_Fires_When_Exceeded()
     {
         // Arrange
-        using var metrics = new ArtifactsMetrics();
+        using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
-        var events = new System.Collections.Generic.List<StorageThresholdEventArgs>();
+        List<StorageThresholdEventArgs> events = new System.Collections.Generic.List<StorageThresholdEventArgs>();
         metrics.ThresholdExceeded += (sender, e) => events.Add(e);
 
         // Act - Upload enough to exceed critical
@@ -52,7 +52,7 @@ public class ArtifactsThresholdTests
 
         // Assert
         events.Should().ContainSingle(e => e.Level == StorageThresholdLevel.Critical);
-        var criticalEvent = events.First(e => e.Level == StorageThresholdLevel.Critical);
+        StorageThresholdEventArgs criticalEvent = events.First(e => e.Level == StorageThresholdLevel.Critical);
         criticalEvent.CurrentBytes.Should().Be(5500);
         criticalEvent.CriticalThreshold.Should().Be(5000);
     }
@@ -61,7 +61,7 @@ public class ArtifactsThresholdTests
     public void Multiple_Uploads_Trigger_Warning_Only_Once()
     {
         // Arrange
-        using var metrics = new ArtifactsMetrics();
+        using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
         int eventCount = 0;
@@ -83,11 +83,11 @@ public class ArtifactsThresholdTests
     public void Threshold_State_Gauge_Reflects_Current_State()
     {
         // Arrange
-        using var metrics = new ArtifactsMetrics();
+        using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
-        var meterListener = new MeterListener();
-        var stateValues = new System.Collections.Generic.List<int>();
+        MeterListener meterListener = new MeterListener();
+        List<int> stateValues = new System.Collections.Generic.List<int>();
 
         meterListener.InstrumentPublished = (instrument, listener) =>
         {
@@ -110,19 +110,19 @@ public class ArtifactsThresholdTests
 
         // Act - Record initial state (normal)
         meterListener.RecordObservableInstruments();
-        var initialState = stateValues.LastOrDefault();
+        int initialState = stateValues.LastOrDefault();
 
         // Upload to warning level
         metrics.RecordUpload(1500);
         Thread.Sleep(50);
         meterListener.RecordObservableInstruments();
-        var warningState = stateValues.LastOrDefault();
+        int warningState = stateValues.LastOrDefault();
 
         // Upload to critical level
         metrics.RecordUpload(4000);
         Thread.Sleep(50);
         meterListener.RecordObservableInstruments();
-        var criticalState = stateValues.LastOrDefault();
+        int criticalState = stateValues.LastOrDefault();
 
         meterListener.Dispose();
 
@@ -136,7 +136,7 @@ public class ArtifactsThresholdTests
     public void No_Events_When_Thresholds_Not_Configured()
     {
         // Arrange
-        using var metrics = new ArtifactsMetrics();
+        using ArtifactsMetrics metrics = new ArtifactsMetrics();
         // Don't call SetThresholds
 
         int eventCount = 0;

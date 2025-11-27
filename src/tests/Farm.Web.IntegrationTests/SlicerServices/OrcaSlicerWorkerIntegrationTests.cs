@@ -29,10 +29,10 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
     public async Task SubmitSlicingJob_ShouldCompleteSuccessfully_WithArtifactUrl()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        ISlicerOrchestrator orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
 
-        var request = new SlicingJobRequest
+        SlicingJobRequest request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
@@ -63,7 +63,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         };
 
         // Act
-        var response = await orchestrator.SubmitJobAsync(request);
+        SlicingJobResponse response = await orchestrator.SubmitJobAsync(request);
 
         // Assert
         Assert.NotEqual(Guid.Empty, response.JobId);
@@ -77,7 +77,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         _output.WriteLine($"Worker URL: {response.SlicerWorkerUrl}");
 
         // Verify job can be retrieved
-        var jobStatus = await orchestrator.GetJobStatusAsync(response.JobId);
+        SlicingJobStatusResponse? jobStatus = await orchestrator.GetJobStatusAsync(response.JobId);
         Assert.NotNull(jobStatus);
         Assert.Equal(response.JobId, jobStatus.JobId);
         Assert.Equal(SlicingJobStatus.Queued, jobStatus.Status);
@@ -87,10 +87,10 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
     public async Task SlicingJobWorkflow_ShouldShowProgressUpdates()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        ISlicerOrchestrator orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
 
-        var request = new SlicingJobRequest
+        SlicingJobRequest request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
@@ -105,7 +105,7 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
         };
 
         // Act
-        var response = await orchestrator.SubmitJobAsync(request);
+        SlicingJobResponse response = await orchestrator.SubmitJobAsync(request);
 
         // Assert initial state
         Assert.Equal(SlicingJobStatus.Queued, response.Status);
@@ -123,12 +123,12 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
     public async Task GetJobStatus_ForNonExistentJob_ShouldReturnNull()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
-        var nonExistentJobId = Guid.NewGuid();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        ISlicerOrchestrator orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
+        Guid nonExistentJobId = Guid.NewGuid();
 
         // Act
-        var jobStatus = await orchestrator.GetJobStatusAsync(nonExistentJobId);
+        SlicingJobStatusResponse? jobStatus = await orchestrator.GetJobStatusAsync(nonExistentJobId);
 
         // Assert
         Assert.Null(jobStatus);
@@ -138,11 +138,11 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
     public async Task OrchestratorHealth_ShouldBeHealthy()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        ISlicerOrchestrator orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
 
         // Act
-        var health = await orchestrator.GetHealthAsync();
+        SlicerOrchestratorHealth health = await orchestrator.GetHealthAsync();
 
         // Assert
         Assert.NotNull(health);
@@ -156,10 +156,10 @@ public class OrcaSlicerWorkerIntegrationTests : IClassFixture<CustomWebApplicati
     public async Task SlicingJobRequest_WithInvalidEngine_ShouldThrowException()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        ISlicerOrchestrator orchestrator = scope.ServiceProvider.GetRequiredService<ISlicerOrchestrator>();
 
-        var request = new SlicingJobRequest
+        SlicingJobRequest request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),

@@ -28,7 +28,7 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
 
     private static IFormFile CreateFormFile(byte[] content, string fileName, string contentType)
     {
-        var stream = new MemoryStream(content);
+        MemoryStream stream = new MemoryStream(content);
         return new FormFile(stream, 0, content.Length, "file", fileName)
         {
             Headers = new HeaderDictionary(),
@@ -40,13 +40,13 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Upload_Increments_Counter_And_Records_Histogram()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        var metrics = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        ArtifactsMetrics metrics = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
 
-        var meterListener = new MeterListener();
-        var counterValues = new List<long>();
-        var histogramValues = new List<long>();
+        MeterListener meterListener = new MeterListener();
+        List<long> counterValues = new List<long>();
+        List<long> histogramValues = new List<long>();
 
         meterListener.InstrumentPublished = (instrument, listener) =>
         {
@@ -77,10 +77,10 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
 
         meterListener.Start();
 
-        var jobId = Guid.NewGuid();
-        var workerId = Guid.NewGuid();
-        var content = Encoding.UTF8.GetBytes("test artifact content");
-        var file = CreateFormFile(content, "test.gcode", "application/x-gcode");
+        Guid jobId = Guid.NewGuid();
+        Guid workerId = Guid.NewGuid();
+        byte[] content = Encoding.UTF8.GetBytes("test artifact content");
+        IFormFile file = CreateFormFile(content, "test.gcode", "application/x-gcode");
 
         // Act
         await service.UploadAsync(file, jobId, workerId, "gcode", CancellationToken.None);
@@ -98,12 +98,12 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Storage_Gauge_Reflects_Cumulative_Size()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        var metrics = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        ArtifactsMetrics metrics = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
 
-        var meterListener = new MeterListener();
-        var gaugeValues = new List<long>();
+        MeterListener meterListener = new MeterListener();
+        List<long> gaugeValues = new List<long>();
 
         meterListener.InstrumentPublished = (instrument, listener) =>
         {
@@ -125,18 +125,18 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
         meterListener.Start();
         meterListener.RecordObservableInstruments();
 
-        var initialGaugeValue = gaugeValues.LastOrDefault();
+        long initialGaugeValue = gaugeValues.LastOrDefault();
 
-        var jobId = Guid.NewGuid();
-        var workerId = Guid.NewGuid();
-        var content1 = Encoding.UTF8.GetBytes("first artifact");
-        var content2 = Encoding.UTF8.GetBytes("second artifact with more content");
+        Guid jobId = Guid.NewGuid();
+        Guid workerId = Guid.NewGuid();
+        byte[] content1 = Encoding.UTF8.GetBytes("first artifact");
+        byte[] content2 = Encoding.UTF8.GetBytes("second artifact with more content");
 
         // Act - Upload two artifacts
-        var file1 = CreateFormFile(content1, "first.gcode", "application/x-gcode");
+        IFormFile file1 = CreateFormFile(content1, "first.gcode", "application/x-gcode");
         await service.UploadAsync(file1, jobId, workerId, "gcode", CancellationToken.None);
 
-        var file2 = CreateFormFile(content2, "second.png", "image/png");
+        IFormFile file2 = CreateFormFile(content2, "second.png", "image/png");
         await service.UploadAsync(file2, jobId, workerId, "thumbnail", CancellationToken.None);
 
         // Observe gauge after uploads
@@ -144,8 +144,8 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
         await Task.Delay(100);
 
         // Assert
-        var finalGaugeValue = gaugeValues.Last();
-        var expectedIncrease = content1.Length + content2.Length;
+        long finalGaugeValue = gaugeValues.Last();
+        int expectedIncrease = content1.Length + content2.Length;
 
         (finalGaugeValue - initialGaugeValue).Should().Be(expectedIncrease,
             "gauge should reflect cumulative size of both uploads");
@@ -157,10 +157,10 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Multiple_Uploads_Increment_Counter_Correctly()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
-        var meterListener = new MeterListener();
+        MeterListener meterListener = new MeterListener();
         long counterTotal = 0;
 
         meterListener.InstrumentPublished = (instrument, listener) =>
@@ -182,14 +182,14 @@ public class ArtifactsMetricsTests : IClassFixture<CustomWebApplicationFactory>
 
         meterListener.Start();
 
-        var jobId = Guid.NewGuid();
-        var workerId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        Guid workerId = Guid.NewGuid();
 
         // Act - Upload 5 artifacts
         for (int i = 0; i < 5; i++)
         {
-            var content = Encoding.UTF8.GetBytes($"artifact {i}");
-            var file = CreateFormFile(content, $"test{i}.gcode", "application/x-gcode");
+            byte[] content = Encoding.UTF8.GetBytes($"artifact {i}");
+            IFormFile file = CreateFormFile(content, $"test{i}.gcode", "application/x-gcode");
             await service.UploadAsync(file, jobId, workerId, "gcode", CancellationToken.None);
         }
 

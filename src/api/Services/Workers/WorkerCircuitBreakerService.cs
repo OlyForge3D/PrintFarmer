@@ -37,7 +37,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
             return;
         }
 
-        var state = _circuitStates.GetOrAdd(workerId, _ => new WorkerCircuitState());
+        WorkerCircuitState state = _circuitStates.GetOrAdd(workerId, _ => new WorkerCircuitState());
 
         bool shouldDisableWorker;
         int failureCount;
@@ -47,7 +47,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
             state.RecentFailures.Add(DateTime.UtcNow);
 
             // Remove failures outside the window
-            var cutoff = DateTime.UtcNow.AddSeconds(-_settings.WindowSeconds);
+            DateTime cutoff = DateTime.UtcNow.AddSeconds(-_settings.WindowSeconds);
             state.RecentFailures.RemoveAll(t => t < cutoff);
 
             failureCount = state.RecentFailures.Count;
@@ -94,7 +94,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
             return;
         }
 
-        if (!_circuitStates.TryGetValue(workerId, out var state))
+        if (!_circuitStates.TryGetValue(workerId, out WorkerCircuitState? state))
         {
             return; // No circuit state = never failed
         }
@@ -142,18 +142,18 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
     /// </summary>
     public void CheckCircuits()
     {
-        var now = DateTime.UtcNow;
+        DateTime now = DateTime.UtcNow;
 
-        foreach (var kvp in _circuitStates)
+        foreach (KeyValuePair<Guid, WorkerCircuitState> kvp in _circuitStates)
         {
-            var workerId = kvp.Key;
-            var state = kvp.Value;
+            Guid workerId = kvp.Key;
+            WorkerCircuitState state = kvp.Value;
 
             lock (state.Lock)
             {
                 if (state.State == CircuitState.Open)
                 {
-                    var elapsed = (now - state.OpenedAt).TotalSeconds;
+                    double elapsed = (now - state.OpenedAt).TotalSeconds;
                     if (elapsed >= _settings.CooldownSeconds)
                     {
                         state.State = CircuitState.HalfOpen;
@@ -172,7 +172,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
     /// </summary>
     public CircuitState GetCircuitState(Guid workerId)
     {
-        if (!_circuitStates.TryGetValue(workerId, out var state))
+        if (!_circuitStates.TryGetValue(workerId, out WorkerCircuitState? state))
         {
             return CircuitState.Closed;
         }
@@ -188,7 +188,7 @@ public class WorkerCircuitBreakerService : IWorkerCircuitBreakerService
     /// </summary>
     public void ResetCircuit(Guid workerId)
     {
-        if (_circuitStates.TryRemove(workerId, out var state))
+        if (_circuitStates.TryRemove(workerId, out WorkerCircuitState? state))
         {
             _logger.LogInformation("Circuit manually RESET for worker {WorkerId}", workerId);
         }

@@ -258,7 +258,7 @@ public class UnifiedSettingsController : ControllerBase
             }
 
             // Get current discovery settings
-            var currentSettings = _modularSettingsService.GetByKey(keyName) as Farm.Infrastructure.Settings.NetworkDiscoverySettings;
+            NetworkDiscoverySettings? currentSettings = _modularSettingsService.GetByKey(keyName) as Farm.Infrastructure.Settings.NetworkDiscoverySettings;
             if (currentSettings == null)
             {
                 _logger.LogWarning("Failed to get NetworkDiscoverySettings for heartbeat");

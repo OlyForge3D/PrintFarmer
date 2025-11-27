@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -54,7 +55,7 @@ namespace Farm.Web.Api.Services.Slicing
             try
             {
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-                var services = _repo.ListAsync(CancellationToken.None).GetAwaiter().GetResult();
+                IReadOnlyList<SlicerService> services = _repo.ListAsync(CancellationToken.None).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
                 return services.Sum(s => s.MaxConcurrentJobs);
             }
@@ -69,7 +70,7 @@ namespace Farm.Web.Api.Services.Slicing
             try
             {
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-                var workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
+                IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
                 return workers.Sum(w => w.FreeSlots);
             }
@@ -84,7 +85,7 @@ namespace Farm.Web.Api.Services.Slicing
             try
             {
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-                var workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
+                IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
                 return workers.Sum(w => w.ActiveJobs);
             }
@@ -101,7 +102,7 @@ namespace Farm.Web.Api.Services.Slicing
 
         public async Task<(Guid id, string apiKey)> RegisterAsync(RegisterSlicerDto dto, CancellationToken ct)
         {
-            var svc = new SlicerService
+            SlicerService svc = new SlicerService
             {
                 Id = Guid.NewGuid(),
                 Name = dto.Name ?? "orca-service",
@@ -126,7 +127,7 @@ namespace Farm.Web.Api.Services.Slicing
             // Synchronize to Worker table for dispatcher
             try
             {
-                var worker = new Worker
+                Worker worker = new Worker
                 {
                     Id = Guid.NewGuid(),
                     ServiceId = svc.Id.ToString(),
@@ -219,8 +220,8 @@ namespace Farm.Web.Api.Services.Slicing
 
         public async Task<bool> HeartbeatAsync(Guid id, HeartbeatDto dto, CancellationToken ct)
         {
-            var startTime = DateTime.UtcNow;
-            var svc = await _repo.GetByIdAsync(id, ct);
+            DateTime startTime = DateTime.UtcNow;
+            SlicerService? svc = await _repo.GetByIdAsync(id, ct);
             if (svc == null)
             {
                 return false;
@@ -240,7 +241,7 @@ namespace Farm.Web.Api.Services.Slicing
             // Synchronize to Worker table for dispatcher
             try
             {
-                var worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+                Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
                 if (worker != null)
                 {
                     // Update existing worker
@@ -266,7 +267,7 @@ namespace Farm.Web.Api.Services.Slicing
             }
 
             // Record heartbeat metrics
-            var latencyMs = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            double latencyMs = (DateTime.UtcNow - startTime).TotalMilliseconds;
             _metrics.RecordServiceHeartbeat(
                 GetSlicerTypeName(svc.SlicerType),
                 id.ToString(),
@@ -312,13 +313,13 @@ namespace Farm.Web.Api.Services.Slicing
 
         public async Task<bool> DeregisterAsync(Guid id, CancellationToken ct)
         {
-            var svc = await _repo.GetByIdAsync(id, ct);
+            SlicerService? svc = await _repo.GetByIdAsync(id, ct);
             if (svc == null)
             {
                 return false;
             }
 
-            var slicerTypeName = GetSlicerTypeName(svc.SlicerType);
+            string slicerTypeName = GetSlicerTypeName(svc.SlicerType);
 
             await _repo.RemoveAsync(svc, ct);
             await _repo.SaveChangesAsync(ct);
@@ -326,7 +327,7 @@ namespace Farm.Web.Api.Services.Slicing
             // Synchronize to Worker table - mark as offline or remove
             try
             {
-                var worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+                Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
                 if (worker != null)
                 {
                     worker.Status = WorkerStatus.Offline;
@@ -358,16 +359,16 @@ namespace Farm.Web.Api.Services.Slicing
 
         public async Task<string?> RotateApiKeyAsync(Guid id, CancellationToken ct, bool isAdminForced = false)
         {
-            var svc = await _repo.GetByIdAsync(id, ct);
+            SlicerService? svc = await _repo.GetByIdAsync(id, ct);
             if (svc == null)
             {
                 return null;
             }
 
-            var slicerTypeName = GetSlicerTypeName(svc.SlicerType);
+            string slicerTypeName = GetSlicerTypeName(svc.SlicerType);
 
             // Generate new API key
-            var newApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
+            string newApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
             svc.ApiKey = newApiKey;
             svc.ApiKeyRotatedAt = DateTime.UtcNow;
             svc.UpdatedAt = DateTime.UtcNow;
@@ -377,7 +378,7 @@ namespace Farm.Web.Api.Services.Slicing
             // Synchronize to Worker table
             try
             {
-                var worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+                Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
                 if (worker != null)
                 {
                     worker.ApiKey = newApiKey;
@@ -423,7 +424,7 @@ namespace Farm.Web.Api.Services.Slicing
             {
                 // Early exit: Only seed if no system profiles exist for OrcaSlicer
                 // This prevents re-seeding on every worker registration
-                var existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                IReadOnlyList<ProcessProfile> existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
                 if (existingSystemProfiles.Any(p => p.IsSystem))
                 {
                     System.Diagnostics.Debug.WriteLine("System OrcaSlicer profiles already exist, skipping seed");
@@ -431,8 +432,8 @@ namespace Farm.Web.Api.Services.Slicing
                 }
 
                 // Call the worker's /profiles endpoint which now returns AllProfilesResponseDto with all three profile types
-                var workerUrl = workerHost.TrimEnd('/');
-                var response = await _httpClient.GetAsync($"{workerUrl}/profiles", ct);
+                string workerUrl = workerHost.TrimEnd('/');
+                HttpResponseMessage response = await _httpClient.GetAsync($"{workerUrl}/profiles", ct);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -440,8 +441,8 @@ namespace Farm.Web.Api.Services.Slicing
                     return;
                 }
 
-                var json = await response.Content.ReadAsStringAsync(ct);
-                var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                string json = await response.Content.ReadAsStringAsync(ct);
+                AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
                 {
@@ -452,32 +453,32 @@ namespace Farm.Web.Api.Services.Slicing
                 int imported = 0;
 
                 // Flatten profiles from the grouped dictionaries
-                var flattenedProcessProfiles = allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
-                var flattenedFilamentProfiles = allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
+                List<ProcessProfileDto> flattenedProcessProfiles = allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
+                List<FilamentProfileDto> flattenedFilamentProfiles = allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
 
                 // Import process profiles from worker
                 if (flattenedProcessProfiles.Count > 0)
                 {
-                    foreach (var profile in flattenedProcessProfiles)
+                    foreach (ProcessProfileDto? profile in flattenedProcessProfiles)
                     {
                         try
                         {
-                            var profileJson = JsonSerializer.Serialize(profile);
-                            var profileHash = ComputeProfileHash(profileJson);
+                            string profileJson = JsonSerializer.Serialize(profile);
+                            string profileHash = ComputeProfileHash(profileJson);
 
-                            var existing = await _profileRepo.GetByHashAsync(profileHash, ct);
+                            ProcessProfile? existing = await _profileRepo.GetByHashAsync(profileHash, ct);
                             if (existing != null && existing.IsSystem)
                             {
                                 continue;
                             }
 
-                            var systemProfile = new ProcessProfile
+                            ProcessProfile systemProfile = new ProcessProfile
                             {
                                 Id = Guid.NewGuid(),
                                 Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
                                 Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
-                                Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out var q) ? q : ProfileQuality.Standard,
+                                Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                 LayerHeight = profile.LayerHeight,
                                 InfillPercentage = profile.InfillPercentage,
                                 PrintSpeed = profile.PrintSpeed,
@@ -515,8 +516,8 @@ namespace Farm.Web.Api.Services.Slicing
 
         private static string ComputeProfileHash(string profileJson)
         {
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var hashedBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(profileJson));
+            using SHA256 sha256 = System.Security.Cryptography.SHA256.Create();
+            byte[] hashedBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(profileJson));
             return Convert.ToHexString(hashedBytes);
         }
     }

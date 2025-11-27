@@ -2,11 +2,11 @@
 using PrinterDiscovery.BackgroundServices;
 using PrinterDiscovery.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Configuration
-var apiBaseUrl = builder.Configuration["Discovery:ApiBaseUrl"] ?? "http://api:5245";
-var enablePeriodicDiscovery = builder.Configuration.GetValue<bool>("Discovery:EnablePeriodicDiscovery", true);
+string apiBaseUrl = builder.Configuration["Discovery:ApiBaseUrl"] ?? "http://api:5245";
+bool enablePeriodicDiscovery = builder.Configuration.GetValue<bool>("Discovery:EnablePeriodicDiscovery", true);
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -41,7 +41,7 @@ if (enablePeriodicDiscovery)
 // Add heartbeat background service to notify API of service availability
 builder.Services.AddHostedService<HeartbeatBackgroundService>();
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
@@ -53,7 +53,7 @@ app.UseRouting();
 app.MapControllers();
 
 // Log startup configuration
-var logger = app.Services.GetRequiredService<ILogger<Program>>();
+ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
 logger.LogInformation("=== Printer Discovery Service Starting ===");
 logger.LogInformation("API Base URL: {ApiBaseUrl}", apiBaseUrl);
 logger.LogInformation("Periodic Discovery: {Enabled}", enablePeriodicDiscovery ? "Enabled" : "Disabled");

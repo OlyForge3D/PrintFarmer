@@ -1,6 +1,9 @@
 ﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Repositories.Catalog;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Shared;
@@ -15,17 +18,17 @@ namespace Farm.Web.Api.Tests.Services
         [Fact]
         public async Task GetManufacturersAsync_DelegatesToCache()
         {
-            var mockCache = new Mock<ICatalogCache>();
-            var expected = (new List<ManufacturerDto> { new ManufacturerDto(Guid.NewGuid(), "Test") } as IReadOnlyList<ManufacturerDto>, "etag1");
+            Mock<ICatalogCache> mockCache = new Mock<ICatalogCache>();
+            (IReadOnlyList<ManufacturerDto>, string) expected = (new List<ManufacturerDto> { new ManufacturerDto(Guid.NewGuid(), "Test") } as IReadOnlyList<ManufacturerDto>, "etag1");
             mockCache.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             // Minimal dependencies: use NullLogger implementations and an in-memory AppDbContext is not required for this test
-            var normLogger = new Moq.Mock<Farm.Infrastructure.Normalization.INormalizationEventLogger>();
-            var unifiedLogging = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            var mockRepo = new Moq.Mock<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository>();
+            Mock<INormalizationEventLogger> normLogger = new Moq.Mock<Farm.Infrastructure.Normalization.INormalizationEventLogger>();
+            Mock<IUnifiedLoggingService> unifiedLogging = new Moq.Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<ICatalogRepository> mockRepo = new Moq.Mock<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository>();
 
-            var svc = new CatalogService(mockRepo.Object, normLogger.Object, mockCache.Object, unifiedLogging.Object);
-            var (list, etag) = await svc.GetManufacturersAsync(CancellationToken.None);
+            CatalogService svc = new CatalogService(mockRepo.Object, normLogger.Object, mockCache.Object, unifiedLogging.Object);
+            (IReadOnlyList<ManufacturerDto>? list, string? etag) = await svc.GetManufacturersAsync(CancellationToken.None);
 
             Assert.Equal(expected.Item2, etag);
             Assert.Equal(expected.Item1, list);

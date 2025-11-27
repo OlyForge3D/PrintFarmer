@@ -2,8 +2,11 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Services.Slicing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -85,7 +88,7 @@ namespace Farm.Web.Api.Services.Workers
                 }
 
                 // Npgsql exceptions often indicate transient DB connectivity issues during startup
-                var typeName = ex.GetType().Name;
+                string typeName = ex.GetType().Name;
                 if (typeName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) ||
                     (ex.Message != null && ex.Message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)))
                 {
@@ -103,9 +106,9 @@ namespace Farm.Web.Api.Services.Workers
             // Check circuit breaker states and transition to half-open if cooldown elapsed
             _circuitBreaker?.CheckCircuits();
 
-            using var scope = _sp.CreateScope();
-            var repo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
-            var workerRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
+            using IServiceScope scope = _sp.CreateScope();
+            ISliceJobRepository repo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+            IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Workers.IWorkerRepository>();
 
             // Determine stuck jobs: jobs with expired leases OR processing longer than 15 minutes
             int longRunningSeconds = 60 * 15; // 15 minutes
@@ -148,7 +151,7 @@ namespace Farm.Web.Api.Services.Workers
 
             _logger.LogInformation("Found {Count} stuck slice jobs to evaluate", stuck.Count);
 
-            foreach (var job in stuck.ToList())
+            foreach (SliceJob? job in stuck.ToList())
             {
                 try
                 {
@@ -160,7 +163,7 @@ namespace Farm.Web.Api.Services.Workers
 
                     // If lease expired, increment retry and requeue or fail depending on retry count
                     await repo.IncrementRetryAndRequeueAsync(job.Id, _retrySettings.MaxAttempts, ct);
-                    var metrics = scope.ServiceProvider.GetService<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
+                    SliceJobMetrics? metrics = scope.ServiceProvider.GetService<Farm.Web.Api.Services.Slicing.SliceJobMetrics>();
                     metrics?.RecordJobRetry();
                     metrics?.RecordJobTimedOut();
                     if (job.RetryCount + 1 > _retrySettings.MaxAttempts)

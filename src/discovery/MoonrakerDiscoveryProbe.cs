@@ -100,7 +100,7 @@ public class MoonrakerDiscoveryProbe : BaseDiscoveryProbe
             HttpResponseMessage response = await client.GetAsync(backendUrl, cancellationToken);
             string content = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            var (isValid, confidence, reason) = await ValidateResponseAsync(response, content);
+            (bool isValid, int confidence, string? reason) = await ValidateResponseAsync(response, content);
             if (!isValid)
             {
                 return null;
@@ -130,7 +130,7 @@ public class MoonrakerDiscoveryProbe : BaseDiscoveryProbe
                 (cameraStreamUrl, cameraSnapshotUrl) = await DiscoverCameraUrlsAsync(ipAddress, frontendPort.Value, client, timeoutMs, cancellationToken);
             }
 
-            var dto = new DiscoveredPrinterDto
+            DiscoveredPrinterDto dto = new DiscoveredPrinterDto
             {
                 IpAddress = ipAddress,
                 BackendPort = 7125,

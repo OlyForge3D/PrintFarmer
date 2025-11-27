@@ -94,10 +94,10 @@ public sealed class FileManagementService : IFileManagementService
             throw new ArgumentException($"Unsupported hash algorithm: {algorithm}. Allowed: sha256, sha1");
         }
 
-        var hashAlgorithm = algorithm == "sha1" ? HashAlgorithmName.SHA1 : HashAlgorithmName.SHA256;
+        HashAlgorithmName hashAlgorithm = algorithm == "sha1" ? HashAlgorithmName.SHA1 : HashAlgorithmName.SHA256;
 
-        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(hashAlgorithm);
-        using var fs = new System.IO.FileStream(filePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read, bufferSize: 81920, useAsync: true);
+        using IncrementalHash hash = System.Security.Cryptography.IncrementalHash.CreateHash(hashAlgorithm);
+        using FileStream fs = new System.IO.FileStream(filePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read, bufferSize: 81920, useAsync: true);
 
         byte[] buffer = new byte[81920];
         int read;

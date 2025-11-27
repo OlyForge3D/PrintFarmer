@@ -33,7 +33,7 @@ public class EfPrintersRepository : IPrintersRepository
         // Clean up dependent records that have NoAction delete behavior to prevent FK constraint violations
 
         // Remove GcodeFile records that reference this printer as source or target
-        var gcodeFilesReferencing = await _db.GcodeFiles
+        List<GcodeFile> gcodeFilesReferencing = await _db.GcodeFiles
             .Where(gf => gf.SourcePrinterId == p.Id || gf.TargetPrinterId == p.Id)
             .ToListAsync(ct);
         if (gcodeFilesReferencing.Any())
@@ -42,7 +42,7 @@ public class EfPrintersRepository : IPrintersRepository
         }
 
         // Remove PrintJob records assigned to this printer
-        var jobsForPrinter = await _db.PrintJobs
+        List<PrintJob> jobsForPrinter = await _db.PrintJobs
             .Where(j => j.AssignedPrinterId == p.Id)
             .ToListAsync(ct);
         if (jobsForPrinter.Any())
@@ -51,7 +51,7 @@ public class EfPrintersRepository : IPrintersRepository
         }
 
         // Remove GcodeHarvestOperation records for this printer
-        var harvestOpsForPrinter = await _db.GcodeHarvestOperations
+        List<GcodeHarvestOperation> harvestOpsForPrinter = await _db.GcodeHarvestOperations
             .Where(h => h.PrinterId == p.Id)
             .ToListAsync(ct);
         if (harvestOpsForPrinter.Any())
@@ -94,7 +94,7 @@ public class EfPrintersRepository : IPrintersRepository
 
     public async Task SaveCapabilitiesAsync(Domain.PrinterCapabilities capabilities, CancellationToken ct)
     {
-        var existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == capabilities.PrinterId, ct);
+        Domain.PrinterCapabilities? existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == capabilities.PrinterId, ct);
         if (existing == null)
         {
             _ = _db.PrinterCapabilities.Add(capabilities);

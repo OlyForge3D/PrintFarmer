@@ -24,12 +24,12 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
     public async Task Login_LocksAccount_AfterMaxFailedAttempts()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
         // Create test user
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "lockouttest",
@@ -42,22 +42,22 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         context.Users.Add(user);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Make 5 failed login attempts (default threshold)
         for (int i = 0; i < 5; i++)
         {
-            var loginRequest = new LoginRequest { UsernameOrEmail = "lockouttest", Password = "WrongPassword" };
-            var response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+            LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "lockouttest", Password = "WrongPassword" };
+            HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
             response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
 
         // Assert - Next login should be blocked due to lockout
-        var finalRequest = new LoginRequest { UsernameOrEmail = "lockouttest", Password = "ValidPassword123!" };
-        var finalResponse = await client.PostAsJsonAsync("/api/auth/login", finalRequest);
+        LoginRequest finalRequest = new LoginRequest { UsernameOrEmail = "lockouttest", Password = "ValidPassword123!" };
+        HttpResponseMessage finalResponse = await client.PostAsJsonAsync("/api/auth/login", finalRequest);
 
         finalResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        var errorContent = await finalResponse.Content.ReadAsStringAsync();
+        string errorContent = await finalResponse.Content.ReadAsStringAsync();
         errorContent.Should().Contain("locked");
     }
 
@@ -65,11 +65,11 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
     public async Task Login_ResetsCounter_OnSuccessfulLogin()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "resettest",
@@ -82,19 +82,19 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         context.Users.Add(user);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Successful login
-        var loginRequest = new LoginRequest { UsernameOrEmail = "resettest", Password = "ValidPassword123!" };
-        var response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+        LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "resettest", Password = "ValidPassword123!" };
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Verify counter was reset (reload from a fresh scope to avoid caching)
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var updatedUser = await verifyContext.Users.FindAsync(user.Id);
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        User? updatedUser = await verifyContext.Users.FindAsync(user.Id);
         updatedUser.Should().NotBeNull();
         updatedUser!.FailedLoginAttempts.Should().Be(0);
         updatedUser.LockoutEnd.Should().BeNull();
@@ -104,11 +104,11 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
     public async Task Login_AllowsLogin_AfterLockoutExpires()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "expiredtest",
@@ -122,15 +122,15 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
         context.Users.Add(user);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Login with valid credentials after lockout expired
-        var loginRequest = new LoginRequest { UsernameOrEmail = "expiredtest", Password = "ValidPassword123!" };
-        var response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+        LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "expiredtest", Password = "ValidPassword123!" };
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert - Should succeed
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var authResult = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
+        AuthenticationResult? authResult = await response.Content.ReadFromJsonAsync<AuthenticationResult>();
         authResult.Should().NotBeNull();
         authResult!.Success.Should().BeTrue();
     }
@@ -139,19 +139,19 @@ public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebAppl
     public async Task Login_TracksFailedAttempts_ForNonExistentUsers()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var client = _factory.CreateClient();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Try to login with non-existent user
-        var loginRequest = new LoginRequest { UsernameOrEmail = "doesnotexist", Password = "SomePassword123!" };
-        var response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+        LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "doesnotexist", Password = "SomePassword123!" };
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         // Verify audit entry was created
-        var auditEntries = context.FailedLoginAttempts
+        List<FailedLoginAttempt> auditEntries = context.FailedLoginAttempts
             .Where(f => f.Identifier == "doesnotexist")
             .ToList();
         auditEntries.Should().HaveCountGreaterThan(0);

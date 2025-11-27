@@ -30,7 +30,7 @@ namespace Farm.Infrastructure.Repositories.Catalog
 
         public async Task<(Guid Id, string Name)?> GetManufacturerByIdAsync(Guid id, CancellationToken ct = default)
         {
-            var m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+            Manufacturer? m = await _db.Manufacturers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
             return m is null ? null : (m.Id, m.Name);
         }
 
@@ -57,7 +57,7 @@ namespace Farm.Infrastructure.Repositories.Catalog
 
         public async Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default)
         {
-            var model = await _db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == modelId, ct);
+            PrinterModel? model = await _db.Models.Include(m => m.SupportedFilamentTypes).FirstOrDefaultAsync(m => m.Id == modelId, ct);
             if (model is null)
             {
                 return;
@@ -73,13 +73,13 @@ namespace Farm.Infrastructure.Repositories.Catalog
 
         public async Task<IReadOnlyList<PrinterModelDto>> GetModelsCachedAsync(Guid? manufacturerId, CancellationToken ct = default)
         {
-            var q = _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
+            IQueryable<PrinterModel> q = _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
             if (manufacturerId.HasValue)
             {
                 q = q.Where(m => m.ManufacturerId == manufacturerId.Value);
             }
-            var models = await q.ToListAsync(ct);
-            var list = models.Select(m => new PrinterModelDto(
+            List<PrinterModel> models = await q.ToListAsync(ct);
+            List<PrinterModelDto> list = models.Select(m => new PrinterModelDto(
                 m.Id,
                 m.Name,
                 m.ManufacturerId,
@@ -95,7 +95,7 @@ namespace Farm.Infrastructure.Repositories.Catalog
 
         public async Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct = default)
         {
-            var model = await _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
+            PrinterModel? model = await _db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType)
                 .FirstOrDefaultAsync(m => m.Id == id, ct);
             if (model is null)
             {

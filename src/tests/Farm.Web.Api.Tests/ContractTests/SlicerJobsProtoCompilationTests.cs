@@ -14,7 +14,7 @@ public class SlicerJobsProtoCompilationTests
     public void SubmitJobRequest_CanBeCreatedAndSerialized()
     {
         // Arrange & Act - Create a gRPC request object
-        var request = new SubmitJobRequest
+        SubmitJobRequest request = new SubmitJobRequest
         {
             JobId = Guid.NewGuid().ToString(),
             UserId = Guid.NewGuid().ToString(),
@@ -53,10 +53,10 @@ public class SlicerJobsProtoCompilationTests
         Assert.Equal(2, request.Metadata.Count);
 
         // Test serialization roundtrip
-        var bytes = request.ToByteArray();
+        byte[] bytes = request.ToByteArray();
         Assert.NotEmpty(bytes);
 
-        var deserialized = SubmitJobRequest.Parser.ParseFrom(bytes);
+        SubmitJobRequest deserialized = SubmitJobRequest.Parser.ParseFrom(bytes);
         Assert.Equal(request.JobId, deserialized.JobId);
         Assert.Equal(request.ModelFileUrl, deserialized.ModelFileUrl);
         Assert.Equal(request.SlicerEngine, deserialized.SlicerEngine);
@@ -66,7 +66,7 @@ public class SlicerJobsProtoCompilationTests
     public void GetJobStatusResponse_CanBeCreatedAndSerialized()
     {
         // Arrange & Act
-        var response = new GetJobStatusResponse
+        GetJobStatusResponse response = new GetJobStatusResponse
         {
             JobId = Guid.NewGuid().ToString(),
             Status = JobStatus.Slicing,
@@ -91,10 +91,10 @@ public class SlicerJobsProtoCompilationTests
         Assert.Single(response.Metadata);
 
         // Test serialization
-        var bytes = response.ToByteArray();
+        byte[] bytes = response.ToByteArray();
         Assert.NotEmpty(bytes);
 
-        var deserialized = GetJobStatusResponse.Parser.ParseFrom(bytes);
+        GetJobStatusResponse deserialized = GetJobStatusResponse.Parser.ParseFrom(bytes);
         Assert.Equal(response.JobId, deserialized.JobId);
         Assert.Equal(response.Status, deserialized.Status);
         Assert.Equal(response.ProgressPercentage, deserialized.ProgressPercentage);
@@ -104,7 +104,7 @@ public class SlicerJobsProtoCompilationTests
     public void ProgressUpdate_CanBeCreatedAndSerialized()
     {
         // Arrange & Act
-        var update = new ProgressUpdate
+        ProgressUpdate update = new ProgressUpdate
         {
             JobId = Guid.NewGuid().ToString(),
             Status = JobStatus.Slicing,
@@ -126,10 +126,10 @@ public class SlicerJobsProtoCompilationTests
         Assert.Equal(2, update.AdditionalData.Count);
 
         // Test serialization
-        var bytes = update.ToByteArray();
+        byte[] bytes = update.ToByteArray();
         Assert.NotEmpty(bytes);
 
-        var deserialized = ProgressUpdate.Parser.ParseFrom(bytes);
+        ProgressUpdate deserialized = ProgressUpdate.Parser.ParseFrom(bytes);
         Assert.Equal(update.JobId, deserialized.JobId);
         Assert.Equal(update.CurrentStep, deserialized.CurrentStep);
         Assert.Equal(update.EstimatedRemainingSeconds, deserialized.EstimatedRemainingSeconds);
@@ -139,7 +139,7 @@ public class SlicerJobsProtoCompilationTests
     public void WorkerInfo_CanBeCreatedAndSerialized()
     {
         // Arrange & Act
-        var workerInfo = new WorkerInfo
+        WorkerInfo workerInfo = new WorkerInfo
         {
             WorkerId = "worker-01",
             WorkerName = "Primary Slicer Worker",
@@ -184,10 +184,10 @@ public class SlicerJobsProtoCompilationTests
         Assert.NotNull(workerInfo.Metrics);
 
         // Test serialization
-        var bytes = workerInfo.ToByteArray();
+        byte[] bytes = workerInfo.ToByteArray();
         Assert.NotEmpty(bytes);
 
-        var deserialized = WorkerInfo.Parser.ParseFrom(bytes);
+        WorkerInfo deserialized = WorkerInfo.Parser.ParseFrom(bytes);
         Assert.Equal(workerInfo.WorkerId, deserialized.WorkerId);
         Assert.Equal(workerInfo.Status, deserialized.Status);
         Assert.Equal(workerInfo.SupportedEngines.Count, deserialized.SupportedEngines.Count);

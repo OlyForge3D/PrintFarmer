@@ -55,8 +55,8 @@ public class TokenRevocationCleanupService : BackgroundService
 
     private async Task CleanupExpiredRevocationsAsync()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var tokenRevocationService = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        ITokenRevocationService tokenRevocationService = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
 
         _logger.LogInformation("Starting token revocation cleanup");
 

@@ -29,7 +29,7 @@ public class FilamentTypeRepository : IFilamentTypeRepository
     public async Task<FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct = default)
     {
         var items = await _db.FilamentTypes.AsNoTracking().Select(f => new { f.Name, f.DefaultHotendTemp, f.DefaultBedTemp }).ToListAsync(ct);
-        var dict = items.ToDictionary(i => i.Name, i => new TempTargets(i.DefaultHotendTemp, i.DefaultBedTemp));
+        Dictionary<string, TempTargets> dict = items.ToDictionary(i => i.Name, i => new TempTargets(i.DefaultHotendTemp, i.DefaultBedTemp));
         return new FilamentPresetsDto(dict);
     }
 
@@ -41,7 +41,7 @@ public class FilamentTypeRepository : IFilamentTypeRepository
 
     public async Task<FilamentTypeDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var f = await _db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        FilamentType? f = await _db.FilamentTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         return f is null ? null : new FilamentTypeDto(f.Id, f.Name, new TempTargets(f.DefaultHotendTemp, f.DefaultBedTemp));
     }
 

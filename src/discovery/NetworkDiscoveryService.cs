@@ -69,10 +69,10 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
         IEnumerable<INetworkDiscoveryProbe> probesToRun = _discoveryProbes;
         if (backendFilter != null)
         {
-            var backends = backendFilter.ToList();
+            List<PrinterBackend> backends = backendFilter.ToList();
             if (backends.Count > 0)
             {
-                var backendSet = new HashSet<PrinterBackend>(backends);
+                HashSet<PrinterBackend> backendSet = new HashSet<PrinterBackend>(backends);
                 probesToRun = probesToRun.Where(p => backendSet.Contains(p.Backend));
             }
         }
@@ -89,7 +89,7 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
             try
             {
                 _logger?.LogDebug("Trying probe {ProbeName} for {IpAddress}", probe.DisplayName, ipAddress);
-                var result = await probe.ProbeAsync(ipAddress, timeoutMs, cancellationToken);
+                ProbeResult? result = await probe.ProbeAsync(ipAddress, timeoutMs, cancellationToken);
                 if (result != null)
                 {
                     _logger?.LogDebug("Probe {ProbeName} matched for {IpAddress} with confidence {ConfidenceScore} ({Reason})", probe.DisplayName, ipAddress, result.ConfidenceScore, result.Reason);
@@ -128,21 +128,21 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
         IEnumerable<PrinterBackend>? backendFilter = null,
         CancellationToken cancellationToken = default)
     {
-        var discovered = new List<DiscoveredPrinterDto>();
-        var ips = ipAddresses?.ToList() ?? new List<string>();
+        List<DiscoveredPrinterDto> discovered = new List<DiscoveredPrinterDto>();
+        List<string> ips = ipAddresses?.ToList() ?? new List<string>();
 
         if (ips.Count == 0)
         {
             return discovered;
         }
 
-        using var semaphore = new SemaphoreSlim(maxConcurrent);
-        var tasks = ips.Select(async ip =>
+        using SemaphoreSlim semaphore = new SemaphoreSlim(maxConcurrent);
+        IEnumerable<Task<DiscoveredPrinterDto?>> tasks = ips.Select(async ip =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var result = await DiscoverPrinterAsync(ip, timeoutMs, backendFilter, cancellationToken);
+                DiscoveredPrinterDto? result = await DiscoverPrinterAsync(ip, timeoutMs, backendFilter, cancellationToken);
                 return result;
             }
             finally
@@ -151,7 +151,7 @@ public class CoreNetworkDiscoveryService : ICoreNetworkDiscoveryService
             }
         });
 
-        var results = await Task.WhenAll(tasks);
+        DiscoveredPrinterDto?[] results = await Task.WhenAll(tasks);
         discovered.AddRange(results.Where(r => r != null)!);
         return discovered;
     }

@@ -16,24 +16,24 @@ public sealed class ConsoleEmailService(IUnifiedLoggingService logger, IEmailTem
 
     public async Task<bool> SendPasswordResetAsync(string email, string resetLink, CancellationToken ct = default)
     {
-        var model = new Dictionary<string, string>
+        Dictionary<string, string> model = new Dictionary<string, string>
         {
             ["ResetLink"] = resetLink,
             ["ExpirationMinutes"] = "60"
         };
-        var (subject, plain, html) = _renderer.Render("PasswordReset", model);
+        (string? subject, string? plain, string? html) = _renderer.Render("PasswordReset", model);
         await SendAsync(new EmailMessage(email, subject, plain, html, "PasswordReset"), ct);
         return true;
     }
 
     public async Task<bool> SendEmailConfirmationAsync(string email, string confirmationLink, CancellationToken ct = default)
     {
-        var model = new Dictionary<string, string>
+        Dictionary<string, string> model = new Dictionary<string, string>
         {
             ["ConfirmationLink"] = confirmationLink,
             ["ExpirationHours"] = "24"
         };
-        var (subject, plain, html) = _renderer.Render("EmailConfirmation", model);
+        (string? subject, string? plain, string? html) = _renderer.Render("EmailConfirmation", model);
         await SendAsync(new EmailMessage(email, subject, plain, html, "EmailConfirmation"), ct);
         return true;
     }

@@ -18,19 +18,19 @@ public class SpoolmanServiceTests
     [Fact]
     public async Task ListSpoolsAsync_ReturnsEmpty_WhenNotConfigured()
     {
-        var settings = new Mock<ISettingsService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
         // Returning null intentionally for this test case. Suppress CS8603 for this line.
 #pragma warning disable CS8603 // Possible null reference return
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(() => (SpoolmanSettings?)null);
 #pragma warning restore CS8603 // Possible null reference return
 
-        var logger = new Mock<IUnifiedLoggingService>();
-        using var _handler = new FakeHttpMessageHandler();
-        using var http = new HttpClient(_handler);
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        using FakeHttpMessageHandler _handler = new FakeHttpMessageHandler();
+        using HttpClient http = new HttpClient(_handler);
 
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        var result = await svc.ListSpoolsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(CancellationToken.None);
 
         Assert.Empty(result);
         logger.Verify(l => l.LogDebug(It.Is<string>(m => m.Contains("Spoolman not configured")), null, null), Times.Once);
@@ -39,18 +39,18 @@ public class SpoolmanServiceTests
     [Fact]
     public async Task ListSpoolsAsync_PaginatesAcrossNextUrls()
     {
-        var settings = new Mock<ISettingsService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        var logger = new Mock<IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         // First page returns a 'next' field pointing to second page; second page returns final array
-        using var handler = new FakeHttpMessageHandler((req) =>
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
                 {
                     if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spool") || req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
                     {
                         if (req.RequestUri!.Query.Contains("page=2"))
                         {
-                            var json2 = JsonSerializer.Serialize(new[] { new { id = 2, name = "Second" } });
+                            string json2 = JsonSerializer.Serialize(new[] { new { id = 2, name = "Second" } });
                             return new HttpResponseMessage(HttpStatusCode.OK)
                             {
                                 Content = new StringContent(json2, Encoding.UTF8, "application/json")
@@ -59,7 +59,7 @@ public class SpoolmanServiceTests
 
                         // Return object with results and next -> /api/v1/spools?page=2
                         var page1 = new { results = new[] { new { id = 1, name = "First" } }, next = "/api/v1/spools?page=2" };
-                        var json1 = JsonSerializer.Serialize(page1);
+                        string json1 = JsonSerializer.Serialize(page1);
                         return new HttpResponseMessage(HttpStatusCode.OK)
                         {
                             Content = new StringContent(json1, Encoding.UTF8, "application/json")
@@ -68,10 +68,10 @@ public class SpoolmanServiceTests
                     return new HttpResponseMessage(HttpStatusCode.NotFound);
                 });
 
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        var items = await svc.ListSpoolsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
 
         Assert.Equal(2, items.Count);
         Assert.Contains(items, i => i.Id == 1);
@@ -81,20 +81,20 @@ public class SpoolmanServiceTests
     [Fact]
     public async Task ListMaterialsAsync_ParsesStringArrayAndObjectArrayFormats()
     {
-        var settings = new Mock<ISettingsService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        var logger = new Mock<IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         // Handler will respond to material endpoint: first call returns string array, second call returns object array
         int call = 0;
-        using var handler = new FakeHttpMessageHandler((req) =>
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
                 {
                     if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/material"))
                     {
                         call++;
                         if (call == 1)
                         {
-                            var arr = new[] { "PLA", "ABS" };
+                            string[] arr = new[] { "PLA", "ABS" };
                             return new HttpResponseMessage(HttpStatusCode.OK)
                             {
                                 Content = new StringContent(JsonSerializer.Serialize(arr), Encoding.UTF8, "application/json")
@@ -110,16 +110,16 @@ public class SpoolmanServiceTests
                     return new HttpResponseMessage(HttpStatusCode.NotFound);
                 });
 
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
         // First call should parse the string array and return two materials
-        var mats1 = await svc.ListMaterialsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanMaterialDto> mats1 = await svc.ListMaterialsAsync(CancellationToken.None);
         Assert.Equal(2, mats1.Count);
         Assert.Contains(mats1, m => m.Name == "PLA");
 
         // Second call should parse object array and return object materials
-        var mats2 = await svc.ListMaterialsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanMaterialDto> mats2 = await svc.ListMaterialsAsync(CancellationToken.None);
         Assert.Contains(mats2, m => m.Name == "PETG" && m.Id == 10);
     }
 
@@ -127,17 +127,17 @@ public class SpoolmanServiceTests
     public async Task ListSpoolsAsync_TriesCandidates_AndReturnsItems_WhenOneEndpointSucceeds()
     {
         // configure settings to return base url
-        var settings = new Mock<ISettingsService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
 
-        var logger = new Mock<IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         // Prepare a message handler that responds to /api/v1/spools with a JSON array of one object
-        using var handler = new FakeHttpMessageHandler((req) =>
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
                 {
                     if (req.RequestUri!.AbsolutePath.StartsWith("/api/v1/spools"))
                     {
-                        var json = JsonSerializer.Serialize(new[] { new { id = 42, name = "Test Spool" } });
+                        string json = JsonSerializer.Serialize(new[] { new { id = 42, name = "Test Spool" } });
                         return new HttpResponseMessage(HttpStatusCode.OK)
                         {
                             Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -146,14 +146,14 @@ public class SpoolmanServiceTests
                     return new HttpResponseMessage(HttpStatusCode.NotFound);
                 });
 
-        using var http = new HttpClient(handler)
+        using HttpClient http = new HttpClient(handler)
         {
             BaseAddress = new Uri("http://spoolman.local")
         };
 
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        var items = await svc.ListSpoolsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
 
         Assert.Single(items);
         Assert.Equal(42, items[0].Id);
@@ -162,15 +162,15 @@ public class SpoolmanServiceTests
     [Fact]
     public async Task ScanNetworkForSpoolmanAsync_ReturnsAvailable_WhenIpResponds()
     {
-        var settings = new Mock<ISettingsService>();
-        var logger = new Mock<IUnifiedLoggingService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         // Handler that responds to /api/v1/info for one IP and times out for others
-        using var handler = new FakeHttpMessageHandler((req) =>
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
                 {
                     if (req.RequestUri!.Host == "192.168.1.5" && req.RequestUri.AbsolutePath == "/api/v1/info")
                     {
-                        var json = JsonSerializer.Serialize(new { version = "1.2.3" });
+                        string json = JsonSerializer.Serialize(new { version = "1.2.3" });
                         return new HttpResponseMessage(HttpStatusCode.OK)
                         {
                             Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -179,10 +179,10 @@ public class SpoolmanServiceTests
                     return new HttpResponseMessage(HttpStatusCode.NotFound);
                 });
 
-        using var http = new HttpClient(handler);
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        using HttpClient http = new HttpClient(handler);
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        var results = await svc.ScanNetworkForSpoolmanAsync(new[] { "192.168.1.0/29" });
+        IEnumerable<SpoolmanDiscoveryResult> results = await svc.ScanNetworkForSpoolmanAsync(new[] { "192.168.1.0/29" });
         // The helper expands small ranges; ensure at least one available result is returned for the 192.168.1.5
         Assert.Contains(results, r => r.IsAvailable && r.Url.Contains("192.168.1.5"));
     }
@@ -190,16 +190,16 @@ public class SpoolmanServiceTests
     [Fact]
     public async Task ListSpoolsAsync_HandlesRelativeNextLinkResolution()
     {
-        var settings = new Mock<ISettingsService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local/root" });
-        var logger = new Mock<IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
-        using var handler = new FakeHttpMessageHandler((req) =>
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
             {
                 // If the request URI contains page=2 return the second page
                 if (req.RequestUri!.AbsoluteUri.Contains("page=2"))
                 {
-                    var json2 = JsonSerializer.Serialize(new[] { new { id = 102, name = "RelSecond" } });
+                    string json2 = JsonSerializer.Serialize(new[] { new { id = 102, name = "RelSecond" } });
                     return new HttpResponseMessage(HttpStatusCode.OK)
                     {
                         Content = new StringContent(json2, Encoding.UTF8, "application/json")
@@ -219,10 +219,10 @@ public class SpoolmanServiceTests
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             });
 
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local/root") };
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local/root") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        var items = await svc.ListSpoolsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
         Assert.Contains(items, i => i.Id == 101);
         Assert.Contains(items, i => i.Id == 102);
     }
@@ -230,11 +230,11 @@ public class SpoolmanServiceTests
     [Fact]
     public async Task GetSpoolByIdAsync_ReturnsNull_OnNonJsonOrNonSuccess()
     {
-        var settings = new Mock<ISettingsService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        var logger = new Mock<IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
-        using var handler = new FakeHttpMessageHandler((req) =>
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
             {
                 // If requesting the specific spool, return HTML (non-JSON)
                 if (req.RequestUri!.AbsolutePath.EndsWith("/api/v1/spool/99"))
@@ -249,34 +249,34 @@ public class SpoolmanServiceTests
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             });
 
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        var res = await svc.GetSpoolByIdAsync(99, CancellationToken.None);
+        SpoolmanSpoolDto? res = await svc.GetSpoolByIdAsync(99, CancellationToken.None);
         Assert.Null(res);
     }
 
     [Fact]
     public async Task ListSpoolsAsync_LogsWarnings_OnEmptySuccessfulResponses()
     {
-        var settings = new Mock<ISettingsService>();
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
         settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        var logger = new Mock<IUnifiedLoggingService>();
+        Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
-        var handler = new FakeHttpMessageHandler((req) =>
+        FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
         {
             // Return empty successful payload to trigger warning and try next candidate
-            var json = JsonSerializer.Serialize(new object[] { });
+            string json = JsonSerializer.Serialize(new object[] { });
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
         });
 
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        var svc = new SpoolmanService(http, settings.Object, logger.Object);
+        HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
 
-        var items = await svc.ListSpoolsAsync(CancellationToken.None);
+        IReadOnlyList<SpoolmanSpoolDto> items = await svc.ListSpoolsAsync(CancellationToken.None);
         Assert.Empty(items);
         logger.Verify(l => l.LogWarning(It.Is<string>(s => s.Contains("returned 0 spools")), null, null), Times.AtLeastOnce);
     }

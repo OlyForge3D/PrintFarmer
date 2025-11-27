@@ -48,8 +48,8 @@ public class CatalogService : ICatalogService
         string normalized = CatalogNameNormalizer.NormalizeManufacturer(original);
         _normLogger.Log("Manufacturer", original, normalized, "create");
 
-        var manufacturerRows = await _repo.GetManufacturersAsync(ct);
-        var existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
+        IReadOnlyList<(Guid Id, string Name)> manufacturerRows = await _repo.GetManufacturersAsync(ct);
+        (Guid Id, string Name) existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
         if (existing.Id != Guid.Empty)
         {
             string? headerName = null;
@@ -69,15 +69,15 @@ public class CatalogService : ICatalogService
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
-            var existingNow = await _repo.GetManufacturerByIdAsync(mfg.Id, ct);
+            (Guid Id, string Name)? existingNow = await _repo.GetManufacturerByIdAsync(mfg.Id, ct);
             if (existingNow == null)
             {
-                var found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
+                (Guid Id, string Name) found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
                 existingNow = found == default ? ((Guid, string)?)null : found;
             }
-            var existingId = existingNow.HasValue ? existingNow.Value.Id : Guid.Empty;
-            var existingName = existingNow.HasValue ? existingNow.Value.Name : normalized;
-            var headerName = existingNow.HasValue ? existingNow.Value.Name : null;
+            Guid existingId = existingNow.HasValue ? existingNow.Value.Id : Guid.Empty;
+            string existingName = existingNow.HasValue ? existingNow.Value.Name : normalized;
+            string? headerName = existingNow.HasValue ? existingNow.Value.Name : null;
             throw new DuplicateEntityException("Manufacturer", new ManufacturerDto(existingId, existingName), headerName,
                 $"A manufacturer with the normalized name '{existingName}' already exists.");
         }
@@ -89,7 +89,7 @@ public class CatalogService : ICatalogService
 
     public async Task<ManufacturerDto?> GetManufacturerByIdAsync(Guid id, CancellationToken ct)
     {
-        var m = await _repo.GetManufacturerByIdAsync(id, ct);
+        (Guid Id, string Name)? m = await _repo.GetManufacturerByIdAsync(id, ct);
         return m is null ? null : new ManufacturerDto(m.Value.Id, m.Value.Name);
     }
 
@@ -115,8 +115,8 @@ public class CatalogService : ICatalogService
             throw new KeyNotFoundException("Manufacturer not found");
         }
 
-        var candidateModels = (await _repo.GetModelsCachedAsync(req.ManufacturerId, ct)).ToList();
-        var existing = candidateModels.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        List<PrinterModelDto> candidateModels = (await _repo.GetModelsCachedAsync(req.ManufacturerId, ct)).ToList();
+        PrinterModelDto? existing = candidateModels.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
             string? headerName = null;
@@ -161,7 +161,7 @@ public class CatalogService : ICatalogService
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
-            var existingNowDto = (await _repo.GetModelsCachedAsync(req.ManufacturerId, ct)).FirstOrDefault(m => m.Name == normalizedName);
+            PrinterModelDto? existingNowDto = (await _repo.GetModelsCachedAsync(req.ManufacturerId, ct)).FirstOrDefault(m => m.Name == normalizedName);
             PrinterModel existingNow = existingNowDto is not null ? new PrinterModel { Id = existingNowDto.Id, Name = existingNowDto.Name, ManufacturerId = existingNowDto.ManufacturerId } : new PrinterModel { Id = model.Id, Name = normalizedName, ManufacturerId = req.ManufacturerId };
             // existingNow.* properties coming from DTOs/repository are stored as nullable ints; convert to enum types for the DTO
             throw new DuplicateEntityException("Model", new PrinterModelDto(existingNow.Id, existingNow.Name, existingNow.ManufacturerId, (MotionType?)existingNow.MotionType, existingNow.MaxX, existingNow.MaxY, existingNow.MaxZ,
@@ -171,12 +171,12 @@ public class CatalogService : ICatalogService
         // If there are supported filament type ids, validate and attach via repository helper
         if (req.SupportedFilamentTypeIds?.Length > 0)
         {
-            var validFilamentTypeIds = (await _repo.GetValidFilamentTypeIdsAsync(req.SupportedFilamentTypeIds, ct)).ToArray();
+            Guid[] validFilamentTypeIds = (await _repo.GetValidFilamentTypeIdsAsync(req.SupportedFilamentTypeIds, ct)).ToArray();
             await _repo.UpdateModelFilamentTypesAsync(model.Id, validFilamentTypeIds, ct);
             await _repo.SaveChangesAsync(ct);
         }
 
-        var createdModel = await _repo.GetModelWithFilamentNamesAsync(model.Id, ct);
+        PrinterModelDto? createdModel = await _repo.GetModelWithFilamentNamesAsync(model.Id, ct);
 
         _catalogCache.InvalidateModels(model.ManufacturerId);
         return createdModel ?? new PrinterModelDto(model.Id, model.Name, model.ManufacturerId, model.MotionType.HasValue ? (MotionType)model.MotionType.Value : (MotionType?)null, model.MaxX, model.MaxY, model.MaxZ,
@@ -253,7 +253,7 @@ public class CatalogService : ICatalogService
 
         if (req.SupportedFilamentTypeIds != null)
         {
-            var validFilamentTypeIds = req.SupportedFilamentTypeIds.Length > 0
+            Guid[] validFilamentTypeIds = req.SupportedFilamentTypeIds.Length > 0
                 ? (await _repo.GetValidFilamentTypeIdsAsync(req.SupportedFilamentTypeIds, ct)).ToArray()
                 : Array.Empty<Guid>();
             await _repo.UpdateModelFilamentTypesAsync(model.Id, validFilamentTypeIds, ct);

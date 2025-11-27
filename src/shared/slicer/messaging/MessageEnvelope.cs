@@ -71,8 +71,8 @@ public record MessageEnvelope
     public static string GenerateChecksum(object content)
     {
         ArgumentNullException.ThrowIfNull(content);
-        var json = JsonSerializer.Serialize(content, CachedSerializerOptions);
-        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
+        string json = JsonSerializer.Serialize(content, CachedSerializerOptions);
+        byte[] hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
         return Convert.ToBase64String(hashBytes);
     }
 
@@ -123,7 +123,7 @@ public record MessageEnvelope
     /// <returns>True if envelope checksum matches job content</returns>
     public bool ValidateChecksum(object jobContent)
     {
-        var expectedChecksum = GenerateChecksum(jobContent);
+        string expectedChecksum = GenerateChecksum(jobContent);
         return string.Equals(Checksum, expectedChecksum, StringComparison.Ordinal);
     }
 

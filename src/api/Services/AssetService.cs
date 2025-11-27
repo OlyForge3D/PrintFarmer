@@ -137,10 +137,10 @@ namespace Farm.Web.Api.Services
                 }
 
                 // Construct asset URL pattern
-                var normalizedMfgId = NormalizeId(manufacturerId);
-                var normalizedModelId = NormalizeId(modelId);
+                string normalizedMfgId = NormalizeId(manufacturerId);
+                string normalizedModelId = NormalizeId(modelId);
 
-                var asset = new PrinterAssetDto
+                PrinterAssetDto asset = new PrinterAssetDto
                 {
                     Id = normalizedModelId,
                     Name = modelId,
@@ -174,7 +174,7 @@ namespace Farm.Web.Api.Services
         /// </summary>
         public async Task<string?> GetCoverImageUrlAsync(string manufacturerId, string modelId, CancellationToken ct = default)
         {
-            var asset = await GetPrinterAssetAsync(manufacturerId, modelId, ct);
+            PrinterAssetDto? asset = await GetPrinterAssetAsync(manufacturerId, modelId, ct);
             return asset?.Cover;
         }
 
@@ -183,7 +183,7 @@ namespace Farm.Web.Api.Services
         /// </summary>
         public async Task<string?> GetBedTextureUrlAsync(string manufacturerId, string modelId, CancellationToken ct = default)
         {
-            var asset = await GetPrinterAssetAsync(manufacturerId, modelId, ct);
+            PrinterAssetDto? asset = await GetPrinterAssetAsync(manufacturerId, modelId, ct);
             return asset?.BedTexture;
         }
 

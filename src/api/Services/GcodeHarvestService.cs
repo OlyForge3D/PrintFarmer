@@ -628,10 +628,10 @@ public partial class GcodeHarvestService(
         // Apply concurrency limiting using semaphore based on configuration
         int maxConcurrent = _harvestSettings.MaxConcurrentImports;
         _logger.LogInformation($"ImportSelectedFilesAsync: Using max concurrent imports: {maxConcurrent}");
-        using var semaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
+        using SemaphoreSlim semaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
 
         // Create import tasks for all selected files with concurrency limiting
-        var importTasks = selectedFiles.Select(async discoveredFile =>
+        List<Task> importTasks = selectedFiles.Select(async discoveredFile =>
         {
             // Acquire a semaphore slot (respects max concurrency)
             await semaphore.WaitAsync(ct);
@@ -836,7 +836,7 @@ public partial class GcodeHarvestService(
         await _harvestRepo.SaveChangesAsync(ct);
         await _gcodeRepo.SaveChangesAsync(ct);
 
-        var result = new GcodeHarvestResultDto(
+        GcodeHarvestResultDto result = new GcodeHarvestResultDto(
             request.HarvestOperationId,
             true,
             $"Imported {importedFileIds.Count} files",

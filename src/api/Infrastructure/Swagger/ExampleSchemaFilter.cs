@@ -16,7 +16,7 @@ public static class ExampleSchemaFilter
     /// </summary>
     public static OpenApiSchema? GetExampleForType(Type t)
     {
-        var schema = new OpenApiSchema();
+        OpenApiSchema schema = new OpenApiSchema();
 
         if (t == typeof(CreatePrinterDto))
         {

@@ -26,7 +26,7 @@ public class JobQueueController(Farm.Web.Api.Services.Queue.IJobQueueService que
     {
         try
         {
-            var dtos = await queueService.GetQueueOverviewAsync(CancellationToken.None);
+            IReadOnlyList<QueueOverviewDto> dtos = await queueService.GetQueueOverviewAsync(CancellationToken.None);
             return Ok(dtos);
         }
         catch (Exception ex)
@@ -52,7 +52,7 @@ public class JobQueueController(Farm.Web.Api.Services.Queue.IJobQueueService que
         }
         try
         {
-            var added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
+            JobQueuePrintJobDto? added = await queueService.AddJobToQueueAsync(request, CancellationToken.None);
             if (added == null)
             {
                 return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
@@ -78,7 +78,7 @@ public class JobQueueController(Farm.Web.Api.Services.Queue.IJobQueueService que
     {
         try
         {
-            var dto = await queueService.GetJobAsync(id, CancellationToken.None);
+            JobQueuePrintJobDto? dto = await queueService.GetJobAsync(id, CancellationToken.None);
             if (dto == null)
             {
                 return NotFound($"Print job with ID {id} not found");
@@ -109,7 +109,7 @@ public class JobQueueController(Farm.Web.Api.Services.Queue.IJobQueueService que
         }
         try
         {
-            var updated = await queueService.UpdateJobAsync(id, request, CancellationToken.None);
+            JobQueuePrintJobDto? updated = await queueService.UpdateJobAsync(id, request, CancellationToken.None);
             if (updated == null)
             {
                 // Service returns null for not found or invalid assignment; translate to proper HTTP
@@ -137,7 +137,7 @@ public class JobQueueController(Farm.Web.Api.Services.Queue.IJobQueueService que
     {
         try
         {
-            var ok = await queueService.RemoveJobAsync(id, CancellationToken.None);
+            bool ok = await queueService.RemoveJobAsync(id, CancellationToken.None);
             if (!ok)
             {
                 return BadRequest("Cannot delete the job (not found or currently printing)");

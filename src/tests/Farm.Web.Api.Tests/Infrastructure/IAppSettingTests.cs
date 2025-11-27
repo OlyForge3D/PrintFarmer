@@ -17,9 +17,9 @@ public class IAppSettingTests
     [InlineData(typeof(DatabaseSettings))]
     public void CanSerializeAndDeserializeSettings(Type settingsType)
     {
-        var instance = Activator.CreateInstance(settingsType);
-        var json = JsonSerializer.Serialize(instance, settingsType);
-        var deserialized = JsonSerializer.Deserialize(json, settingsType);
+        object? instance = Activator.CreateInstance(settingsType);
+        string json = JsonSerializer.Serialize(instance, settingsType);
+        object? deserialized = JsonSerializer.Deserialize(json, settingsType);
         Assert.NotNull(deserialized);
         Assert.IsType(settingsType, deserialized);
     }
@@ -27,7 +27,7 @@ public class IAppSettingTests
     [Fact]
     public void NetworkDiscoverySettings_DeserializationAndValidation_ValidPayload()
     {
-        var json = "{" +
+        string json = "{" +
                 "\"enableDiscovery\": true," +
                 "\"requestDelayMs\": 60," +
                 "\"clientTimeoutMs\": 5," +
@@ -37,7 +37,7 @@ public class IAppSettingTests
                 "\"discoverySubnets\": [\"192.168.1.0/24\", \"10.0.0.0/24\"]" +
                 "}";
 
-        var settings = JsonSerializer.Deserialize<NetworkDiscoverySettings>(json);
+        NetworkDiscoverySettings? settings = JsonSerializer.Deserialize<NetworkDiscoverySettings>(json);
         Assert.NotNull(settings);
         Assert.True(settings.EnableDiscovery);
         Assert.Equal(60, settings.RequestDelayMs);
@@ -54,7 +54,7 @@ public class IAppSettingTests
     [Fact]
     public void NetworkDiscoverySettings_Validation_ThrowsOnMalformedPayload()
     {
-        var json = "{" +
+        string json = "{" +
                 "\"enableDiscovery\": true," +
                 "\"requestDelayMs\": -1," +
                 "\"clientTimeoutMs\": 0," +
@@ -62,7 +62,7 @@ public class IAppSettingTests
                 "\"discoverySubnets\": []" +
                 "}";
 
-        var settings = JsonSerializer.Deserialize<NetworkDiscoverySettings>(json);
+        NetworkDiscoverySettings? settings = JsonSerializer.Deserialize<NetworkDiscoverySettings>(json);
         Assert.NotNull(settings);
         Assert.True(settings.EnableDiscovery);
         Assert.Equal(-1, settings.RequestDelayMs);
@@ -70,7 +70,7 @@ public class IAppSettingTests
 
         if (settings is IValidatableSetting validatable)
         {
-            var ex = Record.Exception(() => validatable.Validate());
+            Exception ex = Record.Exception(() => validatable.Validate());
             Assert.NotNull(ex);
             Assert.IsType<ValidationException>(ex);
         }
@@ -83,7 +83,7 @@ public class IAppSettingTests
     [InlineData(typeof(DatabaseSettings))]
     public void ValidationDoesNotThrowForDefaults(Type settingsType)
     {
-        var instance = Activator.CreateInstance(settingsType);
+        object? instance = Activator.CreateInstance(settingsType);
         if (instance is IValidatableSetting validatable)
         {
             validatable.Validate();

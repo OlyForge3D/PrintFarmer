@@ -7,11 +7,13 @@ using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.SlicerServices;
+using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -30,10 +32,10 @@ namespace Farm.Web.Api.Tests
             clientProxy.Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
-            var clients = new Mock<IHubClients>();
+            Mock<IHubClients> clients = new Mock<IHubClients>();
             clients.Setup(c => c.All).Returns(clientProxy.Object);
 
-            var hubContext = new Mock<IHubContext<SlicerHub>>();
+            Mock<IHubContext<SlicerHub>> hubContext = new Mock<IHubContext<SlicerHub>>();
             hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
             return hubContext;
         }
@@ -45,12 +47,12 @@ namespace Farm.Web.Api.Tests
 
         private static Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> CreateMockSlicerSettings()
         {
-            var settings = new Farm.Infrastructure.Settings.SlicerSettings
+            Farm.Infrastructure.Settings.SlicerSettings settings = new Farm.Infrastructure.Settings.SlicerSettings
             {
                 MaxConcurrentJobs = 10, // High enough not to interfere with tests
                 MaxMemoryMb = 4096
             };
-            var mock = new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings>>();
+            Mock<IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings>> mock = new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings>>();
             mock.Setup(m => m.CurrentValue).Returns(settings);
             return mock.Object;
         }
@@ -68,19 +70,19 @@ namespace Farm.Web.Api.Tests
         [Fact]
         public async Task RegisterAsync_CreatesService_And_Broadcasts()
         {
-            using var db = CreateInMemoryDb();
-            var mockHub = CreateMockHub(out var clientProxy);
+            using AppDbContext db = CreateInMemoryDb();
+            Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
 
-            var repo = new EfSlicersRepository(db);
-            var workerRepo = new EfWorkerRepository(db);
-            var profileRepo = CreateMockProfileRepository();
-            var httpClient = CreateMockHttpClient();
-            var metrics = CreateMetrics();
-            var settings = CreateMockSlicerSettings();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
-            var controller = new SlicersController(service);
+            EfSlicersRepository repo = new EfSlicersRepository(db);
+            EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+            Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            HttpClient httpClient = CreateMockHttpClient();
+            SlicerServiceMetrics metrics = CreateMetrics();
+            IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+            SlicersService service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
+            SlicersController controller = new SlicersController(service);
 
-            var dto = new RegisterSlicerDto
+            RegisterSlicerDto dto = new RegisterSlicerDto
             {
                 Name = "unit-orca",
                 SlicerType = 1,
@@ -90,12 +92,12 @@ namespace Farm.Web.Api.Tests
                 Tags = "t"
             };
 
-            var result = await controller.RegisterAsync(dto);
+            IActionResult result = await controller.RegisterAsync(dto);
 
             result.Should().BeOfType<CreatedResult>();
 
             // Verify DB
-            var svc = await db.SlicerServices.FirstOrDefaultAsync(s => s.Name == "unit-orca");
+            SlicerService? svc = await db.SlicerServices.FirstOrDefaultAsync(s => s.Name == "unit-orca");
             svc.Should().NotBeNull();
 
             // Verify hub broadcast attempted
@@ -108,24 +110,24 @@ namespace Farm.Web.Api.Tests
         [Fact]
         public async Task ListAsync_ReturnsSeededServices()
         {
-            using var db = CreateInMemoryDb();
+            using AppDbContext db = CreateInMemoryDb();
             db.SlicerServices.Add(new SlicerService { Id = System.Guid.NewGuid(), Name = "s1" });
             await db.SaveChangesAsync();
 
-            var mockHub = CreateMockHub(out _);
-            var repo = new EfSlicersRepository(db);
-            var workerRepo = new EfWorkerRepository(db);
-            var profileRepo = CreateMockProfileRepository();
-            var httpClient = CreateMockHttpClient();
-            var metrics = CreateMetrics();
-            var settings = CreateMockSlicerSettings();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
-            var controller = new SlicersController(service);
+            Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
+            EfSlicersRepository repo = new EfSlicersRepository(db);
+            EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+            Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            HttpClient httpClient = CreateMockHttpClient();
+            SlicerServiceMetrics metrics = CreateMetrics();
+            IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+            SlicersService service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
+            SlicersController controller = new SlicersController(service);
 
-            var res = await controller.ListAsync();
+            IActionResult res = await controller.ListAsync();
             res.Should().BeOfType<OkObjectResult>();
-            var ok = res as OkObjectResult;
-            var list = ok!.Value as System.Collections.Generic.List<SlicerService>;
+            OkObjectResult? ok = res as OkObjectResult;
+            List<SlicerService>? list = ok!.Value as System.Collections.Generic.List<SlicerService>;
             list.Should().NotBeNull();
             list!.Count.Should().BeGreaterOrEqualTo(1);
         }
@@ -133,27 +135,27 @@ namespace Farm.Web.Api.Tests
         [Fact]
         public async Task HeartbeatAsync_UpdatesAndBroadcasts()
         {
-            using var db = CreateInMemoryDb();
-            var id = System.Guid.NewGuid();
+            using AppDbContext db = CreateInMemoryDb();
+            Guid id = System.Guid.NewGuid();
             db.SlicerServices.Add(new SlicerService { Id = id, Name = "h1", Tags = "0", Status = "Online" });
             await db.SaveChangesAsync();
 
-            var mockHub = CreateMockHub(out var clientProxy);
-            var repo = new EfSlicersRepository(db);
-            var workerRepo = new EfWorkerRepository(db);
-            var profileRepo = CreateMockProfileRepository();
-            var httpClient = CreateMockHttpClient();
-            var metrics = CreateMetrics();
-            var settings = CreateMockSlicerSettings();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
-            var controller = new SlicersController(service);
+            Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
+            EfSlicersRepository repo = new EfSlicersRepository(db);
+            EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+            Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            HttpClient httpClient = CreateMockHttpClient();
+            SlicerServiceMetrics metrics = CreateMetrics();
+            IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+            SlicersService service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
+            SlicersController controller = new SlicersController(service);
 
-            var hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
-            var res = await controller.HeartbeatAsync(id, hb);
+            HeartbeatDto hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
+            IActionResult res = await controller.HeartbeatAsync(id, hb);
 
             res.Should().BeOfType<NoContentResult>();
 
-            var svc = await db.SlicerServices.FindAsync(id);
+            SlicerService? svc = await db.SlicerServices.FindAsync(id);
             svc.Should().NotBeNull();
             svc!.Status.Should().Be("Updated");
             svc.Tags.Should().Be("3");
@@ -167,25 +169,25 @@ namespace Farm.Web.Api.Tests
         [Fact]
         public async Task DeregisterAsync_RemovesAndBroadcasts()
         {
-            using var db = CreateInMemoryDb();
-            var id = System.Guid.NewGuid();
+            using AppDbContext db = CreateInMemoryDb();
+            Guid id = System.Guid.NewGuid();
             db.SlicerServices.Add(new SlicerService { Id = id, Name = "d1" });
             await db.SaveChangesAsync();
 
-            var mockHub = CreateMockHub(out var clientProxy);
-            var repo = new EfSlicersRepository(db);
-            var workerRepo = new EfWorkerRepository(db);
-            var profileRepo = CreateMockProfileRepository();
-            var httpClient = CreateMockHttpClient();
-            var metrics = CreateMetrics();
-            var settings = CreateMockSlicerSettings();
-            var service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
-            var controller = new SlicersController(service);
+            Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? clientProxy);
+            EfSlicersRepository repo = new EfSlicersRepository(db);
+            EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+            Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            HttpClient httpClient = CreateMockHttpClient();
+            SlicerServiceMetrics metrics = CreateMetrics();
+            IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+            SlicersService service = new Farm.Web.Api.Services.Slicing.SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
+            SlicersController controller = new SlicersController(service);
 
-            var res = await controller.DeregisterAsync(id);
+            IActionResult res = await controller.DeregisterAsync(id);
             res.Should().BeOfType<NoContentResult>();
 
-            var svc = await db.SlicerServices.FindAsync(id);
+            SlicerService? svc = await db.SlicerServices.FindAsync(id);
             svc.Should().BeNull();
 
             clientProxy.Verify(p => p.SendCoreAsync(

@@ -15,8 +15,8 @@ namespace Farm.Web.Api.Tests.Services
         /// </summary>
         public static TestFileSystem WithFile(string filePath, byte[]? content = null)
         {
-            var fs = new TestFileSystem();
-            var dir = System.IO.Path.GetDirectoryName(filePath) ?? string.Empty;
+            TestFileSystem fs = new TestFileSystem();
+            string dir = System.IO.Path.GetDirectoryName(filePath) ?? string.Empty;
             if (!string.IsNullOrEmpty(dir))
             {
                 fs.CreateDirectory(dir);
@@ -36,10 +36,10 @@ namespace Farm.Web.Api.Tests.Services
         /// </summary>
         public static TestFileSystem WithFiles(IDictionary<string, byte[]> files)
         {
-            var fs = new TestFileSystem();
-            foreach (var kv in files)
+            TestFileSystem fs = new TestFileSystem();
+            foreach (KeyValuePair<string, byte[]> kv in files)
             {
-                var dir = System.IO.Path.GetDirectoryName(kv.Key) ?? string.Empty;
+                string dir = System.IO.Path.GetDirectoryName(kv.Key) ?? string.Empty;
                 if (!string.IsNullOrEmpty(dir))
                 {
                     fs.CreateDirectory(dir);

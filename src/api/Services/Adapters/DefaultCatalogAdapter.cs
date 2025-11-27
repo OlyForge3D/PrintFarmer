@@ -11,7 +11,7 @@ public class DefaultCatalogAdapter : IDefaultCatalogAdapter
     public DefaultCatalogAdapter(IDefaultCatalogService inner) => _inner = inner;
     public async Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync()
     {
-        var tup = await _inner.GetDefaultCatalogIdsAsync();
+        (Guid ManufacturerId, Guid ModelId) tup = await _inner.GetDefaultCatalogIdsAsync();
         return tup;
     }
 }

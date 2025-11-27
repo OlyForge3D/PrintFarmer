@@ -1,5 +1,9 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Services.Artifacts;
+using Farm.Web.Api.Tests.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -20,15 +24,15 @@ namespace Farm.Web.Api.Tests.Artifacts
         [Fact(DisplayName = "Unsupported kind returns 400 with allowedKinds (controller direct)")]
         public async Task Unsupported_Kind_Returns_BadRequest_With_Allowed_List()
         {
-            using var scope = _factory.Services.CreateScope();
-            var svc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
-            var opts = Options.Create(new Farm.Infrastructure.Settings.ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
-            var jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
-            var controller = new Farm.Web.Api.Controllers.ArtifactsController(svc, jobRepo, opts);
-            var file = new TestFormFile(System.Text.Encoding.UTF8.GetBytes("dummy"), "a.txt", "text/plain");
-            var result = await controller.UploadAsync(Guid.NewGuid(), "invalid-kind", null, file, default);
+            using IServiceScope scope = _factory.Services.CreateScope();
+            IArtifactsService svc = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+            IOptions<ArtifactStorageSettings> opts = Options.Create(new Farm.Infrastructure.Settings.ArtifactStorageSettings { AllowedKinds = "gcode,thumbnail" });
+            JobDispatcherServiceTests.StubSliceJobRepository jobRepo = new Farm.Web.Api.Tests.Slicing.JobDispatcherServiceTests.StubSliceJobRepository();
+            ArtifactsController controller = new Farm.Web.Api.Controllers.ArtifactsController(svc, jobRepo, opts);
+            TestFormFile file = new TestFormFile(System.Text.Encoding.UTF8.GetBytes("dummy"), "a.txt", "text/plain");
+            IActionResult result = await controller.UploadAsync(Guid.NewGuid(), "invalid-kind", null, file, default);
             result.Should().BeOfType<BadRequestObjectResult>();
-            var bad = (BadRequestObjectResult)result;
+            BadRequestObjectResult bad = (BadRequestObjectResult)result;
             bad.Value!.ToString()!.Should().Contain("allowedKinds");
         }
 

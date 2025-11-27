@@ -62,7 +62,7 @@ public class SignalRTestController(
     {
         try
         {
-            var stats = testService.GetConnectionStats();
+            object stats = testService.GetConnectionStats();
             return Ok(stats);
         }
         catch (Exception ex)

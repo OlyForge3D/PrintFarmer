@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.Artifacts;
@@ -27,12 +28,12 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
     public async Task ScanAndCleanupAsync_DryRunMode_OnlyLogsWithoutDeleting()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        IWebHostEnvironment env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        ILogger<ArtifactCleanupService> logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
 
-        var settings = new ArtifactStorageSettings
+        ArtifactStorageSettings settings = new ArtifactStorageSettings
         {
             MaxAgeDays = 1, // 1 day age limit
             MaxTotalBytes = null,
@@ -40,10 +41,10 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             RootPath = "artifacts"
         };
 
-        var cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
+        ArtifactCleanupService cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
 
         // Create an old artifact (2 days ago)
-        var oldArtifact = new Artifact
+        Artifact oldArtifact = new Artifact
         {
             Id = Guid.NewGuid(),
             JobId = Guid.NewGuid(),
@@ -65,7 +66,7 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
         deletedCount.Should().Be(1, "one artifact should be identified for cleanup");
 
         // Verify artifact still exists (dry-run didn't delete)
-        var stillExists = await db.Artifacts.FindAsync(oldArtifact.Id);
+        Artifact? stillExists = await db.Artifacts.FindAsync(oldArtifact.Id);
         stillExists.Should().NotBeNull("dry-run mode should not delete artifacts");
     }
 
@@ -73,12 +74,12 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
     public async Task ScanAndCleanupAsync_AgeBasedCleanup_DeletesOldArtifacts()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        IWebHostEnvironment env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        ILogger<ArtifactCleanupService> logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
 
-        var settings = new ArtifactStorageSettings
+        ArtifactStorageSettings settings = new ArtifactStorageSettings
         {
             MaxAgeDays = 1, // 1 day age limit
             MaxTotalBytes = null,
@@ -86,10 +87,10 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             RootPath = "artifacts"
         };
 
-        var cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
+        ArtifactCleanupService cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
 
         // Create an old artifact (2 days ago) and a new one (today)
-        var oldArtifact = new Artifact
+        Artifact oldArtifact = new Artifact
         {
             Id = Guid.NewGuid(),
             JobId = Guid.NewGuid(),
@@ -101,7 +102,7 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             Sha256 = "old123",
             CreatedAt = DateTime.UtcNow.AddDays(-2)
         };
-        var newArtifact = new Artifact
+        Artifact newArtifact = new Artifact
         {
             Id = Guid.NewGuid(),
             JobId = Guid.NewGuid(),
@@ -124,10 +125,10 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
         deletedCount.Should().Be(1, "one old artifact should be deleted");
 
         // Verify old artifact deleted, new artifact remains
-        var oldStillExists = await db.Artifacts.FindAsync(oldArtifact.Id);
+        Artifact? oldStillExists = await db.Artifacts.FindAsync(oldArtifact.Id);
         oldStillExists.Should().BeNull("old artifact should be deleted");
 
-        var newStillExists = await db.Artifacts.FindAsync(newArtifact.Id);
+        Artifact? newStillExists = await db.Artifacts.FindAsync(newArtifact.Id);
         newStillExists.Should().NotBeNull("new artifact should remain");
     }
 
@@ -135,12 +136,12 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
     public async Task ScanAndCleanupAsync_SizeBasedCleanup_DeletesOldestWhenOverThreshold()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        IWebHostEnvironment env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        ILogger<ArtifactCleanupService> logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
 
-        var settings = new ArtifactStorageSettings
+        ArtifactStorageSettings settings = new ArtifactStorageSettings
         {
             MaxAgeDays = null, // Disable age-based cleanup
             MaxTotalBytes = 1500, // 1.5KB limit (will trigger cleanup with 3x 1KB artifacts)
@@ -148,10 +149,10 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             RootPath = "artifacts"
         };
 
-        var cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
+        ArtifactCleanupService cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
 
         // Create 3 artifacts (total 3KB > 1.5KB threshold)
-        var artifact1 = new Artifact
+        Artifact artifact1 = new Artifact
         {
             Id = Guid.NewGuid(),
             JobId = Guid.NewGuid(),
@@ -162,7 +163,7 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             Sha256 = "hash1",
             CreatedAt = DateTime.UtcNow.AddDays(-3) // Oldest
         };
-        var artifact2 = new Artifact
+        Artifact artifact2 = new Artifact
         {
             Id = Guid.NewGuid(),
             JobId = Guid.NewGuid(),
@@ -173,7 +174,7 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             Sha256 = "hash2",
             CreatedAt = DateTime.UtcNow.AddDays(-2) // Middle
         };
-        var artifact3 = new Artifact
+        Artifact artifact3 = new Artifact
         {
             Id = Guid.NewGuid(),
             JobId = Guid.NewGuid(),
@@ -196,11 +197,11 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
         deletedCount.Should().BeGreaterOrEqualTo(1, "at least one artifact should be deleted to reduce size");
 
         // Verify at least artifact1 (oldest) was deleted
-        var artifact1Exists = await db.Artifacts.FindAsync(artifact1.Id);
+        Artifact? artifact1Exists = await db.Artifacts.FindAsync(artifact1.Id);
         artifact1Exists.Should().BeNull("oldest artifact should be deleted first");
 
         // Verify total size is now under threshold
-        var totalSize = db.Artifacts.Sum(a => a.SizeBytes);
+        long totalSize = db.Artifacts.Sum(a => a.SizeBytes);
         totalSize.Should().BeLessOrEqualTo(settings.MaxTotalBytes.Value, "total size should be under threshold");
     }
 
@@ -208,12 +209,12 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
     public async Task ScanAndCleanupAsync_NoCandidates_ReturnsZero()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
-        var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        IWebHostEnvironment env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        ILogger<ArtifactCleanupService> logger = scope.ServiceProvider.GetRequiredService<ILogger<ArtifactCleanupService>>();
 
-        var settings = new ArtifactStorageSettings
+        ArtifactStorageSettings settings = new ArtifactStorageSettings
         {
             MaxAgeDays = 365, // Very long retention
             MaxTotalBytes = 1_000_000_000, // 1GB limit (very high)
@@ -221,10 +222,10 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             RootPath = "artifacts"
         };
 
-        var cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
+        ArtifactCleanupService cleanupService = new ArtifactCleanupService(db, Options.Create(settings), env, logger);
 
         // Create a recent small artifact
-        var artifact = new Artifact
+        Artifact artifact = new Artifact
         {
             Id = Guid.NewGuid(),
             JobId = Guid.NewGuid(),
@@ -245,7 +246,7 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
         deletedCount.Should().Be(0, "no artifacts should be eligible for cleanup");
 
         // Verify artifact still exists
-        var stillExists = await db.Artifacts.FindAsync(artifact.Id);
+        Artifact? stillExists = await db.Artifacts.FindAsync(artifact.Id);
         stillExists.Should().NotBeNull("artifact should not be deleted");
     }
 }

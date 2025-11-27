@@ -3,8 +3,12 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Model;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -19,17 +23,17 @@ namespace Farm.Web.Api.Tests.Services
     {
         private static IFormFile CreateFormFile(string name, string content, string fileName)
         {
-            var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+            MemoryStream ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
             return new FormFile(ms, 0, ms.Length, name, fileName);
         }
 
         [Fact]
         public async Task UploadModelAsync_HappyPath_CreatesEntity()
         {
-            var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
-            var mockRepo = new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Strict);
+            Mock<IModelRepository> mockRepo = new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Strict);
             // For happy path: repository returns no existing model for the hash and will accept AddAsync
             mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Farm.Infrastructure.Domain.Model3D?)null);
@@ -37,14 +41,14 @@ namespace Farm.Web.Api.Tests.Services
                 .Returns(Task.CompletedTask);
             mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            var mockFileManagement = new Mock<IFileManagementService>();
+            Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
 
             IFormFile file = CreateFormFile("file", "dummy-content", "model.stl");
 
-            var result = await service.UploadModelAsync(file, CancellationToken.None);
+            Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
 
             Assert.NotNull(result);
             Assert.Equal("model.stl", result.FileName);
@@ -55,15 +59,15 @@ namespace Farm.Web.Api.Tests.Services
         [Fact]
         public async Task UploadModelAsync_Duplicate_TreatedAsDuplicate()
         {
-            var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
-            var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+            Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
             // Prepare an existing model with a computed hash matching the test content
             string content = "dummy-content";
             byte[] hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content));
             string contentHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
 
-            var existing = new Farm.Infrastructure.Domain.Model3D
+            Model3D existing = new Farm.Infrastructure.Domain.Model3D
             {
                 Id = Guid.NewGuid(),
                 OriginalFileName = "model.stl",
@@ -78,12 +82,12 @@ namespace Farm.Web.Api.Tests.Services
                 UpdatedAt = DateTime.UtcNow
             };
 
-            var mockRepo = new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Strict);
+            Mock<IModelRepository> mockRepo = new Mock<Farm.Infrastructure.Repositories.Model.IModelRepository>(MockBehavior.Strict);
             // For duplicate scenario: GetByHashAsync returns existing model for any hash
             mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existing);
 
-            var mockFileManagement = new Mock<IFileManagementService>();
+            Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
             // Setup ToHex to match the expected hash
             mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
@@ -92,10 +96,10 @@ namespace Farm.Web.Api.Tests.Services
             mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            var service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new System.Collections.Generic.Dictionary<string, byte[]>()), mockFileManagement.Object);
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
-            var result = await service.UploadModelAsync(file, CancellationToken.None);
+            Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
 
             // Should return existing model info (duplicate)
             Assert.Equal(existing.Id, result.Id);

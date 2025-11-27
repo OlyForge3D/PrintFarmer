@@ -41,7 +41,7 @@ public class SpoolmanController(
             return Ok(new { success = false, message = "BaseUrl is required" });
         }
 
-        var probe = await spoolman.ProbeAsync(request.BaseUrl, ct);
+        SpoolmanProbeResult probe = await spoolman.ProbeAsync(request.BaseUrl, ct);
         return Ok(new { success = probe.Success, normalizedUrl = probe.NormalizedUrl, endpointTried = probe.EndpointTried, statusCode = probe.StatusCode, version = probe.Version, message = probe.Message, errorCategory = probe.ErrorCategory });
     }
 
@@ -111,7 +111,7 @@ public class SpoolmanController(
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> HealthAsync(CancellationToken ct)
     {
-        var probe = await spoolman.HealthProbeAsync(ct);
+        SpoolmanProbeResult probe = await spoolman.HealthProbeAsync(ct);
         if (!probe.Success)
         {
             return Ok(new { configured = true, success = false, message = probe.Message });

@@ -105,10 +105,10 @@ public class InMemoryRateLimitService : IRateLimitService
         int maxPerDay,
         string operation)
     {
-        var now = DateTime.UtcNow;
-        var normalizedKey = key.ToLowerInvariant();
+        DateTime now = DateTime.UtcNow;
+        string normalizedKey = key.ToLowerInvariant();
 
-        if (!attempts.TryGetValue(normalizedKey, out var attemptList))
+        if (!attempts.TryGetValue(normalizedKey, out List<DateTime>? attemptList))
         {
             return Task.FromResult(new RateLimitResult(true, maxPerHour));
         }
@@ -118,13 +118,13 @@ public class InMemoryRateLimitService : IRateLimitService
             // Remove old attempts (older than 24 hours)
             attemptList.RemoveAll(a => (now - a).TotalHours > 24);
 
-            var attemptsInLastHour = attemptList.Count(a => (now - a).TotalHours < 1);
-            var attemptsInLastDay = attemptList.Count;
+            int attemptsInLastHour = attemptList.Count(a => (now - a).TotalHours < 1);
+            int attemptsInLastDay = attemptList.Count;
 
             if (attemptsInLastHour >= maxPerHour)
             {
-                var oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
-                var retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
+                DateTime oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
+                TimeSpan retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
 
                 _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey} (hourly)", null, new
                 {
@@ -143,8 +143,8 @@ public class InMemoryRateLimitService : IRateLimitService
 
             if (attemptsInLastDay >= maxPerDay)
             {
-                var oldestInDay = attemptList.Min();
-                var retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
+                DateTime oldestInDay = attemptList.Min();
+                TimeSpan retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
 
                 _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey} (daily)", null, new
                 {
@@ -161,7 +161,7 @@ public class InMemoryRateLimitService : IRateLimitService
                     $"Daily limit exceeded. Please try again in {Math.Ceiling(retryAfter.TotalHours)} hours."));
             }
 
-            var remaining = Math.Min(maxPerHour - attemptsInLastHour, maxPerDay - attemptsInLastDay);
+            int remaining = Math.Min(maxPerHour - attemptsInLastHour, maxPerDay - attemptsInLastDay);
             return Task.FromResult(new RateLimitResult(true, remaining));
         }
     }
@@ -173,9 +173,9 @@ public class InMemoryRateLimitService : IRateLimitService
         int maxPerDay,
         string operation)
     {
-        var now = DateTime.UtcNow;
+        DateTime now = DateTime.UtcNow;
 
-        if (!attempts.TryGetValue(key, out var attemptList))
+        if (!attempts.TryGetValue(key, out List<DateTime>? attemptList))
         {
             return Task.FromResult(new RateLimitResult(true, maxPerHour));
         }
@@ -183,31 +183,31 @@ public class InMemoryRateLimitService : IRateLimitService
         lock (attemptList)
         {
             attemptList.RemoveAll(a => (now - a).TotalHours > 24);
-            var attemptsInLastHour = attemptList.Count(a => (now - a).TotalHours < 1);
-            var attemptsInLastDay = attemptList.Count;
+            int attemptsInLastHour = attemptList.Count(a => (now - a).TotalHours < 1);
+            int attemptsInLastDay = attemptList.Count;
 
             if (attemptsInLastHour >= maxPerHour)
             {
-                var oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
-                var retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
+                DateTime oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
+                TimeSpan retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
                 _logger.LogWarning($"{operation} rate limit exceeded for user {key} (hourly)");
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Too many slice jobs this hour. Retry in {Math.Ceiling(retryAfter.TotalMinutes)} minutes."));
             }
             if (attemptsInLastDay >= maxPerDay)
             {
-                var oldestInDay = attemptList.Min();
-                var retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
+                DateTime oldestInDay = attemptList.Min();
+                TimeSpan retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
                 _logger.LogWarning($"{operation} rate limit exceeded for user {key} (daily)");
                 return Task.FromResult(new RateLimitResult(false, 0, retryAfter, $"Daily slice job limit reached. Retry in {Math.Ceiling(retryAfter.TotalHours)} hours."));
             }
-            var remaining = Math.Min(maxPerHour - attemptsInLastHour, maxPerDay - attemptsInLastDay);
+            int remaining = Math.Min(maxPerHour - attemptsInLastHour, maxPerDay - attemptsInLastDay);
             return Task.FromResult(new RateLimitResult(true, remaining));
         }
     }
 
     private void RecordGuidAttempt(Guid key, ConcurrentDictionary<Guid, List<DateTime>> attempts)
     {
-        var now = DateTime.UtcNow;
+        DateTime now = DateTime.UtcNow;
         attempts.AddOrUpdate(
             key,
             _ => [now],
@@ -224,8 +224,8 @@ public class InMemoryRateLimitService : IRateLimitService
 
     private void RecordAttempt(string key, ConcurrentDictionary<string, List<DateTime>> attempts)
     {
-        var normalizedKey = key.ToLowerInvariant();
-        var now = DateTime.UtcNow;
+        string normalizedKey = key.ToLowerInvariant();
+        DateTime now = DateTime.UtcNow;
 
         attempts.AddOrUpdate(
             normalizedKey,
@@ -249,10 +249,10 @@ public class InMemoryRateLimitService : IRateLimitService
         TimeSpan window,
         string operation)
     {
-        var now = DateTime.UtcNow;
-        var normalizedKey = key.ToLowerInvariant();
+        DateTime now = DateTime.UtcNow;
+        string normalizedKey = key.ToLowerInvariant();
 
-        if (!attempts.TryGetValue(normalizedKey, out var attemptList))
+        if (!attempts.TryGetValue(normalizedKey, out List<DateTime>? attemptList))
         {
             return Task.FromResult(new RateLimitResult(true, maxAttempts));
         }
@@ -262,12 +262,12 @@ public class InMemoryRateLimitService : IRateLimitService
             // Remove old attempts (outside the window)
             attemptList.RemoveAll(a => (now - a) > window);
 
-            var attemptsInWindow = attemptList.Count;
+            int attemptsInWindow = attemptList.Count;
 
             if (attemptsInWindow >= maxAttempts)
             {
-                var oldestInWindow = attemptList.Min();
-                var retryAfter = window - (now - oldestInWindow);
+                DateTime oldestInWindow = attemptList.Min();
+                TimeSpan retryAfter = window - (now - oldestInWindow);
 
                 _logger.LogWarning($"{operation} rate limit exceeded for {normalizedKey}", null, new
                 {

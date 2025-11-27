@@ -165,7 +165,7 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// </summary>
     public void RecordJobSubmitted(string slicerType, string? serviceId = null)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType }
         };
@@ -181,7 +181,7 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// </summary>
     public void RecordJobStarted(string slicerType, string serviceId, double queueDurationSeconds)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType },
             { "service_id", serviceId }
@@ -199,7 +199,7 @@ public sealed class SlicerServiceMetrics : IDisposable
         double executionDurationSeconds,
         double totalDurationSeconds)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType },
             { "service_id", serviceId }
@@ -218,7 +218,7 @@ public sealed class SlicerServiceMetrics : IDisposable
         string failureReason,
         double? executionDurationSeconds = null)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType },
             { "failure_reason", failureReason }
@@ -241,7 +241,7 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// </summary>
     public void RecordJobCancelled(string slicerType, string? serviceId = null)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType }
         };
@@ -257,7 +257,7 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// </summary>
     public void RecordServiceRegistration(string slicerType, string serviceId)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType },
             { "service_id", serviceId }
@@ -270,7 +270,7 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// </summary>
     public void RecordServiceDeregistration(string slicerType, string serviceId, string reason)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType },
             { "service_id", serviceId },
@@ -290,7 +290,7 @@ public sealed class SlicerServiceMetrics : IDisposable
         int? freeSlots = null,
         int? totalSlots = null)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType },
             { "service_id", serviceId }
@@ -319,7 +319,7 @@ public sealed class SlicerServiceMetrics : IDisposable
     /// </summary>
     public void RecordApiKeyRotation(string slicerType, string serviceId, bool success, bool isAdminForced = false)
     {
-        var tags = new TagList
+        TagList tags = new TagList
         {
             { "slicer_type", slicerType },
             { "service_id", serviceId },

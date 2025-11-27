@@ -7,6 +7,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Shared = Farm.Web.Shared;
 
@@ -50,7 +51,7 @@ public class FilamentTypeController : ControllerBase
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
-            var list = await _filamentService.GetFilamentTypesAsync(ct);
+            IReadOnlyList<FilamentTypeDto> list = await _filamentService.GetFilamentTypesAsync(ct);
             return Ok(list);
         }
         catch (InvalidOperationException)
@@ -82,7 +83,7 @@ public class FilamentTypeController : ControllerBase
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
-            var presets = await _filamentService.GetFilamentPresetsAsync(ct);
+            FilamentPresetsDto presets = await _filamentService.GetFilamentPresetsAsync(ct);
             return Ok(presets);
         }
         catch (InvalidOperationException)
@@ -113,7 +114,7 @@ public class FilamentTypeController : ControllerBase
     {
         try
         {
-            var created = await _filamentService.CreateFilamentTypeAsync(request, ct);
+            FilamentTypeDto created = await _filamentService.CreateFilamentTypeAsync(request, ct);
             return CreatedAtAction(nameof(GetFilamentTypesAsync), new { id = created.Id }, created);
         }
         catch (ArgumentException ae)
@@ -237,7 +238,7 @@ public class FilamentTypeController : ControllerBase
     {
         try
         {
-            var result = await _filamentService.ImportFromSpoolmanAsync(ct);
+            SpoolmanFilamentImportResult result = await _filamentService.ImportFromSpoolmanAsync(ct);
             return Ok(result);
         }
         catch (InvalidOperationException ie)

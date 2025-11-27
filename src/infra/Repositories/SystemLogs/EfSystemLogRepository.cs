@@ -47,7 +47,7 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
                 query = query.Where(l => l.Metadata != null && EF.Functions.Like(l.Metadata.ToLower(), $"%{lower}%"));
             }
 
-            await foreach (var item in query.OrderByDescending(l => l.Timestamp).AsAsyncEnumerable())
+            await foreach (SystemLog? item in query.OrderByDescending(l => l.Timestamp).AsAsyncEnumerable())
             {
                 yield return item;
             }
@@ -82,7 +82,7 @@ namespace Farm.Infrastructure.Repositories.SystemLogs
                 query = query.Where(l => l.Metadata != null && EF.Functions.Like(l.Metadata.ToLower(), $"%{lower}%"));
             }
 
-            var result = await query.OrderByDescending(l => l.Timestamp).ToListAsync(ct);
+            List<SystemLog> result = await query.OrderByDescending(l => l.Timestamp).ToListAsync(ct);
             return (IReadOnlyList<SystemLog>)result;
         }
 

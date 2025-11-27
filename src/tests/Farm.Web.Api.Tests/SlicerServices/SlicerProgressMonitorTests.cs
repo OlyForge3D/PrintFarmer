@@ -32,7 +32,7 @@ public class SlicerProgressMonitorTests
         public TestProcessHandle(IEnumerable<string> lines, int exitDelayMs = 100)
         {
             _exitDelayMs = exitDelayMs;
-            var bytes = System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines) + '\n');
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines) + '\n');
             _ms = new System.IO.MemoryStream(bytes);
             _sr = new System.IO.StreamReader(_ms);
             _exited = false;
@@ -72,10 +72,10 @@ public class SlicerProgressMonitorTests
     [Fact]
     public async Task MonitorAsync_PrusaParser_EmitsProgressAndCompletion()
     {
-        var lines = new[] { "Progress: 10%", "Layer 50/100", "Exported gcode to out.gcode" };
-        var handle = new TestProcessHandle(lines, exitDelayMs: 200);
-        var notifier = new TestNotifier();
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        string[] lines = new[] { "Progress: 10%", "Layer 50/100", "Exported gcode to out.gcode" };
+        TestProcessHandle handle = new TestProcessHandle(lines, exitDelayMs: 200);
+        TestNotifier notifier = new TestNotifier();
+        CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token);
 
@@ -88,10 +88,10 @@ public class SlicerProgressMonitorTests
     [Fact]
     public async Task MonitorAsync_OrcaParser_ParsesPercentLines()
     {
-        var lines = new[] { "[info] Exporting: 30%", "Saving G-code...", "Saving G-code: 100%" };
-        var handle = new TestProcessHandle(lines, exitDelayMs: 200);
-        var notifier = new TestNotifier();
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        string[] lines = new[] { "[info] Exporting: 30%", "Saving G-code...", "Saving G-code: 100%" };
+        TestProcessHandle handle = new TestProcessHandle(lines, exitDelayMs: 200);
+        TestNotifier notifier = new TestNotifier();
+        CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new OrcaProgressParser(), null, cts.Token);
 
@@ -103,17 +103,17 @@ public class SlicerProgressMonitorTests
     [Fact]
     public async Task MonitorAsync_ParserFailure_InvokesCallbackAndKillsProcess()
     {
-        var lines = new[] { "ERROR: export failed due to permission" };
-        var handle = new TestProcessHandle(lines, exitDelayMs: 50);
-        var notifier = new TestNotifier();
-        var called = false;
+        string[] lines = new[] { "ERROR: export failed due to permission" };
+        TestProcessHandle handle = new TestProcessHandle(lines, exitDelayMs: 50);
+        TestNotifier notifier = new TestNotifier();
+        bool called = false;
         Func<Guid, string, CancellationToken, Task> onFailure = (jobId, msg, ct) =>
         {
             called = true;
             return Task.CompletedTask;
         };
 
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await SlicerProgressMonitor.MonitorAsync(Guid.NewGuid(), handle, notifier, new PrusaProgressParser(), null, cts.Token, null, onFailure);
 
         called.Should().BeTrue();

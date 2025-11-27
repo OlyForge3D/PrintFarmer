@@ -25,7 +25,7 @@ public class TestProcessRunner : IProcessRunner
 
         public TestProcessHandle(IEnumerable<string> lines)
         {
-            var bytes = System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines) + '\n');
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines) + '\n');
             _ms = new System.IO.MemoryStream(bytes);
             _sr = new System.IO.StreamReader(_ms);
             _killed = false;

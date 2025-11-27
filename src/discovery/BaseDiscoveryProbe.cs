@@ -54,7 +54,7 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
                 HttpResponseMessage response = await client.GetAsync(url, cancellationToken);
                 string content = await response.Content.ReadAsStringAsync(cancellationToken);
 
-                var (isValid, confidence, reason) = await ValidateResponseAsync(response, content);
+                (bool isValid, int confidence, string? reason) = await ValidateResponseAsync(response, content);
                 if (!isValid)
                 {
                     continue;
@@ -73,7 +73,7 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
                     // no PTR record or lookup failed
                 }
 
-                var dto = new DiscoveredPrinterDto
+                DiscoveredPrinterDto dto = new DiscoveredPrinterDto
                 {
                     IpAddress = ipAddress,
                     BackendPort = port,

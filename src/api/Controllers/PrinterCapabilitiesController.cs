@@ -28,7 +28,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
     {
         try
         {
-            var list = await _svc.GetAllAsync();
+            IReadOnlyList<PrinterCapabilitiesDto> list = await _svc.GetAllAsync();
             return Ok(list);
         }
         catch (Exception ex)
@@ -49,7 +49,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
     {
         try
         {
-            var cap = await _svc.GetByPrinterIdAsync(printerId);
+            PrinterCapabilitiesDto? cap = await _svc.GetByPrinterIdAsync(printerId);
             if (cap == null)
             {
                 return NotFound($"Capabilities for printer {printerId} not found");
@@ -81,7 +81,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
         }
         try
         {
-            var created = await _svc.CreateAsync(request);
+            PrinterCapabilitiesDto? created = await _svc.CreateAsync(request);
             if (created == null)
             {
                 return NotFound($"Printer with ID {request.PrinterId} not found or capabilities already exist");
@@ -112,7 +112,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
         }
         try
         {
-            var res = await _svc.CreateOrUpdateAsync(printerId, request);
+            PrinterCapabilitiesDto? res = await _svc.CreateOrUpdateAsync(printerId, request);
             if (res == null)
             {
                 return NotFound($"Printer with ID {printerId} not found");
@@ -138,7 +138,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
     {
         try
         {
-            var list = await _svc.GetCompatiblePrintersAsync(gcodeFileId);
+            IReadOnlyList<PrinterDto> list = await _svc.GetCompatiblePrintersAsync(gcodeFileId);
             if (list == null)
             {
                 return NotFound($"G-code file with ID {gcodeFileId} not found");
@@ -164,7 +164,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
     {
         try
         {
-            var deleted = await _svc.DeleteAsync(printerId);
+            bool deleted = await _svc.DeleteAsync(printerId);
             if (!deleted)
             {
                 return NotFound($"Capabilities for printer {printerId} not found");
@@ -191,7 +191,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
     {
         try
         {
-            var (result, isNew) = await _svc.DiscoverAsync(printerId, cancellationToken);
+            (PrinterCapabilitiesDto? result, bool isNew) = await _svc.DiscoverAsync(printerId, cancellationToken);
             if (result == null)
             {
                 return NotFound($"Printer with ID {printerId} not found");
@@ -217,7 +217,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
     {
         try
         {
-            var result = await _svc.ValidateAsync(printerId);
+            CapabilityValidationResult result = await _svc.ValidateAsync(printerId);
             return Ok(result);
         }
         catch (Exception ex)
@@ -238,7 +238,7 @@ public class PrinterCapabilitiesController(Farm.Web.Api.Services.PrinterCapabili
     {
         try
         {
-            var res = await _svc.GetModelDefaultsAsync(printerId);
+            PrinterCapabilitiesDto? res = await _svc.GetModelDefaultsAsync(printerId);
             if (res == null)
             {
                 return NotFound($"No model defaults available for printer {printerId}");

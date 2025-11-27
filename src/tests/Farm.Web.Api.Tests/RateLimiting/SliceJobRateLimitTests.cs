@@ -26,19 +26,19 @@ public class SliceJobRateLimitTests
     [Fact]
     public async Task EnforcesHourlyLimit()
     {
-        var opts = new RateLimitOptions
+        RateLimitOptions opts = new RateLimitOptions
         {
             SliceJobs = new SliceJobRateLimitOptions { MaxAttemptsPerHour = 3, MaxAttemptsPerDay = 10 }
         };
-        var svc = new InMemoryRateLimitService(opts, new StubLogger());
+        InMemoryRateLimitService svc = new InMemoryRateLimitService(opts, new StubLogger());
         Guid userId = Guid.NewGuid();
         for (int i = 0; i < 3; i++)
         {
-            var check = await svc.CheckSliceJobSubmitLimitAsync(userId);
+            RateLimitResult check = await svc.CheckSliceJobSubmitLimitAsync(userId);
             Assert.True(check.IsAllowed);
             await svc.RecordSliceJobSubmitAttemptAsync(userId);
         }
-        var finalCheck = await svc.CheckSliceJobSubmitLimitAsync(userId);
+        RateLimitResult finalCheck = await svc.CheckSliceJobSubmitLimitAsync(userId);
         Assert.False(finalCheck.IsAllowed);
         Assert.NotNull(finalCheck.RetryAfter);
     }
@@ -46,19 +46,19 @@ public class SliceJobRateLimitTests
     [Fact]
     public async Task EnforcesDailyLimit()
     {
-        var opts = new RateLimitOptions
+        RateLimitOptions opts = new RateLimitOptions
         {
             SliceJobs = new SliceJobRateLimitOptions { MaxAttemptsPerHour = 100, MaxAttemptsPerDay = 5 }
         };
-        var svc = new InMemoryRateLimitService(opts, new StubLogger());
+        InMemoryRateLimitService svc = new InMemoryRateLimitService(opts, new StubLogger());
         Guid userId = Guid.NewGuid();
         for (int i = 0; i < 5; i++)
         {
-            var check = await svc.CheckSliceJobSubmitLimitAsync(userId);
+            RateLimitResult check = await svc.CheckSliceJobSubmitLimitAsync(userId);
             Assert.True(check.IsAllowed);
             await svc.RecordSliceJobSubmitAttemptAsync(userId);
         }
-        var finalCheck = await svc.CheckSliceJobSubmitLimitAsync(userId);
+        RateLimitResult finalCheck = await svc.CheckSliceJobSubmitLimitAsync(userId);
         Assert.False(finalCheck.IsAllowed);
     }
 }

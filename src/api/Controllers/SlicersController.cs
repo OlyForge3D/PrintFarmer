@@ -23,7 +23,7 @@ public class SlicersController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> ListAsync()
     {
-        var list = await _service.ListAsync(HttpContext?.RequestAborted ?? CancellationToken.None);
+        IReadOnlyList<SlicerService> list = await _service.ListAsync(HttpContext?.RequestAborted ?? CancellationToken.None);
         return Ok(list);
     }
 
@@ -32,7 +32,7 @@ public class SlicersController : ControllerBase
     [HttpPost("register")]
     public async Task<IActionResult> RegisterAsync([FromBody] Farm.Web.Shared.Contracts.Slicing.RegisterSlicerDto dto)
     {
-        var svc = new SlicerService
+        SlicerService svc = new SlicerService
         {
             Id = Guid.NewGuid(),
             Name = dto.Name ?? "orca-service",
@@ -52,9 +52,9 @@ public class SlicersController : ControllerBase
         // Simple api key generation - rotate or secure later
         svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", "");
 
-        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var (id, apiKey) = await _service.RegisterAsync(dto, ct);
-        var location = $"/api/slicers/{id}";
+        CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        (Guid id, string? apiKey) = await _service.RegisterAsync(dto, ct);
+        string location = $"/api/slicers/{id}";
         return Created(location, new { id, apiKey });
     }
 
@@ -63,7 +63,7 @@ public class SlicersController : ControllerBase
     [RequireSlicerServiceApiKey]
     public async Task<IActionResult> GetAsync(Guid id)
     {
-        var svc = await _service.GetAsync(id, HttpContext?.RequestAborted ?? CancellationToken.None);
+        SlicerService? svc = await _service.GetAsync(id, HttpContext?.RequestAborted ?? CancellationToken.None);
         if (svc == null)
         {
             return NotFound();
@@ -76,8 +76,8 @@ public class SlicersController : ControllerBase
     [RequireSlicerServiceApiKey]
     public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] Farm.Web.Shared.Contracts.Slicing.HeartbeatDto dto)
     {
-        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var ok = await _service.HeartbeatAsync(id, dto, ct);
+        CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        bool ok = await _service.HeartbeatAsync(id, dto, ct);
         return ok ? NoContent() : NotFound();
     }
 
@@ -86,8 +86,8 @@ public class SlicersController : ControllerBase
     [RequireSlicerServiceApiKey]
     public async Task<IActionResult> DeregisterAsync(Guid id)
     {
-        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var ok = await _service.DeregisterAsync(id, ct);
+        CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        bool ok = await _service.DeregisterAsync(id, ct);
         return ok ? NoContent() : NotFound();
     }
 
@@ -95,8 +95,8 @@ public class SlicersController : ControllerBase
     [RequireSlicerServiceApiKey]
     public async Task<IActionResult> RotateApiKeyAsync(Guid id)
     {
-        var ct = HttpContext?.RequestAborted ?? CancellationToken.None;
-        var newApiKey = await _service.RotateApiKeyAsync(id, ct);
+        CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
+        string? newApiKey = await _service.RotateApiKeyAsync(id, ct);
         if (newApiKey == null)
         {
             return NotFound();

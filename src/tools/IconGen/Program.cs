@@ -7,7 +7,7 @@ using Svg.Skia;
 //  [1] => svg source path (optional)
 //  [2] => output directory (optional)
 
-var repoRoot = args.Length > 0 && !string.IsNullOrWhiteSpace(args[0])
+string? repoRoot = args.Length > 0 && !string.IsNullOrWhiteSpace(args[0])
     ? Path.GetFullPath(args[0])
     : FindRepoRoot();
 
@@ -18,7 +18,7 @@ if (repoRoot is null)
 }
 
 // Candidate SVG locations (new React app first, then legacy Blazor client)
-var candidateSvgs = new[]
+string?[] candidateSvgs = new[]
 {
     args.Length > 1 && !string.IsNullOrWhiteSpace(args[1]) ? args[1] : null,
     Path.Combine(repoRoot, "src", "Web", "ReactApp", "public", "printfarmer-logo.svg"),
@@ -26,7 +26,7 @@ var candidateSvgs = new[]
     Path.Combine(repoRoot, "archived", "blazor-client", "client", "wwwroot", "favicon.svg")
 };
 
-var svgPath = candidateSvgs
+string? svgPath = candidateSvgs
     .Where(p => !string.IsNullOrWhiteSpace(p))
     .Select(p => Path.GetFullPath(p!))
     .FirstOrDefault(File.Exists);
@@ -37,13 +37,13 @@ if (svgPath is null)
     return 2;
 }
 
-var outDir = args.Length > 2 && !string.IsNullOrWhiteSpace(args[2])
+string outDir = args.Length > 2 && !string.IsNullOrWhiteSpace(args[2])
     ? Path.GetFullPath(args[2])
     : Path.Combine(repoRoot, "src", "Web", "ReactApp", "public", "icons");
 
 Directory.CreateDirectory(outDir);
 
-var sizes = new (int size, string name)[]
+(int size, string name)[] sizes = new (int size, string name)[]
 {
     (16, "favicon-16x16.png"),
     (32, "favicon-32x32.png"),
@@ -60,41 +60,41 @@ var sizes = new (int size, string name)[]
 Console.WriteLine($"Using SVG: {svgPath}");
 Console.WriteLine($"Output dir: {outDir}");
 
-using var stream = File.OpenRead(svgPath);
-var svg = new SKSvg();
+using FileStream stream = File.OpenRead(svgPath);
+SKSvg svg = new SKSvg();
 svg.Load(stream);
 
-var picture = svg.Picture;
+SKPicture? picture = svg.Picture;
 if (picture == null)
 {
     Console.Error.WriteLine("Failed to load SVG picture.");
     return 3;
 }
 
-foreach (var (size, name) in sizes)
+foreach ((int size, string? name) in sizes)
 {
-    using var bitmap = new SKBitmap(new SKImageInfo(size, size));
-    using var canvas = new SKCanvas(bitmap);
+    using SKBitmap bitmap = new SKBitmap(new SKImageInfo(size, size));
+    using SKCanvas canvas = new SKCanvas(bitmap);
     canvas.Clear(SKColors.Transparent);
 
-    var svgBounds = picture.CullRect;
+    SKRect svgBounds = picture.CullRect;
     // Uniform scale to fit
-    var scale = Math.Min(size / svgBounds.Width, size / svgBounds.Height);
+    float scale = Math.Min(size / svgBounds.Width, size / svgBounds.Height);
     // Centering translation after scale
-    var scaledWidth = svgBounds.Width * scale;
-    var scaledHeight = svgBounds.Height * scale;
-    var offsetX = (size - scaledWidth) / 2f;
-    var offsetY = (size - scaledHeight) / 2f;
+    float scaledWidth = svgBounds.Width * scale;
+    float scaledHeight = svgBounds.Height * scale;
+    float offsetX = (size - scaledWidth) / 2f;
+    float offsetY = (size - scaledHeight) / 2f;
     canvas.Translate(offsetX, offsetY);
     canvas.Scale(scale);
     canvas.Translate(-svgBounds.Left, -svgBounds.Top);
     canvas.DrawPicture(picture);
     canvas.Flush();
 
-    using var image = SKImage.FromBitmap(bitmap);
-    using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-    var outPath = Path.Combine(outDir, name);
-    using var fs = File.Open(outPath, FileMode.Create, FileAccess.Write);
+    using SKImage image = SKImage.FromBitmap(bitmap);
+    using SKData data = image.Encode(SKEncodedImageFormat.Png, 100);
+    string outPath = Path.Combine(outDir, name);
+    using FileStream fs = File.Open(outPath, FileMode.Create, FileAccess.Write);
     data.SaveTo(fs);
     Console.WriteLine($"Wrote {outPath}");
 }
@@ -102,9 +102,9 @@ foreach (var (size, name) in sizes)
 // Convenience copies for common favicon names in public root
 try
 {
-    var publicRoot = Path.Combine(repoRoot, "src", "Web", "ReactApp", "public");
-    var favicon32 = Path.Combine(outDir, "favicon-32x32.png");
-    var favicon16 = Path.Combine(outDir, "favicon-16x16.png");
+    string publicRoot = Path.Combine(repoRoot, "src", "Web", "ReactApp", "public");
+    string favicon32 = Path.Combine(outDir, "favicon-32x32.png");
+    string favicon16 = Path.Combine(outDir, "favicon-16x16.png");
     if (File.Exists(favicon32))
     {
         File.Copy(favicon32, Path.Combine(publicRoot, "favicon.png"), overwrite: true);
@@ -124,10 +124,10 @@ return 0;
 
 static string? FindRepoRoot()
 {
-    var dir = new DirectoryInfo(AppContext.BaseDirectory);
+    DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
     while (dir != null)
     {
-        var solution = Path.Combine(dir.FullName, "farm-web.sln");
+        string solution = Path.Combine(dir.FullName, "farm-web.sln");
         if (File.Exists(solution))
         {
             return dir.FullName;

@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
+using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
@@ -160,7 +161,7 @@ public class GcodeFilesController(
             string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
 
             // Delegate to service - it handles all business logic (sanitization, collision resolution, temp file creation, etc.)
-            var result = chunkedUploadService.InitializeUpload(
+            ChunkedUploadInitResult result = chunkedUploadService.InitializeUpload(
                 userId,
                 req.FileName,
                 req.Size,
@@ -215,7 +216,7 @@ public class GcodeFilesController(
             string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
 
             // Delegate to service - it handles all the validation, quota checking, hashing, and finalization
-            var result = await chunkedUploadService.AppendChunkAsync(uploadId, offset, chunkBytes, userId, quotaService);
+            ChunkedUploadStatus result = await chunkedUploadService.AppendChunkAsync(uploadId, offset, chunkBytes, userId, quotaService);
 
             return Ok(new ChunkStatusResponse(
                 result.UploadId,
@@ -236,7 +237,7 @@ public class GcodeFilesController(
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("paused"))
         {
-            var status = chunkedUploadService.GetOrResumeUpload(uploadId);
+            ChunkedUploadStatus? status = chunkedUploadService.GetOrResumeUpload(uploadId);
             if (status != null)
             {
                 return StatusCode(StatusCodes.Status423Locked, new
@@ -281,7 +282,7 @@ public class GcodeFilesController(
         try
         {
             // Delegate to service - it handles both in-memory and recovery from metadata
-            var status = chunkedUploadService.GetOrResumeUpload(uploadId);
+            ChunkedUploadStatus? status = chunkedUploadService.GetOrResumeUpload(uploadId);
             if (status == null)
             {
                 return NotFound();
@@ -320,7 +321,7 @@ public class GcodeFilesController(
         try
         {
             // Delegate to service
-            var status = chunkedUploadService.PauseUpload(uploadId);
+            ChunkedUploadStatus? status = chunkedUploadService.PauseUpload(uploadId);
             if (status == null)
             {
                 return NotFound();
@@ -354,7 +355,7 @@ public class GcodeFilesController(
         try
         {
             // Delegate to service
-            var status = chunkedUploadService.ResumeUpload(uploadId);
+            ChunkedUploadStatus? status = chunkedUploadService.ResumeUpload(uploadId);
             if (status == null)
             {
                 return NotFound();
@@ -683,7 +684,7 @@ public class GcodeFilesController(
     public async Task<ActionResult<GcodeUploadSettingsResponse>> GetSettingsAsync()
     {
         string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
-        var resp = await gcodeFilesService.GetSettingsAsync(userId, uploadSettings, quotaService, CancellationToken.None);
+        GcodeUploadSettingsResponse resp = await gcodeFilesService.GetSettingsAsync(userId, uploadSettings, quotaService, CancellationToken.None);
         return Ok(resp);
     }
 

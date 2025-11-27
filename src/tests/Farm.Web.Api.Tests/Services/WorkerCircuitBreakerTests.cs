@@ -35,8 +35,8 @@ public class WorkerCircuitBreakerTests
     public async Task RecordJobFailure_OpensCircuit_WhenThresholdExceeded()
     {
         // Arrange
-        var service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
-        var workerId = Guid.NewGuid();
+        WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
+        Guid workerId = Guid.NewGuid();
 
         // Act - record failures up to threshold
         for (int i = 0; i < _settings.FailureThreshold; i++)
@@ -54,8 +54,8 @@ public class WorkerCircuitBreakerTests
     public async Task RecordJobFailure_DoesNotOpenCircuit_BelowThreshold()
     {
         // Arrange
-        var service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
-        var workerId = Guid.NewGuid();
+        WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
+        Guid workerId = Guid.NewGuid();
 
         // Act - record failures below threshold
         for (int i = 0; i < _settings.FailureThreshold - 1; i++)
@@ -72,15 +72,15 @@ public class WorkerCircuitBreakerTests
     public void CheckCircuits_TransitionsToHalfOpen_AfterCooldown()
     {
         // Arrange
-        var shortCooldown = new CircuitBreakerSettings
+        CircuitBreakerSettings shortCooldown = new CircuitBreakerSettings
         {
             FailureThreshold = 2,
             WindowSeconds = 60,
             CooldownSeconds = 1, // 1 second cooldown for test
             SuccessThresholdToClose = 2
         };
-        var service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(shortCooldown));
-        var workerId = Guid.NewGuid();
+        WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(shortCooldown));
+        Guid workerId = Guid.NewGuid();
 
         // Act - open circuit
         for (int i = 0; i < shortCooldown.FailureThreshold; i++)
@@ -105,15 +105,15 @@ public class WorkerCircuitBreakerTests
     public async Task RecordJobSuccess_ClosesCircuit_FromHalfOpen()
     {
         // Arrange
-        var shortCooldown = new CircuitBreakerSettings
+        CircuitBreakerSettings shortCooldown = new CircuitBreakerSettings
         {
             FailureThreshold = 2,
             WindowSeconds = 60,
             CooldownSeconds = 1,
             SuccessThresholdToClose = 2
         };
-        var service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(shortCooldown));
-        var workerId = Guid.NewGuid();
+        WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(shortCooldown));
+        Guid workerId = Guid.NewGuid();
 
         // Open circuit
         for (int i = 0; i < shortCooldown.FailureThreshold; i++)
@@ -141,8 +141,8 @@ public class WorkerCircuitBreakerTests
     public void ResetCircuit_ClearsState()
     {
         // Arrange
-        var service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
-        var workerId = Guid.NewGuid();
+        WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
+        Guid workerId = Guid.NewGuid();
 
         // Open circuit
         for (int i = 0; i < _settings.FailureThreshold; i++)
@@ -164,7 +164,7 @@ public class WorkerCircuitBreakerTests
     public async Task RecordJobFailure_IgnoresEmptyWorkerId()
     {
         // Arrange
-        var service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
+        WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
 
         // Act
         await service.RecordJobFailureAsync(Guid.Empty, _workerRepoMock.Object);

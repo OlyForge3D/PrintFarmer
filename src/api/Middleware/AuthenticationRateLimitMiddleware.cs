@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.RateLimiting;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -25,7 +26,7 @@ public class AuthenticationRateLimitMiddleware
         // integration tests stable in minimal test hosts.
         try
         {
-            var disabled = Environment.GetEnvironmentVariable("TEST_DISABLE_RATE_LIMITER");
+            string? disabled = Environment.GetEnvironmentVariable("TEST_DISABLE_RATE_LIMITER");
             if (!string.IsNullOrEmpty(disabled) && (string.Equals(disabled, "true", StringComparison.OrdinalIgnoreCase) || disabled == "1"))
             {
                 await _next(context);
@@ -36,8 +37,8 @@ public class AuthenticationRateLimitMiddleware
         {
             // If anything goes wrong while checking env, fall back to normal behaviour
         }
-        var path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
-        var method = context.Request.Method.ToUpperInvariant();
+        string path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
+        string method = context.Request.Method.ToUpperInvariant();
 
         // Only apply rate limiting to POST requests on auth endpoints
         if (method != "POST")
@@ -61,7 +62,7 @@ public class AuthenticationRateLimitMiddleware
         string ipAddress = "unknown";
         try
         {
-            if (context.Request.Headers.TryGetValue("X-Forwarded-For", out var headerVal) && !string.IsNullOrEmpty(headerVal))
+            if (context.Request.Headers.TryGetValue("X-Forwarded-For", out StringValues headerVal) && !string.IsNullOrEmpty(headerVal))
             {
                 ipAddress = headerVal.ToString();
             }

@@ -41,43 +41,44 @@ public class ProfilesController : ControllerBase
         {
             _logger.LogInformation("Fetching all OrcaSlicer profiles organized by manufacturer and model hierarchy");
 
-            var machineProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
-            var filamentProfiles = await _profileService.ListAvailableFilamentProfilesAsync(ct);
-            var processProfiles = await _profileService.ListAvailableProcessProfilesAsync(ct);
+            IList<MachineProfileDto> machineProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
+            IList<FilamentProfileDto> filamentProfiles = await _profileService.ListAvailableFilamentProfilesAsync(ct);
+            IList<ProcessProfileDto> processProfiles = await _profileService.ListAvailableProcessProfilesAsync(ct);
 
             // Build the hierarchy organized by manufacturer and model
-            var byHierarchy = new Dictionary<string, ManufacturerProfilesDto>();
+            Dictionary<string, ManufacturerProfilesDto> byHierarchy = new Dictionary<string, ManufacturerProfilesDto>();
 
             // Group machine profiles by manufacturer
-            var machinesByManufacturer = machineProfiles
+            Dictionary<string, List<MachineProfileDto>> machinesByManufacturer = machineProfiles
                 .GroupBy(p => p.Manufacturer ?? "Unknown")
                 .ToDictionary(g => g.Key, g => g.ToList());
 
-            foreach (var (manufacturer, machines) in machinesByManufacturer)
+            foreach ((string? manufacturer, List<MachineProfileDto>? machines) in machinesByManufacturer)
             {
-                var manufacturerProfiles = new ManufacturerProfilesDto { Name = manufacturer };
-                var models = new Dictionary<string, PrinterModelProfilesDto>();
+                ManufacturerProfilesDto manufacturerProfiles = new ManufacturerProfilesDto { Name = manufacturer };
+                Dictionary<string, PrinterModelProfilesDto> models = new Dictionary<string, PrinterModelProfilesDto>();
 
                 // Group machine profiles by model using name matching
                 // Machine profile names are like "Prusa CORE One 0.4 nozzle"
                 // Model identifiers can be extracted from these names
-                var machinesByModelName = new Dictionary<string, List<MachineProfileDto>>();
-                foreach (var machine in machines)
+                Dictionary<string, List<MachineProfileDto>> machinesByModelName = new Dictionary<string, List<MachineProfileDto>>();
+                foreach (MachineProfileDto machine in machines)
                 {
-                    var modelName = ExtractModelName(machine.Name ?? "");
-                    if (!machinesByModelName.ContainsKey(modelName))
+                    string modelName = ExtractModelName(machine.Name ?? "");
+                    if (!machinesByModelName.TryGetValue(modelName, out List<MachineProfileDto>? machineList))
                     {
-                        machinesByModelName[modelName] = new List<MachineProfileDto>();
+                        machineList = new List<MachineProfileDto>();
+                        machinesByModelName[modelName] = machineList;
                     }
 
-                    machinesByModelName[modelName].Add(machine);
+                    machineList.Add(machine);
                 }
 
                 // For each model, collect its machine, filament, and process profiles
-                foreach (var (modelName, modelMachines) in machinesByModelName)
+                foreach ((string? modelName, List<MachineProfileDto>? modelMachines) in machinesByModelName)
                 {
-                    var modelId = GenerateModelId(manufacturer, modelName);
-                    var modelProfiles = new PrinterModelProfilesDto
+                    string modelId = GenerateModelId(manufacturer, modelName);
+                    PrinterModelProfilesDto modelProfiles = new PrinterModelProfilesDto
                     {
                         Name = modelName,
                         ModelId = modelId
@@ -87,7 +88,7 @@ public class ProfilesController : ControllerBase
                     modelProfiles.MachineProfiles = modelMachines.ToList();
 
                     // Find filament and process profiles compatible with any machine in this model
-                    var machineProfileNames = modelMachines.Select(m => m.Name ?? "").ToList();
+                    List<string> machineProfileNames = modelMachines.Select(m => m.Name ?? "").ToList();
 
                     // Filter filament profiles: include if compatible_printers contains any machine in this model
                     modelProfiles.FilamentProfiles = filamentProfiles
@@ -107,7 +108,7 @@ public class ProfilesController : ControllerBase
             }
 
             // Also provide legacy flat structure for backward compatibility
-            var response = new AllProfilesResponseDto
+            AllProfilesResponseDto response = new AllProfilesResponseDto
             {
                 ByHierarchy = byHierarchy,
 
@@ -145,8 +146,8 @@ public class ProfilesController : ControllerBase
     {
         try
         {
-            var profiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
-            var grouped = profiles
+            IList<MachineProfileDto> profiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
+            Dictionary<string, IList<MachineProfileDto>> grouped = profiles
                 .GroupBy(p => p.Manufacturer ?? "Unknown")
                 .ToDictionary(g => g.Key, g => (IList<MachineProfileDto>)g.ToList());
 
@@ -170,8 +171,8 @@ public class ProfilesController : ControllerBase
     {
         try
         {
-            var profiles = await _profileService.ListAvailableFilamentProfilesAsync(ct);
-            var grouped = profiles
+            IList<FilamentProfileDto> profiles = await _profileService.ListAvailableFilamentProfilesAsync(ct);
+            Dictionary<string, IList<FilamentProfileDto>> grouped = profiles
                 .GroupBy(p => p.Manufacturer ?? "Unknown")
                 .ToDictionary(g => g.Key, g => (IList<FilamentProfileDto>)g.ToList());
 
@@ -195,7 +196,7 @@ public class ProfilesController : ControllerBase
     {
         try
         {
-            var profiles = await _profileService.ListAvailableProcessProfilesAsync(ct);
+            IList<ProcessProfileDto> profiles = await _profileService.ListAvailableProcessProfilesAsync(ct);
             return Ok(profiles);
         }
         catch (Exception ex)
@@ -217,11 +218,11 @@ public class ProfilesController : ControllerBase
     {
         try
         {
-            var machineProfiles = (await _profileService.ListAvailableMachineProfilesAsync(ct))
+            List<MachineProfileDto> machineProfiles = (await _profileService.ListAvailableMachineProfilesAsync(ct))
                 .Where(p => (p.Manufacturer ?? "Unknown").Equals(manufacturer, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            var filamentProfiles = (await _profileService.ListAvailableFilamentProfilesAsync(ct))
+            List<FilamentProfileDto> filamentProfiles = (await _profileService.ListAvailableFilamentProfilesAsync(ct))
                 .Where(p => (p.Manufacturer ?? "Unknown").Equals(manufacturer, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
@@ -253,7 +254,7 @@ public class ProfilesController : ControllerBase
     {
         // Machine profile names follow pattern: "{Model} {Variant}" where variant is like "0.4 nozzle"
         // We need to remove nozzle size suffixes
-        var parts = machineName.Split(new[] { " 0." }, StringSplitOptions.None);
+        string[] parts = machineName.Split(new[] { " 0." }, StringSplitOptions.None);
         if (parts.Length > 1)
         {
             return parts[0].Trim();
@@ -267,7 +268,7 @@ public class ProfilesController : ControllerBase
     /// </summary>
     private string GenerateModelId(string manufacturer, string modelName)
     {
-        var modelIdentifier = modelName.Replace(" ", "_");
+        string modelIdentifier = modelName.Replace(" ", "_");
         return $"{manufacturer}_{modelIdentifier}";
     }
 }

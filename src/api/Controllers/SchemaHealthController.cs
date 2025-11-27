@@ -12,7 +12,7 @@ public class SchemaHealthController(ISchemaHealthService health) : ControllerBas
     [HttpGet("ready")]
     public async Task<IActionResult> SchemaReadyAsync(CancellationToken ct)
     {
-        var ready = await _health.IsSchemaReadyAsync(ct);
+        bool ready = await _health.IsSchemaReadyAsync(ct);
         if (ready)
         {
             return Ok(new { ready = true });

@@ -106,16 +106,16 @@ public class FileConsistencyAuditService : BackgroundService
     {
         _logger.LogInformation("Starting file consistency audit");
 
-        using (var scope = _scopeFactory.CreateScope())
+        using (IServiceScope scope = _scopeFactory.CreateScope())
         {
-            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var fileManagementService = scope.ServiceProvider.GetRequiredService<IFileManagementService>();
-            var fileIntegrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
+            AppDbContext dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            IFileManagementService fileManagementService = scope.ServiceProvider.GetRequiredService<IFileManagementService>();
+            IFileIntegrityService fileIntegrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
 
             // Collect results from all audit passes
-            var model3dResults = await AuditModel3DFilesAsync(dbContext, fileManagementService, fileIntegrityService, ct);
-            var gcodeResults = await AuditGcodeFilesAsync(dbContext, fileManagementService, fileIntegrityService, ct);
-            var orphanedResults = await AuditOrphanedFilesAsync(dbContext, ct);
+            AuditResults model3dResults = await AuditModel3DFilesAsync(dbContext, fileManagementService, fileIntegrityService, ct);
+            AuditResults gcodeResults = await AuditGcodeFilesAsync(dbContext, fileManagementService, fileIntegrityService, ct);
+            AuditResults orphanedResults = await AuditOrphanedFilesAsync(dbContext, ct);
 
             // Save audit results to database
             await SaveAuditResultsAsync(dbContext, model3dResults, "Model3D", ct);
@@ -137,7 +137,7 @@ public class FileConsistencyAuditService : BackgroundService
     {
         try
         {
-            var auditEntry = new FileHealthAudit
+            FileHealthAudit auditEntry = new FileHealthAudit
             {
                 Id = Guid.NewGuid(),
                 AuditDate = DateTime.UtcNow,
@@ -180,13 +180,13 @@ public class FileConsistencyAuditService : BackgroundService
     {
         _logger.LogDebug("Auditing Model3D files");
 
-        var models = await dbContext.Models3D
+        List<Model3D> models = await dbContext.Models3D
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var results = new AuditResults { FilesChecked = models.Count };
+        AuditResults results = new AuditResults { FilesChecked = models.Count };
 
-        foreach (var model in models)
+        foreach (Model3D? model in models)
         {
             try
             {
@@ -197,7 +197,7 @@ public class FileConsistencyAuditService : BackgroundService
                     continue;
                 }
 
-                var result = await fileIntegrityService.VerifyIntegrityAsync(
+                FileIntegrityCheckResult result = await fileIntegrityService.VerifyIntegrityAsync(
                     model.FilePath,
                     model.FileHash,
                     model.FileSizeBytes,
@@ -255,13 +255,13 @@ public class FileConsistencyAuditService : BackgroundService
     {
         _logger.LogDebug("Auditing GcodeFile files");
 
-        var gcodeFiles = await dbContext.GcodeFiles
+        List<GcodeFile> gcodeFiles = await dbContext.GcodeFiles
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var results = new AuditResults { FilesChecked = gcodeFiles.Count };
+        AuditResults results = new AuditResults { FilesChecked = gcodeFiles.Count };
 
-        foreach (var gcodeFile in gcodeFiles)
+        foreach (GcodeFile? gcodeFile in gcodeFiles)
         {
             try
             {
@@ -271,7 +271,7 @@ public class FileConsistencyAuditService : BackgroundService
                     continue;
                 }
 
-                var result = await fileIntegrityService.VerifyIntegrityAsync(
+                FileIntegrityCheckResult result = await fileIntegrityService.VerifyIntegrityAsync(
                     gcodeFile.FilePath,
                     gcodeFile.FileHash,
                     gcodeFile.FileSizeBytes,
@@ -314,16 +314,16 @@ public class FileConsistencyAuditService : BackgroundService
     {
         _logger.LogDebug("Auditing for orphaned files");
 
-        var results = new AuditResults();
+        AuditResults results = new AuditResults();
 
-        var dbModelPaths = (await dbContext.Models3D
+        HashSet<string> dbModelPaths = (await dbContext.Models3D
             .AsNoTracking()
             .Select(m => m.FilePath)
             .ToListAsync(ct))
             .Where(p => !string.IsNullOrEmpty(p))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var dbGcodePaths = (await dbContext.GcodeFiles
+        HashSet<string> dbGcodePaths = (await dbContext.GcodeFiles
             .AsNoTracking()
             .Select(g => g.FilePath)
             .ToListAsync(ct))
@@ -335,9 +335,9 @@ public class FileConsistencyAuditService : BackgroundService
         {
             try
             {
-                var diskFiles = Directory.GetFiles(_modelsPath, "*", SearchOption.AllDirectories);
+                string[] diskFiles = Directory.GetFiles(_modelsPath, "*", SearchOption.AllDirectories);
 
-                foreach (var filePath in diskFiles)
+                foreach (string filePath in diskFiles)
                 {
                     // Skip temp files and thumbnails - they're expected to be ephemeral
                     if (filePath.Contains(".tmp") || filePath.Contains("_thumb"))
@@ -364,9 +364,9 @@ public class FileConsistencyAuditService : BackgroundService
         {
             try
             {
-                var diskFiles = Directory.GetFiles(_gcodePath, "*.gcode", SearchOption.AllDirectories);
+                string[] diskFiles = Directory.GetFiles(_gcodePath, "*.gcode", SearchOption.AllDirectories);
 
-                foreach (var filePath in diskFiles)
+                foreach (string filePath in diskFiles)
                 {
                     if (!dbGcodePaths.Contains(filePath))
                     {

@@ -35,9 +35,9 @@ public static class PrinterExpressionParser
 
         try
         {
-            var matchingMachines = new List<string>();
+            List<string> matchingMachines = new List<string>();
 
-            foreach (var machine in availableMachines)
+            foreach (MachineProfileDto machine in availableMachines)
             {
                 if (EvaluateExpression(condition, machine))
                 {
@@ -57,7 +57,7 @@ public static class PrinterExpressionParser
     {
         try
         {
-            var parser = new ExpressionParser(expression, machine);
+            ExpressionParser parser = new ExpressionParser(expression, machine);
             return parser.Parse();
         }
         catch
@@ -85,7 +85,7 @@ public static class PrinterExpressionParser
         public bool Parse()
         {
             SkipWhitespace();
-            var result = ParseOr();
+            bool result = ParseOr();
             SkipWhitespace();
             if (_position < _expression.Length)
             {
@@ -97,13 +97,13 @@ public static class PrinterExpressionParser
 
         private bool ParseOr()
         {
-            var left = ParseAnd();
+            bool left = ParseAnd();
 
             while (PeekKeyword("or"))
             {
                 ConsumeKeyword("or");
                 SkipWhitespace();
-                var right = ParseAnd();
+                bool right = ParseAnd();
                 left = left || right;
             }
 
@@ -112,13 +112,13 @@ public static class PrinterExpressionParser
 
         private bool ParseAnd()
         {
-            var left = ParseComparison();
+            bool left = ParseComparison();
 
             while (PeekKeyword("and"))
             {
                 ConsumeKeyword("and");
                 SkipWhitespace();
-                var right = ParseComparison();
+                bool right = ParseComparison();
                 left = left && right;
             }
 
@@ -130,7 +130,7 @@ public static class PrinterExpressionParser
             SkipWhitespace();
 
             // Parse property with optional index: property or property[index]
-            var (property, index) = ParseProperty();
+            (string? property, int? index) = ParseProperty();
 
             SkipWhitespace();
 
@@ -140,7 +140,7 @@ public static class PrinterExpressionParser
                 Consume('=');
                 Consume('~');
                 SkipWhitespace();
-                var pattern = ParseRegexPattern();
+                string pattern = ParseRegexPattern();
                 return EvaluateRegexMatch(property, pattern);
             }
 
@@ -150,7 +150,7 @@ public static class PrinterExpressionParser
                 Consume('=');
                 Consume('=');
                 SkipWhitespace();
-                var value = ParseValue();
+                string value = ParseValue();
                 return EvaluateEquality(property, index, value);
             }
 
@@ -159,7 +159,7 @@ public static class PrinterExpressionParser
 
         private (string property, int? index) ParseProperty()
         {
-            var property = ReadIdentifier();
+            string property = ReadIdentifier();
             int? index = null;
 
             SkipWhitespace();
@@ -179,7 +179,7 @@ public static class PrinterExpressionParser
         private string ParseRegexPattern()
         {
             Consume('/');
-            var pattern = new StringBuilder();
+            StringBuilder pattern = new StringBuilder();
             while (!Peek("/") && _position < _expression.Length)
             {
                 pattern.Append(_expression[_position++]);
@@ -196,7 +196,7 @@ public static class PrinterExpressionParser
             if (Peek('"'))
             {
                 Consume('"');
-                var value = new StringBuilder();
+                StringBuilder value = new StringBuilder();
                 while (!Peek('"') && _position < _expression.Length)
                 {
                     value.Append(_expression[_position++]);
@@ -206,7 +206,7 @@ public static class PrinterExpressionParser
             }
 
             // Handle unquoted numbers or identifiers
-            var ch = Peek();
+            char? ch = Peek();
             if (ch.HasValue && (char.IsDigit(ch.Value) || (ch == '-' && _position + 1 < _expression.Length && char.IsDigit(_expression[_position + 1]))))
             {
                 return ReadNumber();
@@ -217,7 +217,7 @@ public static class PrinterExpressionParser
 
         private string ReadIdentifier()
         {
-            var id = new StringBuilder();
+            StringBuilder id = new StringBuilder();
             while (_position < _expression.Length && (char.IsLetterOrDigit(_expression[_position]) || _expression[_position] == '_' || _expression[_position] == '.'))
             {
                 id.Append(_expression[_position++]);
@@ -227,7 +227,7 @@ public static class PrinterExpressionParser
 
         private string ReadNumber()
         {
-            var num = new StringBuilder();
+            StringBuilder num = new StringBuilder();
             if (Peek('-'))
             {
                 num.Append(_expression[_position++]);
@@ -271,10 +271,10 @@ public static class PrinterExpressionParser
             }
 
             // Ensure it's a whole word (not part of another identifier)
-            var endPos = _position + keyword.Length;
+            int endPos = _position + keyword.Length;
             if (endPos < _expression.Length)
             {
-                var nextChar = _expression[endPos];
+                char nextChar = _expression[endPos];
                 return !char.IsLetterOrDigit(nextChar) && nextChar != '_';
             }
 
@@ -303,7 +303,7 @@ public static class PrinterExpressionParser
 
         private bool EvaluateRegexMatch(string property, string pattern)
         {
-            var value = GetPropertyValue(property);
+            string? value = GetPropertyValue(property);
             if (value == null)
             {
                 return false;
@@ -321,14 +321,14 @@ public static class PrinterExpressionParser
 
         private bool EvaluateEquality(string property, int? index, string expectedValue)
         {
-            var value = GetPropertyValue(property, index);
+            string? value = GetPropertyValue(property, index);
             if (value == null)
             {
                 return false;
             }
 
             // Numeric comparison with tolerance
-            if (double.TryParse(value, out var numValue) && double.TryParse(expectedValue, out var expectedNum))
+            if (double.TryParse(value, out double numValue) && double.TryParse(expectedValue, out double expectedNum))
             {
                 return Math.Abs(numValue - expectedNum) < 0.0001;
             }
@@ -364,7 +364,7 @@ public static class PrinterExpressionParser
                 }
 
                 // Try settings
-                if (_machine.Settings != null && _machine.Settings.TryGetValue("nozzle_diameter", out var nozzle))
+                if (_machine.Settings != null && _machine.Settings.TryGetValue("nozzle_diameter", out object? nozzle))
                 {
                     if (index == 0 && nozzle != null)
                     {
@@ -384,7 +384,7 @@ public static class PrinterExpressionParser
 
         private static string? ExtractPrinterNotes(MachineProfileDto machine)
         {
-            if (machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out var notes))
+            if (machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out object? notes))
             {
                 return notes?.ToString();
             }
@@ -401,7 +401,7 @@ public static class PrinterExpressionParser
 
             // Look for pattern: space + number + optional decimal + space/end/nozzle
             // e.g., "Prusa MK4S 0.25 nozzle" → "0.25"
-            var match = Regex.Match(machineName, @"\s(\d+\.?\d*)\s*(nozzle|mm)?(\s|$)", RegexOptions.IgnoreCase);
+            Match match = Regex.Match(machineName, @"\s(\d+\.?\d*)\s*(nozzle|mm)?(\s|$)", RegexOptions.IgnoreCase);
             if (match.Success)
             {
                 return match.Groups[1].Value;

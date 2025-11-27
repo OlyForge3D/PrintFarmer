@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Services.Workers;
 
@@ -40,11 +41,11 @@ public sealed class WorkerAuthService : IWorkerAuthService
         {
             return _env.IsEnvironment("Testing");
         }
-        if (!httpContext.Request.Headers.TryGetValue(HeaderName, out var values))
+        if (!httpContext.Request.Headers.TryGetValue(HeaderName, out StringValues values))
         {
             return false;
         }
-        var presented = values.ToString();
+        string presented = values.ToString();
         if (string.IsNullOrWhiteSpace(presented))
         {
             return false;
@@ -55,7 +56,7 @@ public sealed class WorkerAuthService : IWorkerAuthService
             return false;
         }
 
-        var equal = true;
+        bool equal = true;
         for (int i = 0; i < presented.Length; i++)
         {
             equal &= presented[i] == _sharedKey[i];

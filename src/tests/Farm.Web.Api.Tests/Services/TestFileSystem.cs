@@ -32,7 +32,7 @@ namespace Farm.Web.Api.Tests.Services
 
         public void MoveFile(string sourceFileName, string destFileName, bool overwrite = false)
         {
-            if (_files.TryRemove(sourceFileName, out var data))
+            if (_files.TryRemove(sourceFileName, out byte[]? data))
             {
                 if (!overwrite && _files.ContainsKey(destFileName))
                 {
@@ -41,7 +41,7 @@ namespace Farm.Web.Api.Tests.Services
                 _files[destFileName] = data;
 
                 // Move timestamps if they exist
-                if (_times.TryRemove(sourceFileName, out var times))
+                if (_times.TryRemove(sourceFileName, out (DateTime Creation, DateTime LastWrite) times))
                 {
                     _times[destFileName] = times;
                 }
@@ -63,7 +63,7 @@ namespace Farm.Web.Api.Tests.Services
 
         public Stream OpenRead(string path)
         {
-            if (_files.TryGetValue(path, out var data))
+            if (_files.TryGetValue(path, out byte[]? data))
             {
                 return new MemoryStream(data);
             }
@@ -76,7 +76,7 @@ namespace Farm.Web.Api.Tests.Services
 
         public System.Threading.Tasks.Task<byte[]> ReadAllBytesAsync(string path, System.Threading.CancellationToken ct = default)
         {
-            if (_files.TryGetValue(path, out var data))
+            if (_files.TryGetValue(path, out byte[]? data))
             {
                 return System.Threading.Tasks.Task.FromResult(data);
             }
@@ -96,7 +96,7 @@ namespace Farm.Web.Api.Tests.Services
 
         public string ReadAllText(string path)
         {
-            if (_files.TryGetValue(path, out var data))
+            if (_files.TryGetValue(path, out byte[]? data))
             {
                 return Encoding.UTF8.GetString(data);
             }
@@ -105,21 +105,21 @@ namespace Farm.Web.Api.Tests.Services
 
         public string[] GetFiles(string path, string searchPattern, SearchOption option)
         {
-            var prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var matches = _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+            string prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string[] matches = _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
             return matches;
         }
 
         public string[] GetDirectories(string path, string searchPattern, SearchOption option)
         {
-            var prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var dirs = _dirs.Keys.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+            string prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string[] dirs = _dirs.Keys.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
             return dirs;
         }
 
         public bool DirectoryIsEmpty(string path)
         {
-            var prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             return !_files.Keys.Any(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) && !_dirs.Keys.Any(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
         }
 
@@ -127,12 +127,12 @@ namespace Farm.Web.Api.Tests.Services
 
         public FileInfoData GetFileInfo(string path)
         {
-            if (_files.TryGetValue(path, out var data))
+            if (_files.TryGetValue(path, out byte[]? data))
             {
-                var times = _times.GetOrAdd(path, _ => (DateTime.UtcNow, DateTime.UtcNow));
+                (DateTime Creation, DateTime LastWrite) times = _times.GetOrAdd(path, _ => (DateTime.UtcNow, DateTime.UtcNow));
                 return new FileInfoData { Length = data.Length, CreationTimeUtc = times.Creation, LastWriteTimeUtc = times.LastWrite, Extension = Path.GetExtension(path) };
             }
-            var fi = new System.IO.FileInfo(path);
+            FileInfo fi = new System.IO.FileInfo(path);
             return new FileInfoData { Length = fi.Length, CreationTimeUtc = fi.CreationTimeUtc, LastWriteTimeUtc = fi.LastWriteTimeUtc, Extension = fi.Extension };
         }
 
@@ -161,14 +161,14 @@ namespace Farm.Web.Api.Tests.Services
         public void DeleteDirectory(string path)
         {
             // Remove any files under this directory in the in-memory store
-            var prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var keys = _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
-            foreach (var k in keys)
+            string prefix = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string[] keys = _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+            foreach (string? k in keys)
             {
                 _files.TryRemove(k, out _);
             }
-            var dirs = _dirs.Keys.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
-            foreach (var d in dirs)
+            string[] dirs = _dirs.Keys.Where(d => d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+            foreach (string? d in dirs)
             {
                 _dirs.TryRemove(d, out _);
             }

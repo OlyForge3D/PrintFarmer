@@ -1,4 +1,5 @@
 ﻿using System.Threading.Tasks;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using Moq;
@@ -11,15 +12,15 @@ public class MoonrakerDiagnosticsServiceTests
     [Fact]
     public async Task GetFileRootsAsync_ReturnsRoots_WhenClientSucceeds()
     {
-        var mockClient = new Mock<IMoonrakerClient>();
-        var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        Mock<IMoonrakerClient> mockClient = new Mock<IMoonrakerClient>();
+        Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
         mockClient.Setup(c => c.GetFileRootsAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()))
             .ReturnsAsync(new[] { new FileRoot { Path = "/gcodes" } });
 
-        var svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
+        MoonrakerDiagnosticsService svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
 
-        var res = await svc.GetFileRootsAsync("http://example.local");
+        FileRoot[]? res = await svc.GetFileRootsAsync("http://example.local");
 
         Assert.NotNull(res);
         Assert.Single(res!);
@@ -29,15 +30,15 @@ public class MoonrakerDiagnosticsServiceTests
     [Fact]
     public async Task GetFileRootsAsync_ReturnsNull_WhenClientAlwaysThrows()
     {
-        var mockClient = new Mock<IMoonrakerClient>();
-        var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        Mock<IMoonrakerClient> mockClient = new Mock<IMoonrakerClient>();
+        Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
         mockClient.Setup(c => c.GetFileRootsAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()))
             .ThrowsAsync(new System.InvalidOperationException("boom"));
 
-        var svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
+        MoonrakerDiagnosticsService svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
 
-        var res = await svc.GetFileRootsAsync("http://example.local");
+        FileRoot[]? res = await svc.GetFileRootsAsync("http://example.local");
 
         Assert.Null(res);
     }
@@ -45,17 +46,17 @@ public class MoonrakerDiagnosticsServiceTests
     [Fact]
     public async Task GetFileRootsAsync_RetriesUntilSuccess_OnThirdAttempt()
     {
-        var mockClient = new Mock<IMoonrakerClient>();
-        var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        Mock<IMoonrakerClient> mockClient = new Mock<IMoonrakerClient>();
+        Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
         mockClient.SetupSequence(c => c.GetFileRootsAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()))
             .ThrowsAsync(new System.InvalidOperationException("transient1"))
             .ThrowsAsync(new System.InvalidOperationException("transient2"))
             .ReturnsAsync(new[] { new FileRoot { Path = "/gcodes" } });
 
-        var svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
+        MoonrakerDiagnosticsService svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
 
-        var res = await svc.GetFileRootsAsync("http://example.local");
+        FileRoot[]? res = await svc.GetFileRootsAsync("http://example.local");
 
         Assert.NotNull(res);
         Assert.Single(res!);
@@ -64,17 +65,17 @@ public class MoonrakerDiagnosticsServiceTests
     [Fact]
     public async Task GetFileRootsAsync_LogsWarnings_ForEachRetry()
     {
-        var mockClient = new Mock<IMoonrakerClient>();
-        var mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+        Mock<IMoonrakerClient> mockClient = new Mock<IMoonrakerClient>();
+        Mock<IUnifiedLoggingService> mockLogger = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
         mockClient.SetupSequence(c => c.GetFileRootsAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()))
             .ThrowsAsync(new System.InvalidOperationException("transient1"))
             .ThrowsAsync(new System.InvalidOperationException("transient2"))
             .ReturnsAsync(new[] { new FileRoot { Path = "/gcodes" } });
 
-        var svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
+        MoonrakerDiagnosticsService svc = new MoonrakerDiagnosticsService(mockClient.Object, mockLogger.Object);
 
-        var res = await svc.GetFileRootsAsync("http://example.local");
+        FileRoot[]? res = await svc.GetFileRootsAsync("http://example.local");
 
         Assert.NotNull(res);
         // Verify LogWarning called at least twice (once per retry) - match existing overloads

@@ -38,7 +38,7 @@ public class UsersController(
     [HttpGet]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetUsersAsync(CancellationToken ct)
     {
-        var users = await _users.GetUsersAsync(ct);
+        IReadOnlyList<UserDto> users = await _users.GetUsersAsync(ct);
         return Ok(users);
     }
 
@@ -81,7 +81,7 @@ public class UsersController(
         // Check if username or email already exists
         try
         {
-            var createdUser = await _users.CreateUserAsync(request, ct);
+            UserDto createdUser = await _users.CreateUserAsync(request, ct);
             string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
             _logger.LogInformation($"User {currentUserId} created new user {createdUser.Id} ({createdUser.Username})");
             return CreatedAtRoute("GetUserById", new { id = createdUser.Id }, createdUser);
@@ -104,7 +104,7 @@ public class UsersController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var updated = await _users.UpdateUserAsync(id, request, ct);
+        UserDto? updated = await _users.UpdateUserAsync(id, request, ct);
         if (updated is null)
         {
             return NotFound();
@@ -129,7 +129,7 @@ public class UsersController(
             return BadRequest("Cannot delete your own account");
         }
 
-        var deleted = await _users.DeleteUserAsync(id, ct);
+        bool deleted = await _users.DeleteUserAsync(id, ct);
         if (!deleted)
         {
             return NotFound();
@@ -146,7 +146,7 @@ public class UsersController(
     [HttpGet("roles")]
     public async Task<ActionResult<IEnumerable<RoleDto>>> GetRolesAsync(CancellationToken ct)
     {
-        var roles = await _users.GetRolesAsync(ct);
+        IReadOnlyList<RoleDto> roles = await _users.GetRolesAsync(ct);
         return Ok(roles);
     }
 
@@ -165,7 +165,7 @@ public class UsersController(
         [FromQuery] string? email,
         CancellationToken ct)
     {
-        var availability = await _users.CheckAvailabilityAsync(username, email, ct);
+        UserAvailabilityDto availability = await _users.CheckAvailabilityAsync(username, email, ct);
         return Ok(availability);
     }
 
@@ -185,7 +185,7 @@ public class UsersController(
         CancellationToken ct)
     {
         // Get admin user ID from claims
-        var adminUserIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        string? adminUserIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(adminUserIdClaim) || !Guid.TryParse(adminUserIdClaim, out Guid adminUserId))
         {
             _logger.LogWarning("Admin user ID not found in claims");
@@ -200,7 +200,7 @@ public class UsersController(
         }
 
         // Verify user exists
-        var userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
+        bool userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
         if (!userExists)
         {
             return NotFound(new { error = $"User {userId} not found" });
@@ -237,15 +237,15 @@ public class UsersController(
         CancellationToken ct)
     {
         // Verify user exists
-        var userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
+        bool userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
         if (!userExists)
         {
             return NotFound(new { error = $"User {userId} not found" });
         }
 
-        var revokedTokens = await _tokenRevocation.GetUserRevokedTokensAsync(userId);
+        List<RevokedToken> revokedTokens = await _tokenRevocation.GetUserRevokedTokensAsync(userId);
 
-        var dtos = revokedTokens.Select(rt => new RevokedTokenDto
+        IEnumerable<RevokedTokenDto> dtos = revokedTokens.Select(rt => new RevokedTokenDto
         {
             Id = rt.Id,
             RevokedAt = rt.RevokedAt,

@@ -45,7 +45,7 @@ namespace Farm.Web.Api.Controllers
                 return BadRequest("Manufacturer ID and Model ID are required");
             }
 
-            var asset = await _assetService.GetPrinterAssetAsync(manufacturerId, modelId, ct);
+            PrinterAssetDto? asset = await _assetService.GetPrinterAssetAsync(manufacturerId, modelId, ct);
             if (asset == null)
             {
                 _logger.LogInformation("[AssetsController] Asset not found: {ManufacturerId}/{ModelId}", manufacturerId, modelId);
@@ -70,7 +70,7 @@ namespace Farm.Web.Api.Controllers
             string modelId,
             CancellationToken ct = default)
         {
-            var url = await _assetService.GetCoverImageUrlAsync(manufacturerId, modelId, ct);
+            string? url = await _assetService.GetCoverImageUrlAsync(manufacturerId, modelId, ct);
             if (url == null)
             {
                 return NotFound();
@@ -94,7 +94,7 @@ namespace Farm.Web.Api.Controllers
             string modelId,
             CancellationToken ct = default)
         {
-            var url = await _assetService.GetBedTextureUrlAsync(manufacturerId, modelId, ct);
+            string? url = await _assetService.GetBedTextureUrlAsync(manufacturerId, modelId, ct);
             if (url == null)
             {
                 return NotFound();
@@ -113,7 +113,7 @@ namespace Farm.Web.Api.Controllers
         [ProducesResponseType(typeof(AssetManifestDto), 200)]
         public async Task<ActionResult<AssetManifestDto>> GetManifestAsync(CancellationToken ct = default)
         {
-            var manifest = await _assetService.GetManifestAsync(ct);
+            AssetManifestDto? manifest = await _assetService.GetManifestAsync(ct);
             if (manifest == null)
             {
                 // Return response indicating assets are available as static files

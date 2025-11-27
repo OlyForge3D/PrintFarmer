@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Data.Common;
+using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.SchemaHealth;
@@ -16,11 +17,11 @@ public class SchemaHealthRepository : ISchemaHealthRepository
     {
         try
         {
-            var conn = _db.Database.GetDbConnection();
+            DbConnection conn = _db.Database.GetDbConnection();
             await conn.OpenAsync(ct);
-            using var cmd = conn.CreateCommand();
+            using DbCommand cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Printers';";
-            var result = await cmd.ExecuteScalarAsync(ct);
+            object? result = await cmd.ExecuteScalarAsync(ct);
             return result != null && result.ToString() == "Printers";
         }
         catch

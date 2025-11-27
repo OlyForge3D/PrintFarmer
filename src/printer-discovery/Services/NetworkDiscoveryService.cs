@@ -61,15 +61,15 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
             _logger.LogInformation("Starting manual printer discovery scan...");
 
             // Get configured network ranges or auto-detect
-            var subnetsConfig = _config["Discovery:Subnets"] ?? "192.168.0.0/16,10.0.0.0/8";
-            var subnets = subnetsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            var ipAddresses = GenerateIpAddresses(subnets.ToList());
+            string subnetsConfig = _config["Discovery:Subnets"] ?? "192.168.0.0/16,10.0.0.0/8";
+            string[] subnets = subnetsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            List<string> ipAddresses = GenerateIpAddresses(subnets.ToList());
 
             _logger.LogInformation("Scanning {IpCount} IP addresses across {SubnetCount} subnets", ipAddresses.Count, subnets.Length);
 
             // Use the core discovery service to probe all IPs
-            var maxConcurrent = _config.GetValue<int>("Discovery:MaxConcurrentProbes", 50);
-            var discovered = await _coreDiscovery.DiscoverMultipleAsync(
+            int maxConcurrent = _config.GetValue<int>("Discovery:MaxConcurrentProbes", 50);
+            List<DiscoveredPrinterDto> discovered = await _coreDiscovery.DiscoverMultipleAsync(
                 ipAddresses,
                 _probeTimeoutMs,
                 maxConcurrent,
@@ -91,7 +91,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
     /// </summary>
     public async Task RegisterPrintersAsync(IReadOnlyList<DiscoveredPrinterDto> printers, CancellationToken cancellationToken = default)
     {
-        foreach (var printer in printers)
+        foreach (DiscoveredPrinterDto printer in printers)
         {
             try
             {
@@ -120,7 +120,7 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
             try
             {
                 // Scan for printers
-                var discovered = await ScanOnceAsync(cancellationToken);
+                IReadOnlyList<DiscoveredPrinterDto> discovered = await ScanOnceAsync(cancellationToken);
 
                 // Register them
                 await RegisterPrintersAsync(discovered, cancellationToken);
@@ -147,24 +147,24 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
     /// </summary>
     private static List<string> GenerateIpAddresses(List<string> subnets)
     {
-        var ips = new List<string>();
+        List<string> ips = new List<string>();
 
-        foreach (var subnet in subnets)
+        foreach (string subnet in subnets)
         {
             try
             {
-                var parts = subnet.Trim().Split('/');
+                string[] parts = subnet.Trim().Split('/');
                 if (parts.Length != 2)
                 {
                     continue;
                 }
 
-                var network = SubnetParser.Parse(subnet.Trim());
+                SubnetParser network = SubnetParser.Parse(subnet.Trim());
                 // Limit to first 254 addresses to avoid excessive scanning
-                var addressCount = (int)Math.Min(254, network.Total);
+                int addressCount = (int)Math.Min(254, network.Total);
                 for (int i = 1; i < addressCount; i++)
                 {
-                    var ipAddr = network.AddToFirstUsable(i);
+                    IPAddress ipAddr = network.AddToFirstUsable(i);
                     ips.Add(ipAddr.ToString());
                 }
             }
@@ -207,10 +207,10 @@ public class ApiClient : IApiClient
         try
         {
             // Send discovered printer directly to API (single object, not array)
-            var json = System.Text.Json.JsonSerializer.Serialize(printer);
-            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            string json = System.Text.Json.JsonSerializer.Serialize(printer);
+            StringContent content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/api/printers/discovered", content, cancellationToken);
+            HttpResponseMessage response = await _httpClient.PostAsync("/api/printers/discovered", content, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             _logger.LogDebug("Successfully registered printer with API");
@@ -234,18 +234,18 @@ public class SubnetParser
 
     public static SubnetParser Parse(string cidr)
     {
-        var parts = cidr.Split('/');
+        string[] parts = cidr.Split('/');
         if (parts.Length != 2)
         {
             throw new ArgumentException("Invalid CIDR format");
         }
 
-        var ip = IPAddress.Parse(parts[0]);
-        var prefixLength = int.Parse(parts[1]);
+        IPAddress ip = IPAddress.Parse(parts[0]);
+        int prefixLength = int.Parse(parts[1]);
 
-        var ipBytes = ip.GetAddressBytes();
-        var hostBits = 32 - prefixLength;
-        var total = (long)Math.Pow(2, hostBits);
+        byte[] ipBytes = ip.GetAddressBytes();
+        int hostBits = 32 - prefixLength;
+        long total = (long)Math.Pow(2, hostBits);
 
         return new SubnetParser
         {
@@ -256,10 +256,10 @@ public class SubnetParser
 
     public IPAddress AddToFirstUsable(int offset)
     {
-        var bytes = FirstUsable.GetAddressBytes();
-        var value = BitConverter.ToUInt32(new[] { bytes[3], bytes[2], bytes[1], bytes[0] }, 0);
+        byte[] bytes = FirstUsable.GetAddressBytes();
+        uint value = BitConverter.ToUInt32(new[] { bytes[3], bytes[2], bytes[1], bytes[0] }, 0);
         value += (uint)offset;
-        var newBytes = BitConverter.GetBytes(value);
+        byte[] newBytes = BitConverter.GetBytes(value);
         return new IPAddress(new[] { newBytes[3], newBytes[2], newBytes[1], newBytes[0] });
     }
 }

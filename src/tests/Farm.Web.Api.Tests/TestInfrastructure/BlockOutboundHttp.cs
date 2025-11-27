@@ -19,7 +19,7 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
                     return Task.FromException<HttpResponseMessage>(new HttpRequestException("Blocked outbound HTTP: missing RequestUri"));
                 }
 
-                var host = request.RequestUri.Host;
+                string host = request.RequestUri.Host;
                 if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1" || host == "[::1]")
                 {
                     // Allow loopback
@@ -49,8 +49,8 @@ namespace Farm.Web.Api.Tests.TestInfrastructure
             {
                 next(builder);
                 // Prepend the blocking handler to ensure it runs before other handlers
-                var currentPrimary = builder.PrimaryHandler ?? new HttpClientHandler();
-                var blocking = new BlockingOutboundHandler { InnerHandler = currentPrimary };
+                HttpMessageHandler currentPrimary = builder.PrimaryHandler ?? new HttpClientHandler();
+                BlockingOutboundHandler blocking = new BlockingOutboundHandler { InnerHandler = currentPrimary };
                 builder.PrimaryHandler = blocking;
             };
         }

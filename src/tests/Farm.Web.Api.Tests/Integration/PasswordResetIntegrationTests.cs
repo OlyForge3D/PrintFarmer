@@ -24,11 +24,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ForgotPassword_CreatesToken_ForValidEmail()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "resetuser",
@@ -40,22 +40,22 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.Users.Add(user);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act
-        var request = new ForgotPasswordRequest { Email = "reset@test.com" };
-        var response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
+        ForgotPasswordRequest request = new ForgotPasswordRequest { Email = "reset@test.com" };
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await response.Content.ReadFromJsonAsync<ForgotPasswordResponse>();
+        ForgotPasswordResponse? result = await response.Content.ReadFromJsonAsync<ForgotPasswordResponse>();
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
 
         // Verify token was created in database
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var tokens = await verifyContext.PasswordResetTokens
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        List<PasswordResetToken> tokens = await verifyContext.PasswordResetTokens
             .Where(t => t.UserId == user.Id && !t.IsUsed)
             .ToListAsync();
         tokens.Should().HaveCountGreaterThan(0);
@@ -66,15 +66,15 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ForgotPassword_ReturnsSuccess_ForNonExistentEmail()
     {
         // Arrange
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Request reset for non-existent email
-        var request = new ForgotPasswordRequest { Email = "nonexistent@test.com" };
-        var response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
+        ForgotPasswordRequest request = new ForgotPasswordRequest { Email = "nonexistent@test.com" };
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
 
         // Assert - Should return success to prevent email enumeration
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await response.Content.ReadFromJsonAsync<ForgotPasswordResponse>();
+        ForgotPasswordResponse? result = await response.Content.ReadFromJsonAsync<ForgotPasswordResponse>();
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
         result.Message.Should().Contain("If an account with that email exists");
@@ -84,11 +84,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ResetPassword_SucceedsWithValidToken()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "resetvaliduser",
@@ -100,7 +100,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.Users.Add(user);
 
         // Create a valid reset token
-        var resetToken = new PasswordResetToken
+        PasswordResetToken resetToken = new PasswordResetToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
@@ -112,39 +112,39 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.PasswordResetTokens.Add(resetToken);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act
-        var request = new ResetPasswordRequest
+        ResetPasswordRequest request = new ResetPasswordRequest
         {
             Token = "valid-reset-token-12345",
             Email = "resetvalid@test.com",
             NewPassword = "NewSecurePassword123!",
             ConfirmPassword = "NewSecurePassword123!"
         };
-        var response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
+        ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
         result.Should().NotBeNull();
         result!.Success.Should().BeTrue();
 
         // Verify password was changed
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var updatedUser = await verifyContext.Users.FindAsync(user.Id);
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        User? updatedUser = await verifyContext.Users.FindAsync(user.Id);
         updatedUser.Should().NotBeNull();
 
         // Verify old password no longer works
-        var verifyHashing = verifyScope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        IPasswordHashingService verifyHashing = verifyScope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
         verifyHashing.VerifyPassword("OldPassword123!", updatedUser!.PasswordHash).Should().BeFalse();
 
         // Verify new password works
         verifyHashing.VerifyPassword("NewSecurePassword123!", updatedUser.PasswordHash).Should().BeTrue();
 
         // Verify token is marked as used
-        var usedToken = await verifyContext.PasswordResetTokens.FindAsync(resetToken.Id);
+        PasswordResetToken? usedToken = await verifyContext.PasswordResetTokens.FindAsync(resetToken.Id);
         usedToken.Should().NotBeNull();
         usedToken!.IsUsed.Should().BeTrue();
         usedToken.UsedAt.Should().NotBeNull();
@@ -154,11 +154,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ResetPassword_FailsWithExpiredToken()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "expiredtokenuser",
@@ -170,7 +170,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.Users.Add(user);
 
         // Create an expired reset token
-        var resetToken = new PasswordResetToken
+        PasswordResetToken resetToken = new PasswordResetToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
@@ -182,21 +182,21 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.PasswordResetTokens.Add(resetToken);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act
-        var request = new ResetPasswordRequest
+        ResetPasswordRequest request = new ResetPasswordRequest
         {
             Token = "expired-token-12345",
             Email = "expired@test.com",
             NewPassword = "NewPassword123!",
             ConfirmPassword = "NewPassword123!"
         };
-        var response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
+        ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
         result.Message.Should().Contain("Invalid or expired");
@@ -206,11 +206,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ResetPassword_FailsWithUsedToken()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "usedtokenuser",
@@ -222,7 +222,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.Users.Add(user);
 
         // Create a used reset token
-        var resetToken = new PasswordResetToken
+        PasswordResetToken resetToken = new PasswordResetToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
@@ -235,21 +235,21 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.PasswordResetTokens.Add(resetToken);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act
-        var request = new ResetPasswordRequest
+        ResetPasswordRequest request = new ResetPasswordRequest
         {
             Token = "used-token-12345",
             Email = "used@test.com",
             NewPassword = "NewPassword123!",
             ConfirmPassword = "NewPassword123!"
         };
-        var response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
+        ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
     }
@@ -258,11 +258,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ResetPassword_FailsWithInvalidToken()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "invalidtokenuser",
@@ -274,21 +274,21 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.Users.Add(user);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Try with non-existent token
-        var request = new ResetPasswordRequest
+        ResetPasswordRequest request = new ResetPasswordRequest
         {
             Token = "nonexistent-token",
             Email = "invalid@test.com",
             NewPassword = "NewPassword123!",
             ConfirmPassword = "NewPassword123!"
         };
-        var response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
+        ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
     }
@@ -297,11 +297,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ResetPassword_FailsWithMismatchedEmail()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "mismatchuser",
@@ -312,7 +312,7 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         };
         context.Users.Add(user);
 
-        var resetToken = new PasswordResetToken
+        PasswordResetToken resetToken = new PasswordResetToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
@@ -324,21 +324,21 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.PasswordResetTokens.Add(resetToken);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Try with wrong email
-        var request = new ResetPasswordRequest
+        ResetPasswordRequest request = new ResetPasswordRequest
         {
             Token = "valid-token-12345",
             Email = "wrong@test.com", // Different email
             NewPassword = "NewPassword123!",
             ConfirmPassword = "NewPassword123!"
         };
-        var response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
+        ResetPasswordResponse? result = await response.Content.ReadFromJsonAsync<ResetPasswordResponse>();
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
     }
@@ -347,11 +347,11 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
     public async Task ForgotPassword_RespectsRateLimiting()
     {
         // Arrange
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashing = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = new User
+        User user = new User
         {
             Id = Guid.NewGuid(),
             Username = "ratelimituser",
@@ -363,27 +363,27 @@ public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationF
         context.Users.Add(user);
         await context.SaveChangesAsync();
 
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Act - Make multiple rapid requests (default limit is 3 per hour from config)
-        var request = new ForgotPasswordRequest { Email = "ratelimit@test.com" };
+        ForgotPasswordRequest request = new ForgotPasswordRequest { Email = "ratelimit@test.com" };
 
         for (int i = 0; i < 3; i++)
         {
-            var response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
+            HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
             response.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
         // 4th request should still return success (to prevent information leakage)
         // but internally should be rate limited
-        var finalResponse = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
+        HttpResponseMessage finalResponse = await client.PostAsJsonAsync("/api/auth/forgot-password", request);
         finalResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Verify that no new tokens are created beyond rate limit
         // (This is a simplified check - actual behavior depends on rate limit configuration)
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var tokenCount = await verifyContext.PasswordResetTokens
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        int tokenCount = await verifyContext.PasswordResetTokens
             .Where(t => t.UserId == user.Id)
             .CountAsync();
 

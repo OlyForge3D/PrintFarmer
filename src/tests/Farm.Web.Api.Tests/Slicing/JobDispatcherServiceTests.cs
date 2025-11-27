@@ -24,7 +24,7 @@ public class JobDispatcherServiceTests
         public Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs.FindAll(j => j.Status == status));
         public Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
         {
-            var queued = Jobs.FindAll(j => j.Status == SliceJobStatus.Queued);
+            List<SliceJob> queued = Jobs.FindAll(j => j.Status == SliceJobStatus.Queued);
             if (limit.HasValue)
             {
                 queued = queued.GetRange(0, Math.Min(limit.Value, queued.Count));
@@ -34,12 +34,12 @@ public class JobDispatcherServiceTests
         }
         public Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default)
         {
-            var list = Jobs.FindAll(j => j.WorkerId == workerId);
+            List<SliceJob> list = Jobs.FindAll(j => j.WorkerId == workerId);
             return Task.FromResult((IReadOnlyList<SliceJob>)list);
         }
         public Task UpdateStatusAsync(Guid id, string status, string? progressMessage = null, int? progressPercent = null, CancellationToken ct = default)
         {
-            var job = Jobs.Find(j => j.Id == id);
+            SliceJob? job = Jobs.Find(j => j.Id == id);
             if (job != null)
             {
                 job.Status = status;
@@ -47,22 +47,22 @@ public class JobDispatcherServiceTests
 
             return Task.CompletedTask;
         }
-        public Task MarkStartedAsync(Guid id, Guid workerId, CancellationToken ct = default) { var job = Jobs.Find(j => j.Id == id); if (job != null) { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.StartedAt = DateTime.UtcNow; } return Task.CompletedTask; }
+        public Task MarkStartedAsync(Guid id, Guid workerId, CancellationToken ct = default) { SliceJob? job = Jobs.Find(j => j.Id == id); if (job != null) { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.StartedAt = DateTime.UtcNow; } return Task.CompletedTask; }
         public Task MarkCompletedAsync(Guid id, string resultFileUrl, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default) { return Task.CompletedTask; }
         public Task MarkCompletedWithArtifactsAsync(Guid jobId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default) { return Task.CompletedTask; }
         public Task MarkFailedAsync(Guid id, string errorMessage, CancellationToken ct = default) { return Task.CompletedTask; }
         public Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default) { return Task.CompletedTask; }
         public Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
         {
-            var job = Jobs.Find(j => j.Status == SliceJobStatus.Queued);
+            SliceJob? job = Jobs.Find(j => j.Status == SliceJobStatus.Queued);
             if (job != null)
             { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.ClaimedAt = DateTime.UtcNow; job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
             return Task.FromResult(job);
         }
         public Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
         {
-            var now = DateTime.UtcNow;
-            var stuck = Jobs.FindAll(j => j.Status == SliceJobStatus.Processing && (j.LeaseExpiresAt != null && j.LeaseExpiresAt < now));
+            DateTime now = DateTime.UtcNow;
+            List<SliceJob> stuck = Jobs.FindAll(j => j.Status == SliceJobStatus.Processing && (j.LeaseExpiresAt != null && j.LeaseExpiresAt < now));
             if (limit.HasValue)
             {
                 stuck = stuck.GetRange(0, Math.Min(limit.Value, stuck.Count));
@@ -73,7 +73,7 @@ public class JobDispatcherServiceTests
 
         public Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default)
         {
-            var j = Jobs.Find(x => x.Id == jobId);
+            SliceJob? j = Jobs.Find(x => x.Id == jobId);
             if (j != null)
             {
                 j.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds);
@@ -84,7 +84,7 @@ public class JobDispatcherServiceTests
 
         public Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
         {
-            var j = Jobs.Find(x => x.Id == jobId);
+            SliceJob? j = Jobs.Find(x => x.Id == jobId);
             if (j == null)
             {
                 return Task.CompletedTask;
@@ -111,13 +111,13 @@ public class JobDispatcherServiceTests
         // New idempotency methods added to ISliceJobRepository interface
         public Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default)
         {
-            var existing = Jobs.Find(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));
+            SliceJob? existing = Jobs.Find(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(existing);
         }
 
         public Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken ct = default)
         {
-            var exists = Jobs.Exists(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));
+            bool exists = Jobs.Exists(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(exists);
         }
     }
@@ -132,20 +132,20 @@ public class JobDispatcherServiceTests
         public Task<IReadOnlyList<Worker>> GetByStatusAsync(string status, int limit = 100, int offset = 0) => Task.FromResult((IReadOnlyList<Worker>)Workers.FindAll(w => w.Status == status));
         public Task<IReadOnlyList<Worker>> GetAvailableWorkersAsync(int limit = 100)
         {
-            var available = Workers.FindAll(w => w.Status == WorkerStatus.Online && w.FreeSlots > 0 && !w.IsDisabled);
+            List<Worker> available = Workers.FindAll(w => w.Status == WorkerStatus.Online && w.FreeSlots > 0 && !w.IsDisabled);
             return Task.FromResult((IReadOnlyList<Worker>)available);
         }
         public Task<IReadOnlyList<Worker>> GetWorkersByCapabilitiesAsync(string[] requiredCapabilities, int limit = 100)
         {
-            var available = Workers.FindAll(w => w.Status == WorkerStatus.Online && w.FreeSlots > 0 && !w.IsDisabled);
-            var matching = new List<Worker>();
-            foreach (var w in available)
+            List<Worker> available = Workers.FindAll(w => w.Status == WorkerStatus.Online && w.FreeSlots > 0 && !w.IsDisabled);
+            List<Worker> matching = new List<Worker>();
+            foreach (Worker w in available)
             {
                 try
                 {
-                    var caps = JsonSerializer.Deserialize<string[]>(w.CapabilitiesJson) ?? Array.Empty<string>();
+                    string[] caps = JsonSerializer.Deserialize<string[]>(w.CapabilitiesJson) ?? Array.Empty<string>();
                     bool ok = true;
-                    foreach (var req in requiredCapabilities)
+                    foreach (string req in requiredCapabilities)
                     {
                         if (!Array.Exists(caps, c => string.Equals(c, req, StringComparison.OrdinalIgnoreCase)))
                         { ok = false; break; }
@@ -197,16 +197,16 @@ public class JobDispatcherServiceTests
     [Fact]
     public async Task FindBestWorkerForJobAsync_PrefersCapabilityMatch()
     {
-        var jobRepo = new StubSliceJobRepository();
-        var workerRepo = new StubWorkerRepository();
-        var evtService = new StubSliceJobEventService();
-        var logger = new StubLogger();
-        var httpFactory = new DefaultHttpClientFactory();
-        var retryOptions = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
-        var dispatcher = new JobDispatcherService(jobRepo, workerRepo, evtService, logger, httpFactory, retryOptions);
+        StubSliceJobRepository jobRepo = new StubSliceJobRepository();
+        StubWorkerRepository workerRepo = new StubWorkerRepository();
+        StubSliceJobEventService evtService = new StubSliceJobEventService();
+        StubLogger logger = new StubLogger();
+        DefaultHttpClientFactory httpFactory = new DefaultHttpClientFactory();
+        RetryOptions retryOptions = new Farm.Web.Api.Services.JobDispatch.RetryOptions();
+        JobDispatcherService dispatcher = new JobDispatcherService(jobRepo, workerRepo, evtService, logger, httpFactory, retryOptions);
 
         // Workers: one with required capability 'orcaslicer', one without
-        var workerWithCap = new Worker
+        Worker workerWithCap = new Worker
         {
             Id = Guid.NewGuid(),
             Name = "Worker-Orca",
@@ -215,7 +215,7 @@ public class JobDispatcherServiceTests
             TotalSlots = 4,
             CapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer", "gcode-generation" })
         };
-        var workerWithoutCap = new Worker
+        Worker workerWithoutCap = new Worker
         {
             Id = Guid.NewGuid(),
             Name = "Worker-Generic",
@@ -227,14 +227,14 @@ public class JobDispatcherServiceTests
         workerRepo.Workers.Add(workerWithCap);
         workerRepo.Workers.Add(workerWithoutCap);
 
-        var job = new SliceJob
+        SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
             Status = SliceJobStatus.Queued,
             RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer" })
         };
 
-        var selected = await dispatcher.FindBestWorkerForJobAsync(job, CancellationToken.None);
+        Worker? selected = await dispatcher.FindBestWorkerForJobAsync(job, CancellationToken.None);
         Assert.NotNull(selected);
         Assert.Equal(workerWithCap.Id, selected!.Id);
     }
@@ -243,7 +243,7 @@ public class JobDispatcherServiceTests
     public void CapabilityValidation_FailsOnDuplicate()
     {
         string json = "[\"orcaslicer\", \"orcaslicer\"]";
-        var ok = Farm.Web.Api.Controllers.Slicing.SliceJobController.TryValidateCapabilities(json, out var caps, out var error);
+        bool ok = Farm.Web.Api.Controllers.Slicing.SliceJobController.TryValidateCapabilities(json, out string[]? caps, out string? error);
         Assert.False(ok);
         Assert.NotNull(error);
     }

@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Collections;
+using System.Reflection;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -29,12 +31,12 @@ namespace Farm.Infrastructure.Settings
         /// </summary>
         public void InitializeFromEnvironment<T>() where T : class, IAppSetting, new()
         {
-            var settingKey = T.SectionKey;
+            string settingKey = T.SectionKey;
 
             try
             {
                 // Check if settings already exist in database
-                var existingSettings = _settingsService.Get<T>();
+                T existingSettings = _settingsService.Get<T>();
                 if (existingSettings != null && !IsEmpty(existingSettings))
                 {
                     _logger.LogDebug("Settings for {SettingKey} already exist in database, skipping environment initialization", settingKey);
@@ -42,8 +44,8 @@ namespace Farm.Infrastructure.Settings
                 }
 
                 // Try to load from environment variables using PFARM__ prefix
-                var envPrefix = $"PFARM__{settingKey}";
-                var configSection = _configuration.GetSection(envPrefix);
+                string envPrefix = $"PFARM__{settingKey}";
+                IConfigurationSection configSection = _configuration.GetSection(envPrefix);
 
                 if (!configSection.Exists())
                 {
@@ -52,7 +54,7 @@ namespace Farm.Infrastructure.Settings
                 }
 
                 // Bind configuration to new settings instance
-                var newSettings = new T();
+                T newSettings = new T();
                 configSection.Bind(newSettings);
 
                 // Check if we got any non-default values
@@ -82,10 +84,10 @@ namespace Farm.Infrastructure.Settings
                 return true;
             }
 
-            var properties = typeof(T).GetProperties();
-            foreach (var prop in properties)
+            PropertyInfo[] properties = typeof(T).GetProperties();
+            foreach (PropertyInfo prop in properties)
             {
-                var value = prop.GetValue(settings);
+                object? value = prop.GetValue(settings);
 
                 // Check for non-empty strings
                 if (value is string str && !string.IsNullOrWhiteSpace(str))
@@ -96,7 +98,7 @@ namespace Farm.Infrastructure.Settings
                 // Check for non-empty collections
                 if (value is System.Collections.IEnumerable enumerable && value is not string)
                 {
-                    var enumerator = enumerable.GetEnumerator();
+                    IEnumerator enumerator = enumerable.GetEnumerator();
                     if (enumerator.MoveNext())
                     {
                         return false;

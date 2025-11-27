@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using Farm.Web.Shared;
+using Farm.Web.Shared.Contracts.Admin;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;
@@ -32,7 +33,7 @@ public partial class SlicerAdminController : ControllerBase
             }
         }
 
-        var result = new Farm.Web.Shared.Contracts.Admin.DryRunResult();
+        DryRunResult result = new Farm.Web.Shared.Contracts.Admin.DryRunResult();
 
         // Known placeholders we support
         string[] known = new[] { "input", "output", "config", "profile" };

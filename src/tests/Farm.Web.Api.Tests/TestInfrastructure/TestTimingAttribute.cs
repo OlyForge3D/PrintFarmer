@@ -23,7 +23,7 @@ public sealed class TestTimingAttribute : BeforeAfterTestAttribute
         ArgumentNullException.ThrowIfNull(methodUnderTest);
         // Determine if this attribute instance is applied at the method level.
         // methodUnderTest.GetCustomAttributes(..., inherit:false) returns ONLY method-level attributes (not class-level ones).
-        var methodLevelAttrs = methodUnderTest.GetCustomAttributes(typeof(TestTimingAttribute), inherit: false);
+        object[] methodLevelAttrs = methodUnderTest.GetCustomAttributes(typeof(TestTimingAttribute), inherit: false);
         bool isMethodLevel = methodLevelAttrs.Any(a => ReferenceEquals(a, this));
 
         // If this instance is NOT method-level (therefore class-level) AND there exists at least one method-level TestTimingAttribute,
@@ -40,15 +40,15 @@ public sealed class TestTimingAttribute : BeforeAfterTestAttribute
     public override void After(MethodInfo methodUnderTest)
     {
         ArgumentNullException.ThrowIfNull(methodUnderTest);
-        var sw = _sw;
+        Stopwatch? sw = _sw;
         if (sw is null)
         {
             return;
         }
         sw.Stop();
-        var ms = sw.Elapsed.TotalMilliseconds;
-        var cls = methodUnderTest.DeclaringType?.FullName ?? "<unknown>";
-        var method = methodUnderTest.Name;
+        double ms = sw.Elapsed.TotalMilliseconds;
+        string cls = methodUnderTest.DeclaringType?.FullName ?? "<unknown>";
+        string method = methodUnderTest.Name;
         TestTimingLog.Log(_category, cls, method, ms);
     }
 }
@@ -67,14 +67,14 @@ internal static class TestTimingLog
     {
         Console.WriteLine($"[TIMING] {category} {cls}.{method} {ms:F2} ms");
 
-        var enabled = Environment.GetEnvironmentVariable("PF_TIMING");
+        string? enabled = Environment.GetEnvironmentVariable("PF_TIMING");
         if (enabled == "0" || enabled == "false")
         {
             return;
         }
 
         EnsureInitialized();
-        var line = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+        string line = string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"{DateTime.UtcNow:O},{ms:F2},{category},{cls},{method}");
         lock (_lock)
         {
@@ -94,7 +94,7 @@ internal static class TestTimingLog
             {
                 return;
             }
-            var reset = Environment.GetEnvironmentVariable("PF_TIMING_RESET");
+            string? reset = Environment.GetEnvironmentVariable("PF_TIMING_RESET");
             if (reset == "1" || string.Equals(reset, "true", StringComparison.OrdinalIgnoreCase))
             {
                 try

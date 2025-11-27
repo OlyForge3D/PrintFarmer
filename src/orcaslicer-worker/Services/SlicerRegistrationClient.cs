@@ -59,7 +59,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     {
         try
         {
-            var registrationDto = new RegisterSlicerDto
+            RegisterSlicerDto registrationDto = new RegisterSlicerDto
             {
                 Name = _serviceName,
                 SlicerType = 0, // OrcaSlicer enum value
@@ -76,21 +76,21 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 Tags = "orcaslicer,production"
             };
 
-            var json = JsonSerializer.Serialize(registrationDto);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            string json = JsonSerializer.Serialize(registrationDto);
+            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
             // Add API key header if configured
-            var apiKey = _configuration["SlicerRegistry:ApiKey"];
+            string? apiKey = _configuration["SlicerRegistry:ApiKey"];
             if (!string.IsNullOrEmpty(apiKey))
             {
                 _httpClient.DefaultRequestHeaders.Add("X-Slicer-ApiKey", apiKey);
             }
 
-            var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/slicers/register", content, cancellationToken);
+            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/slicers/register", content, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
-                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                string error = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("Failed to register with API: {StatusCode} - {Error}", response.StatusCode, error);
                 _logger.LogError("Registration DTO: {RegistrationData}", json);
                 _logger.LogError("API Base URL: {ApiBaseUrl}, Service Name: {ServiceName}, Host: {ServiceHost}",
@@ -98,8 +98,8 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 throw new InvalidOperationException($"Registration failed: {response.StatusCode} - {error}");
             }
 
-            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
-            var result = JsonSerializer.Deserialize<RegistrationResponse>(responseJson, new JsonSerializerOptions
+            string responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+            RegistrationResponse? result = JsonSerializer.Deserialize<RegistrationResponse>(responseJson, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
@@ -123,23 +123,23 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     {
         try
         {
-            var heartbeatDto = new HeartbeatDto
+            HeartbeatDto heartbeatDto = new HeartbeatDto
             {
                 Status = status,
                 FreeSlots = freeSlots
             };
 
-            var json = JsonSerializer.Serialize(heartbeatDto);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            string json = JsonSerializer.Serialize(heartbeatDto);
+            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
             // Add API key header
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/{serviceId}/heartbeat")
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/{serviceId}/heartbeat")
             {
                 Content = content
             };
             request.Headers.Add("X-Slicer-ApiKey", apiKey);
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -161,10 +161,10 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/{serviceId}/deregister");
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/{serviceId}/deregister");
             request.Headers.Add("X-Slicer-ApiKey", apiKey);
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {

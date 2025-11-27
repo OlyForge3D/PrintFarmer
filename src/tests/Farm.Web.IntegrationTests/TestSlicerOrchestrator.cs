@@ -20,8 +20,8 @@ namespace Farm.Web.IntegrationTests
                 throw new ArgumentException($"Slicer engine {request.SlicerEngine} is not available", nameof(request));
             }
 
-            var jobId = Guid.NewGuid();
-            var response = new SlicingJobResponse
+            Guid jobId = Guid.NewGuid();
+            SlicingJobResponse response = new SlicingJobResponse
             {
                 JobId = jobId,
                 Status = SlicingJobStatus.Queued,
@@ -42,13 +42,13 @@ namespace Farm.Web.IntegrationTests
 
         public Task<SlicingJobStatusResponse?> GetJobStatusAsync(Guid jobId, CancellationToken cancellationToken = default)
         {
-            _jobs.TryGetValue(jobId, out var r);
+            _jobs.TryGetValue(jobId, out SlicingJobStatusResponse? r);
             return Task.FromResult((SlicingJobStatusResponse?)r);
         }
 
         public Task<bool> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default)
         {
-            if (_jobs.TryGetValue(jobId, out var job))
+            if (_jobs.TryGetValue(jobId, out SlicingJobStatusResponse? job))
             {
                 job.Status = SlicingJobStatus.Cancelled;
                 return Task.FromResult(true);
@@ -58,7 +58,7 @@ namespace Farm.Web.IntegrationTests
 
         public Task<List<SlicerEngineInfo>> GetAvailableEnginesAsync(CancellationToken cancellationToken = default)
         {
-            var list = new List<SlicerEngineInfo>
+            List<SlicerEngineInfo> list = new List<SlicerEngineInfo>
             {
                 new SlicerEngineInfo { Engine = SlicerEngineType.OrcaSlicer, IsHealthy = true, Version = "test", SupportedExtensions = new [] { ".stl" } }
             };
@@ -67,7 +67,7 @@ namespace Farm.Web.IntegrationTests
 
         public Task<Dictionary<SlicerEngineType, SlicerQueueStats>> GetAllQueueStatsAsync(CancellationToken cancellationToken = default)
         {
-            var d = new Dictionary<SlicerEngineType, SlicerQueueStats>
+            Dictionary<SlicerEngineType, SlicerQueueStats> d = new Dictionary<SlicerEngineType, SlicerQueueStats>
             {
                 [SlicerEngineType.OrcaSlicer] = new SlicerQueueStats { Engine = SlicerEngineType.OrcaSlicer, QueuedJobs = 0, ActiveWorkers = 0, AverageProcessingTimeSeconds = 0, LastUpdated = DateTime.UtcNow }
             };
@@ -76,7 +76,7 @@ namespace Farm.Web.IntegrationTests
 
         public Task<List<SlicingJobStatusResponse>> GetUserJobsAsync(Guid userId, int? limit = null, CancellationToken cancellationToken = default)
         {
-            var result = _jobs.Values.Where(j => j.Metadata == null || true).Take(limit ?? 50).ToList();
+            List<SlicingJobStatusResponse> result = _jobs.Values.Where(j => j.Metadata == null || true).Take(limit ?? 50).ToList();
             return Task.FromResult(result);
         }
 

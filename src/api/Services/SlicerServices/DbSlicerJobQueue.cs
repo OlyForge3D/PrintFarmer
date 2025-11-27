@@ -29,18 +29,18 @@ namespace Farm.Web.Api.Services.SlicerServices
         {
             ArgumentNullException.ThrowIfNull(job);
 
-            var sj = ToSliceJob(job);
+            SliceJob sj = ToSliceJob(job);
             return _repo.AddAsync(sj, cancellationToken);
         }
 
         public async Task<DistributedSlicingJob?> DequeueAsync(string workerId, SlicerEngineType? preferredEngine = null, CancellationToken cancellationToken = default)
         {
-            if (!Guid.TryParse(workerId, out var wid))
+            if (!Guid.TryParse(workerId, out Guid wid))
             {
                 // WorkerId may be a GUID string in the shared model; try fallback
                 wid = Guid.NewGuid();
             }
-            var job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
+            SliceJob? job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
             if (job == null)
             {
                 return null;
@@ -71,7 +71,7 @@ namespace Farm.Web.Api.Services.SlicerServices
 
         public async Task<DistributedSlicingJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default)
         {
-            var job = await _repo.GetByIdAsync(jobId, cancellationToken);
+            SliceJob? job = await _repo.GetByIdAsync(jobId, cancellationToken);
             return job == null ? null : ToDistributedJob(job);
         }
 
@@ -80,10 +80,10 @@ namespace Farm.Web.Api.Services.SlicerServices
 
         public async Task<SlicerQueueStats> GetQueueStatsAsync(SlicerEngineType? engine = null, CancellationToken cancellationToken = default)
         {
-            var queued = await _repo.GetByStatusAsync(SliceJobStatus.Queued, limit: null, ct: cancellationToken);
-            var processing = await _repo.GetByStatusAsync(SliceJobStatus.Processing, limit: null, ct: cancellationToken);
-            var completed = await _repo.GetByStatusAsync(SliceJobStatus.Completed, limit: null, ct: cancellationToken);
-            var failed = await _repo.GetByStatusAsync(SliceJobStatus.Failed, limit: null, ct: cancellationToken);
+            IReadOnlyList<SliceJob> queued = await _repo.GetByStatusAsync(SliceJobStatus.Queued, limit: null, ct: cancellationToken);
+            IReadOnlyList<SliceJob> processing = await _repo.GetByStatusAsync(SliceJobStatus.Processing, limit: null, ct: cancellationToken);
+            IReadOnlyList<SliceJob> completed = await _repo.GetByStatusAsync(SliceJobStatus.Completed, limit: null, ct: cancellationToken);
+            IReadOnlyList<SliceJob> failed = await _repo.GetByStatusAsync(SliceJobStatus.Failed, limit: null, ct: cancellationToken);
 
             return new SlicerQueueStats
             {
@@ -124,7 +124,7 @@ namespace Farm.Web.Api.Services.SlicerServices
 
         public async Task<DistributedSlicingJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default)
         {
-            var sj = await _repo.FindExistingJobAsync(correlationId, checksum, cancellationToken);
+            SliceJob? sj = await _repo.FindExistingJobAsync(correlationId, checksum, cancellationToken);
             return sj == null ? null : ToDistributedJob(sj);
         }
 
@@ -139,14 +139,14 @@ namespace Farm.Web.Api.Services.SlicerServices
                 return null!;
             }
 
-            var dsj = new DistributedSlicingJob
+            DistributedSlicingJob dsj = new DistributedSlicingJob
             {
                 Id = sj.Id,
                 UserId = sj.UserId,
                 CreatedAt = sj.QueuedAt,
                 Priority = (SlicingJobPriority)sj.Priority,
-                Status = Enum.TryParse<SlicingJobStatus>(sj.Status, true, out var st) ? st : SlicingJobStatus.Queued,
-                ModelFileUrl = Uri.TryCreate(sj.ModelFileUrl, UriKind.RelativeOrAbsolute, out var u) ? u : new Uri("about:blank", UriKind.RelativeOrAbsolute),
+                Status = Enum.TryParse<SlicingJobStatus>(sj.Status, true, out SlicingJobStatus st) ? st : SlicingJobStatus.Queued,
+                ModelFileUrl = Uri.TryCreate(sj.ModelFileUrl, UriKind.RelativeOrAbsolute, out Uri? u) ? u : new Uri("about:blank", UriKind.RelativeOrAbsolute),
                 ModelFileName = sj.ModelFileName,
                 EngineType = (SlicerEngineType)sj.SlicerEngine,
                 SlicerEngine = ((SlicerEngineType)sj.SlicerEngine).ToString(),

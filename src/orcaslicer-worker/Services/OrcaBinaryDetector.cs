@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -25,13 +26,13 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
                 return false;
             }
 
-            var fi = new FileInfo(BinaryPath);
+            FileInfo fi = new FileInfo(BinaryPath);
             if (fi.Length < 2048)
             {
                 return false; // heuristic stub threshold
             }
 
-            using var proc = Process.Start(new ProcessStartInfo
+            using Process? proc = Process.Start(new ProcessStartInfo
             {
                 FileName = BinaryPath,
                 Arguments = "--help",
@@ -70,7 +71,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
                 return null;
             }
 
-            using var proc = Process.Start(new ProcessStartInfo
+            using Process? proc = Process.Start(new ProcessStartInfo
             {
                 FileName = BinaryPath,
                 Arguments = "--version",
@@ -84,7 +85,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
                 return null;
             }
 
-            var tcs = new TaskCompletionSource<bool>();
+            TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
             void OnExited(object? sender, EventArgs e)
             {
                 tcs.TrySetResult(true);
@@ -92,7 +93,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
             proc.EnableRaisingEvents = true;
             proc.Exited += OnExited;
 
-            var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(4000)).ConfigureAwait(false);
+            Task completedTask = await Task.WhenAny(tcs.Task, Task.Delay(4000)).ConfigureAwait(false);
             if (completedTask != tcs.Task)
             {
                 try
@@ -111,7 +112,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
 
             // Parse version from output: typically "OrcaSlicer 1.7.0" or similar
             // Extract the version number pattern (e.g., "1.7.0", "2.0.0")
-            var versionMatch = System.Text.RegularExpressions.Regex.Match(output, @"(\d+\.\d+(?:\.\d+)?)");
+            Match versionMatch = System.Text.RegularExpressions.Regex.Match(output, @"(\d+\.\d+(?:\.\d+)?)");
             return versionMatch.Success ? versionMatch.Groups[1].Value : null;
         }
         catch

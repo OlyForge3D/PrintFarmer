@@ -100,7 +100,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             hasher = algo == "sha1" ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         }
 
-        var state = new InternalUploadState
+        InternalUploadState state = new InternalUploadState
         {
             Id = uploadId,
             UserId = userId,
@@ -149,7 +149,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
 
         ArgumentNullException.ThrowIfNull(quotaService);
 
-        if (!_uploadStates.TryGetValue(uploadId, out var state))
+        if (!_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
             throw new InvalidOperationException($"Upload session '{uploadId}' not found");
         }
@@ -229,7 +229,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
 
         // Check if in memory
-        if (_uploadStates.TryGetValue(uploadId, out var state))
+        if (_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
             return new ChunkedUploadStatus(
                 state.Id,
@@ -246,7 +246,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         {
             // Search for metadata file in temp directories
             // This is a simple implementation - production may need better discovery
-            var rehydrated = RehydrateFromMetadata();
+            InternalUploadState? rehydrated = RehydrateFromMetadata();
             if (rehydrated != null)
             {
                 _uploadStates[uploadId] = rehydrated;
@@ -275,7 +275,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             return null;
         }
 
-        if (!_uploadStates.TryGetValue(uploadId, out var state))
+        if (!_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
             return null;
         }
@@ -313,7 +313,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             return null;
         }
 
-        if (!_uploadStates.TryGetValue(uploadId, out var state))
+        if (!_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
             return null;
         }
@@ -351,7 +351,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             return;
         }
 
-        if (_uploadStates.TryRemove(uploadId, out var state))
+        if (_uploadStates.TryRemove(uploadId, out InternalUploadState? state))
         {
             try
             {

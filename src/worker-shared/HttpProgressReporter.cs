@@ -24,7 +24,7 @@ public class HttpProgressReporter : IProgressReporter
 
     private static StringContent ToJsonContent(object payload)
     {
-        var json = JsonSerializer.Serialize(payload);
+        string json = JsonSerializer.Serialize(payload);
         return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
@@ -33,7 +33,7 @@ public class HttpProgressReporter : IProgressReporter
         try
         {
             var payload = new { JobId = jobId, WorkerId = _workerId, Progress = progress, Message = message, Timestamp = DateTime.UtcNow };
-            var response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", ToJsonContent(payload), cancellationToken);
+            HttpResponseMessage response = await _httpClient.PutAsync($"{_apiBaseUrl}/api/workers/progress", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning($"Progress report failed {jobId} status {response.StatusCode}");
@@ -64,7 +64,7 @@ public class HttpProgressReporter : IProgressReporter
                 CompletedAt = DateTime.UtcNow,
                 Metadata = result.Metadata
             };
-            var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", ToJsonContent(payload), cancellationToken);
+            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning($"Completion report failed {job.Id} status {response.StatusCode}");
@@ -81,7 +81,7 @@ public class HttpProgressReporter : IProgressReporter
         try
         {
             var payload = new { JobId = jobId, WorkerId = _workerId, Status = SlicingJobStatus.Error, ErrorMessage = errorMessage, CompletedAt = DateTime.UtcNow };
-            var response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", ToJsonContent(payload), cancellationToken);
+            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", ToJsonContent(payload), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning($"Failure report failed {jobId} status {response.StatusCode}");

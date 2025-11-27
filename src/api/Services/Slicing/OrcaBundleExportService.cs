@@ -1,5 +1,6 @@
 ﻿namespace Farm.Web.Api.Services.Slicing;
 
+using System.Linq;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -21,7 +22,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
         ArgumentNullException.ThrowIfNull(request);
 
         // Build the bundle structure
-        var bundle = new Dictionary<string, object>();
+        Dictionary<string, object> bundle = new Dictionary<string, object>();
 
         // Add metadata if requested
         if (request.IncludeMetadata)
@@ -36,14 +37,14 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
         }
 
         // Export printer presets
-        var printerPresets = await ExportPrinterPresetsAsync(request.PrinterModelIds);
+        List<Dictionary<string, object>> printerPresets = await ExportPrinterPresetsAsync(request.PrinterModelIds);
         if (printerPresets.Count > 0)
         {
             bundle["printer"] = printerPresets;
         }
 
         // Export filament presets
-        var filamentPresets = await ExportFilamentPresetsAsync(request.FilamentTypeIds);
+        List<Dictionary<string, object>> filamentPresets = await ExportFilamentPresetsAsync(request.FilamentTypeIds);
         if (filamentPresets.Count > 0)
         {
             bundle["filament"] = filamentPresets;
@@ -52,7 +53,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
         // Export process presets if requested
         if (request.IncludeProcessProfiles)
         {
-            var processPresets = await ExportProcessPresetsAsync();
+            List<Dictionary<string, object>> processPresets = await ExportProcessPresetsAsync();
             if (processPresets.Count > 0)
             {
                 bundle["process"] = processPresets;
@@ -60,7 +61,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
         }
 
         // Serialize to JSON with formatting
-        var options = new JsonSerializerOptions
+        JsonSerializerOptions options = new JsonSerializerOptions
         {
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -71,7 +72,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
 
     private async Task<List<Dictionary<string, object>>> ExportPrinterPresetsAsync(IReadOnlyList<Guid>? filterIds)
     {
-        var query = _db.Models
+        IQueryable<PrinterModel> query = _db.Models
             .Include(m => m.Manufacturer)
             .AsNoTracking();
 
@@ -80,12 +81,12 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
             query = query.Where(m => filterIds.Contains(m.Id));
         }
 
-        var models = await query.ToListAsync();
-        var presets = new List<Dictionary<string, object>>();
+        List<PrinterModel> models = await query.ToListAsync();
+        List<Dictionary<string, object>> presets = new List<Dictionary<string, object>>();
 
-        foreach (var model in models)
+        foreach (PrinterModel? model in models)
         {
-            var preset = new Dictionary<string, object>
+            Dictionary<string, object> preset = new Dictionary<string, object>
             {
                 ["name"] = $"{model.Manufacturer?.Name ?? "Unknown"} {model.Name}",
                 ["printer_model"] = model.Name,
@@ -189,19 +190,19 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
 
     private async Task<List<Dictionary<string, object>>> ExportFilamentPresetsAsync(IReadOnlyList<Guid>? filterIds)
     {
-        var query = _db.FilamentTypes.AsNoTracking();
+        IQueryable<FilamentType> query = _db.FilamentTypes.AsNoTracking();
 
         if (filterIds != null && filterIds.Count > 0)
         {
             query = query.Where(f => filterIds.Contains(f.Id));
         }
 
-        var filaments = await query.ToListAsync();
-        var presets = new List<Dictionary<string, object>>();
+        List<FilamentType> filaments = await query.ToListAsync();
+        List<Dictionary<string, object>> presets = new List<Dictionary<string, object>>();
 
-        foreach (var filament in filaments)
+        foreach (FilamentType? filament in filaments)
         {
-            var preset = new Dictionary<string, object>
+            Dictionary<string, object> preset = new Dictionary<string, object>
             {
                 ["name"] = filament.Name,
                 ["filament_type"] = DeriveFilamentType(filament.Name),
@@ -224,7 +225,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
             }
 
             // Material properties based on type
-            var materialType = DeriveFilamentType(filament.Name);
+            string materialType = DeriveFilamentType(filament.Name);
             AddMaterialProperties(preset, materialType);
 
             presets.Add(preset);
@@ -236,13 +237,13 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
     private async Task<List<Dictionary<string, object>>> ExportProcessPresetsAsync()
     {
         // Export ProcessProfile entities as process presets
-        var profiles = await _db.ProcessProfiles
+        List<ProcessProfile> profiles = await _db.ProcessProfiles
             .Include(p => p.PrinterModel)
             .ThenInclude(m => m!.Manufacturer)
             .AsNoTracking()
             .ToListAsync();
 
-        var presets = new List<Dictionary<string, object>>();
+        List<Dictionary<string, object>> presets = new List<Dictionary<string, object>>();
 
         // Add default process presets if no custom profiles exist
         if (profiles.Count == 0)
@@ -251,9 +252,9 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
             return presets;
         }
 
-        foreach (var profile in profiles)
+        foreach (ProcessProfile? profile in profiles)
         {
-            var preset = new Dictionary<string, object>
+            Dictionary<string, object> preset = new Dictionary<string, object>
             {
                 ["name"] = profile.Name,
                 ["from"] = "PrintFarmer",
@@ -288,7 +289,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
             }
 
             // Quality derivation
-            var quality = DeriveQuality(profile.LayerHeight);
+            string? quality = DeriveQuality(profile.LayerHeight);
             if (!string.IsNullOrEmpty(quality))
             {
                 preset["quality"] = quality;
@@ -366,7 +367,7 @@ public class OrcaBundleExportService(AppDbContext db) : IOrcaBundleExportService
 
     private static string DeriveFilamentType(string name)
     {
-        var nameLower = name.ToLowerInvariant();
+        string nameLower = name.ToLowerInvariant();
 
         if (nameLower.Contains("pla"))
         {

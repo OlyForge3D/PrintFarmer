@@ -56,7 +56,7 @@ public class ProfilesController(
         }
         try
         {
-            var (sanitizedRaw, metadataJson, hash) = parsingService.ParseAndPrepare(request.RawJson);
+            (string? sanitizedRaw, string? metadataJson, string? hash) = parsingService.ParseAndPrepare(request.RawJson);
             // Attempt to derive basic fields from metadata
             double layerHeight = 0.2;
             int infillPct = 20;
@@ -66,22 +66,22 @@ public class ProfilesController(
             {
                 using JsonDocument doc = JsonDocument.Parse(metadataJson);
                 JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("layerHeight", out var lh) && lh.TryGetDouble(out double lhVal))
+                if (root.TryGetProperty("layerHeight", out JsonElement lh) && lh.TryGetDouble(out double lhVal))
                 {
                     layerHeight = lhVal;
                 }
 
-                if (root.TryGetProperty("infillPercentage", out var inf) && inf.TryGetInt32(out int infVal))
+                if (root.TryGetProperty("infillPercentage", out JsonElement inf) && inf.TryGetInt32(out int infVal))
                 {
                     infillPct = infVal;
                 }
 
-                if (root.TryGetProperty("filamentMaterial", out var mat) && mat.ValueKind == JsonValueKind.String)
+                if (root.TryGetProperty("filamentMaterial", out JsonElement mat) && mat.ValueKind == JsonValueKind.String)
                 {
                     material = mat.GetString() ?? material;
                 }
 
-                if (root.TryGetProperty("profileType", out var qt) && qt.ValueKind == JsonValueKind.String)
+                if (root.TryGetProperty("profileType", out JsonElement qt) && qt.ValueKind == JsonValueKind.String)
                 {
                     quality = qt.GetString() ?? quality;
                 }
@@ -96,7 +96,7 @@ public class ProfilesController(
                 SlicerType = slicerType,
                 LayerHeight = layerHeight,
                 InfillPercentage = infillPct,
-                Quality = Enum.TryParse<ProfileQuality>(quality, true, out var q) ? q : ProfileQuality.Standard,
+                Quality = Enum.TryParse<ProfileQuality>(quality, true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                 RawJson = sanitizedRaw,
                 MetadataJson = metadataJson,
                 Hash = hash,
@@ -119,7 +119,7 @@ public class ProfilesController(
             try
             {
                 using JsonDocument doc = JsonDocument.Parse(result.MetadataJson ?? "{}");
-                foreach (var prop in doc.RootElement.EnumerateObject())
+                foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
                 {
                     metadataDict[prop.Name] = prop.Value.ValueKind switch
                     {
@@ -181,7 +181,7 @@ public class ProfilesController(
         try
         {
             using JsonDocument doc = JsonDocument.Parse(profile.MetadataJson ?? "{}");
-            foreach (var prop in doc.RootElement.EnumerateObject())
+            foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
             {
                 metadataDict[prop.Name] = prop.Value.ValueKind switch
                 {
@@ -228,13 +228,13 @@ public class ProfilesController(
     [ProducesResponseType(typeof(ExtendedProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListExtendedAsync(CancellationToken ct)
     {
-        var processProfiles = new List<ProcessProfileListItemDto>();
-        var filamentProfiles = new List<FilamentProfileListItemDto>();
-        var machineProfiles = new List<MachineProfileListItemDto>();
+        List<ProcessProfileListItemDto> processProfiles = new List<ProcessProfileListItemDto>();
+        List<FilamentProfileListItemDto> filamentProfiles = new List<FilamentProfileListItemDto>();
+        List<MachineProfileListItemDto> machineProfiles = new List<MachineProfileListItemDto>();
 
         // Get process profiles
-        var processProfileEntities = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        foreach (var p in processProfileEntities)
+        IReadOnlyList<ProcessProfile> processProfileEntities = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        foreach (ProcessProfile p in processProfileEntities)
         {
             processProfiles.Add(new ProcessProfileListItemDto
             {
@@ -252,8 +252,8 @@ public class ProfilesController(
         }
 
         // Get filament profiles
-        var filamentProfileEntities = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        foreach (var p in filamentProfileEntities)
+        IReadOnlyList<FilamentProfile> filamentProfileEntities = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        foreach (FilamentProfile p in filamentProfileEntities)
         {
             filamentProfiles.Add(new FilamentProfileListItemDto
             {
@@ -272,8 +272,8 @@ public class ProfilesController(
         }
 
         // Get machine profiles
-        var machineProfileEntities = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        foreach (var p in machineProfileEntities)
+        IReadOnlyList<MachineProfile> machineProfileEntities = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        foreach (MachineProfile p in machineProfileEntities)
         {
             machineProfiles.Add(new MachineProfileListItemDto
             {
@@ -288,7 +288,7 @@ public class ProfilesController(
             });
         }
 
-        var response = new ExtendedProfilesResponseDto
+        ExtendedProfilesResponseDto response = new ExtendedProfilesResponseDto
         {
             ProcessProfiles = processProfiles,
             FilamentProfiles = filamentProfiles,
@@ -324,7 +324,7 @@ public class ProfilesController(
                 return BadRequest("Invalid quality setting");
             }
             // Map to service request and delegate creation
-            var createReq = new Farm.Web.Shared.CreateProcessProfileDto
+            CreateProcessProfileDto createReq = new Farm.Web.Shared.CreateProcessProfileDto
             {
                 Name = request.Name,
                 Description = request.Description,
@@ -340,7 +340,7 @@ public class ProfilesController(
                 AdvancedSettings = request.AdvancedSettings
             };
 
-            var created = await _profilesService.CreateProfileAsync(createReq, CancellationToken.None);
+            ProcessProfileResponseDto created = await _profilesService.CreateProfileAsync(createReq, CancellationToken.None);
             return Created($"/api/slicer/profiles/{created.Id}", created);
         }
         catch (Exception ex)
@@ -355,7 +355,7 @@ public class ProfilesController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProfileAsync(Guid id)
     {
-        var profile = await _profilesService.GetProfileAsync(id, CancellationToken.None);
+        ProcessProfileResponseDto? profile = await _profilesService.GetProfileAsync(id, CancellationToken.None);
         if (profile == null)
         {
             return NotFound();
@@ -404,7 +404,7 @@ public class ProfilesController(
                 }));
             }
 
-            var list = await _profilesService.GetProfilesAsync(CancellationToken.None);
+            IReadOnlyList<SlicerProfileDto> list = await _profilesService.GetProfilesAsync(CancellationToken.None);
             // Map composite SlicerProfileDto to lightweight view for the client
             IEnumerable<object> mapped = list.Select(p => (object)new
             {
@@ -418,7 +418,7 @@ public class ProfilesController(
                 quality = p.ProcessProfile?.Quality ?? "standard"
             });
 
-            var final = mapped.ToList();
+            List<object> final = mapped.ToList();
             if (final.Count == 0)
             {
                 return Ok(DefaultProfiles().Select(d => (object)new
@@ -547,8 +547,8 @@ public class ProfilesController(
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListSystemOrcaProfilesAsync(CancellationToken ct)
     {
-        var profiles = await _processProfileRepo.GetSystemOrcaProfilesAsync(ct);
-        var dtos = profiles.Select(p => new SlicerProfileListItemDto
+        IReadOnlyList<ProcessProfile> profiles = await _processProfileRepo.GetSystemOrcaProfilesAsync(ct);
+        List<SlicerProfileListItemDto> dtos = profiles.Select(p => new SlicerProfileListItemDto
         {
             Id = p.Id,
             Name = p.Name,
@@ -587,7 +587,7 @@ public class ProfilesController(
         try
         {
             // Get OrcaSlicer worker URL from database registry
-            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
             if (string.IsNullOrEmpty(workerUrl))
             {
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
@@ -597,12 +597,12 @@ public class ProfilesController(
             string? orcaVersion = null;
             try
             {
-                var versionResponse = await httpClient.GetAsync($"{workerUrl}/version", ct);
+                HttpResponseMessage versionResponse = await httpClient.GetAsync($"{workerUrl}/version", ct);
                 if (versionResponse.IsSuccessStatusCode)
                 {
-                    var versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
-                    using var versionDoc = JsonDocument.Parse(versionJson);
-                    if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out var versionElem) && versionElem.ValueKind == JsonValueKind.String)
+                    string versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
+                    using JsonDocument versionDoc = JsonDocument.Parse(versionJson);
+                    if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out JsonElement versionElem) && versionElem.ValueKind == JsonValueKind.String)
                     {
                         orcaVersion = versionElem.GetString();
                     }
@@ -615,7 +615,7 @@ public class ProfilesController(
             }
 
             // Call the OrcaSlicer worker /profiles endpoint to get official profiles
-            var response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -623,16 +623,16 @@ public class ProfilesController(
                 return StatusCode((int)response.StatusCode, "OrcaSlicer worker unavailable or returned an error");
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
+            string json = await response.Content.ReadAsStringAsync(ct);
             _logger.LogInformation($"Raw OrcaSlicer worker /profiles response: {json[..Math.Min(1000, json.Length)]}");
 
             // Deserialize the new AllProfilesResponseDto with three profile types grouped by manufacturer
-            var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             // Flatten the grouped profiles for importing
-            var totalProcessCount = allProfiles?.ProcessProfiles?.Values.Sum(list => list.Count) ?? 0;
-            var totalFilamentCount = allProfiles?.FilamentProfiles?.Values.Sum(list => list.Count) ?? 0;
-            var totalMachineCount = allProfiles?.MachineProfiles?.Values.Sum(list => list.Count) ?? 0;
+            int totalProcessCount = allProfiles?.ProcessProfiles?.Values.Sum(list => list.Count) ?? 0;
+            int totalFilamentCount = allProfiles?.FilamentProfiles?.Values.Sum(list => list.Count) ?? 0;
+            int totalMachineCount = allProfiles?.MachineProfiles?.Values.Sum(list => list.Count) ?? 0;
 
             _logger.LogInformation($"Deserialized {totalProcessCount} process + {totalFilamentCount} filament + {totalMachineCount} machine profiles from worker");
 
@@ -645,34 +645,34 @@ public class ProfilesController(
             int skipped = 0;
 
             // Flatten all profiles from the grouped dictionaries
-            var processProfiles = (allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<ProcessProfileDto>()).ToList();
-            var filamentProfiles = (allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<FilamentProfileDto>()).ToList();
-            var machineProfiles = (allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<MachineProfileDto>()).ToList();
+            List<ProcessProfileDto> processProfiles = (allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<ProcessProfileDto>()).ToList();
+            List<FilamentProfileDto> filamentProfiles = (allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<FilamentProfileDto>()).ToList();
+            List<MachineProfileDto> machineProfiles = (allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<MachineProfileDto>()).ToList();
 
             _logger.LogInformation($"Seeding {processProfiles.Count} process, {filamentProfiles.Count} filament, {machineProfiles.Count} machine profiles");
 
             // Import process profiles
-            foreach (var profile in processProfiles)
+            foreach (ProcessProfileDto profile in processProfiles)
             {
                 try
                 {
-                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    var profileHash = ComputeSha256Hash(profileJson);
+                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    string profileHash = ComputeSha256Hash(profileJson);
 
-                    var existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
+                    ProcessProfile? existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
                     if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
                     {
                         skipped++;
                         continue;
                     }
 
-                    var systemProfile = new ProcessProfile
+                    ProcessProfile systemProfile = new ProcessProfile
                     {
                         Id = Guid.NewGuid(),
                         Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
                         Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
                         SlicerType = SlicerType.OrcaSlicer,
-                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out var q) ? q : ProfileQuality.Standard,
+                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                         LayerHeight = profile.LayerHeight,
                         InfillPercentage = profile.InfillPercentage,
                         PrintSpeed = profile.PrintSpeed,
@@ -699,21 +699,21 @@ public class ProfilesController(
 
             // Import filament profiles
             int filamentImported = 0;
-            foreach (var profile in filamentProfiles)
+            foreach (FilamentProfileDto profile in filamentProfiles)
             {
                 try
                 {
-                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    var profileHash = ComputeSha256Hash(profileJson);
+                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    string profileHash = ComputeSha256Hash(profileJson);
 
-                    var existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
+                    FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
                     if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
                     {
                         skipped++;
                         continue;
                     }
 
-                    var systemProfile = new FilamentProfile
+                    FilamentProfile systemProfile = new FilamentProfile
                     {
                         Id = Guid.NewGuid(),
                         Name = profile.Name ?? $"{profile.Material}",
@@ -743,21 +743,21 @@ public class ProfilesController(
 
             // Import machine profiles
             int machineImported = 0;
-            foreach (var profile in machineProfiles)
+            foreach (MachineProfileDto profile in machineProfiles)
             {
                 try
                 {
-                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    var profileHash = ComputeSha256Hash(profileJson);
+                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    string profileHash = ComputeSha256Hash(profileJson);
 
-                    var existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
+                    MachineProfile? existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
                     if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
                     {
                         skipped++;
                         continue;
                     }
 
-                    var systemProfile = new MachineProfile
+                    MachineProfile systemProfile = new MachineProfile
                     {
                         Id = Guid.NewGuid(),
                         Name = profile.Name ?? string.Empty,
@@ -838,8 +838,8 @@ public class ProfilesController(
             }
 
             // Get all printers in the system and extract unique nozzle sizes
-            var allPrinters = await _printersRepo.GetAllAsync(ct);
-            var systemNozzleSizes = allPrinters
+            List<Printer> allPrinters = await _printersRepo.GetAllAsync(ct);
+            HashSet<double> systemNozzleSizes = allPrinters
                 .Where(p => p.Model?.DefaultNozzleDiameter.HasValue ?? false)
                 .Select(p => p.Model!.DefaultNozzleDiameter!.Value)
                 .Distinct()
@@ -848,7 +848,7 @@ public class ProfilesController(
             _logger.LogInformation($"System has {allPrinters.Count} printers with {systemNozzleSizes.Count} unique nozzle sizes: {string.Join(", ", systemNozzleSizes.OrderBy(x => x).Select(x => $"{x}mm"))}");
 
             // Get OrcaSlicer worker URL from database registry
-            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
             if (string.IsNullOrEmpty(workerUrl))
             {
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
@@ -858,12 +858,12 @@ public class ProfilesController(
             string? orcaVersion = null;
             try
             {
-                var versionResponse = await httpClient.GetAsync($"{workerUrl}/version", ct);
+                HttpResponseMessage versionResponse = await httpClient.GetAsync($"{workerUrl}/version", ct);
                 if (versionResponse.IsSuccessStatusCode)
                 {
-                    var versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
-                    using var versionDoc = JsonDocument.Parse(versionJson);
-                    if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out var versionElem) && versionElem.ValueKind == JsonValueKind.String)
+                    string versionJson = await versionResponse.Content.ReadAsStringAsync(ct);
+                    using JsonDocument versionDoc = JsonDocument.Parse(versionJson);
+                    if (versionDoc.RootElement.TryGetProperty("orcaslicerVersion", out JsonElement versionElem) && versionElem.ValueKind == JsonValueKind.String)
                     {
                         orcaVersion = versionElem.GetString();
                     }
@@ -876,20 +876,20 @@ public class ProfilesController(
             }
 
             // Call the OrcaSlicer worker /profiles endpoint to get official profiles
-            var response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode} from {workerUrl}/profiles");
-                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                string errorContent = await response.Content.ReadAsStringAsync(ct);
                 return StatusCode((int)response.StatusCode, $"OrcaSlicer worker unavailable or returned an error: {errorContent}");
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
+            string json = await response.Content.ReadAsStringAsync(ct);
             _logger.LogInformation($"Raw OrcaSlicer worker /profiles response (force-reseed): {json[..Math.Min(1000, json.Length)]}");
 
             // Deserialize the new AllProfilesResponseDto with three profile types
-            var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             _logger.LogInformation($"Deserialized {allProfiles?.ProcessProfiles?.Count ?? 0} process + {allProfiles?.FilamentProfiles?.Count ?? 0} filament + {allProfiles?.MachineProfiles?.Count ?? 0} machine profiles from worker response (force-reseed)");
 
             if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
@@ -902,12 +902,12 @@ public class ProfilesController(
             int skipped = 0;
 
             // Import machine profiles - only those matching system nozzle sizes
-            var flattenedMachineProfiles = allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<MachineProfileDto>();
+            List<MachineProfileDto> flattenedMachineProfiles = allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<MachineProfileDto>();
             _logger.LogInformation($"Force-reseeding machine profiles: checking {flattenedMachineProfiles.Count} profiles against {systemNozzleSizes.Count} system nozzle sizes");
             int machineImported = 0;
-            var importedMachineNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> importedMachineNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var profile in flattenedMachineProfiles)
+            foreach (MachineProfileDto? profile in flattenedMachineProfiles)
             {
                 try
                 {
@@ -919,10 +919,10 @@ public class ProfilesController(
                         continue;
                     }
 
-                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    var profileHash = ComputeSha256Hash(profileJson);
+                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    string profileHash = ComputeSha256Hash(profileJson);
 
-                    var systemProfile = new MachineProfile
+                    MachineProfile systemProfile = new MachineProfile
                     {
                         Id = Guid.NewGuid(),
                         Name = profile.Name ?? string.Empty,
@@ -951,23 +951,23 @@ public class ProfilesController(
             }
 
             // Import all process profiles (they're not machine-specific in OrcaSlicer)
-            var flattenedProcessProfiles = allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
+            List<ProcessProfileDto> flattenedProcessProfiles = allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
             _logger.LogInformation($"Force-reseeding {flattenedProcessProfiles.Count} process profiles");
             int processImported = 0;
-            foreach (var profile in flattenedProcessProfiles)
+            foreach (ProcessProfileDto? profile in flattenedProcessProfiles)
             {
                 try
                 {
-                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    var profileHash = ComputeSha256Hash(profileJson);
+                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    string profileHash = ComputeSha256Hash(profileJson);
 
-                    var systemProfile = new ProcessProfile
+                    ProcessProfile systemProfile = new ProcessProfile
                     {
                         Id = Guid.NewGuid(),
                         Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
                         Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
                         SlicerType = SlicerType.OrcaSlicer,
-                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out var q) ? q : ProfileQuality.Standard,
+                        Quality = Enum.TryParse<ProfileQuality>(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                         LayerHeight = profile.LayerHeight,
                         InfillPercentage = profile.InfillPercentage,
                         PrintSpeed = profile.PrintSpeed,
@@ -994,17 +994,17 @@ public class ProfilesController(
             }
 
             // Import all filament profiles (they're not machine-specific in OrcaSlicer)
-            var flattenedFilamentProfiles = allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
+            List<FilamentProfileDto> flattenedFilamentProfiles = allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
             _logger.LogInformation($"Force-reseeding {flattenedFilamentProfiles.Count} filament profiles");
             int filamentImported = 0;
-            foreach (var profile in flattenedFilamentProfiles)
+            foreach (FilamentProfileDto? profile in flattenedFilamentProfiles)
             {
                 try
                 {
-                    var profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    var profileHash = ComputeSha256Hash(profileJson);
+                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                    string profileHash = ComputeSha256Hash(profileJson);
 
-                    var systemProfile = new FilamentProfile
+                    FilamentProfile systemProfile = new FilamentProfile
                     {
                         Id = Guid.NewGuid(),
                         Name = profile.Name ?? $"{profile.Material}",
@@ -1080,12 +1080,12 @@ public class ProfilesController(
         try
         {
             // Get OrcaSlicer worker URL from database registry
-            var workerUrl = await GetOrcaSlicerWorkerUrlAsync(ct);
+            string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
             if (string.IsNullOrEmpty(workerUrl))
             {
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
             }
-            var response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1093,12 +1093,12 @@ public class ProfilesController(
                 return StatusCode((int)response.StatusCode, "OrcaSlicer worker unavailable or returned an error");
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
+            string json = await response.Content.ReadAsStringAsync(ct);
             // Deserialize the new AllProfilesResponseDto with three profile types
-            var allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             // Return only process profiles for backward compatibility - flatten from grouped dictionary
-            var flattenedProcessProfiles = allProfiles?.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
+            List<ProcessProfileDto> flattenedProcessProfiles = allProfiles?.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
             return Ok(flattenedProcessProfiles);
         }
         catch (HttpRequestException ex)
@@ -1131,17 +1131,17 @@ public class ProfilesController(
         CancellationToken ct)
     {
         // Verify printer exists using repository
-        var printer = await _printersRepo.FindByIdAsync(printerId, ct);
+        Printer? printer = await _printersRepo.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");
         }
 
         // Get all system OrcaSlicer profiles using repository
-        var profiles = await _processProfileRepo.GetSystemOrcaProfilesAsync(ct);
+        IReadOnlyList<ProcessProfile> profiles = await _processProfileRepo.GetSystemOrcaProfilesAsync(ct);
 
         // Convert to DTOs
-        var dtos = profiles.Select(p => new SlicerProfileListItemDto
+        List<SlicerProfileListItemDto> dtos = profiles.Select(p => new SlicerProfileListItemDto
         {
             Id = p.Id,
             Name = p.Name,
@@ -1177,15 +1177,15 @@ public class ProfilesController(
         }
 
         // Verify printer exists using repository
-        var printer = await _printersRepo.FindByIdAsync(printerId, ct);
+        Printer? printer = await _printersRepo.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");
         }
 
         // Get the profiles to import - fetch system profiles by ID
-        var allSystemProfiles = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        var profilesToImport = allSystemProfiles
+        IReadOnlyList<ProcessProfile> allSystemProfiles = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        List<ProcessProfile> profilesToImport = allSystemProfiles
             .Where(p => p.IsSystem && request.ProfileIds.Contains(p.Id))
             .ToList();
 
@@ -1198,12 +1198,12 @@ public class ProfilesController(
         int imported = 0;
         int duplicated = 0;
 
-        foreach (var systemProfile in profilesToImport)
+        foreach (ProcessProfile systemProfile in profilesToImport)
         {
             try
             {
                 // Create a user-owned copy of the system profile
-                var userProfile = new ProcessProfile
+                ProcessProfile userProfile = new ProcessProfile
                 {
                     Id = Guid.NewGuid(),
                     Name = systemProfile.Name,
@@ -1271,7 +1271,7 @@ public class ProfilesController(
         }
 
         // Verify printer exists using repository
-        var printer = await _printersRepo.FindByIdAsync(printerId, ct);
+        Printer? printer = await _printersRepo.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");
@@ -1281,13 +1281,13 @@ public class ProfilesController(
         int duplicated = 0;
 
         // Import each profile from the worker
-        foreach (var workerProfile in request.Profiles)
+        foreach (SlicerProfileDto workerProfile in request.Profiles)
         {
             try
             {
                 // Extract properties from composite SlicerProfileDto
-                var processProfile = workerProfile.ProcessProfile;
-                var filamentProfile = workerProfile.FilamentProfile;
+                ProcessProfileDto? processProfile = workerProfile.ProcessProfile;
+                FilamentProfileDto? filamentProfile = workerProfile.FilamentProfile;
 
                 // Skip if we don't have essential profile data
                 if (processProfile == null)
@@ -1297,15 +1297,15 @@ public class ProfilesController(
                 }
 
                 // Generate a hash for deduplication using process profile properties
-                var layerHeight = processProfile.LayerHeight.ToString();
-                var infill = processProfile.InfillPercentage.ToString();
-                var material = filamentProfile?.Material ?? "Unknown";
-                var quality = processProfile.Quality ?? "Standard";
+                string layerHeight = processProfile.LayerHeight.ToString();
+                string infill = processProfile.InfillPercentage.ToString();
+                string material = filamentProfile?.Material ?? "Unknown";
+                string quality = processProfile.Quality ?? "Standard";
 
-                var profileHash = $"{material}:{quality}:{layerHeight}:{infill}";
+                string profileHash = $"{material}:{quality}:{layerHeight}:{infill}";
 
                 // Check if this profile already exists (by hash) using repository
-                var existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
+                ProcessProfile? existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
                 if (existingProfile != null && existingProfile.SlicerType == SlicerType.OrcaSlicer)
                 {
                     duplicated++;
@@ -1313,7 +1313,7 @@ public class ProfilesController(
                 }
 
                 // Create a user-owned profile from the worker data
-                var userProfile = new ProcessProfile
+                ProcessProfile userProfile = new ProcessProfile
                 {
                     Id = Guid.NewGuid(),
                     Name = $"{material} - {quality} ({layerHeight}mm)",
@@ -1323,7 +1323,7 @@ public class ProfilesController(
                     InfillPercentage = processProfile.InfillPercentage,
                     PrintSpeed = processProfile.PrintSpeed,
                     EnableSupports = processProfile.Supports,
-                    Quality = Enum.TryParse<ProfileQuality>(quality, true, out var q) ? q : ProfileQuality.Standard,
+                    Quality = Enum.TryParse<ProfileQuality>(quality, true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                     IsSystem = false,
                     IsDefault = false,
                     IsPublic = request.MakePublic ?? false,
@@ -1360,8 +1360,8 @@ public class ProfilesController(
         try
         {
             // Query for any worker with OrcaSlicer capability that is online
-            var allWorkers = await _workerRepository.GetAllAsync(limit: 100, offset: 0);
-            var orcaWorker = allWorkers.FirstOrDefault(w =>
+            IReadOnlyList<Worker> allWorkers = await _workerRepository.GetAllAsync(limit: 100, offset: 0);
+            Worker? orcaWorker = allWorkers.FirstOrDefault(w =>
                 w.Status == "online" &&
                 !string.IsNullOrEmpty(w.CapabilitiesJson) &&
                 w.CapabilitiesJson.Contains("orcaslicer", StringComparison.OrdinalIgnoreCase));
@@ -1399,9 +1399,9 @@ public class ProfilesController(
     /// </summary>
     private static string ComputeSha256Hash(string input)
     {
-        using (var sha256 = SHA256.Create())
+        using (SHA256 sha256 = SHA256.Create())
         {
-            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
+            byte[] hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
             return Convert.ToHexString(hashedBytes).ToLower();
         }
     }

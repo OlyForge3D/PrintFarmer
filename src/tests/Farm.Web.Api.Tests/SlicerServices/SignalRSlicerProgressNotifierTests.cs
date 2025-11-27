@@ -41,7 +41,7 @@ public class SignalRSlicerProgressNotifierTests
     public async Task NotifyProgressAsync_WithValidUpdate_ShouldSendToMonitors()
     {
         // Arrange
-        var update = new SlicingProgressUpdate
+        SlicingProgressUpdate update = new SlicingProgressUpdate
         {
             JobId = Guid.NewGuid(),
             Progress = 50,
@@ -66,10 +66,10 @@ public class SignalRSlicerProgressNotifierTests
     public async Task NotifyProgressAsync_WithJobSubscribers_ShouldSendToSubscribers()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionId = "connection-123";
+        Guid jobId = Guid.NewGuid();
+        string connectionId = "connection-123";
 
-        var update = new SlicingProgressUpdate
+        SlicingProgressUpdate update = new SlicingProgressUpdate
         {
             JobId = jobId,
             Progress = 75,
@@ -97,8 +97,8 @@ public class SignalRSlicerProgressNotifierTests
     public async Task NotifyCompletionAsync_SuccessfulJob_ShouldSendCompletionNotification()
     {
         // Arrange
-        var job = CreateDistributedSlicingJob();
-        var result = new SlicingResult
+        DistributedSlicingJob job = CreateDistributedSlicingJob();
+        SlicingResult result = new SlicingResult
         {
             Success = true,
             ResultFileUrl = new Uri("https://storage.example.com/results/result.gcode"),
@@ -134,8 +134,8 @@ public class SignalRSlicerProgressNotifierTests
     public async Task NotifyCompletionAsync_FailedJob_ShouldSendFailureNotification()
     {
         // Arrange
-        var job = CreateDistributedSlicingJob();
-        var result = new SlicingResult
+        DistributedSlicingJob job = CreateDistributedSlicingJob();
+        SlicingResult result = new SlicingResult
         {
             Success = false,
             Error = "Slicing failed due to invalid model",
@@ -167,11 +167,11 @@ public class SignalRSlicerProgressNotifierTests
     public async Task NotifyCompletionAsync_WithJobSubscribers_ShouldSendToSubscribersAndCleanup()
     {
         // Arrange
-        var job = CreateDistributedSlicingJob();
-        var connectionId1 = "connection-1";
-        var connectionId2 = "connection-2";
+        DistributedSlicingJob job = CreateDistributedSlicingJob();
+        string connectionId1 = "connection-1";
+        string connectionId2 = "connection-2";
 
-        var result = new SlicingResult { Success = true };
+        SlicingResult result = new SlicingResult { Success = true };
 
         // Subscribe connections to job
         await _notifier.SubscribeToJobAsync(job.Id, connectionId1);
@@ -186,7 +186,7 @@ public class SignalRSlicerProgressNotifierTests
         )), Times.Once);
 
         // Verify subsequent progress updates don't go to these connections (cleanup worked)
-        var progressUpdate = new SlicingProgressUpdate { JobId = job.Id, Progress = 100 };
+        SlicingProgressUpdate progressUpdate = new SlicingProgressUpdate { JobId = job.Id, Progress = 100 };
         await _notifier.NotifyProgressAsync(progressUpdate);
 
         // Should only send to monitors, not to the cleaned-up subscribers
@@ -197,8 +197,8 @@ public class SignalRSlicerProgressNotifierTests
     public async Task NotifyFailureAsync_ShouldSendFailureNotification()
     {
         // Arrange
-        var job = CreateDistributedSlicingJob();
-        var errorMessage = "Job cancelled by user";
+        DistributedSlicingJob job = CreateDistributedSlicingJob();
+        string errorMessage = "Job cancelled by user";
 
         // Act
         await _notifier.NotifyFailureAsync(job, errorMessage);
@@ -221,14 +221,14 @@ public class SignalRSlicerProgressNotifierTests
     public async Task SubscribeToJobAsync_ShouldAddConnectionToJobSubscriptions()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionId = "connection-123";
+        Guid jobId = Guid.NewGuid();
+        string connectionId = "connection-123";
 
         // Act
         await _notifier.SubscribeToJobAsync(jobId, connectionId);
 
         // Verify by sending a progress update and checking if it goes to the subscriber
-        var update = new SlicingProgressUpdate { JobId = jobId, Progress = 25 };
+        SlicingProgressUpdate update = new SlicingProgressUpdate { JobId = jobId, Progress = 25 };
         await _notifier.NotifyProgressAsync(update);
 
         // Assert
@@ -239,10 +239,10 @@ public class SignalRSlicerProgressNotifierTests
     public async Task SubscribeToJobAsync_MultipleConnections_ShouldTrackAllSubscriptions()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionId1 = "connection-1";
-        var connectionId2 = "connection-2";
-        var connectionId3 = "connection-3";
+        Guid jobId = Guid.NewGuid();
+        string connectionId1 = "connection-1";
+        string connectionId2 = "connection-2";
+        string connectionId3 = "connection-3";
 
         // Act
         await _notifier.SubscribeToJobAsync(jobId, connectionId1);
@@ -250,7 +250,7 @@ public class SignalRSlicerProgressNotifierTests
         await _notifier.SubscribeToJobAsync(jobId, connectionId3);
 
         // Send progress update
-        var update = new SlicingProgressUpdate { JobId = jobId, Progress = 50 };
+        SlicingProgressUpdate update = new SlicingProgressUpdate { JobId = jobId, Progress = 50 };
         await _notifier.NotifyProgressAsync(update);
 
         // Assert
@@ -265,9 +265,9 @@ public class SignalRSlicerProgressNotifierTests
     public async Task UnsubscribeFromJobAsync_ShouldRemoveConnectionFromSubscriptions()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionId1 = "connection-1";
-        var connectionId2 = "connection-2";
+        Guid jobId = Guid.NewGuid();
+        string connectionId1 = "connection-1";
+        string connectionId2 = "connection-2";
 
         // Subscribe both connections
         await _notifier.SubscribeToJobAsync(jobId, connectionId1);
@@ -277,7 +277,7 @@ public class SignalRSlicerProgressNotifierTests
         await _notifier.UnsubscribeFromJobAsync(jobId, connectionId1);
 
         // Send progress update
-        var update = new SlicingProgressUpdate { JobId = jobId, Progress = 75 };
+        SlicingProgressUpdate update = new SlicingProgressUpdate { JobId = jobId, Progress = 75 };
         await _notifier.NotifyProgressAsync(update);
 
         // Assert - Should only send to remaining subscriber
@@ -290,15 +290,15 @@ public class SignalRSlicerProgressNotifierTests
     public async Task UnsubscribeFromJobAsync_LastSubscriber_ShouldRemoveJobFromTracking()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionId = "connection-only";
+        Guid jobId = Guid.NewGuid();
+        string connectionId = "connection-only";
 
         // Subscribe and then unsubscribe
         await _notifier.SubscribeToJobAsync(jobId, connectionId);
         await _notifier.UnsubscribeFromJobAsync(jobId, connectionId);
 
         // Act - Send progress update
-        var update = new SlicingProgressUpdate { JobId = jobId, Progress = 100 };
+        SlicingProgressUpdate update = new SlicingProgressUpdate { JobId = jobId, Progress = 100 };
         await _notifier.NotifyProgressAsync(update);
 
         // Assert - Should only send to monitors, not to any specific clients
@@ -310,8 +310,8 @@ public class SignalRSlicerProgressNotifierTests
     public async Task UnsubscribeFromJobAsync_NonExistentJob_ShouldNotThrow()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionId = "connection-123";
+        Guid jobId = Guid.NewGuid();
+        string connectionId = "connection-123";
 
         // Act & Assert - Should not throw
         await _notifier.UnsubscribeFromJobAsync(jobId, connectionId);
@@ -321,9 +321,9 @@ public class SignalRSlicerProgressNotifierTests
     public async Task UnsubscribeFromJobAsync_NonExistentConnection_ShouldNotThrow()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionId1 = "connection-1";
-        var connectionId2 = "connection-2";
+        Guid jobId = Guid.NewGuid();
+        string connectionId1 = "connection-1";
+        string connectionId2 = "connection-2";
 
         // Subscribe one connection
         await _notifier.SubscribeToJobAsync(jobId, connectionId1);
@@ -336,17 +336,17 @@ public class SignalRSlicerProgressNotifierTests
     public async Task ConcurrentOperations_ShouldHandleThreadSafety()
     {
         // Arrange
-        var jobId = Guid.NewGuid();
-        var connectionIds = Enumerable.Range(1, 10).Select(i => $"connection-{i}").ToList();
-        var tasks = new List<Task>();
+        Guid jobId = Guid.NewGuid();
+        List<string> connectionIds = Enumerable.Range(1, 10).Select(i => $"connection-{i}").ToList();
+        List<Task> tasks = new List<Task>();
 
         // Act - Concurrent subscribes and unsubscribes
-        foreach (var connectionId in connectionIds.Take(5))
+        foreach (string? connectionId in connectionIds.Take(5))
         {
             tasks.Add(_notifier.SubscribeToJobAsync(jobId, connectionId));
         }
 
-        foreach (var connectionId in connectionIds.Skip(2).Take(3))
+        foreach (string? connectionId in connectionIds.Skip(2).Take(3))
         {
             tasks.Add(_notifier.UnsubscribeFromJobAsync(jobId, connectionId));
         }
@@ -377,7 +377,7 @@ public class SignalRSlicerProgressNotifierTests
     public async Task NotifyProgressAsync_DifferentProgressValues_ShouldSendCorrectUpdates(int progress, string step)
     {
         // Arrange
-        var update = new SlicingProgressUpdate
+        SlicingProgressUpdate update = new SlicingProgressUpdate
         {
             JobId = Guid.NewGuid(),
             Progress = progress,

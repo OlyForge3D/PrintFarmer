@@ -18,13 +18,13 @@ public class AccountLockoutServiceTests : IDisposable
 
     public AccountLockoutServiceTests()
     {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase($"AccountLockoutTest_{Guid.NewGuid()}")
             .Options;
         _context = new AppDbContext(options);
 
         // Create configuration with test settings
-        var configData = new Dictionary<string, string?>
+        Dictionary<string, string?> configData = new Dictionary<string, string?>
         {
             ["AccountLockout:MaxFailedAttempts"] = "5",
             ["AccountLockout:LockoutDurationMinutes"] = "15",
@@ -50,8 +50,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task IsLockedOutAsync_ReturnsFalse_WhenUserNotLocked()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -74,8 +74,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task IsLockedOutAsync_ReturnsTrue_WhenUserLockedAndNotExpired()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -98,8 +98,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task IsLockedOutAsync_ReturnsFalse_WhenLockoutExpired()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -122,8 +122,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task RecordFailedLoginAsync_IncrementsCounter()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -138,7 +138,7 @@ public class AccountLockoutServiceTests : IDisposable
         await _service.RecordFailedLoginAsync(userId, "testuser", "192.168.1.1", "Invalid password");
 
         // Assert
-        var updatedUser = await _context.Users.FindAsync(userId);
+        User? updatedUser = await _context.Users.FindAsync(userId);
         updatedUser.Should().NotBeNull();
         updatedUser!.FailedLoginAttempts.Should().Be(3);
     }
@@ -147,8 +147,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task RecordFailedLoginAsync_LocksAccount_WhenThresholdExceeded()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -163,7 +163,7 @@ public class AccountLockoutServiceTests : IDisposable
         await _service.RecordFailedLoginAsync(userId, "testuser", "192.168.1.1", "Invalid password");
 
         // Assert
-        var updatedUser = await _context.Users.FindAsync(userId);
+        User? updatedUser = await _context.Users.FindAsync(userId);
         updatedUser.Should().NotBeNull();
         updatedUser!.FailedLoginAttempts.Should().Be(5);
         updatedUser.LockoutEnd.Should().NotBeNull();
@@ -174,8 +174,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task RecordFailedLoginAsync_CreatesAuditEntry()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -190,7 +190,7 @@ public class AccountLockoutServiceTests : IDisposable
         await _service.RecordFailedLoginAsync(userId, "testuser", "192.168.1.1", "Invalid password");
 
         // Assert
-        var auditEntries = await _context.FailedLoginAttempts
+        List<FailedLoginAttempt> auditEntries = await _context.FailedLoginAttempts
             .Where(f => f.Identifier == "testuser")
             .ToListAsync();
         auditEntries.Should().HaveCount(1);
@@ -205,7 +205,7 @@ public class AccountLockoutServiceTests : IDisposable
         await _service.RecordFailedLoginByUsernameAsync("nonexistent", "192.168.1.1", "User not found");
 
         // Assert
-        var auditEntries = await _context.FailedLoginAttempts
+        List<FailedLoginAttempt> auditEntries = await _context.FailedLoginAttempts
             .Where(f => f.Identifier == "nonexistent")
             .ToListAsync();
         auditEntries.Should().HaveCount(1);
@@ -216,8 +216,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task ResetFailedLoginCountAsync_ClearsCounter_AndLockout()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -234,7 +234,7 @@ public class AccountLockoutServiceTests : IDisposable
         await _service.ResetFailedLoginCountAsync(userId);
 
         // Assert
-        var updatedUser = await _context.Users.FindAsync(userId);
+        User? updatedUser = await _context.Users.FindAsync(userId);
         updatedUser.Should().NotBeNull();
         updatedUser!.FailedLoginAttempts.Should().Be(0);
         updatedUser.LockoutEnd.Should().BeNull();
@@ -245,8 +245,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task GetFailedLoginCountAsync_ReturnsCorrectCount()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -268,9 +268,9 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task GetLockoutEndAsync_ReturnsCorrectDateTime()
     {
         // Arrange
-        var lockoutEnd = DateTime.UtcNow.AddMinutes(15);
-        var userId = Guid.NewGuid();
-        var user = new User
+        DateTime lockoutEnd = DateTime.UtcNow.AddMinutes(15);
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -293,8 +293,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task ManuallyLockAccountAsync_LocksAccount()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -309,7 +309,7 @@ public class AccountLockoutServiceTests : IDisposable
         await _service.ManuallyLockAccountAsync(userId, 30);
 
         // Assert
-        var updatedUser = await _context.Users.FindAsync(userId);
+        User? updatedUser = await _context.Users.FindAsync(userId);
         updatedUser.Should().NotBeNull();
         updatedUser!.LockoutEnd.Should().NotBeNull();
         updatedUser.LockoutEnd.Should().BeAfter(DateTime.UtcNow.AddMinutes(29));
@@ -319,8 +319,8 @@ public class AccountLockoutServiceTests : IDisposable
     public async Task UnlockAccountAsync_ClearsLockout()
     {
         // Arrange
-        var userId = Guid.NewGuid();
-        var user = new User
+        Guid userId = Guid.NewGuid();
+        User user = new User
         {
             Id = userId,
             Username = "testuser",
@@ -336,7 +336,7 @@ public class AccountLockoutServiceTests : IDisposable
         await _service.UnlockAccountAsync(userId);
 
         // Assert
-        var updatedUser = await _context.Users.FindAsync(userId);
+        User? updatedUser = await _context.Users.FindAsync(userId);
         updatedUser.Should().NotBeNull();
         updatedUser!.FailedLoginAttempts.Should().Be(0);
         updatedUser.LockoutEnd.Should().BeNull();

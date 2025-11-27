@@ -93,7 +93,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     // localhost so internal health probes target the local loopback.
                     try
                     {
-                        if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsed))
+                        if (Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? parsed))
                         {
                             string host = parsed.Host ?? string.Empty;
                             if (string.Equals(host, "0.0.0.0", StringComparison.OrdinalIgnoreCase)

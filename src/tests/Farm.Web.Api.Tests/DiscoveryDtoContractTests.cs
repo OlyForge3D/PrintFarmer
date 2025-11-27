@@ -10,7 +10,7 @@ public class DiscoveryDtoContractTests
     [Fact]
     public void DiscoveryProgressDto_should_serialize_with_new_fields()
     {
-        var dto = new DiscoveryProgressDto(
+        DiscoveryProgressDto dto = new DiscoveryProgressDto(
             SessionId: "sess-1",
             CurrentNetwork: "192.168.1.0/24",
             CurrentIp: "192.168.1.10",
@@ -25,7 +25,7 @@ public class DiscoveryDtoContractTests
             AutoDetectedNetworks: true
         );
 
-        var json = JsonSerializer.Serialize(dto, _jsonOptions);
+        string json = JsonSerializer.Serialize(dto, _jsonOptions);
         json.Should().Contain("\"networkRanges\"");
         json.Should().Contain("\"autoDetectedNetworks\":true");
     }
@@ -33,7 +33,7 @@ public class DiscoveryDtoContractTests
     [Fact]
     public void DiscoveryCompletedDto_should_serialize_with_new_fields()
     {
-        var dto = new DiscoveryCompletedDto(
+        DiscoveryCompletedDto dto = new DiscoveryCompletedDto(
             SessionId: "sess-2",
             TotalPrintersFound: 5,
             TotalPrintersExcluded: 2,
@@ -43,7 +43,7 @@ public class DiscoveryDtoContractTests
             AutoDetectedNetworks: false
         );
 
-        var json = JsonSerializer.Serialize(dto, _jsonOptions);
+        string json = JsonSerializer.Serialize(dto, _jsonOptions);
         json.Should().Contain("\"networkRanges\"");
         json.Should().Contain("\"autoDetectedNetworks\":false");
     }

@@ -76,25 +76,25 @@ public sealed class MailjetEmailService : IEmailService, IDisposable
 
     public async Task<bool> SendPasswordResetAsync(string email, string resetLink, CancellationToken ct = default)
     {
-        var model = new Dictionary<string, string>
+        Dictionary<string, string> model = new Dictionary<string, string>
         {
             ["ResetLink"] = resetLink,
             ["ExpirationMinutes"] = "60"
         };
-        var (subject, plain, html) = _renderer.Render("PasswordReset", model);
-        var result = await SendAsync(new EmailMessage(email, subject, plain, html, "PasswordReset"), ct);
+        (string? subject, string? plain, string? html) = _renderer.Render("PasswordReset", model);
+        EmailDispatchResult result = await SendAsync(new EmailMessage(email, subject, plain, html, "PasswordReset"), ct);
         return result.Success;
     }
 
     public async Task<bool> SendEmailConfirmationAsync(string email, string confirmationLink, CancellationToken ct = default)
     {
-        var model = new Dictionary<string, string>
+        Dictionary<string, string> model = new Dictionary<string, string>
         {
             ["ConfirmationLink"] = confirmationLink,
             ["ExpirationHours"] = "24"
         };
-        var (subject, plain, html) = _renderer.Render("EmailConfirmation", model);
-        var result = await SendAsync(new EmailMessage(email, subject, plain, html, "EmailConfirmation"), ct);
+        (string? subject, string? plain, string? html) = _renderer.Render("EmailConfirmation", model);
+        EmailDispatchResult result = await SendAsync(new EmailMessage(email, subject, plain, html, "EmailConfirmation"), ct);
         return result.Success;
     }
 

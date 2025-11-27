@@ -20,7 +20,7 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
             return reader.TokenType switch
             {
                 JsonTokenType.String => ParseString(reader.GetString()),
-                JsonTokenType.Number => reader.TryGetInt32(out var i) && Enum.IsDefined(typeof(PrinterBackend), i)
+                JsonTokenType.Number => reader.TryGetInt32(out int i) && Enum.IsDefined(typeof(PrinterBackend), i)
                     ? (PrinterBackend)i : PrinterBackend.Moonraker,
                 _ => PrinterBackend.Moonraker
             };
@@ -38,12 +38,12 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
             return PrinterBackend.Moonraker;
         }
         // numeric-as-string
-        if (int.TryParse(value, out var num) && Enum.IsDefined(typeof(PrinterBackend), num))
+        if (int.TryParse(value, out int num) && Enum.IsDefined(typeof(PrinterBackend), num))
         {
             return (PrinterBackend)num;
         }
         // case-insensitive name match
-        if (Enum.TryParse<PrinterBackend>(value, ignoreCase: true, out var parsed))
+        if (Enum.TryParse<PrinterBackend>(value, ignoreCase: true, out PrinterBackend parsed))
         {
             return parsed;
         }
@@ -70,7 +70,7 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
             return reader.TokenType switch
             {
                 JsonTokenType.String => ParseString(reader.GetString()),
-                JsonTokenType.Number => reader.TryGetInt32(out var i) && Enum.IsDefined(typeof(PrintJobStatus), i)
+                JsonTokenType.Number => reader.TryGetInt32(out int i) && Enum.IsDefined(typeof(PrintJobStatus), i)
                     ? (PrintJobStatus)i : PrintJobStatus.Queued,
                 _ => PrintJobStatus.Queued
             };
@@ -88,11 +88,11 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
             return PrintJobStatus.Queued;
         }
 
-        if (int.TryParse(value, out var num) && Enum.IsDefined(typeof(PrintJobStatus), num))
+        if (int.TryParse(value, out int num) && Enum.IsDefined(typeof(PrintJobStatus), num))
         {
             return (PrintJobStatus)num;
         }
-        if (Enum.TryParse<PrintJobStatus>(value, ignoreCase: true, out var parsed))
+        if (Enum.TryParse<PrintJobStatus>(value, ignoreCase: true, out PrintJobStatus parsed))
         {
             return parsed;
         }

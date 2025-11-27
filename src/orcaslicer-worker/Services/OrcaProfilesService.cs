@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,16 +39,16 @@ public class OrcaProfilesService : ISlicerProfilesService
     private readonly object _machineCacheLock = new();
 
     // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
-    private IList<MachineProfileDto>? _allMachineProfilesCache;
-    private IList<FilamentProfileDto>? _allFilamentProfilesCache;
-    private IList<ProcessProfileDto>? _allProcessProfilesCache;
+    private List<MachineProfileDto>? _allMachineProfilesCache;
+    private List<FilamentProfileDto>? _allFilamentProfilesCache;
+    private List<ProcessProfileDto>? _allProcessProfilesCache;
     private readonly object _profilesCacheLock = new();
 
     public OrcaProfilesService(IUnifiedLoggingService logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         // Check for environment variable override (useful for testing with sample profiles)
-        var envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
+        string? envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
         if (!string.IsNullOrWhiteSpace(envPath) && Directory.Exists(envPath))
         {
             _orcaProfilesPath = envPath;
@@ -60,6 +61,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
     }
 
+#pragma warning disable CS1998
     public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
     {
         // Return from cache if available
@@ -72,7 +74,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
         }
 
-        var profiles = new List<MachineProfileDto>();
+        List<MachineProfileDto> profiles = new List<MachineProfileDto>();
 
         try
         {
@@ -85,7 +87,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             // Find all manufacturer bundle JSON files (e.g., Prusa.json, Voron.json, etc.)
-            var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+            List<string> bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
                 .Where(f => !Path.GetFileName(f).StartsWith('.')) // Skip hidden files
                 .ToList();
 
@@ -94,17 +96,17 @@ public class OrcaProfilesService : ISlicerProfilesService
             int successCount = 0;
             int failureCount = 0;
 
-            foreach (var bundleFile in bundleFiles)
+            foreach (string? bundleFile in bundleFiles)
             {
                 try
                 {
-                    var bundle = ParseManufacturerBundle(bundleFile);
+                    ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle != null)
                     {
                         string manufacturerName = bundle.Name; // Extract from bundle
 
                         // Load from both machine_model_list and machine_list
-                        var allMachineEntries = new List<ManufacturerBundleProfileEntry>();
+                        List<ManufacturerBundleProfileEntry> allMachineEntries = new List<ManufacturerBundleProfileEntry>();
                         if (bundle.MachineModelList != null)
                         {
                             allMachineEntries.AddRange(bundle.MachineModelList);
@@ -115,11 +117,11 @@ public class OrcaProfilesService : ISlicerProfilesService
                             allMachineEntries.AddRange(bundle.MachineList);
                         }
 
-                        foreach (var entry in allMachineEntries)
+                        foreach (ManufacturerBundleProfileEntry entry in allMachineEntries)
                         {
                             try
                             {
-                                var profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning($"Machine profile referenced in bundle not found: {profilePath}");
@@ -127,7 +129,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                     continue;
                                 }
 
-                                var profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
+                                MachineProfileDto? profile = LoadProfileFromFile<MachineProfileDto>(profilePath);
                                 if (profile != null)
                                 {
                                     // Ensure manufacturer name is set from bundle
@@ -171,6 +173,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             return profiles;
         }
     }
+#pragma warning restore CS1998
 
     public async Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default)
     {
@@ -184,7 +187,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
         }
 
-        var profiles = new List<FilamentProfileDto>();
+        List<FilamentProfileDto> profiles = new List<FilamentProfileDto>();
 
         try
         {
@@ -199,7 +202,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             // Ensure machines are cached first so we can evaluate compatible_printers_condition
             await EnsureMachinesCachedAsync();
 
-            var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+            List<string> bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
                 .Where(f => !Path.GetFileName(f).StartsWith('.'))
                 .ToList();
 
@@ -208,21 +211,21 @@ public class OrcaProfilesService : ISlicerProfilesService
             int successCount = 0;
             int failureCount = 0;
 
-            foreach (var bundleFile in bundleFiles)
+            foreach (string? bundleFile in bundleFiles)
             {
                 try
                 {
-                    var bundle = ParseManufacturerBundle(bundleFile);
+                    ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.FilamentList != null)
                     {
                         // Get machines for this manufacturer to evaluate conditions
-                        var manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
 
-                        foreach (var entry in bundle.FilamentList)
+                        foreach (ManufacturerBundleProfileEntry entry in bundle.FilamentList)
                         {
                             try
                             {
-                                var profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning($"Filament profile referenced in bundle not found: {profilePath}");
@@ -230,7 +233,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                     continue;
                                 }
 
-                                var profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
+                                FilamentProfileDto? profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
                                 if (profile != null)
                                 {
                                     profile.Manufacturer = bundle.Name;
@@ -240,7 +243,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                         !string.IsNullOrEmpty(profile.CompatiblePrintersCondition) &&
                                         manufacturerMachines?.Count > 0)
                                     {
-                                        var matchedMachines = PrinterExpressionParser.EvaluateCondition(
+                                        List<string>? matchedMachines = PrinterExpressionParser.EvaluateCondition(
                                             profile.CompatiblePrintersCondition,
                                             manufacturerMachines);
                                         if (matchedMachines?.Count > 0)
@@ -301,7 +304,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
         }
 
-        var profiles = new List<ProcessProfileDto>();
+        List<ProcessProfileDto> profiles = new List<ProcessProfileDto>();
 
         try
         {
@@ -316,7 +319,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             // Ensure machines are cached first so we can evaluate compatible_printers_condition
             await EnsureMachinesCachedAsync();
 
-            var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
+            List<string> bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
                 .Where(f => !Path.GetFileName(f).StartsWith('.'))
                 .ToList();
 
@@ -325,21 +328,21 @@ public class OrcaProfilesService : ISlicerProfilesService
             int successCount = 0;
             int failureCount = 0;
 
-            foreach (var bundleFile in bundleFiles)
+            foreach (string? bundleFile in bundleFiles)
             {
                 try
                 {
-                    var bundle = ParseManufacturerBundle(bundleFile);
+                    ManufacturerBundleDto? bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.ProcessList != null)
                     {
                         // Get machines for this manufacturer to evaluate conditions
-                        var manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+                        List<MachineProfileDto>? manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
 
-                        foreach (var entry in bundle.ProcessList)
+                        foreach (ManufacturerBundleProfileEntry entry in bundle.ProcessList)
                         {
                             try
                             {
-                                var profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
+                                string profilePath = Path.Combine(_orcaProfilesPath, bundle.Name, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning($"Process profile referenced in bundle not found: {profilePath}");
@@ -347,7 +350,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                     continue;
                                 }
 
-                                var profile = LoadProfileFromFile<ProcessProfileDto>(profilePath);
+                                ProcessProfileDto? profile = LoadProfileFromFile<ProcessProfileDto>(profilePath);
                                 if (profile != null)
                                 {
                                     profile.Manufacturer = bundle.Name;
@@ -357,7 +360,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                                         !string.IsNullOrEmpty(profile.CompatiblePrintersCondition) &&
                                         manufacturerMachines?.Count > 0)
                                     {
-                                        var matchedMachines = PrinterExpressionParser.EvaluateCondition(
+                                        List<string>? matchedMachines = PrinterExpressionParser.EvaluateCondition(
                                             profile.CompatiblePrintersCondition,
                                             manufacturerMachines);
                                         if (matchedMachines?.Count > 0)
@@ -410,8 +413,8 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         try
         {
-            var json = File.ReadAllText(bundleFilePath);
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            string json = File.ReadAllText(bundleFilePath);
+            JsonSerializerOptions options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             return JsonSerializer.Deserialize<ManufacturerBundleDto>(json, options);
         }
         catch (Exception ex)
@@ -426,18 +429,18 @@ public class OrcaProfilesService : ISlicerProfilesService
         try
         {
             // Build the fully resolved profile JSON by loading and merging the entire inheritance chain
-            var resolvedProfileJson = BuildResolvedProfileJson(filePath);
+            string? resolvedProfileJson = BuildResolvedProfileJson(filePath);
             if (resolvedProfileJson == null)
             {
                 return null;
             }
 
             // Parse the resolved profile
-            using var doc = JsonDocument.Parse(resolvedProfileJson);
-            var resolvedProfile = doc.RootElement;
+            using JsonDocument doc = JsonDocument.Parse(resolvedProfileJson);
+            JsonElement resolvedProfile = doc.RootElement;
 
             // Check instantiation AFTER resolving (in case it's inherited)
-            if (resolvedProfile.TryGetProperty("instantiation", out var instantiationElem))
+            if (resolvedProfile.TryGetProperty("instantiation", out JsonElement instantiationElem))
             {
                 bool isInstantiatable = instantiationElem.ValueKind == JsonValueKind.True ||
                     (instantiationElem.ValueKind == JsonValueKind.String && instantiationElem.GetString() == "true");
@@ -472,8 +475,8 @@ public class OrcaProfilesService : ISlicerProfilesService
         try
         {
             // Collect all profiles in the inheritance chain (parent -> child order)
-            var inheritanceChain = new List<string>();
-            var visited = new HashSet<string>();
+            List<string> inheritanceChain = new List<string>();
+            HashSet<string> visited = new HashSet<string>();
 
             if (!CollectInheritanceChainAsJson(filePath, inheritanceChain, visited))
             {
@@ -505,7 +508,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         visited.Add(filePath);
 
         // Load this profile JSON (from cache or disk)
-        var profileJson = LoadProfileJsonFromDisk(filePath);
+        string? profileJson = LoadProfileJsonFromDisk(filePath);
         if (profileJson == null)
         {
             return false;
@@ -514,19 +517,19 @@ public class OrcaProfilesService : ISlicerProfilesService
         // Parse to check for inherits property
         try
         {
-            using var doc = JsonDocument.Parse(profileJson);
-            var root = doc.RootElement;
+            using JsonDocument doc = JsonDocument.Parse(profileJson);
+            JsonElement root = doc.RootElement;
 
             // Check if this profile has a parent (inherits property)
-            if (root.TryGetProperty("inherits", out var inheritsElem) &&
+            if (root.TryGetProperty("inherits", out JsonElement inheritsElem) &&
                 inheritsElem.ValueKind == JsonValueKind.String)
             {
-                var inheritedProfileName = inheritsElem.GetString();
+                string? inheritedProfileName = inheritsElem.GetString();
                 if (!string.IsNullOrWhiteSpace(inheritedProfileName))
                 {
                     // Find the parent profile in the same directory
-                    var profileDir = Path.GetDirectoryName(filePath);
-                    var parentProfilePath = Path.Combine(profileDir ?? "", $"{inheritedProfileName}.json");
+                    string? profileDir = Path.GetDirectoryName(filePath);
+                    string parentProfilePath = Path.Combine(profileDir ?? "", $"{inheritedProfileName}.json");
 
                     if (File.Exists(parentProfilePath))
                     {
@@ -561,7 +564,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         lock (_cacheLock)
         {
             // Check cache first
-            if (_profileJsonCache.TryGetValue(filePath, out var cached))
+            if (_profileJsonCache.TryGetValue(filePath, out string? cached))
             {
                 cachedJson = cached;
             }
@@ -614,19 +617,19 @@ public class OrcaProfilesService : ISlicerProfilesService
         try
         {
             // Accumulate all properties from all profiles
-            var allProps = new Dictionary<string, string>();
+            Dictionary<string, string> allProps = new Dictionary<string, string>();
 
-            foreach (var profileJson in profileJsons)
+            foreach (string profileJson in profileJsons)
             {
-                using var doc = JsonDocument.Parse(profileJson);
-                var root = doc.RootElement;
+                using JsonDocument doc = JsonDocument.Parse(profileJson);
+                JsonElement root = doc.RootElement;
 
                 if (root.ValueKind != JsonValueKind.Object)
                 {
                     continue;
                 }
 
-                foreach (var prop in root.EnumerateObject())
+                foreach (JsonProperty prop in root.EnumerateObject())
                 {
                     // Store all properties as raw JSON text (will override previous values)
                     allProps[prop.Name] = prop.Value.GetRawText();
@@ -634,23 +637,23 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             // Reconstruct as JSON string
-            var sb = new System.Text.StringBuilder("{");
+            StringBuilder sb = new System.Text.StringBuilder("{");
             bool first = true;
-            foreach (var kvp in allProps.OrderBy(x => x.Key)) // Order for consistency
+            foreach (KeyValuePair<string, string> kvp in allProps.OrderBy(x => x.Key)) // Order for consistency
             {
                 if (!first)
                 {
-                    sb.Append(",");
+                    sb.Append(',');
                 }
 
-                sb.Append("\"").Append(EscapeJsonKey(kvp.Key)).Append("\":");
+                sb.Append('"').Append(EscapeJsonKey(kvp.Key)).Append("\":");
                 sb.Append(kvp.Value);
                 first = false;
             }
-            sb.Append("}");
+            sb.Append('}');
 
             // Validate by parsing
-            using var validationDoc = JsonDocument.Parse(sb.ToString());
+            using JsonDocument validationDoc = JsonDocument.Parse(sb.ToString());
             return sb.ToString();
         }
         catch (Exception ex)
@@ -667,25 +670,25 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     private MachineProfileDto? ParseMachineProfile(JsonElement root, string filePath)
     {
-        var profile = new MachineProfileDto();
+        MachineProfileDto profile = new MachineProfileDto();
 
-        if (root.TryGetProperty("name", out var nameElem))
+        if (root.TryGetProperty("name", out JsonElement nameElem))
         {
             profile.Name = nameElem.GetString() ?? string.Empty;
         }
 
-        if (root.TryGetProperty("manufacturer", out var mfgElem))
+        if (root.TryGetProperty("manufacturer", out JsonElement mfgElem))
         {
             profile.Manufacturer = mfgElem.GetString() ?? string.Empty;
         }
 
         // Extract nozzle diameter from settings - REQUIRED property
         // nozzle_diameter is typically an array like ["0.4"], get the first value
-        if (root.TryGetProperty("nozzle_diameter", out var nozzleElem))
+        if (root.TryGetProperty("nozzle_diameter", out JsonElement nozzleElem))
         {
             if (nozzleElem.ValueKind == JsonValueKind.Array)
             {
-                var nozzleArray = nozzleElem.EnumerateArray().FirstOrDefault();
+                JsonElement nozzleArray = nozzleElem.EnumerateArray().FirstOrDefault();
                 profile.NozzleDiameter = ParseDoubleValue(nozzleArray);
             }
             else
@@ -708,47 +711,47 @@ public class OrcaProfilesService : ISlicerProfilesService
 #pragma warning disable S1172 // Unused parameters are required by interface
     private FilamentProfileDto? ParseFilamentProfile(JsonElement root, string filePath)
     {
-        var profile = new FilamentProfileDto();
+        FilamentProfileDto profile = new FilamentProfileDto();
 
-        if (root.TryGetProperty("name", out var nameElem))
+        if (root.TryGetProperty("name", out JsonElement nameElem))
         {
             profile.Name = nameElem.GetString() ?? string.Empty;
         }
 
-        if (root.TryGetProperty("filament_type", out var typeElem))
+        if (root.TryGetProperty("filament_type", out JsonElement typeElem))
         {
             profile.Material = typeElem.GetString() ?? "PLA";
         }
-        else if (root.TryGetProperty("material", out var matElem))
+        else if (root.TryGetProperty("material", out JsonElement matElem))
         {
             profile.Material = matElem.GetString() ?? "PLA";
         }
 
-        if (root.TryGetProperty("nozzle_temperature", out var nozzleElem))
+        if (root.TryGetProperty("nozzle_temperature", out JsonElement nozzleElem))
         {
             profile.NozzleTemperature = ParseIntValue(nozzleElem) ?? 210;
         }
 
-        if (root.TryGetProperty("bed_temperature", out var bedElem))
+        if (root.TryGetProperty("bed_temperature", out JsonElement bedElem))
         {
             profile.BedTemperature = ParseIntValue(bedElem) ?? 60;
         }
 
-        if (root.TryGetProperty("travel_speed", out var speedElem))
+        if (root.TryGetProperty("travel_speed", out JsonElement speedElem))
         {
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
         }
 
         // Profile is now fully resolved - check for compatible_printers first
-        if (root.TryGetProperty("compatible_printers", out var compatibleElem))
+        if (root.TryGetProperty("compatible_printers", out JsonElement compatibleElem))
         {
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
         }
 
         // Store compatible_printers_condition for later evaluation
-        if (root.TryGetProperty("compatible_printers_condition", out var conditionElem))
+        if (root.TryGetProperty("compatible_printers_condition", out JsonElement conditionElem))
         {
-            var condition = conditionElem.GetString();
+            string? condition = conditionElem.GetString();
             if (!string.IsNullOrEmpty(condition))
             {
                 profile.CompatiblePrintersCondition = condition;
@@ -765,43 +768,43 @@ public class OrcaProfilesService : ISlicerProfilesService
 #pragma warning disable S1172 // Unused parameters are required by interface
     private ProcessProfileDto? ParseProcessProfile(JsonElement root, string filePath)
     {
-        var profile = new ProcessProfileDto();
+        ProcessProfileDto profile = new ProcessProfileDto();
 
-        if (root.TryGetProperty("name", out var nameElem))
+        if (root.TryGetProperty("name", out JsonElement nameElem))
         {
             profile.Name = nameElem.GetString() ?? string.Empty;
         }
 
-        if (root.TryGetProperty("layer_height", out var layerElem))
+        if (root.TryGetProperty("layer_height", out JsonElement layerElem))
         {
             profile.LayerHeight = ParseDoubleValue(layerElem) ?? 0.2;
         }
 
-        if (root.TryGetProperty("fill_density", out var infillElem))
+        if (root.TryGetProperty("fill_density", out JsonElement infillElem))
         {
             profile.InfillPercentage = ParseIntValue(infillElem) ?? 20;
         }
 
-        if (root.TryGetProperty("wall_loops", out var speedElem))
+        if (root.TryGetProperty("wall_loops", out JsonElement speedElem))
         {
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
         }
 
-        if (root.TryGetProperty("enable_support", out var supportsElem))
+        if (root.TryGetProperty("enable_support", out JsonElement supportsElem))
         {
             profile.Supports = ParseBoolValue(supportsElem);
         }
 
         // Profile is now fully resolved - check for compatible_printers first
-        if (root.TryGetProperty("compatible_printers", out var compatibleElem))
+        if (root.TryGetProperty("compatible_printers", out JsonElement compatibleElem))
         {
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
         }
 
         // Store compatible_printers_condition for later evaluation
-        if (root.TryGetProperty("compatible_printers_condition", out var conditionElem))
+        if (root.TryGetProperty("compatible_printers_condition", out JsonElement conditionElem))
         {
-            var condition = conditionElem.GetString();
+            string? condition = conditionElem.GetString();
             if (!string.IsNullOrEmpty(condition))
             {
                 profile.CompatiblePrintersCondition = condition;
@@ -833,11 +836,11 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         if (elem.ValueKind == JsonValueKind.Number)
         {
-            return elem.TryGetInt32(out var val) ? val : null;
+            return elem.TryGetInt32(out int val) ? val : null;
         }
         else if (elem.ValueKind == JsonValueKind.String)
         {
-            return int.TryParse(elem.GetString(), out var val) ? val : null;
+            return int.TryParse(elem.GetString(), out int val) ? val : null;
         }
 
         return null;
@@ -847,11 +850,11 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         if (elem.ValueKind == JsonValueKind.Number)
         {
-            return elem.TryGetDouble(out var val) ? val : null;
+            return elem.TryGetDouble(out double val) ? val : null;
         }
         else if (elem.ValueKind == JsonValueKind.String)
         {
-            return double.TryParse(elem.GetString(), out var val) ? val : null;
+            return double.TryParse(elem.GetString(), out double val) ? val : null;
         }
 
         return null;
@@ -873,12 +876,12 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     private Dictionary<string, object> SerializeElementToDict(JsonElement elem)
     {
-        var dict = new Dictionary<string, object>();
+        Dictionary<string, object> dict = new Dictionary<string, object>();
         try
         {
             if (elem.ValueKind == JsonValueKind.Object)
             {
-                foreach (var prop in elem.EnumerateObject())
+                foreach (JsonProperty prop in elem.EnumerateObject())
                 {
                     dict[prop.Name] = prop.Value.GetRawText();
                 }
@@ -896,11 +899,11 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (compatibleElem.ValueKind == JsonValueKind.Array)
         {
             // Direct array format
-            foreach (var printer in compatibleElem.EnumerateArray())
+            foreach (JsonElement printer in compatibleElem.EnumerateArray())
             {
                 if (printer.ValueKind == JsonValueKind.String)
                 {
-                    var printerName = printer.GetString() ?? "";
+                    string printerName = printer.GetString() ?? "";
                     if (!string.IsNullOrWhiteSpace(printerName))
                     {
                         targetList.Add(printerName);
@@ -911,20 +914,20 @@ public class OrcaProfilesService : ISlicerProfilesService
         else if (compatibleElem.ValueKind == JsonValueKind.String)
         {
             // String format - need to parse as JSON array
-            var jsonString = compatibleElem.GetString();
+            string? jsonString = compatibleElem.GetString();
             if (!string.IsNullOrWhiteSpace(jsonString))
             {
                 try
                 {
-                    using var doc = JsonDocument.Parse(jsonString);
-                    var root = doc.RootElement;
+                    using JsonDocument doc = JsonDocument.Parse(jsonString);
+                    JsonElement root = doc.RootElement;
                     if (root.ValueKind == JsonValueKind.Array)
                     {
-                        foreach (var item in root.EnumerateArray())
+                        foreach (JsonElement item in root.EnumerateArray())
                         {
                             if (item.ValueKind == JsonValueKind.String)
                             {
-                                var printerName = item.GetString() ?? "";
+                                string printerName = item.GetString() ?? "";
                                 if (!string.IsNullOrWhiteSpace(printerName))
                                 {
                                     targetList.Add(printerName);
@@ -956,8 +959,8 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         // Load all machines and group by manufacturer
-        var allMachines = await ListAvailableMachineProfilesAsync();
-        var grouped = allMachines
+        IList<MachineProfileDto> allMachines = await ListAvailableMachineProfilesAsync();
+        Dictionary<string, List<MachineProfileDto>> grouped = allMachines
             .GroupBy(m => m.Manufacturer ?? "Unknown")
             .ToDictionary(g => g.Key, g => g.ToList());
 
@@ -971,7 +974,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         lock (_machineCacheLock)
         {
-            if (_machinesByManufacturerCache?.TryGetValue(manufacturerName, out var machines) == true)
+            if (_machinesByManufacturerCache?.TryGetValue(manufacturerName, out List<MachineProfileDto>? machines) == true)
             {
                 return machines;
             }

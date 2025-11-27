@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
@@ -76,7 +77,7 @@ public class JobDispatcherService : IJobDispatcherService
 
     public async Task<bool> DispatchJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             // Get job details
@@ -98,9 +99,9 @@ public class JobDispatcherService : IJobDispatcherService
             if (worker == null)
             {
                 _logger.LogDebug($"No suitable worker found for job {jobId}");
-                var noWorkerTags = new System.Diagnostics.TagList { { "outcome", "failed" } };
+                TagList noWorkerTags = new System.Diagnostics.TagList { { "outcome", "failed" } };
                 _dispatchDurationMs.Record(sw.ElapsedMilliseconds, noWorkerTags);
-                var noWorkerReasonTags = new System.Diagnostics.TagList { { "reason", "no_worker" } };
+                TagList noWorkerReasonTags = new System.Diagnostics.TagList { { "reason", "no_worker" } };
                 _jobsDispatchFailed.Add(1, noWorkerReasonTags);
                 return false;
             }
@@ -110,9 +111,9 @@ public class JobDispatcherService : IJobDispatcherService
             if (!success)
             {
                 _logger.LogWarning($"Failed to send job {jobId} to worker {worker.Id}");
-                var sendFailedTags = new System.Diagnostics.TagList { { "outcome", "failed" } };
+                TagList sendFailedTags = new System.Diagnostics.TagList { { "outcome", "failed" } };
                 _dispatchDurationMs.Record(sw.ElapsedMilliseconds, sendFailedTags);
-                var sendFailedReasonTags = new System.Diagnostics.TagList { { "reason", "send_failed" } };
+                TagList sendFailedReasonTags = new System.Diagnostics.TagList { { "reason", "send_failed" } };
                 _jobsDispatchFailed.Add(1, sendFailedReasonTags);
                 return false;
             }
@@ -133,7 +134,7 @@ public class JobDispatcherService : IJobDispatcherService
             }
 
             _logger.LogInformation($"Job {jobId} dispatched to worker {worker.Id} ({worker.Name})");
-            var successTags = new System.Diagnostics.TagList { { "outcome", "success" } };
+            TagList successTags = new System.Diagnostics.TagList { { "outcome", "success" } };
             _dispatchDurationMs.Record(sw.ElapsedMilliseconds, successTags);
             _jobsDispatched.Add(1);
             return true;
@@ -141,9 +142,9 @@ public class JobDispatcherService : IJobDispatcherService
         catch (Exception ex)
         {
             _logger.LogError($"Error dispatching job {jobId}: {ex.Message}");
-            var errorTags = new System.Diagnostics.TagList { { "outcome", "error" } };
+            TagList errorTags = new System.Diagnostics.TagList { { "outcome", "error" } };
             _dispatchDurationMs.Record(sw.ElapsedMilliseconds, errorTags);
-            var exceptionReasonTags = new System.Diagnostics.TagList { { "reason", "exception" } };
+            TagList exceptionReasonTags = new System.Diagnostics.TagList { { "reason", "exception" } };
             _jobsDispatchFailed.Add(1, exceptionReasonTags);
             return false;
         }
@@ -176,7 +177,7 @@ public class JobDispatcherService : IJobDispatcherService
         int staleSeconds = 120;
         try
         {
-            var envVal = Environment.GetEnvironmentVariable("SLICER_WORKER_STALE_SECONDS");
+            string? envVal = Environment.GetEnvironmentVariable("SLICER_WORKER_STALE_SECONDS");
             if (!string.IsNullOrWhiteSpace(envVal) && int.TryParse(envVal, out int parsed) && parsed >= 30 && parsed <= 3600)
             {
                 staleSeconds = parsed;

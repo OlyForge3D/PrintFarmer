@@ -51,7 +51,7 @@ namespace Farm.Web.Api.Services.Model
 
         public async Task<IReadOnlyList<Shared.Model3DDto>> ListModelsAsync(CancellationToken ct)
         {
-            var models = await _repository.ListValidAsync(ct);
+            IReadOnlyList<Model3D> models = await _repository.ListValidAsync(ct);
 
             return models.Select(m => new Shared.Model3DDto
             {
@@ -193,7 +193,7 @@ namespace Farm.Web.Api.Services.Model
                 string fileHash;
                 try
                 {
-                    using (var stream = _fileSystem.OpenWrite(tempFilePath))
+                    using (Stream stream = _fileSystem.OpenWrite(tempFilePath))
                     {
                         using MemoryStream memoryStream = new();
                         await modelFile.CopyToAsync(memoryStream, ct);

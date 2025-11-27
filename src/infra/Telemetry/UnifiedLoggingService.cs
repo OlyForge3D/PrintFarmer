@@ -144,7 +144,7 @@ public sealed class UnifiedLoggingService : IUnifiedLoggingService, IDisposable
         }
 
         // Log to structured logger with telemetry context (file/console)
-        var loggerArgs = new object?[]
+        object?[] loggerArgs = new object?[]
         {
             category,
             message,

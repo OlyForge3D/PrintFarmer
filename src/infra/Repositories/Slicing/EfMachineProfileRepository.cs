@@ -54,7 +54,7 @@ public class EfMachineProfileRepository(AppDbContext db) : IMachineProfileReposi
 
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
     {
-        var profiles = await _db.MachineProfiles
+        List<MachineProfile> profiles = await _db.MachineProfiles
             .Where(p => p.IsSystem && p.SlicerType == engine)
             .ToListAsync(ct);
 

@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Filament;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 using Shared = Farm.Web.Shared;
 
@@ -54,7 +55,7 @@ namespace Farm.Web.Api.Services.Filament
             }
 
             string trimmed = req.Name.Trim();
-            var existing = await _repo.GetByNameAsync(trimmed, ct);
+            FilamentType? existing = await _repo.GetByNameAsync(trimmed, ct);
             if (existing != null)
             {
                 throw new InvalidOperationException("Filament type with this name already exists");
@@ -79,12 +80,12 @@ namespace Farm.Web.Api.Services.Filament
                 throw new ArgumentException("Request body is required", nameof(req));
             }
 
-            var dto = await _repo.GetByIdAsync(id, ct);
+            FilamentTypeDto? dto = await _repo.GetByIdAsync(id, ct);
             if (dto is null)
             {
                 throw new KeyNotFoundException("Filament type not found");
             }
-            var entity = await _repo.GetEntityByIdAsync(id, ct);
+            FilamentType? entity = await _repo.GetEntityByIdAsync(id, ct);
             if (entity is null)
             {
                 throw new KeyNotFoundException("Filament type not found");
@@ -101,7 +102,7 @@ namespace Farm.Web.Api.Services.Filament
 
         public async Task DeleteFilamentTypeAsync(Guid id, CancellationToken ct)
         {
-            var dto = await _repo.GetByIdAsync(id, ct);
+            FilamentTypeDto? dto = await _repo.GetByIdAsync(id, ct);
             if (dto is null)
             {
                 throw new KeyNotFoundException("Filament type not found");

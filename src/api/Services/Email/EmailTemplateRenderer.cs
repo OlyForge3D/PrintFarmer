@@ -26,7 +26,7 @@ public sealed class EmailTemplateRenderer : IEmailTemplateRenderer
 
     public (string Subject, string PlainBody, string HtmlBody) Render(string templateKey, IReadOnlyDictionary<string, string> model)
     {
-        if (!Templates.TryGetValue(templateKey, out var tpl))
+        if (!Templates.TryGetValue(templateKey, out (string Subject, string Plain, string Html) tpl))
         {
             throw new InvalidOperationException($"Unknown email template: {templateKey}");
         }
@@ -39,7 +39,7 @@ public sealed class EmailTemplateRenderer : IEmailTemplateRenderer
     private static string ReplaceTokens(string input, IReadOnlyDictionary<string, string> model)
     {
         StringBuilder sb = new(input);
-        foreach (var kv in model)
+        foreach (KeyValuePair<string, string> kv in model)
         {
             _ = sb.Replace("{{" + kv.Key + "}}", kv.Value);
         }

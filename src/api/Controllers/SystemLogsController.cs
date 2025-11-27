@@ -21,7 +21,7 @@ public class SystemLogsController(Farm.Web.Api.Services.SystemLogs.ISystemLogSer
         [FromQuery] string? metadata,
         CancellationToken ct)
     {
-        var logs = await _service.QueryLogsAsync(correlationId, level, from, to, metadata, ct);
+        IReadOnlyList<SystemLog> logs = await _service.QueryLogsAsync(correlationId, level, from, to, metadata, ct);
         return Ok(logs);
     }
 
@@ -34,7 +34,7 @@ public class SystemLogsController(Farm.Web.Api.Services.SystemLogs.ISystemLogSer
         [FromQuery] string? metadata,
         CancellationToken ct)
     {
-        var logs = await _service.QueryAllLogsAsync(correlationId, level, from, to, metadata, ct);
+        IReadOnlyList<SystemLog> logs = await _service.QueryAllLogsAsync(correlationId, level, from, to, metadata, ct);
         string json = System.Text.Json.JsonSerializer.Serialize(logs);
         return File(System.Text.Encoding.UTF8.GetBytes(json), "application/json", $"systemlogs_{DateTime.UtcNow:yyyyMMddHHmmss}.json");
     }

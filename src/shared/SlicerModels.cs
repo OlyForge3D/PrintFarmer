@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using Farm.Web.Shared.Slicer.Messaging;
 
 namespace Farm.Web.Shared;
 
@@ -93,7 +94,7 @@ public class SlicingJobRequest
         {
             return Envelope;
         }
-        var jobContent = Slicer.Messaging.SlicingJobContent.FromRequest(this);
+        SlicingJobContent jobContent = Slicer.Messaging.SlicingJobContent.FromRequest(this);
         return Slicer.Messaging.MessageEnvelope.Create(jobContent, SlicerEngine, Priority);
     }
 }
@@ -154,7 +155,7 @@ public class DistributedSlicingJob : SlicingJobDto
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(envelope);
 
-        var job = new DistributedSlicingJob
+        DistributedSlicingJob job = new DistributedSlicingJob
         {
             Id = envelope.JobId,
             UserId = request.UserId,
@@ -176,7 +177,7 @@ public class DistributedSlicingJob : SlicingJobDto
 
         if (request.Metadata?.Count > 0)
         {
-            foreach (var kv in request.Metadata)
+            foreach (KeyValuePair<string, object> kv in request.Metadata)
             {
                 job.Metadata[kv.Key] = kv.Value;
             }
@@ -211,7 +212,7 @@ public class DistributedSlicingJob : SlicingJobDto
         JobId = baseJob.JobId;
         Status = baseJob.Status;
         Progress = baseJob.Progress;
-        EngineType = Enum.TryParse<SlicerEngineType>(baseJob.SlicerEngine, true, out var engine) ? engine : SlicerEngineType.OrcaSlicer;
+        EngineType = Enum.TryParse<SlicerEngineType>(baseJob.SlicerEngine, true, out SlicerEngineType engine) ? engine : SlicerEngineType.OrcaSlicer;
         PrinterId = baseJob.PrinterId;
         ModelFilePath = baseJob.ModelFilePath;
         GcodeFilePath = baseJob.GcodeFilePath;
@@ -322,7 +323,7 @@ public class SlicerWorkerConfiguration
 
     public static SlicerWorkerConfiguration WithTempDirectory(string tempRoot, Action<SlicerWorkerConfiguration>? configure = null)
     {
-        var cfg = new SlicerWorkerConfiguration { TempDirectory = tempRoot };
+        SlicerWorkerConfiguration cfg = new SlicerWorkerConfiguration { TempDirectory = tempRoot };
         configure?.Invoke(cfg);
         return cfg;
     }

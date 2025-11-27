@@ -12,7 +12,7 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_Create_ShouldGenerateValidEnvelope()
     {
         // Arrange
-        var jobContent = new SlicingJobContent
+        SlicingJobContent jobContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
@@ -23,7 +23,7 @@ public class MessageEnvelopeTests
         };
 
         // Act
-        var envelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, SlicingJobPriority.High);
+        MessageEnvelope envelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, SlicingJobPriority.High);
 
         // Assert
         envelope.Should().NotBeNull();
@@ -41,7 +41,7 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_GenerateChecksum_ShouldBeConsistent()
     {
         // Arrange
-        var jobContent = new SlicingJobContent
+        SlicingJobContent jobContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
@@ -51,8 +51,8 @@ public class MessageEnvelopeTests
         };
 
         // Act
-        var checksum1 = MessageEnvelope.GenerateChecksum(jobContent);
-        var checksum2 = MessageEnvelope.GenerateChecksum(jobContent);
+        string checksum1 = MessageEnvelope.GenerateChecksum(jobContent);
+        string checksum2 = MessageEnvelope.GenerateChecksum(jobContent);
 
         // Assert
         checksum1.Should().NotBeNullOrEmpty();
@@ -64,21 +64,21 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_GenerateChecksum_ShouldBeDifferentForDifferentContent()
     {
         // Arrange
-        var jobContent1 = new SlicingJobContent
+        SlicingJobContent jobContent1 = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
             ModelFileUrl = "https://storage.example.com/model1.stl",
         };
 
-        var jobContent2 = new SlicingJobContent
+        SlicingJobContent jobContent2 = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
             ModelFileUrl = "https://storage.example.com/model2.stl",
         };
 
         // Act
-        var checksum1 = MessageEnvelope.GenerateChecksum(jobContent1);
-        var checksum2 = MessageEnvelope.GenerateChecksum(jobContent2);
+        string checksum1 = MessageEnvelope.GenerateChecksum(jobContent1);
+        string checksum2 = MessageEnvelope.GenerateChecksum(jobContent2);
 
         // Assert
         checksum1.Should().NotBe(checksum2);
@@ -88,16 +88,16 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_ValidateChecksum_ShouldReturnTrueForMatchingContent()
     {
         // Arrange
-        var jobContent = new SlicingJobContent
+        SlicingJobContent jobContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
             ModelFileUrl = "https://storage.example.com/model.stl",
         };
 
-        var envelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
+        MessageEnvelope envelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
 
         // Act
-        var isValid = envelope.ValidateChecksum(jobContent);
+        bool isValid = envelope.ValidateChecksum(jobContent);
 
         // Assert
         isValid.Should().BeTrue();
@@ -107,22 +107,22 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_ValidateChecksum_ShouldReturnFalseForDifferentContent()
     {
         // Arrange
-        var originalContent = new SlicingJobContent
+        SlicingJobContent originalContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
             ModelFileUrl = "https://storage.example.com/model.stl",
         };
 
-        var modifiedContent = new SlicingJobContent
+        SlicingJobContent modifiedContent = new SlicingJobContent
         {
             UserId = originalContent.UserId,
             ModelFileUrl = "https://storage.example.com/different-model.stl", // Changed
         };
 
-        var envelope = MessageEnvelope.Create(originalContent, SlicerEngineType.OrcaSlicer);
+        MessageEnvelope envelope = MessageEnvelope.Create(originalContent, SlicerEngineType.OrcaSlicer);
 
         // Act
-        var isValid = envelope.ValidateChecksum(modifiedContent);
+        bool isValid = envelope.ValidateChecksum(modifiedContent);
 
         // Assert
         isValid.Should().BeFalse();
@@ -132,18 +132,18 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_IsDuplicateOf_ShouldReturnTrueForSameCorrelationAndChecksum()
     {
         // Arrange
-        var correlationId = Guid.NewGuid();
-        var jobContent = new SlicingJobContent
+        Guid correlationId = Guid.NewGuid();
+        SlicingJobContent jobContent = new SlicingJobContent
         {
             UserId = Guid.NewGuid(),
             ModelFileUrl = "https://storage.example.com/model.stl",
         };
 
-        var envelope1 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
-        var envelope2 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
+        MessageEnvelope envelope1 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
+        MessageEnvelope envelope2 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
 
         // Act
-        var isDuplicate = envelope1.IsDuplicateOf(envelope2);
+        bool isDuplicate = envelope1.IsDuplicateOf(envelope2);
 
         // Assert
         isDuplicate.Should().BeTrue();
@@ -153,13 +153,13 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_IsDuplicateOf_ShouldReturnFalseForDifferentCorrelation()
     {
         // Arrange
-        var jobContent = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model.stl" };
+        SlicingJobContent jobContent = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model.stl" };
 
-        var envelope1 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
-        var envelope2 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
+        MessageEnvelope envelope1 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
+        MessageEnvelope envelope2 = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
 
         // Act
-        var isDuplicate = envelope1.IsDuplicateOf(envelope2);
+        bool isDuplicate = envelope1.IsDuplicateOf(envelope2);
 
         // Assert
         isDuplicate.Should().BeFalse(); // Different correlation IDs
@@ -169,15 +169,15 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_IsDuplicateOf_ShouldReturnFalseForDifferentChecksum()
     {
         // Arrange
-        var correlationId = Guid.NewGuid();
-        var jobContent1 = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model1.stl" };
-        var jobContent2 = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model2.stl" };
+        Guid correlationId = Guid.NewGuid();
+        SlicingJobContent jobContent1 = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model1.stl" };
+        SlicingJobContent jobContent2 = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model2.stl" };
 
-        var envelope1 = MessageEnvelope.Create(jobContent1, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
-        var envelope2 = MessageEnvelope.Create(jobContent2, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
+        MessageEnvelope envelope1 = MessageEnvelope.Create(jobContent1, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
+        MessageEnvelope envelope2 = MessageEnvelope.Create(jobContent2, SlicerEngineType.OrcaSlicer, correlationId: correlationId);
 
         // Act
-        var isDuplicate = envelope1.IsDuplicateOf(envelope2);
+        bool isDuplicate = envelope1.IsDuplicateOf(envelope2);
 
         // Assert
         isDuplicate.Should().BeFalse(); // Different checksums
@@ -187,11 +187,11 @@ public class MessageEnvelopeTests
     public void MessageEnvelope_CreateRetry_ShouldIncrementAttempt()
     {
         // Arrange
-        var jobContent = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model.stl" };
-        var originalEnvelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
+        SlicingJobContent jobContent = new SlicingJobContent { UserId = Guid.NewGuid(), ModelFileUrl = "https://storage.example.com/model.stl" };
+        MessageEnvelope originalEnvelope = MessageEnvelope.Create(jobContent, SlicerEngineType.OrcaSlicer);
 
         // Act
-        var retryEnvelope = MessageEnvelope.CreateRetry(originalEnvelope);
+        MessageEnvelope retryEnvelope = MessageEnvelope.CreateRetry(originalEnvelope);
 
         // Assert
         retryEnvelope.Attempt.Should().Be(originalEnvelope.Attempt + 1);
@@ -205,7 +205,7 @@ public class MessageEnvelopeTests
     public void SlicingJobContent_FromRequest_ShouldCreateCorrectContent()
     {
         // Arrange
-        var request = new SlicingJobRequest
+        SlicingJobRequest request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
             PrinterId = Guid.NewGuid(),
@@ -221,7 +221,7 @@ public class MessageEnvelopeTests
         request.Metadata["test"] = "value";
 
         // Act
-        var content = SlicingJobContent.FromRequest(request);
+        SlicingJobContent content = SlicingJobContent.FromRequest(request);
 
         // Assert
         content.UserId.Should().Be(request.UserId);
@@ -238,7 +238,7 @@ public class MessageEnvelopeTests
     public void SlicingJobRequest_GetOrCreateEnvelope_ShouldCreateEnvelopeIfNone()
     {
         // Arrange
-        var request = new SlicingJobRequest
+        SlicingJobRequest request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
             ModelFileUrl = new Uri("https://storage.example.com/model.stl"),
@@ -247,7 +247,7 @@ public class MessageEnvelopeTests
         };
 
         // Act
-        var envelope = request.GetOrCreateEnvelope();
+        MessageEnvelope envelope = request.GetOrCreateEnvelope();
 
         // Assert
         envelope.Should().NotBeNull();
@@ -259,14 +259,14 @@ public class MessageEnvelopeTests
     public void SlicingJobRequest_GetOrCreateEnvelope_ShouldReturnExistingEnvelope()
     {
         // Arrange
-        var existingEnvelope = new MessageEnvelope
+        MessageEnvelope existingEnvelope = new MessageEnvelope
         {
             SlicerType = SlicerEngineType.PrusaSlicer,
             Priority = SlicingJobPriority.High,
             CorrelationId = Guid.NewGuid()
         };
 
-        var request = new SlicingJobRequest
+        SlicingJobRequest request = new SlicingJobRequest
         {
             UserId = Guid.NewGuid(),
             ModelFileUrl = new Uri("https://storage.example.com/model.stl"),
@@ -275,7 +275,7 @@ public class MessageEnvelopeTests
         };
 
         // Act
-        var envelope = request.GetOrCreateEnvelope();
+        MessageEnvelope envelope = request.GetOrCreateEnvelope();
 
         // Assert
         envelope.Should().BeSameAs(existingEnvelope);

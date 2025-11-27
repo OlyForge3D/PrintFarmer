@@ -24,8 +24,8 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
     public async Task Login_WithinRateLimit_ShouldSucceed()
     {
         // Arrange
-        var client = CreateClient();
-        var loginRequest = new LoginRequest
+        HttpClient client = CreateClient();
+        LoginRequest loginRequest = new LoginRequest
         {
             UsernameOrEmail = "testuser",
             Password = "TestPassword123!"
@@ -33,9 +33,9 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
 
         // Act - Make 3 login attempts (well within the 10/minute limit)
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.1");
-        var response1 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
-        var response2 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
-        var response3 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+        HttpResponseMessage response1 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+        HttpResponseMessage response2 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
+        HttpResponseMessage response3 = await client.PostAsJsonAsync("/api/auth/login", loginRequest);
 
         // Assert - All should process (may fail auth, but not rate limited)
         response1.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
@@ -47,15 +47,15 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
     public async Task Login_ExceedingRateLimit_ShouldReturn429()
     {
         // Arrange
-        var client = CreateClient();
-        var loginRequest = new LoginRequest
+        HttpClient client = CreateClient();
+        LoginRequest loginRequest = new LoginRequest
         {
             UsernameOrEmail = "testuser",
             Password = "password"
         };
 
         // Act - Make 11 rapid login attempts (exceeds 10/minute limit)
-        var responses = new List<HttpResponseMessage>();
+        List<HttpResponseMessage> responses = new List<HttpResponseMessage>();
         client.DefaultRequestHeaders.Remove("X-Forwarded-For");
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.2");
         for (int i = 0; i < 11; i++)
@@ -64,14 +64,14 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         }
 
         // Assert - At least one should be rate limited
-        var rateLimitedResponses = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
+        List<HttpResponseMessage> rateLimitedResponses = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
         rateLimitedResponses.Should().NotBeEmpty("at least one request should be rate limited");
 
         // Check the rate limited response
-        var rateLimitedResponse = rateLimitedResponses.First();
+        HttpResponseMessage rateLimitedResponse = rateLimitedResponses.First();
         rateLimitedResponse.Headers.Should().ContainKey("Retry-After");
 
-        var content = await rateLimitedResponse.Content.ReadFromJsonAsync<RateLimitErrorResponse>();
+        RateLimitErrorResponse? content = await rateLimitedResponse.Content.ReadFromJsonAsync<RateLimitErrorResponse>();
         content.Should().NotBeNull();
         content!.Error.Should().Be("Too Many Requests");
         content.Message.Should().Contain("login");
@@ -82,15 +82,15 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
     public async Task Register_ExceedingRateLimit_ShouldReturn429()
     {
         // Arrange
-        var client = CreateClient();
+        HttpClient client = CreateClient();
 
         // Act - Make 11 rapid registration attempts (exceeds 10/minute limit)
-        var responses = new List<HttpResponseMessage>();
+        List<HttpResponseMessage> responses = new List<HttpResponseMessage>();
         client.DefaultRequestHeaders.Remove("X-Forwarded-For");
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.3");
         for (int i = 0; i < 11; i++)
         {
-            var registerRequest = new RegisterRequest
+            RegisterRequest registerRequest = new RegisterRequest
             {
                 Username = $"user{i}",
                 Email = $"user{i}@example.com",
@@ -103,14 +103,14 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         }
 
         // Assert - At least one should be rate limited
-        var rateLimitedResponses = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
+        List<HttpResponseMessage> rateLimitedResponses = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
         rateLimitedResponses.Should().NotBeEmpty("at least one request should be rate limited");
 
         // Check the rate limited response
-        var rateLimitedResponse = rateLimitedResponses.First();
+        HttpResponseMessage rateLimitedResponse = rateLimitedResponses.First();
         rateLimitedResponse.Headers.Should().ContainKey("Retry-After");
 
-        var content = await rateLimitedResponse.Content.ReadFromJsonAsync<RateLimitErrorResponse>();
+        RateLimitErrorResponse? content = await rateLimitedResponse.Content.ReadFromJsonAsync<RateLimitErrorResponse>();
         content.Should().NotBeNull();
         content!.Error.Should().Be("Too Many Requests");
         content.Message.Should().Contain("register");
@@ -120,8 +120,8 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
     public async Task Login_RateLimitDoesNotAffectOtherEndpoints_ShouldSucceed()
     {
         // Arrange
-        var client = CreateClient();
-        var loginRequest = new LoginRequest
+        HttpClient client = CreateClient();
+        LoginRequest loginRequest = new LoginRequest
         {
             UsernameOrEmail = "testuser",
             Password = "password"
@@ -134,7 +134,7 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         }
 
         // Try to access a different endpoint (health check)
-        var healthResponse = await client.GetAsync("/health");
+        HttpResponseMessage healthResponse = await client.GetAsync("/health");
 
         // Assert - Health endpoint should still work
         healthResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);
@@ -145,8 +145,8 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
     public async Task Register_RateLimitIsIndependentFromLogin_ShouldSucceed()
     {
         // Arrange
-        var client = CreateClient();
-        var loginRequest = new LoginRequest
+        HttpClient client = CreateClient();
+        LoginRequest loginRequest = new LoginRequest
         {
             UsernameOrEmail = "testuser",
             Password = "password"
@@ -159,7 +159,7 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         }
 
         // Try to register (different rate limit counter)
-        var registerRequest = new RegisterRequest
+        RegisterRequest registerRequest = new RegisterRequest
         {
             Username = "newuser",
             Email = "newuser@example.com",
@@ -170,7 +170,7 @@ public class RateLimitingIntegrationTests : IClassFixture<CustomWebApplicationFa
         };
         client.DefaultRequestHeaders.Remove("X-Forwarded-For");
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.0.0.4");
-        var registerResponse = await client.PostAsJsonAsync("/api/auth/register", registerRequest);
+        HttpResponseMessage registerResponse = await client.PostAsJsonAsync("/api/auth/register", registerRequest);
 
         // Assert - Register should not be rate limited (independent counter)
         registerResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests);

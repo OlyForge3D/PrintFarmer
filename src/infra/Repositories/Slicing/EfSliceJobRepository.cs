@@ -33,7 +33,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default)
     {
-        var query = _db.SliceJobs
+        IOrderedQueryable<SliceJob> query = _db.SliceJobs
             .Where(j => j.UserId == userId)
             .OrderByDescending(j => j.QueuedAt);
 
@@ -52,7 +52,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default)
     {
-        var query = _db.SliceJobs
+        IOrderedQueryable<SliceJob> query = _db.SliceJobs
             .Where(j => j.Status == status)
             .OrderByDescending(j => j.QueuedAt);
 
@@ -74,7 +74,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
     {
-        var query = _db.SliceJobs
+        IOrderedQueryable<SliceJob> query = _db.SliceJobs
             .Where(j => j.Status == SliceJobStatus.Queued)
             .OrderByDescending(j => j.Priority)
             .ThenBy(j => j.QueuedAt);
@@ -89,7 +89,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task UpdateStatusAsync(Guid jobId, string status, string? progressMessage = null, int? progressPercent = null, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
@@ -111,7 +111,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task MarkStartedAsync(Guid jobId, Guid workerId, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
@@ -125,7 +125,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task MarkCompletedAsync(Guid jobId, string resultFileUrl, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
@@ -143,13 +143,13 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task MarkCompletedWithArtifactsAsync(Guid jobId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
         }
 
-        var ids = artifactIds?.Distinct().ToArray() ?? Array.Empty<Guid>();
+        Guid[] ids = artifactIds?.Distinct().ToArray() ?? Array.Empty<Guid>();
         job.Status = SliceJobStatus.Completed;
         job.CompletedAt = DateTime.UtcNow;
         job.ResultFileUrl = resultFileUrl;
@@ -175,7 +175,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task MarkFailedAsync(Guid jobId, string errorMessage, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
@@ -189,7 +189,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
@@ -202,8 +202,8 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
     {
-        var now = DateTime.UtcNow;
-        var leaseExpiration = now.AddSeconds(leaseDurationSeconds);
+        DateTime now = DateTime.UtcNow;
+        DateTime leaseExpiration = now.AddSeconds(leaseDurationSeconds);
 
         // Base query: queued or expired lease
         IQueryable<SliceJob> baseQuery = _db.SliceJobs
@@ -216,7 +216,7 @@ public class EfSliceJobRepository : ISliceJobRepository
         if (capabilities != null && capabilities.Length > 0)
         {
             // Materialize a small candidate set (limit 50) then perform capability matching client-side
-            var candidates = await baseQuery.Take(50).ToListAsync(ct);
+            List<SliceJob> candidates = await baseQuery.Take(50).ToListAsync(ct);
             job = candidates.FirstOrDefault(j =>
                 string.IsNullOrEmpty(j.RequiredCapabilitiesJson) || j.RequiredCapabilitiesJson == "[]" ||
                 capabilities.Any(cap => j.RequiredCapabilitiesJson.Contains($"\"{cap}\"", StringComparison.OrdinalIgnoreCase)));
@@ -251,8 +251,8 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
     {
-        var threshold = DateTime.UtcNow.AddSeconds(-maxAgeSeconds);
-        var query = _db.SliceJobs
+        DateTime threshold = DateTime.UtcNow.AddSeconds(-maxAgeSeconds);
+        IOrderedQueryable<SliceJob> query = _db.SliceJobs
             .Where(j => j.Status == SliceJobStatus.Processing &&
                         ((j.LeaseExpiresAt != null && j.LeaseExpiresAt < DateTime.UtcNow) || (j.StartedAt != null && j.StartedAt < threshold)))
             .OrderBy(j => j.StartedAt);
@@ -267,7 +267,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
@@ -280,7 +280,7 @@ public class EfSliceJobRepository : ISliceJobRepository
 
     public async Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
     {
-        var job = await GetByIdAsync(jobId, ct);
+        SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
             return;
@@ -311,7 +311,7 @@ public class EfSliceJobRepository : ISliceJobRepository
     public async Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default)
     {
         // Try to find a job with matching CorrelationId and checksum if those fields are populated
-        var job = await _db.SliceJobs.FirstOrDefaultAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
+        SliceJob? job = await _db.SliceJobs.FirstOrDefaultAsync(j => j.CorrelationId == correlationId && (j.Checksum == checksum || j.Checksum == null), ct);
         if (job != null)
         {
             return job;

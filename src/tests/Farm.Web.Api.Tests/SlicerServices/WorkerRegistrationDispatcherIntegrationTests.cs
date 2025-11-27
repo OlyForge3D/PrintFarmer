@@ -36,8 +36,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
         public async Task Registration_Should_Create_WorkerEntity()
         {
             // Arrange
-            using var client = CreateClient();
-            var registerDto = new RegisterSlicerDto
+            using HttpClient client = CreateClient();
+            RegisterSlicerDto registerDto = new RegisterSlicerDto
             {
                 Name = "dispatcher-worker-1",
                 SlicerType = 0,
@@ -47,26 +47,26 @@ namespace Farm.Web.Api.Tests.SlicerServices
                 CapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer" }),
                 Tags = "tag1"
             };
-            var json = JsonSerializer.Serialize(registerDto);
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            string json = JsonSerializer.Serialize(registerDto);
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
             // Act - register
-            var resp = await client.PostAsync("/api/slicers/register", content);
+            HttpResponseMessage resp = await client.PostAsync("/api/slicers/register", content);
             resp.IsSuccessStatusCode.Should().BeTrue();
-            var respBody = await resp.Content.ReadAsStringAsync();
-            var regResult = JsonSerializer.Deserialize<RegResponse>(respBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            string respBody = await resp.Content.ReadAsStringAsync();
+            RegResponse? regResult = JsonSerializer.Deserialize<RegResponse>(respBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             regResult.Should().NotBeNull();
 
             // Query workers endpoint
-            var workersResp = await client.GetAsync("/api/workers");
+            HttpResponseMessage workersResp = await client.GetAsync("/api/workers");
             workersResp.IsSuccessStatusCode.Should().BeTrue();
-            var workersJson = await workersResp.Content.ReadAsStringAsync();
+            string workersJson = await workersResp.Content.ReadAsStringAsync();
             workersJson.Should().Contain("dispatcher-worker-1");
 
             // Validate Worker repository directly
-            using var scope = _factory.Services.CreateScope();
-            var workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
-            var worker = await workerRepo.GetByServiceIdAsync(regResult!.Id.ToString());
+            using IServiceScope scope = _factory.Services.CreateScope();
+            IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
+            Worker? worker = await workerRepo.GetByServiceIdAsync(regResult!.Id.ToString());
             worker.Should().NotBeNull();
             worker!.Name.Should().Be("dispatcher-worker-1");
             worker.Status.Should().Be(WorkerStatus.Online);
@@ -78,8 +78,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
         public async Task Dispatcher_Should_Select_Worker_With_Capability()
         {
             // Arrange - register worker
-            using var client = CreateClient();
-            var registerDto = new RegisterSlicerDto
+            using HttpClient client = CreateClient();
+            RegisterSlicerDto registerDto = new RegisterSlicerDto
             {
                 Name = "dispatcher-worker-cap",
                 SlicerType = 0,
@@ -88,21 +88,21 @@ namespace Farm.Web.Api.Tests.SlicerServices
                 MaxConcurrentJobs = 1,
                 CapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer", "gcode-generation" })
             };
-            var json = JsonSerializer.Serialize(registerDto);
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var resp = await client.PostAsync("/api/slicers/register", content);
+            string json = JsonSerializer.Serialize(registerDto);
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            HttpResponseMessage resp = await client.PostAsync("/api/slicers/register", content);
             resp.IsSuccessStatusCode.Should().BeTrue();
-            var respBody = await resp.Content.ReadAsStringAsync();
-            var regResult = JsonSerializer.Deserialize<RegResponse>(respBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            string respBody = await resp.Content.ReadAsStringAsync();
+            RegResponse? regResult = JsonSerializer.Deserialize<RegResponse>(respBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             regResult.Should().NotBeNull();
 
             // Create a queued slice job directly via repository
-            using var scope = _factory.Services.CreateScope();
-            var jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
-            var workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
-            var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
+            using IServiceScope scope = _factory.Services.CreateScope();
+            ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+            IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
+            IJobDispatcherService dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcherService>();
 
-            var job = new SliceJob
+            SliceJob job = new SliceJob
             {
                 Id = Guid.NewGuid(),
                 Status = SliceJobStatus.Queued,
@@ -114,7 +114,7 @@ namespace Farm.Web.Api.Tests.SlicerServices
             await jobRepo.SaveChangesAsync();
 
             // Act - attempt to find best worker
-            var selected = await dispatcher.FindBestWorkerForJobAsync(job);
+            Worker? selected = await dispatcher.FindBestWorkerForJobAsync(job);
 
             // Assert
             selected.Should().NotBeNull();

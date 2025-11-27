@@ -40,7 +40,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        var scope = _factory.Services.CreateScope();
+        IServiceScope scope = _factory.Services.CreateScope();
         _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         // Setup test storage directories
         _modelStoragePath = Path.Combine(Path.GetTempPath(), "test_models_" + Guid.NewGuid());
@@ -72,19 +72,19 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task GetHealthSummary_WithHealthyFiles_ReturnsCorrectStats()
     {
         // Arrange
-        var model1 = CreateAndPersistModel3D("test-model-1.stl", FileHealthStatus.Healthy);
-        var model2 = CreateAndPersistModel3D("test-model-2.stl", FileHealthStatus.Healthy);
-        var gcode1 = CreateAndPersistGcodeFile("test-print.gcode", FileHealthStatus.Healthy);
+        Model3D model1 = CreateAndPersistModel3D("test-model-1.stl", FileHealthStatus.Healthy);
+        Model3D model2 = CreateAndPersistModel3D("test-model-2.stl", FileHealthStatus.Healthy);
+        GcodeFile gcode1 = CreateAndPersistGcodeFile("test-print.gcode", FileHealthStatus.Healthy);
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var response = await _client.GetAsync("/api/fileconsistency/health/summary");
+        HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/health/summary");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = await response.Content.ReadAsStringAsync();
-        var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        string json = await response.Content.ReadAsStringAsync();
+        JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
         root.GetProperty("totalModel3DFiles").GetInt32().Should().Be(2);
         root.GetProperty("model3DHealthy").GetInt32().Should().Be(2);
         root.GetProperty("totalGcodeFiles").GetInt32().Should().Be(1);
@@ -97,19 +97,19 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task GetModel3DHealth_WithSpecificFile_ReturnsCorrectDetails()
     {
         // Arrange
-        var model = CreateAndPersistModel3D("test.stl", FileHealthStatus.Healthy);
+        Model3D model = CreateAndPersistModel3D("test.stl", FileHealthStatus.Healthy);
         model.LastHealthCheckDate = DateTime.UtcNow.AddMinutes(-5);
         model.LastVerificationResult = "{\"verified\": true, \"hash_match\": true}";
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var response = await _client.GetAsync($"/api/fileconsistency/model3d/{model.Id}/health");
+        HttpResponseMessage response = await _client.GetAsync($"/api/fileconsistency/model3d/{model.Id}/health");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = await response.Content.ReadAsStringAsync();
-        var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        string json = await response.Content.ReadAsStringAsync();
+        JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
         root.GetProperty("fileId").GetString().Should().Be(model.Id.ToString());
         root.GetProperty("healthStatus").GetString().Should().Be("Healthy");
         root.GetProperty("fileSize").GetInt64().Should().Be(model.FileSizeBytes);
@@ -119,7 +119,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task GetGcodeFileHealth_WithNonexistentFile_Returns404()
     {
         // Act
-        var response = await _client.GetAsync($"/api/fileconsistency/gcode/{Guid.NewGuid()}/health");
+        HttpResponseMessage response = await _client.GetAsync($"/api/fileconsistency/gcode/{Guid.NewGuid()}/health");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -129,7 +129,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task GetAuditHistory_WithMultipleAudits_ReturnsInReverseChronological()
     {
         // Arrange
-        var audit1 = new FileHealthAudit
+        FileHealthAudit audit1 = new FileHealthAudit
         {
             Id = Guid.NewGuid(),
             AuditDate = DateTime.UtcNow.AddHours(-2),
@@ -144,7 +144,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             CreatedAt = DateTime.UtcNow.AddHours(-2)
         };
 
-        var audit2 = new FileHealthAudit
+        FileHealthAudit audit2 = new FileHealthAudit
         {
             Id = Guid.NewGuid(),
             AuditDate = DateTime.UtcNow.AddHours(-1),
@@ -164,16 +164,16 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var response = await _client.GetAsync("/api/fileconsistency/audits/history?pageSize=10");
+        HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/audits/history?pageSize=10");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = await response.Content.ReadAsStringAsync();
-        var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        string json = await response.Content.ReadAsStringAsync();
+        JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
         root.GetArrayLength().Should().Be(2);
-        var audit1Date = DateTime.Parse(root[0].GetProperty("auditDate").GetString() ?? "");
-        var audit2Date = DateTime.Parse(root[1].GetProperty("auditDate").GetString() ?? "");
+        DateTime audit1Date = DateTime.Parse(root[0].GetProperty("auditDate").GetString() ?? "");
+        DateTime audit2Date = DateTime.Parse(root[1].GetProperty("auditDate").GetString() ?? "");
         audit1Date.Should().BeAfter(audit2Date);
     }
 
@@ -181,11 +181,11 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task FileConsistencyAuditService_WithMissingFile_SavesAuditResultsToDB()
     {
         // Arrange
-        var model = CreateAndPersistModel3D("test-model.stl", FileHealthStatus.Unknown);
+        Model3D model = CreateAndPersistModel3D("test-model.stl", FileHealthStatus.Unknown);
         await _dbContext.SaveChangesAsync();
 
         // Create audit result manually (simulating background service)
-        var auditResult = new FileHealthAudit
+        FileHealthAudit auditResult = new FileHealthAudit
         {
             Id = Guid.NewGuid(),
             AuditDate = DateTime.UtcNow,
@@ -206,7 +206,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Assert
-        var savedAudit = await _dbContext.FileHealthAudits
+        FileHealthAudit? savedAudit = await _dbContext.FileHealthAudits
             .FirstOrDefaultAsync(a => a.Id == auditResult.Id);
         savedAudit.Should().NotBeNull();
         savedAudit!.MissingFiles.Should().Be(1);
@@ -217,12 +217,12 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task FileIntegrityService_VerifyIntegrity_DetectsMissingFiles()
     {
         // Arrange
-        var scope = _factory.Services.CreateScope();
-        var integrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
-        var nonexistentPath = Path.Combine(_modelStoragePath, "nonexistent.stl");
+        IServiceScope scope = _factory.Services.CreateScope();
+        IFileIntegrityService integrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
+        string nonexistentPath = Path.Combine(_modelStoragePath, "nonexistent.stl");
 
         // Act
-        var result = await integrityService.VerifyIntegrityAsync(
+        FileIntegrityCheckResult result = await integrityService.VerifyIntegrityAsync(
             nonexistentPath,
             "expectedhash",
             1024,
@@ -237,13 +237,13 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task FileIntegrityService_VerifyIntegrity_DetectsHashMismatch()
     {
         // Arrange
-        var scope = _factory.Services.CreateScope();
-        var integrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
-        var testFilePath = Path.Combine(_modelStoragePath, "test.stl");
+        IServiceScope scope = _factory.Services.CreateScope();
+        IFileIntegrityService integrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
+        string testFilePath = Path.Combine(_modelStoragePath, "test.stl");
         File.WriteAllText(testFilePath, "test content");
 
         // Act
-        var result = await integrityService.VerifyIntegrityAsync(
+        FileIntegrityCheckResult result = await integrityService.VerifyIntegrityAsync(
             testFilePath,
             "wronghash1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
             1024, // Wrong size
@@ -265,13 +265,13 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var response = await _client.GetAsync("/api/fileconsistency/health/summary");
+        HttpResponseMessage response = await _client.GetAsync("/api/fileconsistency/health/summary");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var json = await response.Content.ReadAsStringAsync();
-        var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        string json = await response.Content.ReadAsStringAsync();
+        JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
         // 2 healthy out of 4 files = 50%
         root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(50.0);
     }
@@ -280,12 +280,12 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task FileConsistencyController_RequiresAuthorization()
     {
         // Arrange - use an unauthenticated client
-        var factoryWithoutAuth = new CustomWebApplicationFactory();
-        var clientWithoutAuth = factoryWithoutAuth.CreateClient(
+        CustomWebApplicationFactory factoryWithoutAuth = new CustomWebApplicationFactory();
+        HttpClient clientWithoutAuth = factoryWithoutAuth.CreateClient(
             new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
         // Act
-        var response = await clientWithoutAuth.GetAsync("/api/fileconsistency/health/summary");
+        HttpResponseMessage response = await clientWithoutAuth.GetAsync("/api/fileconsistency/health/summary");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -297,7 +297,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
     private Model3D CreateAndPersistModel3D(string fileName, FileHealthStatus healthStatus)
     {
-        var model = new Model3D
+        Model3D model = new Model3D
         {
             Id = Guid.NewGuid(),
             OriginalFileName = fileName,
@@ -320,7 +320,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
     private GcodeFile CreateAndPersistGcodeFile(string fileName, FileHealthStatus healthStatus)
     {
-        var gcode = new GcodeFile
+        GcodeFile gcode = new GcodeFile
         {
             Id = Guid.NewGuid(),
             OriginalFileName = fileName,

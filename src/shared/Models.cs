@@ -112,10 +112,10 @@ public partial record PrinterDto(
 // Non-breaking typed accessors for URL-like fields (ignored in JSON)
 public partial record PrinterDto
 {
-    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
-    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out var u) ? u : null);
-    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out var u) ? u : null);
-    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
+    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out Uri? u) ? u : null);
+    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out Uri? u) ? u : null);
+    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 
 // Basic printer info without live status (for fast loading)
@@ -138,7 +138,7 @@ public partial record PrinterBasicDto(
 
 public partial record PrinterBasicDto
 {
-    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
 }
 
 // Camera URLs for all printers (static configuration without external API calls)
@@ -153,8 +153,8 @@ public partial record PrinterCameraUrlsDto(
 
 public partial record PrinterCameraUrlsDto
 {
-    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out var u) ? u : null);
-    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out Uri? u) ? u : null);
+    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 
 // Fast printer info optimized for performance - excludes camera URLs and real-time status
@@ -180,7 +180,7 @@ public partial record PrinterFastDto(
 
 public partial record PrinterFastDto
 {
-    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out var u) ? u : null;
+    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
 }
 
 // Live status info for a specific printer
@@ -207,9 +207,9 @@ public partial record PrinterStatusDto(
 
 public partial record PrinterStatusDto
 {
-    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out var u) ? u : null);
-    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out var u) ? u : null);
-    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out Uri? u) ? u : null);
+    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out Uri? u) ? u : null);
+    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 
 // Real-time update payload for SignalR
@@ -362,7 +362,7 @@ public record MoveRequest(double? X, double? Y, double? Z, double? F);
 public partial record SpoolmanConfigDto(string? BaseUrl);
 public partial record SpoolmanConfigDto
 {
-    [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) ? u : null);
+    [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 /// <summary>
 /// Represents a single filament spool entity retrieved from Spoolman.
@@ -689,7 +689,7 @@ public class RegisterDiscoveredPrinterDto
             IpAddress = IpAddress,
             ServerUrl = $"http://{IpAddress}:{Port}",
             OriginalServerUrl = null,
-            Backend = Enum.TryParse<PrinterBackend>(PrinterBackend, ignoreCase: true, out var b) ? b : global::Farm.Web.Shared.PrinterBackend.Moonraker,
+            Backend = Enum.TryParse<PrinterBackend>(PrinterBackend, ignoreCase: true, out PrinterBackend b) ? b : global::Farm.Web.Shared.PrinterBackend.Moonraker,
             BackendPort = Port,
             FrontendPort = null,
             DiscoveredAt = DiscoveredAt,

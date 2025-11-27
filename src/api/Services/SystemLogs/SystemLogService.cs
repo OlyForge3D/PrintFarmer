@@ -20,8 +20,8 @@ public class SystemLogService : ISystemLogService
 
     public async Task<IReadOnlyList<SystemLog>> QueryLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
     {
-        var list = new List<SystemLog>();
-        await foreach (var item in _repo.QueryAsync(correlationId, level, from, to, metadata))
+        List<SystemLog> list = new List<SystemLog>();
+        await foreach (SystemLog item in _repo.QueryAsync(correlationId, level, from, to, metadata))
         {
             list.Add(item);
             if (list.Count >= 500)

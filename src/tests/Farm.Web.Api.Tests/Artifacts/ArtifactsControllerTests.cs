@@ -1,6 +1,9 @@
 ﻿using System;
 using System.IO;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Services.Artifacts;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -19,13 +22,13 @@ public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactor
     [Fact(DisplayName = "Artifact service upload + file presence works")]
     public async Task Artifact_Upload_And_File_Persisted()
     {
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
-        var db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
 
         Guid jobId = Guid.NewGuid();
         // Minimal job row required to satisfy FK-less artifact (jobId stored but SliceJob not strictly required yet)
-        var sliceJob = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob sliceJob = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = jobId,
             UserId = Guid.NewGuid(),
@@ -41,18 +44,18 @@ public class ArtifactsControllerTests : IClassFixture<CustomWebApplicationFactor
 
         string kind = "gcode";
         byte[] data = System.Text.Encoding.UTF8.GetBytes("G1 X0 Y0 Z0 F1500 ; test gcode");
-        var formFile = new TestFormFile(data, "test.gcode", "text/plain");
-        var artifact = await artifactsService.UploadAsync(formFile, jobId, null, kind, default);
+        TestFormFile formFile = new TestFormFile(data, "test.gcode", "text/plain");
+        Artifact artifact = await artifactsService.UploadAsync(formFile, jobId, null, kind, default);
 
         artifact.Kind.Should().Be(kind);
         artifact.SizeBytes.Should().Be(data.Length);
         artifact.FileName.Should().Be("test.gcode");
 
-        var pathInfo = await artifactsService.GetWithPathAsync(artifact.Id, default);
+        (Artifact artifact, string fullPath)? pathInfo = await artifactsService.GetWithPathAsync(artifact.Id, default);
         pathInfo.Should().NotBeNull();
-        var fullPath = pathInfo!.Value.fullPath;
+        string fullPath = pathInfo!.Value.fullPath;
         File.Exists(fullPath).Should().BeTrue();
-        var fileBytes = await File.ReadAllBytesAsync(fullPath);
+        byte[] fileBytes = await File.ReadAllBytesAsync(fullPath);
         fileBytes.Length.Should().Be(data.Length);
     }
 

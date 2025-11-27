@@ -29,9 +29,9 @@ namespace Farm.Web.Api.Services.Slicing
         {
             ArgumentNullException.ThrowIfNull(req);
 
-            var (slicerType, quality) = ValidateAndParseEnums(req.SlicerType, req.Quality);
+            (SlicerType slicerType, ProfileQuality quality) = ValidateAndParseEnums(req.SlicerType, req.Quality);
 
-            var profile = new ProcessProfile
+            ProcessProfile profile = new ProcessProfile
             {
                 Id = Guid.NewGuid(),
                 Name = NormalizeString(req.Name, "Untitled Profile"),
@@ -58,19 +58,19 @@ namespace Farm.Web.Api.Services.Slicing
 
         public async Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct)
         {
-            var profile = await _repo.FindByIdAsync(id, ct);
+            ProcessProfile? profile = await _repo.FindByIdAsync(id, ct);
             return profile is null ? null : ToResponseDto(profile);
         }
 
         public async Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(CancellationToken ct)
         {
-            var profiles = await _repo.GetAllAsync(ct);
+            List<ProcessProfile> profiles = await _repo.GetAllAsync(ct);
             return profiles.OrderBy(p => p.Name).Select(ToSummaryDto).ToList();
         }
 
         public async Task DeleteProfileAsync(Guid id, CancellationToken ct)
         {
-            var profile = await _repo.FindByIdAsync(id, ct);
+            ProcessProfile? profile = await _repo.FindByIdAsync(id, ct);
             if (profile is null)
             {
                 throw new KeyNotFoundException($"Profile with ID {id} not found");
@@ -137,11 +137,11 @@ namespace Farm.Web.Api.Services.Slicing
             string? slicerTypeStr,
             string? qualityStr)
         {
-            var slicerType = Enum.TryParse<SlicerType>(slicerTypeStr, ignoreCase: true, out var st)
+            SlicerType slicerType = Enum.TryParse<SlicerType>(slicerTypeStr, ignoreCase: true, out SlicerType st)
                 ? st
                 : SlicerType.PrusaSlicer;
 
-            var quality = Enum.TryParse<ProfileQuality>(qualityStr, ignoreCase: true, out var q)
+            ProfileQuality quality = Enum.TryParse<ProfileQuality>(qualityStr, ignoreCase: true, out ProfileQuality q)
                 ? q
                 : ProfileQuality.Standard;
 

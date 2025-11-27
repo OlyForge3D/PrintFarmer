@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Shared;
@@ -60,7 +61,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         }
 
         // Map the new DTO to the old service DTO
-        var serviceRequest = new Farm.Web.Shared.RegisterRequest(
+        Shared.RegisterRequest serviceRequest = new Farm.Web.Shared.RegisterRequest(
             request.Username,
             request.Email,
             request.Password,
@@ -128,7 +129,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         }
 
         // Map from service UserDto to contracts UserDto
-        var user = new UserDto
+        UserDto user = new UserDto
         {
             Id = serviceUser.Id,
             Username = serviceUser.Username,
@@ -319,13 +320,13 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         try
         {
             // Get user ID from authenticated claims
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            Claim? userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out Guid userId))
             {
                 return BadRequest(new ResendConfirmationResponse(false, "Invalid user authentication"));
             }
 
-            var userDto = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+            Shared.UserDto? userDto = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
             if (userDto == null)
             {
                 return NotFound();
@@ -337,7 +338,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
             }
 
             // Get the actual User entity to pass to SendEmailConfirmationAsync
-            var user = await _authService.GetUserByEmailAsync(userDto.Email);
+            User? user = await _authService.GetUserByEmailAsync(userDto.Email);
             if (user == null)
             {
                 return NotFound();

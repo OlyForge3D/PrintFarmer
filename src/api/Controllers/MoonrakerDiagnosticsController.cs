@@ -37,7 +37,7 @@ public class MoonrakerDiagnosticsController(
         try
         {
             // Delegate to diagnostics service (which encapsulates retry logic)
-            var roots = await _diagnosticsService.GetFileRootsAsync(url);
+            FileRoot[]? roots = await _diagnosticsService.GetFileRootsAsync(url);
             if (roots is null)
             {
                 return Problem($"GetFileRootsAsync failed after retries", statusCode: 500);
@@ -76,7 +76,7 @@ public class MoonrakerDiagnosticsController(
         try
         {
             // Delegate to diagnostics service (which encapsulates retry logic)
-            var directory = await _diagnosticsService.GetDirectoryAsync(url, path);
+            Services.DirectoryInfo? directory = await _diagnosticsService.GetDirectoryAsync(url, path);
             if (directory is null)
             {
                 return Problem($"GetDirectoryAsync failed after retries", statusCode: 500);
@@ -111,7 +111,7 @@ public class MoonrakerDiagnosticsController(
         try
         {
             // Delegate to diagnostics service (which encapsulates retry logic)
-            var fileList = await _diagnosticsService.GetDetailedFileListAsync(url, root, path);
+            MoonrakerFileInfo[]? fileList = await _diagnosticsService.GetDetailedFileListAsync(url, root, path);
             if (fileList is null)
             {
                 return Problem($"GetDetailedFileListAsync failed after retries", statusCode: 500);

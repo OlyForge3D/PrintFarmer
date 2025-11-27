@@ -32,11 +32,11 @@ public class FileConsistencyController(
     {
         try
         {
-            var model3DStats = await GetModel3DHealthStatsAsync(ct);
-            var gcodeStats = await GetGcodeHealthStatsAsync(ct);
-            var recentAudit = await _repo.GetMostRecentHealthyAuditAsync(ct);
+            (int Total, int Healthy, int Missing, int Corrupted) model3DStats = await GetModel3DHealthStatsAsync(ct);
+            (int Total, int Healthy, int Missing, int Corrupted) gcodeStats = await GetGcodeHealthStatsAsync(ct);
+            FileHealthAudit? recentAudit = await _repo.GetMostRecentHealthyAuditAsync(ct);
 
-            var summary = new FileHealthSummaryDto
+            FileHealthSummaryDto summary = new FileHealthSummaryDto
             {
                 TotalModel3DFiles = model3DStats.Total,
                 Model3DHealthy = model3DStats.Healthy,
@@ -69,8 +69,8 @@ public class FileConsistencyController(
     {
         try
         {
-            var audits = await _repo.GetRecentAuditsAsync(pageSize, ct);
-            var auditDtos = audits.Select(a => new FileHealthAuditDto
+            IReadOnlyList<FileHealthAudit> audits = await _repo.GetRecentAuditsAsync(pageSize, ct);
+            List<FileHealthAuditDto> auditDtos = audits.Select(a => new FileHealthAuditDto
             {
                 Id = a.Id,
                 AuditDate = a.AuditDate,
@@ -102,13 +102,13 @@ public class FileConsistencyController(
         try
         {
             // Use repository methods to get files with issues
-            var missingModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Missing, ct);
-            var corruptedModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
+            IReadOnlyList<Model3D> missingModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Missing, ct);
+            IReadOnlyList<Model3D> corruptedModel3DFiles = await _repo.GetModel3DFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
 
-            var missingGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Missing, ct);
-            var corruptedGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
+            IReadOnlyList<GcodeFile> missingGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Missing, ct);
+            IReadOnlyList<GcodeFile> corruptedGcodeFiles = await _repo.GetGcodeFilesWithIssueAsync(FileHealthStatus.Corrupted, ct);
 
-            var allIssues = new List<FileIssueDto>();
+            List<FileIssueDto> allIssues = new List<FileIssueDto>();
 
             // Add Model3D missing files
             allIssues.AddRange(missingModel3DFiles.Select(m => new FileIssueDto
@@ -154,7 +154,7 @@ public class FileConsistencyController(
                 LastCheckDate = g.LastHealthCheckDate
             }));
 
-            var summary = new FileIssuesSummaryDto
+            FileIssuesSummaryDto summary = new FileIssuesSummaryDto
             {
                 TotalIssues = allIssues.Count,
                 MissingFiles = allIssues.Count(i => i.IssueType == "Missing"),
@@ -178,14 +178,14 @@ public class FileConsistencyController(
     [HttpGet("model3d/{modelId}/health")]
     public async Task<ActionResult<FileHealthDetailDto>> GetModel3DHealthAsync(Guid modelId, CancellationToken ct)
     {
-        var model = await _repo.GetModel3DWithHealthDetailsAsync(modelId, ct);
+        Model3D? model = await _repo.GetModel3DWithHealthDetailsAsync(modelId, ct);
 
         if (model is null)
         {
             return NotFound($"Model3D with ID {modelId} not found");
         }
 
-        var dto = new FileHealthDetailDto
+        FileHealthDetailDto dto = new FileHealthDetailDto
         {
             FileId = model.Id,
             FileName = model.DisplayName,
@@ -208,14 +208,14 @@ public class FileConsistencyController(
     [HttpGet("gcode/{gcodeId}/health")]
     public async Task<ActionResult<FileHealthDetailDto>> GetGcodeFileHealthAsync(Guid gcodeId, CancellationToken ct)
     {
-        var gcode = await _repo.GetGcodeFileWithHealthDetailsAsync(gcodeId, ct);
+        GcodeFile? gcode = await _repo.GetGcodeFileWithHealthDetailsAsync(gcodeId, ct);
 
         if (gcode is null)
         {
             return NotFound($"GcodeFile with ID {gcodeId} not found");
         }
 
-        var dto = new FileHealthDetailDto
+        FileHealthDetailDto dto = new FileHealthDetailDto
         {
             FileId = gcode.Id,
             FileName = gcode.DisplayName,
@@ -236,20 +236,20 @@ public class FileConsistencyController(
 
     private async Task<(int Total, int Healthy, int Missing, int Corrupted)> GetModel3DHealthStatsAsync(CancellationToken ct)
     {
-        var total = await _repo.CountModel3DFilesAsync(ct);
-        var healthy = await _repo.CountHealthyModel3DFilesAsync(ct);
-        var missing = await _repo.CountMissingModel3DFilesAsync(ct);
-        var corrupted = await _repo.CountCorruptedModel3DFilesAsync(ct);
+        int total = await _repo.CountModel3DFilesAsync(ct);
+        int healthy = await _repo.CountHealthyModel3DFilesAsync(ct);
+        int missing = await _repo.CountMissingModel3DFilesAsync(ct);
+        int corrupted = await _repo.CountCorruptedModel3DFilesAsync(ct);
 
         return (total, healthy, missing, corrupted);
     }
 
     private async Task<(int Total, int Healthy, int Missing, int Corrupted)> GetGcodeHealthStatsAsync(CancellationToken ct)
     {
-        var total = await _repo.CountGcodeFilesAsync(ct);
-        var healthy = await _repo.CountHealthyGcodeFilesAsync(ct);
-        var missing = await _repo.CountMissingGcodeFilesAsync(ct);
-        var corrupted = await _repo.CountCorruptedGcodeFilesAsync(ct);
+        int total = await _repo.CountGcodeFilesAsync(ct);
+        int healthy = await _repo.CountHealthyGcodeFilesAsync(ct);
+        int missing = await _repo.CountMissingGcodeFilesAsync(ct);
+        int corrupted = await _repo.CountCorruptedGcodeFilesAsync(ct);
 
         return (total, healthy, missing, corrupted);
     }
@@ -258,13 +258,13 @@ public class FileConsistencyController(
         (int Total, int Healthy, int Missing, int Corrupted) model3DStats,
         (int Total, int Healthy, int Missing, int Corrupted) gcodeStats)
     {
-        var totalFiles = model3DStats.Total + gcodeStats.Total;
+        int totalFiles = model3DStats.Total + gcodeStats.Total;
         if (totalFiles == 0)
         {
             return 100.0;
         }
 
-        var totalHealthy = model3DStats.Healthy + gcodeStats.Healthy;
+        int totalHealthy = model3DStats.Healthy + gcodeStats.Healthy;
         return (totalHealthy / (double)totalFiles) * 100.0;
     }
 }

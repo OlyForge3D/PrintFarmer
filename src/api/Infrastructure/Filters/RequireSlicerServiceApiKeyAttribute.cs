@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Infrastructure.Filters;
 
@@ -18,31 +20,31 @@ public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActio
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
         // Only enforce for endpoints with a SlicerService id in route
-        if (!context.RouteData.Values.TryGetValue("id", out var idObj) || idObj == null)
+        if (!context.RouteData.Values.TryGetValue("id", out object? idObj) || idObj == null)
         {
             context.Result = new UnauthorizedObjectResult(new { error = "Missing SlicerService id in route" });
             return;
         }
-        if (!Guid.TryParse(idObj.ToString(), out var id))
+        if (!Guid.TryParse(idObj.ToString(), out Guid id))
         {
             context.Result = new UnauthorizedObjectResult(new { error = "Invalid SlicerService id" });
             return;
         }
 
-        if (!context.HttpContext.Request.Headers.TryGetValue(HeaderName, out var provided) || string.IsNullOrWhiteSpace(provided))
+        if (!context.HttpContext.Request.Headers.TryGetValue(HeaderName, out StringValues provided) || string.IsNullOrWhiteSpace(provided))
         {
             context.Result = new UnauthorizedObjectResult(new { error = "Missing X-Slicer-ApiKey header" });
             return;
         }
 
         // Resolve ISlicersRepository from DI
-        var repo = context.HttpContext.RequestServices.GetService(typeof(ISlicersRepository)) as ISlicersRepository;
+        ISlicersRepository? repo = context.HttpContext.RequestServices.GetService(typeof(ISlicersRepository)) as ISlicersRepository;
         if (repo == null)
         {
             context.Result = new UnauthorizedObjectResult(new { error = "SlicersRepository unavailable" });
             return;
         }
-        var svc = await repo.GetByIdAsync(id, context.HttpContext.RequestAborted);
+        SlicerService? svc = await repo.GetByIdAsync(id, context.HttpContext.RequestAborted);
         if (svc == null)
         {
             context.Result = new UnauthorizedObjectResult(new { error = "SlicerService not found" });

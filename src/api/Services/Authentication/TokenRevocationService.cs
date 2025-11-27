@@ -1,4 +1,5 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
@@ -37,10 +38,10 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            var tokenHash = GetTokenHash(token);
+            string tokenHash = GetTokenHash(token);
 
             // Check if already revoked
-            var existingRevocation = await _context.RevokedTokens
+            RevokedToken? existingRevocation = await _context.RevokedTokens
                 .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
 
             if (existingRevocation != null)
@@ -50,9 +51,9 @@ public class TokenRevocationService : ITokenRevocationService
             }
 
             // Get token expiration from JWT
-            var expiration = GetTokenExpiration(token);
+            DateTime expiration = GetTokenExpiration(token);
 
-            var revokedToken = new RevokedToken
+            RevokedToken revokedToken = new RevokedToken
             {
                 Id = Guid.NewGuid(),
                 TokenHash = tokenHash,
@@ -93,13 +94,13 @@ public class TokenRevocationService : ITokenRevocationService
             // This will require checking userId in the middleware
 
             // Alternative approach: Get all active refresh tokens for the user and revoke them
-            var activeRefreshTokens = await _context.RefreshTokens
+            List<RefreshToken> activeRefreshTokens = await _context.RefreshTokens
                 .Where(rt => rt.UserId == userId && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
                 .ToListAsync(cancellationToken);
 
             int revokedCount = 0;
 
-            foreach (var refreshToken in activeRefreshTokens)
+            foreach (RefreshToken? refreshToken in activeRefreshTokens)
             {
                 // Mark refresh token as revoked
                 refreshToken.IsRevoked = true;
@@ -110,7 +111,7 @@ public class TokenRevocationService : ITokenRevocationService
 
             // Also create a time-based revocation marker for JWT tokens
             // Any JWT issued before this timestamp for this user will be considered revoked
-            var revocationMarker = new RevokedToken
+            RevokedToken revocationMarker = new RevokedToken
             {
                 Id = Guid.NewGuid(),
                 TokenHash = $"ALL_TOKENS_{userId}_{DateTime.UtcNow.Ticks}", // Special marker
@@ -146,10 +147,10 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            var tokenHash = GetTokenHash(token);
+            string tokenHash = GetTokenHash(token);
 
             // Check if specific token is revoked
-            var isRevoked = await _context.RevokedTokens
+            bool isRevoked = await _context.RevokedTokens
                 .AnyAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
 
             if (isRevoked)
@@ -158,13 +159,13 @@ public class TokenRevocationService : ITokenRevocationService
             }
 
             // Check if user has a "revoke all" marker
-            var userId = GetUserIdFromToken(token);
+            Guid? userId = GetUserIdFromToken(token);
             if (userId.HasValue)
             {
-                var tokenIssuedAt = GetTokenIssuedAt(token);
+                DateTime tokenIssuedAt = GetTokenIssuedAt(token);
 
                 // Check if there's a revocation marker issued after this token
-                var hasRevocationMarker = await _context.RevokedTokens
+                bool hasRevocationMarker = await _context.RevokedTokens
                     .Where(rt => rt.UserId == userId.Value && rt.RevokedAt > tokenIssuedAt)
                     .AnyAsync(rt => rt.TokenHash.StartsWith("ALL_TOKENS_"), cancellationToken);
 
@@ -188,7 +189,7 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            var expiredRevocations = await _context.RevokedTokens
+            List<RevokedToken> expiredRevocations = await _context.RevokedTokens
                 .Where(rt => rt.ExpiresAt < DateTime.UtcNow)
                 .ToListAsync(cancellationToken);
 
@@ -215,8 +216,8 @@ public class TokenRevocationService : ITokenRevocationService
 
     public string GetTokenHash(string token)
     {
-        using var sha256 = SHA256.Create();
-        var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(token));
+        using SHA256 sha256 = SHA256.Create();
+        byte[] hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(token));
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
@@ -224,8 +225,8 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            var handler = new JwtSecurityTokenHandler();
-            var jwtToken = handler.ReadJwtToken(token);
+            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
+            JwtSecurityToken jwtToken = handler.ReadJwtToken(token);
             return jwtToken.ValidTo;
         }
         catch
@@ -239,17 +240,17 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            var handler = new JwtSecurityTokenHandler();
-            var jwtToken = handler.ReadJwtToken(token);
+            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
+            JwtSecurityToken jwtToken = handler.ReadJwtToken(token);
             // Tokens are issued with ClaimTypes.NameIdentifier by AuthenticationService.
             // Also accept common JWT claim names (sub, userId) for compatibility.
-            var userIdClaim = jwtToken.Claims.FirstOrDefault(c =>
+            Claim? userIdClaim = jwtToken.Claims.FirstOrDefault(c =>
                 c.Type == System.Security.Claims.ClaimTypes.NameIdentifier ||
                 string.Equals(c.Type, "sub", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(c.Type, "userId", StringComparison.OrdinalIgnoreCase)
             );
 
-            if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var userId))
+            if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out Guid userId))
             {
                 return userId;
             }
@@ -266,8 +267,8 @@ public class TokenRevocationService : ITokenRevocationService
     {
         try
         {
-            var handler = new JwtSecurityTokenHandler();
-            var jwtToken = handler.ReadJwtToken(token);
+            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
+            JwtSecurityToken jwtToken = handler.ReadJwtToken(token);
             return jwtToken.ValidFrom;
         }
         catch

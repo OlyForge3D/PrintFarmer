@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
@@ -51,7 +52,7 @@ public class PrintersController(
     {
         try
         {
-            var dtos = await _printersService.GetCameraUrlsAsync(ct);
+            PrinterCameraUrlsDto[] dtos = await _printersService.GetCameraUrlsAsync(ct);
             return Ok(dtos.ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -89,8 +90,8 @@ public class PrintersController(
     {
         try
         {
-            var dtos = await _printersService.GetAllFastDtosAsync(ct);
-            var isAdmin = User.IsInRole("farm_admin");
+            PrinterFastDto[] dtos = await _printersService.GetAllFastDtosAsync(ct);
+            bool isAdmin = User.IsInRole("farm_admin");
             if (isAdmin)
             {
                 return Ok(dtos);
@@ -102,7 +103,7 @@ public class PrintersController(
             }
 
             // Filter to only enabled printers for normal users
-            var enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
+            List<PrinterFastDto> enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
             return Ok(enabledDtos);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -144,10 +145,10 @@ public class PrintersController(
         }
 
         // Validate all printers first before delegating to service
-        var validationErrors = new Dictionary<int, List<string>>();
+        Dictionary<int, List<string>> validationErrors = new Dictionary<int, List<string>>();
         for (int i = 0; i < printers.Length; i++)
         {
-            var result = await _validator.ValidateAsync(printers[i], ct);
+            ValidationResult result = await _validator.ValidateAsync(printers[i], ct);
             if (!result.IsValid)
             {
                 validationErrors[i] = result.Errors.Select(e => e.ErrorMessage).ToList();
@@ -157,7 +158,7 @@ public class PrintersController(
         // If all printers failed validation, return error
         if (validationErrors.Count == printers.Length)
         {
-            var errorMessage = string.Join("; ", validationErrors.SelectMany(kvp =>
+            string errorMessage = string.Join("; ", validationErrors.SelectMany(kvp =>
                 kvp.Value.Select(err => $"[Printer {kvp.Key}] {err}")));
             _logger.LogWarning($"[BulkCreate] Validation failed for all printers: {errorMessage}");
             return BadRequest(new { message = "All printers failed validation", errors = validationErrors });
@@ -166,7 +167,7 @@ public class PrintersController(
         try
         {
             // Delegate to service for actual creation logic
-            var result = await _printersService.BulkCreatePrintersAsync(printers, duplicateHandling ?? "skip", ct);
+            object result = await _printersService.BulkCreatePrintersAsync(printers, duplicateHandling ?? "skip", ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -205,7 +206,7 @@ public class PrintersController(
             return BadRequest(new { message = "No file provided or file is empty" });
         }
 
-        var fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
+        string fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
         if (fileExtension != ".csv" && fileExtension != ".json")
         {
             return BadRequest(new { message = "File must be CSV or JSON format" });
@@ -219,7 +220,7 @@ public class PrintersController(
         try
         {
             _logger.LogInformation($"[Import] Starting import from file: {file.FileName}");
-            var result = await _printersService.ImportFromFileAsync(file, duplicateHandling ?? "skip", ct);
+            object result = await _printersService.ImportFromFileAsync(file, duplicateHandling ?? "skip", ct);
             _logger.LogInformation($"[Import] Successfully imported from file: {file.FileName}");
             return Ok(result);
         }
@@ -262,7 +263,7 @@ public class PrintersController(
         try
         {
             // Verify printer exists first
-            var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
             if (printer == null)
             {
                 _logger.LogWarning($"[PrintJob] Printer {id} not found");
@@ -272,7 +273,7 @@ public class PrintersController(
             _logger.LogInformation($"[PrintJob] Getting print job status for printer {printer.Name}");
 
             // Delegate to service for actual retrieval logic
-            var jobStatus = await _printersService.GetPrintJobStatusAsync(id, ct);
+            PrintJobStatusDto? jobStatus = await _printersService.GetPrintJobStatusAsync(id, ct);
 
             // Return the status (may be null if no active job)
             return Ok(jobStatus);
@@ -315,7 +316,7 @@ public class PrintersController(
     {
         try
         {
-            var dto = await _printersService.GetStatusDtoAsync(id, ct);
+            PrinterStatusDto dto = await _printersService.GetStatusDtoAsync(id, ct);
             return Ok(dto);
         }
         catch (KeyNotFoundException)
@@ -345,7 +346,7 @@ public class PrintersController(
     {
         try
         {
-            var dto = await _printersService.GetPrinterDtoAsync(id, ct);
+            PrinterDto dto = await _printersService.GetPrinterDtoAsync(id, ct);
             return Ok(dto);
         }
         catch (KeyNotFoundException)
@@ -468,7 +469,7 @@ public class PrintersController(
         _logger.LogInformation($"Creating new printer: {dto.Name} ({dto.Backend})");
 
         // Delegate creation/business logic to the service
-        var created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
+        PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
         return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
     }
 
@@ -511,10 +512,10 @@ public class PrintersController(
             // Handle JSON deserialization
             try
             {
-                var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                JsonSerializerOptions options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 if (jsonElem.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
-                    var array = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto[]>(jsonElem.GetRawText(), options);
+                    DiscoveredPrinterDto[]? array = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto[]>(jsonElem.GetRawText(), options);
                     if (array != null)
                     {
                         printers.AddRange(array);
@@ -522,7 +523,7 @@ public class PrintersController(
                 }
                 else
                 {
-                    var obj = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto>(jsonElem.GetRawText(), options);
+                    DiscoveredPrinterDto? obj = System.Text.Json.JsonSerializer.Deserialize<DiscoveredPrinterDto>(jsonElem.GetRawText(), options);
                     if (obj != null)
                     {
                         printers.Add(obj);
@@ -541,9 +542,9 @@ public class PrintersController(
             return BadRequest("No valid printers provided");
         }
 
-        var registered = new List<PrinterDto>();
+        List<PrinterDto> registered = new List<PrinterDto>();
 
-        foreach (var discovered in printers)
+        foreach (DiscoveredPrinterDto discovered in printers)
         {
             try
             {
@@ -552,14 +553,14 @@ public class PrintersController(
                     $"({discovered.IpAddress}:{discovered.BackendPort ?? 80}) - Backend: {discovered.Backend}");
 
                 // Check if printer already exists by normalized server URL
-                var normalizedUrl = _printersService.NormalizeServerUrl(discovered.ServerUrl, discovered.BackendPort ?? 80);
-                var existing = (await _printersService.GetAllAsync(ct))
+                string normalizedUrl = _printersService.NormalizeServerUrl(discovered.ServerUrl, discovered.BackendPort ?? 80);
+                Printer? existing = (await _printersService.GetAllAsync(ct))
                     .FirstOrDefault(p => _printersService.NormalizeServerUrl(p.ServerUrl, 80) == normalizedUrl);
 
                 if (existing != null)
                 {
                     _logger.LogInformation($"Printer already registered: {existing.Name}");
-                    var existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
+                    PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
                         registered.Add(existingDto);
@@ -568,9 +569,9 @@ public class PrintersController(
                 }
 
                 // Create new printer from discovered data, preserving all discovered metadata
-                var createDto = CreatePrinterDto.FromDiscovered(discovered);
+                CreatePrinterDto createDto = CreatePrinterDto.FromDiscovered(discovered);
 
-                var validationResult = await _validator.ValidateAsync(createDto, ct);
+                ValidationResult validationResult = await _validator.ValidateAsync(createDto, ct);
                 if (!validationResult.IsValid)
                 {
                     _logger.LogWarning(
@@ -579,7 +580,7 @@ public class PrintersController(
                 }
 
                 // Create the printer
-                var created = await _printersService.CreatePrinterFromDtoAsync(createDto, ct);
+                PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(createDto, ct);
                 registered.Add(created);
 
                 _logger.LogInformation($"Successfully registered discovered printer: {created.Name}");
@@ -623,12 +624,12 @@ public class PrintersController(
         string? modelName = null;
         if (printer.ManufacturerId != Guid.Empty)
         {
-            var man = await _catalogService.GetManufacturerByIdAsync(printer.ManufacturerId, ct);
+            ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(printer.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
         if (printer.ModelId != Guid.Empty)
         {
-            var mod = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
+            PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
             modelName = mod?.Name;
         }
         PrinterDto dto = new(
@@ -690,7 +691,7 @@ public class PrintersController(
         {
             string name = dto.NewManufacturerName!.Trim();
             // ICatalogRepository does not expose GetManufacturerByName; create via CatalogService
-            var created = await _catalogService.CreateManufacturerAsync(name, ct);
+            ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct);
             manufacturerId = created.Id;
         }
 
@@ -698,7 +699,7 @@ public class PrintersController(
         if ((dto.ModelId is null && !string.IsNullOrWhiteSpace(dto.NewModelName)) && manufacturerId != Guid.Empty)
         {
             string mname = dto.NewModelName!.Trim();
-            var createReq = new Requests.CreateModelRequest(
+            CreateModelRequest createReq = new Requests.CreateModelRequest(
                 ManufacturerId: manufacturerId,
                 Name: mname,
                 Type: null,
@@ -707,7 +708,7 @@ public class PrintersController(
                 MaxZ: null,
                 DefaultBackend: null,
                 SupportedFilamentTypeIds: Array.Empty<Guid>());
-            var createdModel = await _catalogService.CreateModelAsync(createReq, ct);
+            PrinterModelDto createdModel = await _catalogService.CreateModelAsync(createReq, ct);
             modelId = createdModel.Id;
         }
 
@@ -732,8 +733,8 @@ public class PrintersController(
             (p.Backend == (int)Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : p.Backend == (int)Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125);
 
         // Delegate normalization and optional hostname resolution to the PrintersService
-        var backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
-        var resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);
+        PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
+        ResolveHostnameResponse resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);
         p.ServerUrl = resolveResp.ResolvedBaseUrl ?? resolveResp.NormalizedInputUrl;
         p.OriginalServerUrl = resolveResp.NormalizedInputUrl;
         p.IpAddress = resolveResp.ResolvedIp;
@@ -798,12 +799,12 @@ public class PrintersController(
         string? modelName = null;
         if (p.ManufacturerId != Guid.Empty)
         {
-            var man = await _catalogService.GetManufacturerByIdAsync(p.ManufacturerId, ct);
+            ManufacturerDto? man = await _catalogService.GetManufacturerByIdAsync(p.ManufacturerId, ct);
             manufacturerName = man?.Name;
         }
         if (p.ModelId != Guid.Empty)
         {
-            var mod = await _catalogService.GetModelByIdAsync(p.ModelId, ct);
+            PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(p.ModelId, ct);
             modelName = mod?.Name;
         }
 
@@ -861,7 +862,7 @@ public class PrintersController(
                          body.Backend == Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125;
         try
         {
-            var resp = await _printersService.ResolveHostnameAsync(body.ServerUrl, body.Backend, ct);
+            ResolveHostnameResponse resp = await _printersService.ResolveHostnameAsync(body.ServerUrl, body.Backend, ct);
             return Ok(resp);
         }
         catch (ArgumentException)
@@ -888,7 +889,7 @@ public class PrintersController(
     public async Task<ActionResult<PrinterCapabilitiesDto>> GetModelDefaultCapabilitiesAsync(Guid modelId, CancellationToken ct)
     {
         // Load model to verify it exists and get capability data
-        var modelDto = await _catalogService.GetModelByIdAsync(modelId, ct);
+        PrinterModelDto? modelDto = await _catalogService.GetModelByIdAsync(modelId, ct);
         if (modelDto == null)
         {
             return NotFound($"Printer model with ID {modelId} not found");
@@ -1212,7 +1213,7 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
-        var (streamUrl, snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
+        (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
         if (streamUrl == null && snapshotUrl == null)
         {
             return NotFound();
@@ -1309,7 +1310,7 @@ public class PrintersController(
     {
         try
         {
-            var resp = await _printersService.GetHistoryListAsync(id, limit, start, since, before, order, ct);
+            Shared.HistoryListResponse resp = await _printersService.GetHistoryListAsync(id, limit, start, since, before, order, ct);
             return Ok(resp);
         }
         catch (KeyNotFoundException)
@@ -1334,7 +1335,7 @@ public class PrintersController(
     {
         try
         {
-            var job = await _printersService.GetHistoryJobAsync(id, jobId, ct);
+            Shared.HistoryJob job = await _printersService.GetHistoryJobAsync(id, jobId, ct);
             return Ok(job);
         }
         catch (ArgumentException)
@@ -1372,7 +1373,7 @@ public class PrintersController(
     {
         try
         {
-            var totals = await _printersService.GetHistoryTotalsAsync(id, ct);
+            Shared.HistoryTotals totals = await _printersService.GetHistoryTotalsAsync(id, ct);
             return Ok(totals);
         }
         catch (KeyNotFoundException)
@@ -1437,7 +1438,7 @@ public class PrintersController(
     {
         try
         {
-            var results = await _printersService.GetPrintersWithCapabilitiesDtosAsync(ids, ct);
+            PrinterWithCapabilitiesDto[] results = await _printersService.GetPrintersWithCapabilitiesDtosAsync(ids, ct);
             return Ok(results);
         }
         catch (Exception ex)
@@ -1503,7 +1504,7 @@ public class PrintersController(
         try
         {
             _logger.LogInformation($"[Config] Getting printer configuration for {id}");
-            var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
 
             if (printer == null)
             {
@@ -1577,7 +1578,7 @@ public class PrintersController(
         {
             _logger.LogInformation($"[Config] Updating printer configuration for {id}");
 
-            var printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
+            Printer? printer = await _printersService.FindByIdWithIncludesAsync(id, ct);
             if (printer == null)
             {
                 _logger.LogWarning($"[Config] Printer {id} not found for update");
@@ -1587,49 +1588,49 @@ public class PrintersController(
             // Parse configuration updates from JSON
             if (config is System.Text.Json.JsonElement jsonElement)
             {
-                var configDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText());
+                Dictionary<string, object>? configDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText());
                 if (configDict == null)
                 {
                     return BadRequest(new { message = "Invalid configuration format" });
                 }
 
                 // Update fields if present in the request
-                if (configDict.TryGetValue("name", out var nameVal) && nameVal != null)
+                if (configDict.TryGetValue("name", out object? nameVal) && nameVal != null)
                 {
                     printer.Name = nameVal.ToString() ?? printer.Name;
                 }
 
-                if (configDict.TryGetValue("apiKey", out var apiKeyVal))
+                if (configDict.TryGetValue("apiKey", out object? apiKeyVal))
                 {
                     printer.ApiKey = apiKeyVal?.ToString();
                 }
 
-                if (configDict.TryGetValue("cameraStreamUrl", out var streamVal))
+                if (configDict.TryGetValue("cameraStreamUrl", out object? streamVal))
                 {
                     printer.CameraStreamUrl = streamVal?.ToString();
                 }
 
-                if (configDict.TryGetValue("cameraSnapshotUrl", out var snapshotVal))
+                if (configDict.TryGetValue("cameraSnapshotUrl", out object? snapshotVal))
                 {
                     printer.CameraSnapshotUrl = snapshotVal?.ToString();
                 }
 
-                if (configDict.TryGetValue("notes", out var notesVal))
+                if (configDict.TryGetValue("notes", out object? notesVal))
                 {
                     printer.Notes = notesVal?.ToString();
                 }
 
-                if (configDict.TryGetValue("inMaintenance", out var maintenanceVal) && bool.TryParse(maintenanceVal?.ToString(), out bool maintValue))
+                if (configDict.TryGetValue("inMaintenance", out object? maintenanceVal) && bool.TryParse(maintenanceVal?.ToString(), out bool maintValue))
                 {
                     printer.InMaintenance = maintValue;
                 }
 
-                if (configDict.TryGetValue("backendPort", out var bpVal) && int.TryParse(bpVal?.ToString(), out int bp))
+                if (configDict.TryGetValue("backendPort", out object? bpVal) && int.TryParse(bpVal?.ToString(), out int bp))
                 {
                     printer.BackendPort = bp;
                 }
 
-                if (configDict.TryGetValue("frontendPort", out var fpVal) && int.TryParse(fpVal?.ToString(), out int fp))
+                if (configDict.TryGetValue("frontendPort", out object? fpVal) && int.TryParse(fpVal?.ToString(), out int fp))
                 {
                     printer.FrontendPort = fp;
                 }
@@ -1696,7 +1697,7 @@ public class PrintersController(
         {
             _logger.LogInformation($"[Capabilities] Getting printer capabilities for {id}");
 
-            var capabilities = await _printersService.GetCapabilitiesByPrinterIdAsync(id, ct);
+            PrinterCapabilities? capabilities = await _printersService.GetCapabilitiesByPrinterIdAsync(id, ct);
 
             if (capabilities == null)
             {

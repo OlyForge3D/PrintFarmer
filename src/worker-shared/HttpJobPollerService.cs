@@ -56,19 +56,19 @@ public abstract class HttpJobPollerService(
         {
             try
             {
-                using var httpClient = _httpClientFactory.CreateClient();
+                using HttpClient httpClient = _httpClientFactory.CreateClient();
                 httpClient.BaseAddress = new Uri(apiBaseUrl);
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
 
                 // Attempt to claim a job
-                var claimRequest = new ClaimJobRequest
+                ClaimJobRequest claimRequest = new ClaimJobRequest
                 {
                     WorkerId = _workerId,
                     Capabilities = GetWorkerCapabilities(),
                     LeaseDurationSeconds = leaseDurationSeconds
                 };
 
-                var claimResponse = await httpClient.PostAsJsonAsync("/api/slice/claim", claimRequest, stoppingToken);
+                HttpResponseMessage claimResponse = await httpClient.PostAsJsonAsync("/api/slice/claim", claimRequest, stoppingToken);
 
                 if (claimResponse.StatusCode == System.Net.HttpStatusCode.NoContent)
                 {
@@ -84,7 +84,7 @@ public abstract class HttpJobPollerService(
                     continue;
                 }
 
-                var jobStatus = await claimResponse.Content.ReadFromJsonAsync<SliceJobStatusResponse>(stoppingToken);
+                SliceJobStatusResponse? jobStatus = await claimResponse.Content.ReadFromJsonAsync<SliceJobStatusResponse>(stoppingToken);
                 if (jobStatus == null)
                 {
                     _logger.LogWarning("Claimed job but received null response");
@@ -94,12 +94,12 @@ public abstract class HttpJobPollerService(
 
                 // Convert SliceJobStatusResponse to DistributedSlicingJob for pipeline
                 // Map claimed job to DistributedSlicingJob (feed actual metadata to pipeline)
-                var engineEnum = (SlicerEngineType)jobStatus.SlicerEngine;
-                var job = new DistributedSlicingJob
+                SlicerEngineType engineEnum = (SlicerEngineType)jobStatus.SlicerEngine;
+                DistributedSlicingJob job = new DistributedSlicingJob
                 {
                     Id = jobStatus.Id,
                     WorkerId = _workerId.ToString(),
-                    ModelFileUrl = Uri.TryCreate(jobStatus.ModelFileUrl, UriKind.RelativeOrAbsolute, out var tmp) ? tmp : new Uri("about:blank", UriKind.RelativeOrAbsolute),
+                    ModelFileUrl = Uri.TryCreate(jobStatus.ModelFileUrl, UriKind.RelativeOrAbsolute, out Uri? tmp) ? tmp : new Uri("about:blank", UriKind.RelativeOrAbsolute),
                     ModelFileName = jobStatus.ModelFileName,
                     EngineType = engineEnum,
                     SlicerEngine = engineEnum.ToString(),
@@ -132,11 +132,11 @@ public abstract class HttpJobPollerService(
 
     private async Task HandleJobAsync(DistributedSlicingJob job, HttpClient httpClient, CancellationToken ct)
     {
-        var start = DateTime.UtcNow;
+        DateTime start = DateTime.UtcNow;
         CancellationTokenSource? localLinkedCts = null;
         try
         {
-            using var scope = _serviceProvider.CreateScope();
+            using IServiceScope scope = _serviceProvider.CreateScope();
 
             // Start a lease-renewal loop to prevent the API from reclaiming the job while we're actively processing.
             try
@@ -151,8 +151,8 @@ public abstract class HttpJobPollerService(
                     {
                         try
                         {
-                            var renewReq = new Farm.Web.Shared.Contracts.Slicing.RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
-                            var resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew", renewReq, localLinkedCts.Token);
+                            RenewLeaseRequest renewReq = new Farm.Web.Shared.Contracts.Slicing.RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
+                            HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew", renewReq, localLinkedCts.Token);
                             if (!resp.IsSuccessStatusCode)
                             {
                                 _logger.LogDebug($"Lease renew for job {job.Id} returned {resp.StatusCode}");
@@ -176,7 +176,7 @@ public abstract class HttpJobPollerService(
             }
 
             // Execute the slicing pipeline (downloads STL, runs slicer, generates G-code)
-            var result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
+            SlicingResult result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
             if (!result.Success)
             {
                 throw new InvalidOperationException("Slicing pipeline reported failure");
@@ -189,23 +189,23 @@ public abstract class HttpJobPollerService(
             _logger.LogInformation($"Job {job.Id} slicing completed in {(DateTime.UtcNow - start).TotalSeconds:F1}s");
 
             // Upload artifacts (G-code file and any metadata)
-            var artifactIds = await UploadArtifactsAsync(job, result, httpClient, ct);
+            List<Guid> artifactIds = await UploadArtifactsAsync(job, result, httpClient, ct);
 
             // Complete the job with artifact references
-            var completeRequest = new CompleteSliceJobRequest
+            CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
             {
                 PrimaryArtifactId = artifactIds[0],
                 AdditionalArtifactIds = artifactIds.Skip(1).ToArray(),
                 EstimatedPrintTimeSeconds = (int?)Math.Round(result.EstimatedPrintTimeSeconds),
                 FilamentUsedGrams = (decimal?)Math.Round(result.EstimatedFilamentUsageGrams, 2),
-                LogText = result.Metadata.TryGetValue("SlicerLog", out var logObj) ? logObj?.ToString() : null
+                LogText = result.Metadata.TryGetValue("SlicerLog", out string? logObj) ? logObj?.ToString() : null
             };
 
-            var completeResponse = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest, ct);
+            HttpResponseMessage completeResponse = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest, ct);
 
             if (!completeResponse.IsSuccessStatusCode)
             {
-                var errorContent = await completeResponse.Content.ReadAsStringAsync(ct);
+                string errorContent = await completeResponse.Content.ReadAsStringAsync(ct);
                 throw new InvalidOperationException($"Failed to complete job: {completeResponse.StatusCode} - {errorContent}");
             }
 
@@ -243,12 +243,12 @@ public abstract class HttpJobPollerService(
     {
         try
         {
-            var progressReq = new SliceJobProgressUpdateRequest
+            SliceJobProgressUpdateRequest progressReq = new SliceJobProgressUpdateRequest
             {
                 ProgressPercent = percent,
                 ProgressMessage = message
             };
-            var resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/progress", progressReq, ct);
+            HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/progress", progressReq, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug($"Progress update for job {jobId} returned {resp.StatusCode}");
@@ -262,7 +262,7 @@ public abstract class HttpJobPollerService(
 
     private async Task<List<Guid>> UploadArtifactsAsync(DistributedSlicingJob job, SlicingResult result, HttpClient httpClient, CancellationToken ct)
     {
-        var artifactIds = new List<Guid>();
+        List<Guid> artifactIds = new List<Guid>();
 
         // Extract the local file path from the result URL
         string? gcodeFilePath = null;
@@ -292,23 +292,23 @@ public abstract class HttpJobPollerService(
         _logger.LogInformation($"Uploading G-code artifact from {gcodeFilePath}");
 
         // Upload the primary G-code file
-        using var gcodeContent = new MultipartFormDataContent();
+        using MultipartFormDataContent gcodeContent = new MultipartFormDataContent();
         gcodeContent.Add(new StringContent(job.Id.ToString()), "jobId");
         gcodeContent.Add(new StringContent("gcode"), "kind");
         gcodeContent.Add(new StringContent(_workerId.ToString()), "workerId");
 
-        var gcodeBytes = await File.ReadAllBytesAsync(gcodeFilePath, ct);
+        byte[] gcodeBytes = await File.ReadAllBytesAsync(gcodeFilePath, ct);
         gcodeContent.Add(new ByteArrayContent(gcodeBytes), "file", Path.GetFileName(gcodeFilePath));
 
-        var uploadResponse = await httpClient.PostAsync("/api/artifacts", gcodeContent, ct);
+        HttpResponseMessage uploadResponse = await httpClient.PostAsync("/api/artifacts", gcodeContent, ct);
 
         if (!uploadResponse.IsSuccessStatusCode)
         {
-            var errorContent = await uploadResponse.Content.ReadAsStringAsync(ct);
+            string errorContent = await uploadResponse.Content.ReadAsStringAsync(ct);
             throw new InvalidOperationException($"Failed to upload G-code artifact: {uploadResponse.StatusCode} - {errorContent}");
         }
 
-        var artifactResponse = await uploadResponse.Content.ReadFromJsonAsync<ArtifactResponse>(ct);
+        ArtifactResponse? artifactResponse = await uploadResponse.Content.ReadFromJsonAsync<ArtifactResponse>(ct);
         if (artifactResponse?.Id == null)
         {
             throw new InvalidOperationException("Artifact upload succeeded but no ID returned");

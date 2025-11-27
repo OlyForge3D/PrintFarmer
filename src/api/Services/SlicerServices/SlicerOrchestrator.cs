@@ -393,7 +393,7 @@ public class SlicerOrchestrator(
 
         // Treat obviously-placeholder or invalid model URLs as bad input (argument error) rather than missing files.
         // Tests may pass placeholders like "about:blank" to indicate an empty/invalid model; handle that explicitly.
-        var modelUrl = request.ModelFileUrl;
+        Uri modelUrl = request.ModelFileUrl;
         if (modelUrl.IsAbsoluteUri)
         {
             string scheme = modelUrl.Scheme ?? string.Empty;

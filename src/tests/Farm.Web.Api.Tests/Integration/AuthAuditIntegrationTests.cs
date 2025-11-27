@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Data.Common;
+using System.Net;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -29,7 +30,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     {
         try
         {
-            var body = await resp.Content.ReadAsStringAsync();
+            string body = await resp.Content.ReadAsStringAsync();
             Console.WriteLine($"[TestHttp][{tag}] Status={(int)resp.StatusCode} {resp.StatusCode}");
             Console.WriteLine($"[TestHttp][{tag}] Body={body}");
         }
@@ -47,26 +48,26 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             try
             { Console.WriteLine($"[TestDiag][{tag}] Conn={ctx.Database.GetConnectionString()}"); }
             catch { }
-            var conn = ctx.Database.GetDbConnection();
+            DbConnection conn = ctx.Database.GetDbConnection();
             if (conn.State != System.Data.ConnectionState.Open)
             { conn.Open(); }
-            using var cmd = conn.CreateCommand();
+            using DbCommand cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT COUNT(*) FROM \"AuthAuditLogs\"";
-            var res = cmd.ExecuteScalar();
+            object? res = cmd.ExecuteScalar();
             Console.WriteLine($"[TestDiag][{tag}] AuthAuditLogs count={res}");
 
             // Print up to 10 sample rows for quick inspection
-            using var sampleCmd = conn.CreateCommand();
+            using DbCommand sampleCmd = conn.CreateCommand();
             sampleCmd.CommandText = "SELECT Id, UserId, EventType, FailureReason, Metadata FROM \"AuthAuditLogs\" ORDER BY Timestamp DESC LIMIT 10";
-            using var rdr = sampleCmd.ExecuteReader();
+            using DbDataReader rdr = sampleCmd.ExecuteReader();
             Console.WriteLine($"[TestDiag][{tag}] AuthAuditLogs sample:");
             while (rdr.Read())
             {
-                var id = rdr.IsDBNull(0) ? "(null)" : rdr.GetValue(0).ToString();
-                var uid = rdr.IsDBNull(1) ? "(null)" : rdr.GetValue(1).ToString();
-                var et = rdr.IsDBNull(2) ? "(null)" : rdr.GetValue(2).ToString();
-                var fr = rdr.IsDBNull(3) ? "(null)" : rdr.GetValue(3).ToString();
-                var md = rdr.IsDBNull(4) ? "(null)" : rdr.GetValue(4).ToString();
+                string? id = rdr.IsDBNull(0) ? "(null)" : rdr.GetValue(0).ToString();
+                string? uid = rdr.IsDBNull(1) ? "(null)" : rdr.GetValue(1).ToString();
+                string? et = rdr.IsDBNull(2) ? "(null)" : rdr.GetValue(2).ToString();
+                string? fr = rdr.IsDBNull(3) ? "(null)" : rdr.GetValue(3).ToString();
+                string? md = rdr.IsDBNull(4) ? "(null)" : rdr.GetValue(4).ToString();
                 Console.WriteLine($" - Id={id} UserId={uid} EventType={et} FailureReason={fr} Metadata={md}");
             }
         }
@@ -80,14 +81,14 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task SuccessfulLogin_CreatesAuditLogEntry()
     {
         // Arrange - Create a user
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             "auditloginuser",
             "auditlogin@test.com",
             "SecurePassword123!",
             "Audit",
             "User");
 
-        var registerResponse = await _client.PostAsJsonAsync("/api/auth/register", new
+        HttpResponseMessage registerResponse = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -99,27 +100,27 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Dump HTTP response for diagnostics
         await DumpResponse(registerResponse, "registerResponse");
 
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Approve the user
-        var user = await context.Users.FirstAsync(u => u.Username == "auditloginuser");
+        User user = await context.Users.FirstAsync(u => u.Username == "auditloginuser");
         user.IsActive = true;
         await context.SaveChangesAsync();
 
         // Act - Login
-        var loginRequest = new LoginRequest("auditloginuser", "SecurePassword123!");
-        var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+        LoginRequest loginRequest = new LoginRequest("auditloginuser", "SecurePassword123!");
+        HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
         // Dump HTTP response for diagnostics
         await DumpResponse(loginResponse, "loginResponse");
 
         // Assert - Check audit log
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         DumpAuthAuditInfo(verifyContext, "SuccessfulLogin");
 
-        var auditLogs = await verifyContext.AuthAuditLogs
+        List<AuthAuditLog> auditLogs = await verifyContext.AuthAuditLogs
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.Login)
             .ToListAsync();
 
@@ -133,7 +134,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task FailedLogin_CreatesAuditLogEntry()
     {
         // Arrange - Create a user
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             "auditfailuser",
             "auditfail@test.com",
             "SecurePassword123!",
@@ -150,30 +151,30 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             LastName = registerRequest.LastName
         });
 
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var user = await context.Users.FirstAsync(u => u.Username == "auditfailuser");
+        User user = await context.Users.FirstAsync(u => u.Username == "auditfailuser");
         user.IsActive = true;
         await context.SaveChangesAsync();
 
         // Act - Failed login with wrong password
-        var loginRequest = new LoginRequest("auditfailuser", "WrongPassword123!");
-        var loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+        LoginRequest loginRequest = new LoginRequest("auditfailuser", "WrongPassword123!");
+        HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
 
         // Assert - Check audit log for failed login
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         DumpAuthAuditInfo(verifyContext, "FailedLogin");
 
-        var auditLogs = await verifyContext.AuthAuditLogs
+        List<AuthAuditLog> auditLogs = await verifyContext.AuthAuditLogs
             .Where(a => a.EventType == AuthEventType.LoginFailed)
             .OrderByDescending(a => a.Timestamp)
             .ToListAsync();
 
         auditLogs.Should().NotBeEmpty();
-        var failedLogin = auditLogs.First();
+        AuthAuditLog failedLogin = auditLogs.First();
         failedLogin.Success.Should().BeFalse();
         failedLogin.FailureReason.Should().Contain("Invalid password");
     }
@@ -182,14 +183,14 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task Registration_CreatesAuditLogEntry()
     {
         // Arrange & Act - Register a new user
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             $"auditreg{Guid.NewGuid():N}",
             $"auditreg{Guid.NewGuid():N}@test.com",
             "SecurePassword123!",
             "Audit",
             "Register");
 
-        var response = await _client.PostAsJsonAsync("/api/auth/register", new
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -200,16 +201,16 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         });
 
         // Assert - Check audit log
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var user = await context.Users
+        User user = await context.Users
             .OrderByDescending(u => u.CreatedAt)
             .FirstAsync(u => u.FirstName == "Audit" && u.LastName == "Register");
 
         DumpAuthAuditInfo(context, "Registration");
 
-        var auditLogs = await context.AuthAuditLogs
+        List<AuthAuditLog> auditLogs = await context.AuthAuditLogs
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.Register)
             .ToListAsync();
 
@@ -222,10 +223,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task PasswordChange_CreatesAuditLogEntry()
     {
         // Arrange - Create and login user
-        var username = $"auditpwchange{Guid.NewGuid():N}";
-        var email = $"{username}@test.com";
+        string username = $"auditpwchange{Guid.NewGuid():N}";
+        string email = $"{username}@test.com";
 
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             username,
             email,
             "OldPassword123!",
@@ -242,25 +243,25 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             LastName = registerRequest.LastName
         });
 
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var user = await context.Users.FirstAsync(u => u.Username == username);
+        User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
         await context.SaveChangesAsync();
 
         // Act - Change password by calling the service directly (avoids controller model binding subtleties in tests)
-        var authService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
-        var success = await authService.ChangePasswordAsync(user.Id, "OldPassword123!", "NewPassword123!");
+        IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Authentication.IAuthenticationService>();
+        bool success = await authService.ChangePasswordAsync(user.Id, "OldPassword123!", "NewPassword123!");
         success.Should().BeTrue();
 
         // Assert - Check audit log
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         DumpAuthAuditInfo(verifyContext, "PasswordChange");
 
-        var auditLogs = await verifyContext.AuthAuditLogs
+        List<AuthAuditLog> auditLogs = await verifyContext.AuthAuditLogs
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.PasswordChange)
             .ToListAsync();
 
@@ -273,9 +274,9 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task PasswordResetInitiated_CreatesAuditLogEntry()
     {
         // Arrange - Create user
-        var email = $"auditreset{Guid.NewGuid():N}@test.com";
+        string email = $"auditreset{Guid.NewGuid():N}@test.com";
 
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             $"auditreset{Guid.NewGuid():N}",
             email,
             "SecurePassword123!",
@@ -293,25 +294,25 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         });
 
         // Act - Initiate password reset
-        var forgotPasswordRequest = new Farm.Web.Shared.Contracts.Auth.ForgotPasswordRequest
+        Shared.Contracts.Auth.ForgotPasswordRequest forgotPasswordRequest = new Farm.Web.Shared.Contracts.Auth.ForgotPasswordRequest
         {
             Email = email
         };
-        var response = await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotPasswordRequest);
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotPasswordRequest);
 
         // Assert - Check audit log
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         DumpAuthAuditInfo(context, "PasswordResetInitiated");
 
-        var auditLogs = await context.AuthAuditLogs
+        List<AuthAuditLog> auditLogs = await context.AuthAuditLogs
             .Where(a => a.EventType == AuthEventType.PasswordResetInitiated)
             .OrderByDescending(a => a.Timestamp)
             .ToListAsync();
 
         auditLogs.Should().NotBeEmpty();
-        var resetLog = auditLogs.First();
+        AuthAuditLog resetLog = auditLogs.First();
         resetLog.Success.Should().BeTrue();
         resetLog.Metadata.Should().Contain(email);
     }
@@ -320,10 +321,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task PasswordResetCompleted_CreatesAuditLogEntry()
     {
         // Arrange - Create user and reset token
-        var username = $"auditresetcomp{Guid.NewGuid():N}";
-        var email = $"{username}@test.com";
+        string username = $"auditresetcomp{Guid.NewGuid():N}";
+        string email = $"{username}@test.com";
 
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             username,
             email,
             "OldPassword123!",
@@ -340,15 +341,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             LastName = registerRequest.LastName
         });
 
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var passwordHashingService = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IPasswordHashingService passwordHashingService = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
-        var user = await context.Users.FirstAsync(u => u.Username == username);
+        User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
 
         // Create password reset token
-        var resetToken = new PasswordResetToken
+        PasswordResetToken resetToken = new PasswordResetToken
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
@@ -362,7 +363,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         await context.SaveChangesAsync();
 
         // Act - Complete password reset
-        var resetPasswordRequest = new Farm.Web.Shared.Contracts.Auth.ResetPasswordRequest
+        Shared.Contracts.Auth.ResetPasswordRequest resetPasswordRequest = new Farm.Web.Shared.Contracts.Auth.ResetPasswordRequest
         {
             Token = "test-reset-token-123",
             Email = email,
@@ -370,15 +371,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             ConfirmPassword = "NewPassword123!"
         };
 
-        var response = await _client.PostAsJsonAsync("/api/auth/reset-password", resetPasswordRequest);
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/reset-password", resetPasswordRequest);
 
         // Assert - Check audit log
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         DumpAuthAuditInfo(verifyContext, "PasswordResetCompleted");
 
-        var auditLogs = await verifyContext.AuthAuditLogs
+        List<AuthAuditLog> auditLogs = await verifyContext.AuthAuditLogs
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.PasswordReset)
             .ToListAsync();
 
@@ -391,10 +392,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task AccountLocked_CreatesAuditLogEntry()
     {
         // Arrange - Create user
-        var username = $"auditlockuser{Guid.NewGuid():N}";
-        var email = $"{username}@test.com";
+        string username = $"auditlockuser{Guid.NewGuid():N}";
+        string email = $"{username}@test.com";
 
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             username,
             email,
             "SecurePassword123!",
@@ -411,27 +412,27 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             LastName = registerRequest.LastName
         });
 
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var user = await context.Users.FirstAsync(u => u.Username == username);
+        User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
         await context.SaveChangesAsync();
 
         // Act - Trigger account lockout with 5 failed login attempts
         for (int i = 0; i < 5; i++)
         {
-            var loginRequest = new LoginRequest(username, "WrongPassword!");
+            LoginRequest loginRequest = new LoginRequest(username, "WrongPassword!");
             await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
         }
 
         // Assert - Check audit log for account locked event
-        using var verifyScope = _factory.Services.CreateScope();
-        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         DumpAuthAuditInfo(verifyContext, "AccountLocked");
 
-        var auditLogs = await verifyContext.AuthAuditLogs
+        List<AuthAuditLog> auditLogs = await verifyContext.AuthAuditLogs
             .Where(a => a.UserId == user.Id && a.EventType == AuthEventType.AccountLocked)
             .ToListAsync();
 
@@ -445,10 +446,10 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task GetUserAuditLog_ReturnsUserEvents()
     {
         // Arrange - Create user and perform actions
-        var username = $"auditgetlog{Guid.NewGuid():N}";
-        var email = $"{username}@test.com";
+        string username = $"auditgetlog{Guid.NewGuid():N}";
+        string email = $"{username}@test.com";
 
-        var registerRequest = new RegisterRequest(
+        RegisterRequest registerRequest = new RegisterRequest(
             username,
             email,
             "SecurePassword123!",
@@ -465,20 +466,20 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             LastName = registerRequest.LastName
         });
 
-        using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var user = await context.Users.FirstAsync(u => u.Username == username);
+        User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
         await context.SaveChangesAsync();
 
         // Perform login
-        var loginRequest = new LoginRequest(username, "SecurePassword123!");
+        LoginRequest loginRequest = new LoginRequest(username, "SecurePassword123!");
         await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
 
         // Act - Get audit log via service
-        var auditService = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
-        var auditLogs = await auditService.GetUserAuditLogAsync(user.Id, pageSize: 10);
+        IAuthAuditService auditService = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();
+        List<AuthAuditLog> auditLogs = await auditService.GetUserAuditLogAsync(user.Id, pageSize: 10);
 
         DumpAuthAuditInfo(context, "GetUserAuditLog");
 

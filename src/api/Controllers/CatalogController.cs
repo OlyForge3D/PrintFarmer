@@ -57,7 +57,7 @@ public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingServ
     [ProducesResponseType(404)]
     public async Task<ActionResult<ManufacturerDto>> GetManufacturerByIdAsync(Guid id, CancellationToken ct)
     {
-        var dto = await _catalogService.GetManufacturerByIdAsync(id, ct);
+        ManufacturerDto? dto = await _catalogService.GetManufacturerByIdAsync(id, ct);
         if (dto is null)
         {
             return NotFound();
@@ -86,7 +86,7 @@ public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingServ
             return BadRequest("Name is required");
         }
         // Normalize via shared helper for consistent rule across API & seeding
-        var dto = await _catalogService.CreateManufacturerAsync(request.Name, ct);
+        ManufacturerDto dto = await _catalogService.CreateManufacturerAsync(request.Name, ct);
         // The service handles normalization and cache invalidation; include normalized header only if different
         string normalized = dto.Name;
         if (!string.Equals(request.Name, normalized, StringComparison.Ordinal))
@@ -120,7 +120,7 @@ public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingServ
     [ProducesResponseType(404)]
     public async Task<ActionResult<PrinterModelDto>> GetPrinterModelByIdAsync(Guid id, CancellationToken ct)
     {
-        var dto = await _catalogService.GetModelByIdAsync(id, ct);
+        PrinterModelDto? dto = await _catalogService.GetModelByIdAsync(id, ct);
         if (dto is null)
         {
             return NotFound();
@@ -147,7 +147,7 @@ public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingServ
         }
         try
         {
-            var created = await _catalogService.CreateModelAsync(req, ct);
+            PrinterModelDto created = await _catalogService.CreateModelAsync(req, ct);
             if (!string.Equals(req.Name, created.Name, StringComparison.Ordinal))
             {
                 Response.Headers["X-Normalized-Name"] = created.Name;
@@ -177,7 +177,7 @@ public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingServ
         ArgumentNullException.ThrowIfNull(req);
         try
         {
-            var updated = await _catalogService.UpdateModelAsync(id, req, ct);
+            PrinterModelDto? updated = await _catalogService.UpdateModelAsync(id, req, ct);
             if (updated is null)
             {
                 return NotFound();

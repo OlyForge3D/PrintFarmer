@@ -84,7 +84,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             _logger.LogInformation($"Generating thumbnail for {fileName}...");
 
             // Load the 3D model using Assimp
-            var scene = _assimpContext.ImportFile(modelFilePath, PostProcessSteps.Triangulate | PostProcessSteps.JoinIdenticalVertices);
+            Scene scene = _assimpContext.ImportFile(modelFilePath, PostProcessSteps.Triangulate | PostProcessSteps.JoinIdenticalVertices);
 
             if (scene == null || scene.MeshCount == 0)
             {
@@ -100,16 +100,16 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             // Extract triangles from all meshes
             for (int m = 0; m < scene.MeshCount; m++)
             {
-                var mesh = scene.Meshes[m];
+                Mesh mesh = scene.Meshes[m];
 
                 for (int f = 0; f < mesh.FaceCount; f++)
                 {
-                    var face = mesh.Faces[f];
+                    Face face = mesh.Faces[f];
                     if (face.IndexCount >= 3)
                     {
-                        var v0 = mesh.Vertices[face.Indices[0]];
-                        var v1 = mesh.Vertices[face.Indices[1]];
-                        var v2 = mesh.Vertices[face.Indices[2]];
+                        Vector3 v0 = mesh.Vertices[face.Indices[0]];
+                        Vector3 v1 = mesh.Vertices[face.Indices[1]];
+                        Vector3 v2 = mesh.Vertices[face.Indices[2]];
 
                         Vector3 vec0 = new(v0.X, v0.Y, v0.Z);
                         Vector3 vec1 = new(v1.X, v1.Y, v1.Z);
@@ -143,7 +143,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
     {
         try
         {
-            using var image = new Image<Rgba32>(width, height);
+            using Image<Rgba32> image = new Image<Rgba32>(width, height);
             image.Mutate(ctx =>
             {
                 // Transparent background
@@ -180,7 +180,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 // Render triangles with high-quality depth-based shading
                 foreach (var item in sortedTriangles)
                 {
-                    var (v0, v1, v2) = item.tri;
+                    (Vector3 v0, Vector3 v1, Vector3 v2) = item.tri;
                     float depth = (item.avgY - minBounds.Y) / (size.Y > 0 ? size.Y : 1); // 0 to 1, normalized
                     depth = Math.Clamp(depth, 0, 1);
 
@@ -196,12 +196,12 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                     byte r = (byte)(nearR + (farR - nearR) * depth);
                     byte g = (byte)(nearG + (farG - nearG) * depth);
                     byte b = (byte)(nearB + (farB - nearB) * depth);
-                    var triangleColor = new Color(new Rgba32(r, g, b, 255));
+                    Color triangleColor = new Color(new Rgba32(r, g, b, 255));
 
                     // Project vertices to 2D
-                    var p0 = ProjectVertexIsometric(v0, minBounds, scale, offsetX, offsetY);
-                    var p1 = ProjectVertexIsometric(v1, minBounds, scale, offsetX, offsetY);
-                    var p2 = ProjectVertexIsometric(v2, minBounds, scale, offsetX, offsetY);
+                    PointF p0 = ProjectVertexIsometric(v0, minBounds, scale, offsetX, offsetY);
+                    PointF p1 = ProjectVertexIsometric(v1, minBounds, scale, offsetX, offsetY);
+                    PointF p2 = ProjectVertexIsometric(v2, minBounds, scale, offsetX, offsetY);
 
                     // Only draw if triangle is visible (has area)
                     if (IsTriangleVisible(p0, p1, p2))
@@ -215,8 +215,8 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                             byte outlineR = (byte)(r * 0.6);
                             byte outlineG = (byte)(g * 0.6);
                             byte outlineB = (byte)(b * 0.6);
-                            var outlineColor = new Color(new Rgba32(outlineR, outlineG, outlineB, 255));
-                            var outlinePen = Pens.Solid(outlineColor, 0.3f);
+                            Color outlineColor = new Color(new Rgba32(outlineR, outlineG, outlineB, 255));
+                            SolidPen outlinePen = Pens.Solid(outlineColor, 0.3f);
                             ctx.DrawPolygon(outlinePen, p0, p1, p2);
                         }
                         catch
@@ -258,7 +258,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
     {
         try
         {
-            using var image = new Image<Rgba32>(width, height);
+            using Image<Rgba32> image = new Image<Rgba32>(width, height);
             image.Mutate(ctx =>
             {
                 ctx.Fill(new Color(new Rgba32(255, 100, 100, 128))); // Semi-transparent red for errors

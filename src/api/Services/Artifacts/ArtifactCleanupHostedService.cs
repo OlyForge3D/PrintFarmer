@@ -45,8 +45,8 @@ public class ArtifactCleanupHostedService : BackgroundService
                 _logger.LogInformation("Running scheduled artifact cleanup");
 
                 // Create a scope to resolve scoped dependencies (DbContext)
-                using var scope = _serviceProvider.CreateScope();
-                var cleanupService = scope.ServiceProvider.GetRequiredService<IArtifactCleanupService>();
+                using IServiceScope scope = _serviceProvider.CreateScope();
+                IArtifactCleanupService cleanupService = scope.ServiceProvider.GetRequiredService<IArtifactCleanupService>();
 
                 int deletedCount = await cleanupService.ScanAndCleanupAsync(stoppingToken);
 

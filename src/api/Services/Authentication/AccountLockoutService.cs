@@ -31,7 +31,7 @@ public class AccountLockoutService : IAccountLockoutService
 
     public async Task<bool> IsLockedOutAsync(Guid userId)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         if (user == null)
         {
             return false;
@@ -60,11 +60,11 @@ public class AccountLockoutService : IAccountLockoutService
 
     public async Task RecordFailedLoginAsync(Guid userId, string identifier, string? ipAddress, string? failureReason = null)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         if (user == null)
         {
             // Record attempt for non-existent user (for auditing)
-            var attempt = new FailedLoginAttempt
+            FailedLoginAttempt attempt = new FailedLoginAttempt
             {
                 Identifier = identifier,
                 IpAddress = ipAddress,
@@ -81,7 +81,7 @@ public class AccountLockoutService : IAccountLockoutService
         user.LastFailedLogin = DateTime.UtcNow;
 
         // Record the failed attempt in audit log
-        var failedAttempt = new FailedLoginAttempt
+        FailedLoginAttempt failedAttempt = new FailedLoginAttempt
         {
             Identifier = identifier,
             IpAddress = ipAddress,
@@ -108,7 +108,7 @@ public class AccountLockoutService : IAccountLockoutService
 
     public async Task RecordFailedLoginByUsernameAsync(string username, string? ipAddress, string? failureReason = null)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == username);
+        User? user = await _context.Users.FirstOrDefaultAsync(u => u.Username == username);
 
         if (user != null)
         {
@@ -117,7 +117,7 @@ public class AccountLockoutService : IAccountLockoutService
         else
         {
             // Record attempt for non-existent username (for auditing)
-            var attempt = new FailedLoginAttempt
+            FailedLoginAttempt attempt = new FailedLoginAttempt
             {
                 Identifier = username,
                 IpAddress = ipAddress,
@@ -131,7 +131,7 @@ public class AccountLockoutService : IAccountLockoutService
 
     public async Task ResetFailedLoginCountAsync(Guid userId)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         if (user != null)
         {
             user.FailedLoginAttempts = 0;
@@ -143,19 +143,19 @@ public class AccountLockoutService : IAccountLockoutService
 
     public async Task<int> GetFailedLoginCountAsync(Guid userId)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         return user?.FailedLoginAttempts ?? 0;
     }
 
     public async Task<DateTime?> GetLockoutEndAsync(Guid userId)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         return user?.LockoutEnd;
     }
 
     public async Task ManuallyLockAccountAsync(Guid userId, int lockoutDurationMinutes)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         if (user != null)
         {
             user.LockoutEnd = DateTime.UtcNow.AddMinutes(lockoutDurationMinutes);
@@ -166,7 +166,7 @@ public class AccountLockoutService : IAccountLockoutService
 
     public async Task UnlockAccountAsync(Guid userId)
     {
-        var user = await _context.Users.FindAsync(userId);
+        User? user = await _context.Users.FindAsync(userId);
         if (user != null)
         {
             user.LockoutEnd = null;

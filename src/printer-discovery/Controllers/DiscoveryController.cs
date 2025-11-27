@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Farm.Web.Shared;
+using Microsoft.AspNetCore.Mvc;
 using PrinterDiscovery.Services;
 
 namespace PrinterDiscovery.Controllers;
@@ -38,7 +39,7 @@ public class DiscoveryController : ControllerBase
             _logger.LogInformation("Manual discovery scan requested (autoRegister={AutoRegister})", autoRegister);
 
             // Perform discovery scan
-            var discovered = await _discoveryService.ScanOnceAsync(HttpContext.RequestAborted);
+            IReadOnlyList<DiscoveredPrinterDto> discovered = await _discoveryService.ScanOnceAsync(HttpContext.RequestAborted);
 
             // Optionally register immediately
             if (autoRegister)
@@ -48,7 +49,7 @@ public class DiscoveryController : ControllerBase
             }
 
             // Return results
-            var results = discovered.Select(p => new DiscoveryResult
+            List<DiscoveryResult> results = discovered.Select(p => new DiscoveryResult
             {
                 Hostname = p.Name,
                 IpAddress = p.IpAddress,

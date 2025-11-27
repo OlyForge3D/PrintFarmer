@@ -38,8 +38,10 @@ namespace Farm.Web.Api.Services.Slicing
 
         public ProfileImportService(IProfileParsingService parsingService, IUnifiedLoggingService logger)
         {
-            _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            ArgumentNullException.ThrowIfNull(parsingService);
+            ArgumentNullException.ThrowIfNull(logger);
+            _parsingService = parsingService;
+            _logger = logger;
         }
 
         public async Task<ProcessProfile> ImportProfileAsync(
@@ -47,30 +49,27 @@ namespace Farm.Web.Api.Services.Slicing
             Func<ProcessProfile, Task<ProcessProfile>> persistDelegate,
             CancellationToken ct)
         {
-            if (request is null)
-            {
-                throw new ArgumentNullException(nameof(request));
-            }
+            ArgumentNullException.ThrowIfNull(request);
 
             if (string.IsNullOrWhiteSpace(request.RawJson))
             {
                 throw new ArgumentException("Raw JSON is required", nameof(request));
             }
 
-            if (!Enum.TryParse<SlicerType>(request.SlicerType, ignoreCase: true, out var slicerType))
+            if (!Enum.TryParse<SlicerType>(request.SlicerType, ignoreCase: true, out SlicerType slicerType))
             {
                 throw new ArgumentException($"Invalid slicer type: {request.SlicerType}", nameof(request));
             }
 
             // Parse and prepare the profile
-            var (sanitizedRaw, metadataJson, hash) = _parsingService.ParseAndPrepare(request.RawJson);
+            (string? sanitizedRaw, string? metadataJson, string? hash) = _parsingService.ParseAndPrepare(request.RawJson);
 
             // Extract basic fields from metadata with sensible defaults
-            var (layerHeight, infillPct, material, quality) = ExtractProfileDefaults(metadataJson);
+            (double layerHeight, int infillPct, string? material, ProfileQuality quality) = ExtractProfileDefaults(metadataJson);
 
             string name = NormalizeProfileName(request.Name, quality.ToString(), layerHeight);
 
-            var imported = new ProcessProfile
+            ProcessProfile imported = new ProcessProfile
             {
                 Id = Guid.NewGuid(),
                 Name = name,
@@ -89,7 +88,7 @@ namespace Farm.Web.Api.Services.Slicing
             };
 
             // Persist using delegate (allows controller/service to decide storage strategy)
-            var result = await persistDelegate(imported);
+            ProcessProfile result = await persistDelegate(imported);
 
             _logger.LogInformation(
                 $"Profile imported: {result.Id} - {result.Name} ({result.SlicerType}) [Hash: {result.Hash}]");
@@ -99,7 +98,7 @@ namespace Farm.Web.Api.Services.Slicing
 
         public Dictionary<string, object?> ExtractMetadata(string? jsonStr)
         {
-            var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object?> result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
             if (string.IsNullOrWhiteSpace(jsonStr))
             {
@@ -108,8 +107,8 @@ namespace Farm.Web.Api.Services.Slicing
 
             try
             {
-                using var doc = JsonDocument.Parse(jsonStr);
-                foreach (var prop in doc.RootElement.EnumerateObject())
+                using JsonDocument doc = JsonDocument.Parse(jsonStr);
+                foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
                 {
                     result[prop.Name] = prop.Value.ValueKind switch
                     {
@@ -149,25 +148,25 @@ namespace Farm.Web.Api.Services.Slicing
 
             try
             {
-                using var doc = JsonDocument.Parse(metadataJson);
-                var root = doc.RootElement;
+                using JsonDocument doc = JsonDocument.Parse(metadataJson);
+                JsonElement root = doc.RootElement;
 
-                if (root.TryGetProperty("layerHeight", out var lh) && lh.TryGetDouble(out double lhVal))
+                if (root.TryGetProperty("layerHeight", out JsonElement lh) && lh.TryGetDouble(out double lhVal))
                 {
                     layerHeight = lhVal;
                 }
 
-                if (root.TryGetProperty("infillPercentage", out var inf) && inf.TryGetInt32(out int infVal))
+                if (root.TryGetProperty("infillPercentage", out JsonElement inf) && inf.TryGetInt32(out int infVal))
                 {
                     infillPct = infVal;
                 }
 
-                if (root.TryGetProperty("filamentMaterial", out var mat) && mat.ValueKind == JsonValueKind.String)
+                if (root.TryGetProperty("filamentMaterial", out JsonElement mat) && mat.ValueKind == JsonValueKind.String)
                 {
                     material = mat.GetString() ?? material;
                 }
 
-                if (root.TryGetProperty("profileType", out var qt) && qt.ValueKind == JsonValueKind.String)
+                if (root.TryGetProperty("profileType", out JsonElement qt) && qt.ValueKind == JsonValueKind.String)
                 {
                     quality = qt.GetString() ?? quality;
                 }
@@ -177,7 +176,7 @@ namespace Farm.Web.Api.Services.Slicing
                 _logger.LogWarning(ex, "Failed to extract profile defaults from metadata");
             }
 
-            var parsedQuality = Enum.TryParse<ProfileQuality>(quality, ignoreCase: true, out var q)
+            ProfileQuality parsedQuality = Enum.TryParse<ProfileQuality>(quality, ignoreCase: true, out ProfileQuality q)
                 ? q
                 : ProfileQuality.Standard;
 

@@ -169,7 +169,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
     /// </summary>
     public async Task<int> DeleteSystemProfilesAsync(SlicerType engine, CancellationToken ct = default)
     {
-        var profilesToDelete = await _db.ProcessProfiles
+        List<ProcessProfile> profilesToDelete = await _db.ProcessProfiles
             .Where(p => p.IsSystem && p.SlicerType == engine)
             .ToListAsync(ct);
 

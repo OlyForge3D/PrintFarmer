@@ -13,8 +13,8 @@ internal static class CsvImportParser
             return Array.Empty<string>();
         }
 
-        var values = new List<string>();
-        var current = new StringBuilder();
+        List<string> values = new List<string>();
+        StringBuilder current = new StringBuilder();
         bool inQuotes = false;
 
         int i = 0;

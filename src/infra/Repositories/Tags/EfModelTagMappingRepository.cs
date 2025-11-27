@@ -55,7 +55,7 @@ namespace Farm.Infrastructure.Repositories.Tags
 
         public async Task RemoveByModelIdAsync(Guid modelId, CancellationToken ct)
         {
-            var mappings = await _dbContext.Model3DTagMappings
+            List<Model3DTagMapping> mappings = await _dbContext.Model3DTagMappings
                 .Where(m => m.Model3DId == modelId)
                 .ToListAsync(ct);
 
@@ -67,7 +67,7 @@ namespace Farm.Infrastructure.Repositories.Tags
 
         public async Task RemoveByModelAndTagAsync(Guid modelId, Guid tagId, CancellationToken ct)
         {
-            var mapping = await GetMappingAsync(modelId, tagId, ct);
+            Model3DTagMapping? mapping = await GetMappingAsync(modelId, tagId, ct);
             if (mapping != null)
             {
                 _dbContext.Model3DTagMappings.Remove(mapping);

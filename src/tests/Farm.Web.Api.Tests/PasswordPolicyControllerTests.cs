@@ -1,6 +1,7 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Services.PasswordPolicy;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
@@ -14,17 +15,17 @@ public class PasswordPolicyControllerTests
     public async Task GetAsync_ReturnsDto_FromService()
     {
         // Arrange
-        var svc = new Mock<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService>();
-        var expected = new PasswordPolicyDto { MinLength = 10, RequireDigit = true };
+        Mock<IPasswordPolicyService> svc = new Mock<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService>();
+        PasswordPolicyDto expected = new PasswordPolicyDto { MinLength = 10, RequireDigit = true };
         svc.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
-        var controller = new PasswordPolicyController(svc.Object);
+        PasswordPolicyController controller = new PasswordPolicyController(svc.Object);
 
         // Act
-        var result = await controller.GetAsync(CancellationToken.None);
+        ActionResult<PasswordPolicyDto> result = await controller.GetAsync(CancellationToken.None);
 
         // Assert
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var dto = Assert.IsType<PasswordPolicyDto>(ok.Value!);
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        PasswordPolicyDto dto = Assert.IsType<PasswordPolicyDto>(ok.Value!);
         Assert.Equal(10, dto.MinLength);
         Assert.True(dto.RequireDigit);
     }
@@ -32,16 +33,16 @@ public class PasswordPolicyControllerTests
     [Fact]
     public async Task UpdateAsync_Delegates_ToService_AndReturnsOk()
     {
-        var svc = new Mock<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService>();
-        var request = new UpdatePasswordPolicyRequest { MinLength = 12 };
-        var updated = new PasswordPolicyDto { MinLength = 12 };
+        Mock<IPasswordPolicyService> svc = new Mock<Farm.Web.Api.Services.PasswordPolicy.IPasswordPolicyService>();
+        UpdatePasswordPolicyRequest request = new UpdatePasswordPolicyRequest { MinLength = 12 };
+        PasswordPolicyDto updated = new PasswordPolicyDto { MinLength = 12 };
         svc.Setup(s => s.UpdateAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(updated);
-        var controller = new PasswordPolicyController(svc.Object);
+        PasswordPolicyController controller = new PasswordPolicyController(svc.Object);
 
-        var result = await controller.UpdateAsync(request, CancellationToken.None);
+        ActionResult<PasswordPolicyDto> result = await controller.UpdateAsync(request, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var dto = Assert.IsType<PasswordPolicyDto>(ok.Value!);
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        PasswordPolicyDto dto = Assert.IsType<PasswordPolicyDto>(ok.Value!);
         Assert.Equal(12, dto.MinLength);
     }
 }

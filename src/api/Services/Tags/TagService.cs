@@ -35,7 +35,7 @@ namespace Farm.Web.Api.Services.Tags
         {
             try
             {
-                var tags = await _tagRepository.ListAllAsync(ct);
+                IReadOnlyList<Model3DTag> tags = await _tagRepository.ListAllAsync(ct);
                 return tags.Select(t => new Model3DTagDto
                 {
                     Id = t.Id,
@@ -55,7 +55,7 @@ namespace Farm.Web.Api.Services.Tags
         {
             try
             {
-                var tag = await _tagRepository.GetByIdAsync(tagId, ct);
+                Model3DTag? tag = await _tagRepository.GetByIdAsync(tagId, ct);
                 if (tag == null)
                 {
                     return null;
@@ -87,11 +87,11 @@ namespace Farm.Web.Api.Services.Tags
                     throw new ArgumentException("Tag name is required", nameof(dto));
                 }
 
-                var trimmedName = dto.Name.Trim();
-                var normalizedName = ToPascalCase(trimmedName);
+                string trimmedName = dto.Name.Trim();
+                string normalizedName = ToPascalCase(trimmedName);
 
                 // Check if tag already exists (after normalization)
-                var existing = await _tagRepository.GetByNameAsync(normalizedName, ct);
+                Model3DTag? existing = await _tagRepository.GetByNameAsync(normalizedName, ct);
                 if (existing != null)
                 {
                     // Return the existing tag
@@ -104,7 +104,7 @@ namespace Farm.Web.Api.Services.Tags
                     };
                 }
 
-                var tag = new Model3DTag
+                Model3DTag tag = new Model3DTag
                 {
                     Id = Guid.NewGuid(),
                     Name = normalizedName,
@@ -125,7 +125,7 @@ namespace Farm.Web.Api.Services.Tags
                 {
                     // Handle race condition: tag was created between check and insert
                     // Fetch and return the existing tag
-                    var existingTag = await _tagRepository.GetByNameAsync(normalizedName, ct);
+                    Model3DTag? existingTag = await _tagRepository.GetByNameAsync(normalizedName, ct);
                     if (existingTag != null)
                     {
                         return new Model3DTagDto
@@ -165,9 +165,9 @@ namespace Farm.Web.Api.Services.Tags
             }
 
             // First, convert to lowercase to normalize
-            var lowered = input.ToLowerInvariant();
+            string lowered = input.ToLowerInvariant();
 
-            var words = lowered.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] words = lowered.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries);
 
             // Handle case where input was only delimiters
             if (words.Length == 0)
@@ -175,7 +175,7 @@ namespace Farm.Web.Api.Services.Tags
                 return input;
             }
 
-            var pascalWords = words.Select(word =>
+            IEnumerable<string> pascalWords = words.Select(word =>
             {
                 // Safety check in case word is somehow empty
                 if (string.IsNullOrEmpty(word))
@@ -193,7 +193,7 @@ namespace Farm.Web.Api.Services.Tags
         {
             try
             {
-                var tag = await _tagRepository.GetByIdAsync(tagId, ct);
+                Model3DTag? tag = await _tagRepository.GetByIdAsync(tagId, ct);
                 if (tag == null)
                 {
                     throw new KeyNotFoundException($"Tag {tagId} not found");
@@ -214,11 +214,11 @@ namespace Farm.Web.Api.Services.Tags
         {
             try
             {
-                var tagIdList = tagIds?.ToList() ?? new List<Guid>();
+                List<Guid> tagIdList = tagIds?.ToList() ?? new List<Guid>();
                 _logger.LogInformation($"Assigning {tagIdList.Count} tags to model {modelId}");
 
                 // Verify model exists
-                var model = await _modelRepository.GetByIdAsync(modelId, ct);
+                Model3D? model = await _modelRepository.GetByIdAsync(modelId, ct);
                 if (model == null)
                 {
                     _logger.LogError($"Model {modelId} not found");
@@ -232,12 +232,12 @@ namespace Farm.Web.Api.Services.Tags
 
                 // Add new tag mappings
                 _logger.LogInformation($"Adding {tagIdList.Count} new tag mappings");
-                foreach (var tagId in tagIdList)
+                foreach (Guid tagId in tagIdList)
                 {
-                    var tag = await _tagRepository.GetByIdAsync(tagId, ct);
+                    Model3DTag? tag = await _tagRepository.GetByIdAsync(tagId, ct);
                     if (tag != null)
                     {
-                        var mapping = new Model3DTagMapping
+                        Model3DTagMapping mapping = new Model3DTagMapping
                         {
                             Id = Guid.NewGuid(),
                             Model3DId = modelId,
@@ -269,7 +269,7 @@ namespace Farm.Web.Api.Services.Tags
         {
             try
             {
-                var mapping = await _mappingRepository.GetMappingAsync(modelId, tagId, ct);
+                Model3DTagMapping? mapping = await _mappingRepository.GetMappingAsync(modelId, tagId, ct);
                 if (mapping == null)
                 {
                     throw new KeyNotFoundException($"Tag {tagId} not assigned to model {modelId}");
@@ -289,13 +289,13 @@ namespace Farm.Web.Api.Services.Tags
         {
             try
             {
-                var mappings = await _mappingRepository.GetByModelIdAsync(modelId, ct);
-                var tagIds = mappings.Select(m => m.TagId).ToList();
+                IReadOnlyList<Model3DTagMapping> mappings = await _mappingRepository.GetByModelIdAsync(modelId, ct);
+                List<Guid> tagIds = mappings.Select(m => m.TagId).ToList();
 
-                var tags = new List<Model3DTagDto>();
-                foreach (var tagId in tagIds)
+                List<Model3DTagDto> tags = new List<Model3DTagDto>();
+                foreach (Guid tagId in tagIds)
                 {
-                    var tag = await _tagRepository.GetByIdAsync(tagId, ct);
+                    Model3DTag? tag = await _tagRepository.GetByIdAsync(tagId, ct);
                     if (tag != null)
                     {
                         tags.Add(new Model3DTagDto
@@ -321,10 +321,10 @@ namespace Farm.Web.Api.Services.Tags
         {
             try
             {
-                var modelIdList = modelIds?.ToList() ?? new List<Guid>();
-                var tagIdList = tagIds?.ToList() ?? new List<Guid>();
+                List<Guid> modelIdList = modelIds?.ToList() ?? new List<Guid>();
+                List<Guid> tagIdList = tagIds?.ToList() ?? new List<Guid>();
 
-                foreach (var modelId in modelIdList)
+                foreach (Guid modelId in modelIdList)
                 {
                     await AssignTagsToModelAsync(modelId, tagIdList, ct);
                 }

@@ -67,11 +67,11 @@ public class RegistrationBackgroundService : BackgroundService
                 }
 
                 // Send heartbeat with current capacity
-                var state = _workerState.GetWorkerState();
-                var freeSlots = Math.Max(0, _maxConcurrentJobs - state.ActiveJobs);
-                var status = state.IsShuttingDown ? "Draining" : "Online";
+                WorkerState state = _workerState.GetWorkerState();
+                int freeSlots = Math.Max(0, _maxConcurrentJobs - state.ActiveJobs);
+                string status = state.IsShuttingDown ? "Draining" : "Online";
 
-                var success = await _registrationClient.HeartbeatAsync(
+                bool success = await _registrationClient.HeartbeatAsync(
                     _serviceId,
                     _apiKey,
                     freeSlots,
@@ -105,7 +105,7 @@ public class RegistrationBackgroundService : BackgroundService
         {
             _logger.LogInformation("Attempting to register with slicer registry...");
 
-            var (serviceId, apiKey) = await _registrationClient.RegisterAsync(cancellationToken);
+            (Guid serviceId, string? apiKey) = await _registrationClient.RegisterAsync(cancellationToken);
 
             _serviceId = serviceId;
             _apiKey = apiKey;
@@ -138,8 +138,8 @@ public class RegistrationBackgroundService : BackgroundService
             _logger.LogInformation("Application shutting down, deregistering from slicer registry...");
 
             // Use a short timeout for deregistration
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var deregisterTask = _registrationClient.DeregisterAsync(_serviceId, _apiKey, cts.Token);
+            using CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Task<bool> deregisterTask = _registrationClient.DeregisterAsync(_serviceId, _apiKey, cts.Token);
 
             // Block until deregistration completes or times out
 #pragma warning disable VSTHRD002 // Synchronous wait acceptable in shutdown scenario

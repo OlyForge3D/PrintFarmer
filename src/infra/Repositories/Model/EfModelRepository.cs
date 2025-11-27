@@ -54,12 +54,12 @@ namespace Farm.Infrastructure.Repositories.Model
 
         public async Task<IReadOnlyList<Model3D>> SearchAsync(string? query, Guid[]? tagIds, string sortBy, bool descending, int skip, int take, CancellationToken ct)
         {
-            var queryable = _db.Models3D.Where(m => m.IsValid).AsQueryable();
+            IQueryable<Model3D> queryable = _db.Models3D.Where(m => m.IsValid).AsQueryable();
 
             // Text search
             if (!string.IsNullOrWhiteSpace(query))
             {
-                var searchTerm = query.ToLower();
+                string searchTerm = query.ToLower();
                 queryable = queryable.Where(m => m.DisplayName.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
                                                 (m.Description != null && m.Description.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase)));
             }
@@ -67,7 +67,7 @@ namespace Farm.Infrastructure.Repositories.Model
             // Tag filtering (AND logic - must have all tags)
             if (tagIds?.Length > 0)
             {
-                foreach (var tagId in tagIds)
+                foreach (Guid tagId in tagIds)
                 {
                     queryable = queryable.Where(m => m.TagMappings.Any(tm => tm.TagId == tagId));
                 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.PrinterCapabilities;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
@@ -25,7 +26,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<IReadOnlyList<PrinterCapabilitiesDto>> GetAllAsync(CancellationToken ct = default)
         {
-            var capabilities = await _repo.GetAllWithPrinterAsync(ct);
+            List<Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await _repo.GetAllWithPrinterAsync(ct);
 
             return capabilities.Select(cap => new PrinterCapabilitiesDto(
                 Id: cap.Id,
@@ -54,7 +55,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<PrinterCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct = default)
         {
-            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
+            Farm.Infrastructure.Domain.PrinterCapabilities? cap = await _repo.GetByPrinterIdAsync(printerId, ct);
 
             if (cap == null)
             {
@@ -90,13 +91,13 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            var printer = await _repo.FindPrinterAsync(request.PrinterId, ct);
+            Printer? printer = await _repo.FindPrinterAsync(request.PrinterId, ct);
             if (printer == null)
             {
                 return null;
             }
 
-            var exists = await _repo.ExistsByPrinterIdAsync(request.PrinterId, ct);
+            bool exists = await _repo.ExistsByPrinterIdAsync(request.PrinterId, ct);
             if (exists)
             {
                 return null;
@@ -128,7 +129,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
             {
                 try
                 {
-                    var defaults = await _discovery.GetModelDefaultCapabilitiesAsync(printer);
+                    Farm.Infrastructure.Domain.PrinterCapabilities? defaults = await _discovery.GetModelDefaultCapabilitiesAsync(printer);
                     if (defaults != null)
                     {
                         capabilities.MaxBuildVolumeX ??= defaults.MaxBuildVolumeX;
@@ -181,13 +182,13 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            var printer = await _repo.FindPrinterAsync(printerId, ct);
+            Printer? printer = await _repo.FindPrinterAsync(printerId, ct);
             if (printer == null)
             {
                 return null;
             }
 
-            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
+            Farm.Infrastructure.Domain.PrinterCapabilities? cap = await _repo.GetByPrinterIdAsync(printerId, ct);
             if (cap == null)
             {
                 cap = new Farm.Infrastructure.Domain.PrinterCapabilities
@@ -261,16 +262,16 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<IReadOnlyList<PrinterDto>> GetCompatiblePrintersAsync(Guid gcodeFileId, CancellationToken ct = default)
         {
-            var gcodeFile = await _repo.FindGcodeFileAsync(gcodeFileId, ct);
+            GcodeFile? gcodeFile = await _repo.FindGcodeFileAsync(gcodeFileId, ct);
             if (gcodeFile == null)
             {
                 return new List<PrinterDto>();
             }
 
-            var allPrinters = await _repo.GetAvailableWithPrinterAsync(ct);
+            List<Farm.Infrastructure.Domain.PrinterCapabilities> allPrinters = await _repo.GetAvailableWithPrinterAsync(ct);
 
-            var compatible = new List<PrinterDto>();
-            foreach (var cap in allPrinters)
+            List<PrinterDto> compatible = new List<PrinterDto>();
+            foreach (Farm.Infrastructure.Domain.PrinterCapabilities cap in allPrinters)
             {
                 bool isCompatible = true;
                 if (gcodeFile.RequiredNozzleDiameter.HasValue && cap.NozzleDiameter.HasValue && Math.Abs(cap.NozzleDiameter.Value - gcodeFile.RequiredNozzleDiameter.Value) > 0.001)
@@ -335,7 +336,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<bool> DeleteAsync(Guid printerId, CancellationToken ct = default)
         {
-            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
+            Farm.Infrastructure.Domain.PrinterCapabilities? cap = await _repo.GetByPrinterIdAsync(printerId, ct);
             if (cap == null)
             {
                 return false;
@@ -348,13 +349,13 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<(PrinterCapabilitiesDto? result, bool isNew)> DiscoverAsync(Guid printerId, CancellationToken ct = default)
         {
-            var printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
+            Printer? printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
             if (printer == null)
             {
                 return (null, false);
             }
 
-            var existing = await _repo.GetByPrinterIdAsync(printerId, ct);
+            Farm.Infrastructure.Domain.PrinterCapabilities? existing = await _repo.GetByPrinterIdAsync(printerId, ct);
             Farm.Infrastructure.Domain.PrinterCapabilities capabilities;
             bool isNew = false;
             if (existing != null)
@@ -363,7 +364,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
             }
             else
             {
-                var discovered = await _discovery.DiscoverCapabilitiesAsync(printer, ct);
+                Farm.Infrastructure.Domain.PrinterCapabilities? discovered = await _discovery.DiscoverCapabilitiesAsync(printer, ct);
                 if (discovered == null)
                 {
                     return (null, false);
@@ -377,7 +378,7 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
             await _repo.SaveChangesAsync(ct);
             await _repo.LoadPrinterReferenceAsync(capabilities, ct);
 
-            var dto = new PrinterCapabilitiesDto(
+            PrinterCapabilitiesDto dto = new PrinterCapabilitiesDto(
                 Id: capabilities.Id,
                 PrinterId: capabilities.PrinterId,
                 PrinterName: capabilities.Printer?.Name ?? string.Empty,
@@ -405,31 +406,31 @@ namespace Farm.Web.Api.Services.PrinterCapabilities
 
         public async Task<Farm.Web.Api.Services.Interfaces.CapabilityValidationResult> ValidateAsync(Guid printerId, CancellationToken ct = default)
         {
-            var printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
+            Printer? printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
             if (printer == null)
             {
                 return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
             }
 
-            var cap = await _repo.GetByPrinterIdAsync(printerId, ct);
+            Farm.Infrastructure.Domain.PrinterCapabilities? cap = await _repo.GetByPrinterIdAsync(printerId, ct);
             if (cap == null)
             {
                 return new Farm.Web.Api.Services.Interfaces.CapabilityValidationResult { IsValid = false };
             }
 
-            var res = await _discovery.ValidateCapabilitiesAsync(cap, printer);
+            CapabilityValidationResult res = await _discovery.ValidateCapabilitiesAsync(cap, printer);
             return res;
         }
 
         public async Task<PrinterCapabilitiesDto?> GetModelDefaultsAsync(Guid printerId, CancellationToken ct = default)
         {
-            var printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
+            Printer? printer = await _repo.GetPrinterWithModelAndManufacturerAsync(printerId, ct);
             if (printer == null)
             {
                 return null;
             }
 
-            var defaults = await _discovery.GetModelDefaultCapabilitiesAsync(printer);
+            Farm.Infrastructure.Domain.PrinterCapabilities? defaults = await _discovery.GetModelDefaultCapabilitiesAsync(printer);
             if (defaults == null)
             {
                 return null;

@@ -2,11 +2,18 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoMapper;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Printers;
 using Farm.Web.Shared;
+using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;
 
@@ -17,31 +24,31 @@ namespace Farm.Web.Api.Tests.Services
         [Fact]
         public async Task GetPrinterAsync_ReturnsPrinter_WhenFound()
         {
-            var id = Guid.NewGuid();
-            var repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
-            var expected = new Farm.Infrastructure.Domain.Printer { Id = id, Name = "TestPrinter" };
+            Guid id = Guid.NewGuid();
+            Mock<IPrintersRepository> repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
+            Printer expected = new Farm.Infrastructure.Domain.Printer { Id = id, Name = "TestPrinter" };
             repoMock.Setup(r => r.FindByIdWithIncludesAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-            var moonMock = new Mock<IMoonrakerClient>();
-            var prusaMock = new Mock<IPrusaLinkClient>();
-            var sdcpMock = new Mock<ISdcpClient>();
-            var octoMock = new Mock<IOctoPrintClient>();
-            var circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
-            var capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            var defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
-            var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
-            var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
-            var urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
-            var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
+            Mock<IMoonrakerClient> moonMock = new Mock<IMoonrakerClient>();
+            Mock<IPrusaLinkClient> prusaMock = new Mock<IPrusaLinkClient>();
+            Mock<ISdcpClient> sdcpMock = new Mock<ISdcpClient>();
+            Mock<IOctoPrintClient> octoMock = new Mock<IOctoPrintClient>();
+            Mock<ICircuitBreakerService> circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
+            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
+            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
+            Mock<ICatalogService> catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
+            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
+            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
 
             // Provide a real AutoMapper instance for mapping dependencies
-            var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
-            var mapper = mapperConfig.CreateMapper();
+            MapperConfiguration mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            IMapper mapper = mapperConfig.CreateMapper();
 
-            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
+            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
 
-            var printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
+            Printer? printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
             Assert.NotNull(printer);
             Assert.Equal(expected.Id, printer!.Id);
@@ -51,29 +58,29 @@ namespace Farm.Web.Api.Tests.Services
         [Fact]
         public async Task GetPrinterAsync_ReturnsNull_WhenNotFound()
         {
-            var id = Guid.NewGuid();
-            var repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
+            Guid id = Guid.NewGuid();
+            Mock<IPrintersRepository> repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
             repoMock.Setup(r => r.FindByIdWithIncludesAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Farm.Infrastructure.Domain.Printer?)null);
 
-            var moonMock = new Mock<IMoonrakerClient>();
-            var prusaMock = new Mock<IPrusaLinkClient>();
-            var sdcpMock = new Mock<ISdcpClient>();
-            var octoMock = new Mock<IOctoPrintClient>();
-            var circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
-            var capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            var defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
-            var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
-            var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
-            var urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
-            var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
+            Mock<IMoonrakerClient> moonMock = new Mock<IMoonrakerClient>();
+            Mock<IPrusaLinkClient> prusaMock = new Mock<IPrusaLinkClient>();
+            Mock<ISdcpClient> sdcpMock = new Mock<ISdcpClient>();
+            Mock<IOctoPrintClient> octoMock = new Mock<IOctoPrintClient>();
+            Mock<ICircuitBreakerService> circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
+            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
+            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
+            Mock<ICatalogService> catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
+            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
+            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
 
-            var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
-            var mapper = mapperConfig.CreateMapper();
+            MapperConfiguration mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            IMapper mapper = mapperConfig.CreateMapper();
 
-            var svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
+            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
 
-            var printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
+            Printer? printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
             Assert.Null(printer);
         }
@@ -95,10 +102,10 @@ namespace Farm.Web.Api.Tests.Services
         public void NormalizeServerUrl_RemovesPortAndPath_ReturnsSchemeAndHostOnly(string input, int defaultPort, string expected)
         {
             // Arrange
-            var service = CreatePrintersService();
+            PrintersService service = CreatePrintersService();
 
             // Act
-            var result = service.NormalizeServerUrl(input, defaultPort);
+            string result = service.NormalizeServerUrl(input, defaultPort);
 
             // Assert
             Assert.Equal(expected, result);
@@ -115,10 +122,10 @@ namespace Farm.Web.Api.Tests.Services
         public void NormalizeServerUrl_AddsScheme_ReturnsNormalizedUrl(string input, int defaultPort, string expected)
         {
             // Arrange
-            var service = CreatePrintersService();
+            PrintersService service = CreatePrintersService();
 
             // Act
-            var result = service.NormalizeServerUrl(input, defaultPort);
+            string result = service.NormalizeServerUrl(input, defaultPort);
 
             // Assert
             Assert.Equal(expected, result);
@@ -134,10 +141,10 @@ namespace Farm.Web.Api.Tests.Services
         public void NormalizeServerUrl_NullOrWhitespace_ReturnsEmptyString(string? input, int defaultPort)
         {
             // Arrange
-            var service = CreatePrintersService();
+            PrintersService service = CreatePrintersService();
 
             // Act
-            var result = service.NormalizeServerUrl(input, defaultPort);
+            string result = service.NormalizeServerUrl(input, defaultPort);
 
             // Assert
             Assert.Equal(string.Empty, result);
@@ -151,12 +158,12 @@ namespace Farm.Web.Api.Tests.Services
         public async Task ResolveHostnameAsync_ReturnsNormalizedUrl_WithoutExplicitPort()
         {
             // Arrange
-            var service = CreatePrintersService();
+            PrintersService service = CreatePrintersService();
             string input = "http://printer.local:7125";
-            var backend = PrinterBackend.Moonraker;
+            PrinterBackend backend = PrinterBackend.Moonraker;
 
             // Act
-            var result = await service.ResolveHostnameAsync(input, backend, CancellationToken.None);
+            ResolveHostnameResponse result = await service.ResolveHostnameAsync(input, backend, CancellationToken.None);
 
             // Assert
             // NormalizedInputUrl should not contain explicit port (Port = -1 in UriBuilder)
@@ -177,10 +184,10 @@ namespace Farm.Web.Api.Tests.Services
         public async Task ResolveHostnameAsync_PreservesHost_InNormalizedUrl(string input, PrinterBackend backend)
         {
             // Arrange
-            var service = CreatePrintersService();
+            PrintersService service = CreatePrintersService();
 
             // Act
-            var result = await service.ResolveHostnameAsync(input, backend, CancellationToken.None);
+            ResolveHostnameResponse result = await service.ResolveHostnameAsync(input, backend, CancellationToken.None);
 
             // Assert
             Assert.NotNull(result);
@@ -193,22 +200,22 @@ namespace Farm.Web.Api.Tests.Services
 
         private static PrintersService CreatePrintersService()
         {
-            var repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
-            var moonMock = new Mock<IMoonrakerClient>();
-            var prusaMock = new Mock<IPrusaLinkClient>();
-            var sdcpMock = new Mock<ISdcpClient>();
-            var octoMock = new Mock<IOctoPrintClient>();
-            var circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
-            var capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
-            var defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
-            var catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
-            var httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
-            var urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
-            var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
-            var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
+            Mock<IPrintersRepository> repoMock = new Mock<Farm.Infrastructure.Repositories.Printers.IPrintersRepository>();
+            Mock<IMoonrakerClient> moonMock = new Mock<IMoonrakerClient>();
+            Mock<IPrusaLinkClient> prusaMock = new Mock<IPrusaLinkClient>();
+            Mock<ISdcpClient> sdcpMock = new Mock<ISdcpClient>();
+            Mock<IOctoPrintClient> octoMock = new Mock<IOctoPrintClient>();
+            Mock<ICircuitBreakerService> circuitMock = new Mock<Farm.Infrastructure.ICircuitBreakerService>();
+            Mock<IPrinterCapabilityDiscoveryService> capDiscoveryMock = new Mock<Farm.Web.Api.Services.Interfaces.IPrinterCapabilityDiscoveryService>();
+            Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<Farm.Web.Api.Services.IDefaultCatalogService>();
+            Mock<ICatalogService> catalogMock = new Mock<Farm.Web.Api.Services.Catalog.ICatalogService>();
+            Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<System.Net.Http.IHttpClientFactory>();
+            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<Farm.Web.Api.Services.Interfaces.INetworkUrlRewriteService>();
+            Mock<IUnifiedLoggingService> loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
+            Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Farm.Web.Api.Hubs.PrinterHub>>();
 
-            var mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
-            var mapper = mapperConfig.CreateMapper();
+            MapperConfiguration mapperConfig = new AutoMapper.MapperConfiguration(cfg => cfg.AddProfile(new Farm.Web.Api.Mapping.PrinterMappingProfile()));
+            IMapper mapper = mapperConfig.CreateMapper();
 
             return new PrintersService(
                 repoMock.Object,

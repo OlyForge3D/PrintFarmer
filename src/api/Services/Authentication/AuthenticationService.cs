@@ -4,6 +4,7 @@ using System.Text;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Shared;
 using Microsoft.IdentityModel.Tokens;
 
@@ -274,7 +275,7 @@ public class AuthenticationService(
 
     public async Task<bool> HasPermissionAsync(Guid userId, string resource, string action)
     {
-        var permissions = await _usersRepository.GetGrantedPermissionsAsync(userId);
+        List<(string Resource, string Action)> permissions = await _usersRepository.GetGrantedPermissionsAsync(userId);
         return permissions.Any(p => p.Resource == resource && p.Action == action);
     }
 
@@ -291,7 +292,7 @@ public class AuthenticationService(
         // Diagnostic logging to help tests: print a short preview of the stored hash and verification result
         try
         {
-            var preview = user.PasswordHash != null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : user.PasswordHash;
+            string? preview = user.PasswordHash != null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : user.PasswordHash;
             Console.WriteLine($"[AuthenticationService] ChangePassword: UserId={userId} StoredHashPreview={preview}");
         }
         catch { }
@@ -302,7 +303,7 @@ public class AuthenticationService(
             return false;
         }
 
-        var currentMatches = _passwordHashing.VerifyPassword(currentPassword, user.PasswordHash);
+        bool currentMatches = _passwordHashing.VerifyPassword(currentPassword, user.PasswordHash);
         Console.WriteLine($"[AuthenticationService] ChangePassword: VerifyPassword result={currentMatches} for UserId={userId}");
         if (!currentMatches)
         {
@@ -329,7 +330,7 @@ public class AuthenticationService(
         try
         {
             // Check rate limiting
-            var rateLimit = await _rateLimitService.CheckEmailConfirmationLimitAsync(user.Email);
+            RateLimitResult rateLimit = await _rateLimitService.CheckEmailConfirmationLimitAsync(user.Email);
             if (!rateLimit.IsAllowed)
             {
                 _logger.LogWarning($"Email confirmation rate limit exceeded for {user.Email}", null, new
@@ -434,7 +435,7 @@ public class AuthenticationService(
         try
         {
             // Check rate limiting first
-            var rateLimit = await _rateLimitService.CheckPasswordResetLimitAsync(email);
+            RateLimitResult rateLimit = await _rateLimitService.CheckPasswordResetLimitAsync(email);
             if (!rateLimit.IsAllowed)
             {
                 _logger.LogWarning($"Password reset rate limit exceeded for {email}", null, new
@@ -469,7 +470,7 @@ public class AuthenticationService(
                 .Replace("=", "");
 
             // Create password reset token entity
-            var resetToken = new PasswordResetToken
+            PasswordResetToken resetToken = new PasswordResetToken
             {
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
@@ -529,7 +530,7 @@ public class AuthenticationService(
             }
 
             // Find and validate token
-            var resetToken = await _usersRepository.GetPasswordResetTokenAsync(token);
+            PasswordResetToken? resetToken = await _usersRepository.GetPasswordResetTokenAsync(token);
             if (resetToken == null || resetToken.UserId != user.Id)
             {
                 _logger.LogWarning($"Invalid password reset token for user: {user.Username}");

@@ -11,7 +11,7 @@ public static class DockerTestHelpers
 {
     public static string GetRepositoryRoot()
     {
-        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+        DirectoryInfo? directory = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (directory != null && !File.Exists(Path.Combine(directory.FullName, "global.json")))
         {
             directory = directory.Parent;
@@ -38,7 +38,7 @@ public static class DockerTestHelpers
         ArgumentNullException.ThrowIfNull(composeFile);
         ArgumentNullException.ThrowIfNull(workingDir);
         ArgumentNullException.ThrowIfNull(args);
-        var allArgs = new[] { "compose", "-f", composeFile }.Concat(args).ToArray();
+        string[] allArgs = new[] { "compose", "-f", composeFile }.Concat(args).ToArray();
         return RunCommandAsync(output, workingDir, "docker", allArgs);
     }
 
@@ -48,7 +48,7 @@ public static class DockerTestHelpers
         ArgumentNullException.ThrowIfNull(workingDir);
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(args);
-        using var process = new Process();
+        using Process process = new Process();
         process.StartInfo = new ProcessStartInfo
         {
             FileName = command,
@@ -69,11 +69,11 @@ public static class DockerTestHelpers
 
         output.WriteLine($"Running: {command} {string.Join(" ", args)}");
         process.Start();
-        var stdOutTask = process.StandardOutput.ReadToEndAsync();
-        var stdErrTask = process.StandardError.ReadToEndAsync();
+        Task<string> stdOutTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> stdErrTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
-        var stdOut = await stdOutTask;
-        var stdErr = await stdErrTask;
+        string stdOut = await stdOutTask;
+        string stdErr = await stdErrTask;
         return (process.ExitCode == 0, stdOut, stdErr);
     }
 
@@ -81,10 +81,10 @@ public static class DockerTestHelpers
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            var url = $"http://localhost:{port}{endpoint}";
-            var resp = await http.GetAsync(url);
-            var body = await resp.Content.ReadAsStringAsync();
+            using HttpClient http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            string url = $"http://localhost:{port}{endpoint}";
+            HttpResponseMessage resp = await http.GetAsync(url);
+            string body = await resp.Content.ReadAsStringAsync();
             return resp.IsSuccessStatusCode
                 ? (true, $"{serviceName} healthy at {url}: {body}")
                 : (false, $"{serviceName} unhealthy at {url}: {(int)resp.StatusCode} {resp.StatusCode} - {body}");
@@ -101,11 +101,11 @@ public static class DockerTestHelpers
         ArgumentNullException.ThrowIfNull(serviceName);
         timeout ??= TimeSpan.FromSeconds(60);
         pollInterval ??= TimeSpan.FromSeconds(2);
-        var sw = Stopwatch.StartNew();
+        Stopwatch sw = Stopwatch.StartNew();
         string? lastMessage = null;
         while (sw.Elapsed < timeout)
         {
-            var health = await CheckServiceHealthAsync(serviceName, port, endpoint);
+            (bool IsHealthy, string Message) health = await CheckServiceHealthAsync(serviceName, port, endpoint);
             if (health.IsHealthy)
             {
                 output.WriteLine($"{serviceName} healthy after {sw.Elapsed.TotalSeconds:F1}s");
@@ -125,15 +125,15 @@ public static class DockerTestHelpers
         ArgumentNullException.ThrowIfNull(serviceName);
         ArgumentNullException.ThrowIfNull(execArgs);
         pollInterval ??= TimeSpan.FromSeconds(3);
-        var sw = Stopwatch.StartNew();
+        Stopwatch sw = Stopwatch.StartNew();
         while (sw.Elapsed < timeout)
         {
-            var combined = new string[3 + execArgs.Length];
+            string[] combined = new string[3 + execArgs.Length];
             combined[0] = "exec";
             combined[1] = "-T";
             combined[2] = serviceName;
             Array.Copy(execArgs, 0, combined, 3, execArgs.Length);
-            var res = await RunDockerComposeCommandAsync(output, composeFile, workingDir, combined);
+            (bool Success, string Output, string ErrorOutput) res = await RunDockerComposeCommandAsync(output, composeFile, workingDir, combined);
             if (res.Success)
             {
                 output.WriteLine($"Exec success for {serviceName} after {sw.Elapsed.TotalSeconds:F1}s -> {string.Join(' ', execArgs)}");

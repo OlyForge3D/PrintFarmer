@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Services.IO
         public System.Collections.Generic.IEnumerable<string> EnumerateFileSystemEntries(string path) => Directory.EnumerateFileSystemEntries(path);
         public FileInfoData GetFileInfo(string path)
         {
-            var fi = new System.IO.FileInfo(path);
+            System.IO.FileInfo fi = new System.IO.FileInfo(path);
             return new FileInfoData
             {
                 Length = fi.Length,

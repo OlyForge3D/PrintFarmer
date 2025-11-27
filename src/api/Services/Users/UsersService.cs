@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Services.Users
 
         public async Task<UserDto> CreateUserAsync(Farm.Web.Shared.CreateUserRequest request, CancellationToken ct)
         {
-            var user = new User
+            User user = new User
             {
                 Id = Guid.NewGuid(),
                 Username = request.Username,
@@ -46,7 +46,7 @@ namespace Farm.Web.Api.Services.Users
             await _users.AddUserAsync(user, request.RoleIds, ct);
             await _users.SaveChangesAsync(ct);
 
-            var created = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
+            UserDto? created = await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
             return created!;
         }
 

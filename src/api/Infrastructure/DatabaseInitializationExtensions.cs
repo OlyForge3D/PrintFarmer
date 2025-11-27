@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Data.Common;
+using System.Linq;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -22,13 +23,13 @@ public static class DatabaseInitializationExtensions
         IStartupStatus startupStatus)
     {
         // Get startup timeout from environment (default: 120 seconds)
-        var dbStartupTimeout = TimeSpan.FromSeconds(
+        TimeSpan dbStartupTimeout = TimeSpan.FromSeconds(
             int.TryParse(Environment.GetEnvironmentVariable("DB_STARTUP_TIMEOUT"), out int timeoutSec) ? timeoutSec : 120
         );
 
         try
         {
-            using var startupCts = new CancellationTokenSource(dbStartupTimeout);
+            using CancellationTokenSource startupCts = new CancellationTokenSource(dbStartupTimeout);
 
             // STEP 1: Ensure database schema exists FIRST (before any services query it)
             logger.LogInformation("[Startup] Step 1/3: Creating/verifying database schema (timeout: {Timeout}s)...", dbStartupTimeout.TotalSeconds.ToString());
@@ -81,24 +82,24 @@ public static class DatabaseInitializationExtensions
                 // invoking the initializer which will run seeding queries.
                 try
                 {
-                    var providerName = db.Database.ProviderName ?? string.Empty;
+                    string providerName = db.Database.ProviderName ?? string.Empty;
                     if (providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
                     {
-                        var conn = db.Database.GetDbConnection();
+                        DbConnection conn = db.Database.GetDbConnection();
                         await conn.OpenAsync(startupCts.Token);
                         try
                         {
-                            var required = new[] { "Manufacturers", "FilamentTypes", "SystemLogs" };
+                            string[] required = new[] { "Manufacturers", "FilamentTypes", "SystemLogs" };
                             int attempts = 0;
                             const int maxAttempts = 10;
                             const int delayMs = 200;
                             bool allPresent = false;
                             while (attempts < maxAttempts)
                             {
-                                using var cmd = conn.CreateCommand();
+                                using DbCommand cmd = conn.CreateCommand();
                                 cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Manufacturers','FilamentTypes','SystemLogs')";
-                                var found = new List<string>();
-                                using var reader = await cmd.ExecuteReaderAsync();
+                                List<string> found = new List<string>();
+                                using DbDataReader reader = await cmd.ExecuteReaderAsync();
                                 while (await reader.ReadAsync())
                                 {
                                     found.Add(reader.GetString(0));
@@ -151,19 +152,19 @@ public static class DatabaseInitializationExtensions
                     // caused errors on other providers (for example Postgres). Use both the
                     // EF provider name and the DB_PROVIDER env var as signals to be robust
                     // in a variety of deployment/test setups.
-                    var providerName = db.Database.ProviderName ?? string.Empty;
+                    string providerName = db.Database.ProviderName ?? string.Empty;
                     string envProvider = Environment.GetEnvironmentVariable("DB_PROVIDER") ?? string.Empty;
                     if (providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) ||
                         envProvider.Equals("sqlite", StringComparison.OrdinalIgnoreCase))
                     {
-                        var conn = db.Database.GetDbConnection();
+                        DbConnection conn = db.Database.GetDbConnection();
                         await conn.OpenAsync(startupCts.Token);
                         try
                         {
-                            using var cmd = conn.CreateCommand();
+                            using DbCommand cmd = conn.CreateCommand();
                             cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('Manufacturers','FilamentTypes','SystemLogs')";
-                            var tables = new List<string>();
-                            using var reader = await cmd.ExecuteReaderAsync();
+                            List<string> tables = new List<string>();
+                            using DbDataReader reader = await cmd.ExecuteReaderAsync();
                             while (await reader.ReadAsync())
                             {
                                 tables.Add(reader.GetString(0));

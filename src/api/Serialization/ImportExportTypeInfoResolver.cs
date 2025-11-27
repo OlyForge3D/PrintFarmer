@@ -18,7 +18,7 @@ public sealed class ImportExportTypeInfoResolver : IJsonTypeInfoResolver
 
     public JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
     {
-        var ti = _inner.GetTypeInfo(type, options);
+        JsonTypeInfo ti = _inner.GetTypeInfo(type, options);
         // Ensure we have a JsonTypeInfo (Default resolver should return non-null)
         if (ti == null)
         {
@@ -26,15 +26,15 @@ public sealed class ImportExportTypeInfoResolver : IJsonTypeInfoResolver
         }
 
         // Only need to inspect types that may contain the attribute on properties
-        foreach (var prop in ti.Properties)
+        foreach (JsonPropertyInfo prop in ti.Properties)
         {
-            var pi = type.GetProperty(prop.Name, BindingFlags.Public | BindingFlags.Instance);
+            PropertyInfo? pi = type.GetProperty(prop.Name, BindingFlags.Public | BindingFlags.Instance);
             if (pi == null)
             {
                 continue;
             }
 
-            var attr = pi.GetCustomAttribute<ImportExportAttribute>(inherit: true);
+            ImportExportAttribute? attr = pi.GetCustomAttribute<ImportExportAttribute>(inherit: true);
             if (attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0)
             {
                 // Prevent this property from being written during serialization

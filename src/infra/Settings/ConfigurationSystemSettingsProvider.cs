@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using System.Reflection;
+using Microsoft.Extensions.Configuration;
 
 namespace Farm.Infrastructure.Settings
 {
@@ -14,8 +15,8 @@ namespace Farm.Infrastructure.Settings
         public T Get<T>() where T : class, new()
         {
             // Try to find a public constant/field or static property named SectionName on the type T
-            var field = typeof(T).GetField("SectionName", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            var prop = typeof(T).GetProperty("SectionName", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            FieldInfo? field = typeof(T).GetField("SectionName", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            PropertyInfo? prop = typeof(T).GetProperty("SectionName", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
             string? section = null;
             try
             {
@@ -27,7 +28,7 @@ namespace Farm.Infrastructure.Settings
                 else if (prop != null)
                 {
                     // Only accept static property values
-                    var getter = prop.GetMethod;
+                    MethodInfo? getter = prop.GetMethod;
                     if (getter != null && getter.IsStatic)
                     {
                         object? val = prop.GetValue(null);

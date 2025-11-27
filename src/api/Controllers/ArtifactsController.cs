@@ -3,6 +3,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
 using Farm.Web.Api.DTOs.Artifacts;
 using Farm.Web.Api.Services.Artifacts;
 using Microsoft.AspNetCore.Authorization;
@@ -79,12 +80,12 @@ public class ArtifactsController : ControllerBase
             return BadRequest(new { error = "At least one file is required" });
         }
 
-        var allowed = _settings.Value.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var results = new List<ArtifactDto>();
+        string[] allowed = _settings.Value.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        List<ArtifactDto> results = new List<ArtifactDto>();
 
         try
         {
-            foreach (var file in files)
+            foreach (IFormFile file in files)
             {
                 // Infer kind from content type or filename
                 string kind = InferKind(file);
@@ -98,7 +99,7 @@ public class ArtifactsController : ControllerBase
                     });
                 }
 
-                var artifact = await _service.UploadAsync(file, jobId, workerId, kind, ct);
+                Artifact artifact = await _service.UploadAsync(file, jobId, workerId, kind, ct);
                 results.Add(Map(artifact));
             }
 
@@ -130,7 +131,7 @@ public class ArtifactsController : ControllerBase
         }
 
         // Fallback to file extension
-        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        string ext = Path.GetExtension(file.FileName).ToLowerInvariant();
         return ext switch
         {
             ".gcode" or ".g" or ".nc" => "gcode",
@@ -176,14 +177,14 @@ public class ArtifactsController : ControllerBase
             return BadRequest("file is required");
         }
 
-        var allowed = _settings.Value.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[] allowed = _settings.Value.AllowedKinds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (string.IsNullOrWhiteSpace(kind) || !allowed.Contains(kind, StringComparer.OrdinalIgnoreCase))
         {
             return BadRequest(new { error = "unsupported artifact kind", allowedKinds = allowed });
         }
         try
         {
-            var artifact = await _service.UploadAsync(file, jobId, workerId, kind, ct);
+            Artifact artifact = await _service.UploadAsync(file, jobId, workerId, kind, ct);
             ArtifactDto dto = Map(artifact);
             return Ok(dto);
         }
@@ -208,7 +209,7 @@ public class ArtifactsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
-        var a = await _service.GetAsync(id, ct);
+        Artifact? a = await _service.GetAsync(id, ct);
         if (a == null)
         {
             return NotFound();
@@ -246,7 +247,7 @@ public class ArtifactsController : ControllerBase
             return Forbid();
         }
 
-        var list = await _service.ListByJobAsync(jobId, ct);
+        IReadOnlyList<Artifact> list = await _service.ListByJobAsync(jobId, ct);
         return Ok(list.Select(Map));
     }
 
@@ -275,13 +276,13 @@ public class ArtifactsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> DownloadAsync(Guid id, CancellationToken ct)
     {
-        var result = await _service.GetWithPathAsync(id, ct);
+        (Artifact artifact, string fullPath)? result = await _service.GetWithPathAsync(id, ct);
         if (result == null)
         {
             return NotFound();
         }
 
-        var (artifact, fullPath) = result.Value;
+        (Artifact? artifact, string? fullPath) = result.Value;
 
         // Authorization: only job owner or admin can download
         if (!await CanAccessArtifactAsync(artifact.JobId, ct))
@@ -294,7 +295,7 @@ public class ArtifactsController : ControllerBase
             return NotFound(new { error = "file missing" });
         }
 
-        var stream = System.IO.File.OpenRead(fullPath);
+        FileStream stream = System.IO.File.OpenRead(fullPath);
         return File(stream, artifact.ContentType ?? "application/octet-stream", artifact.FileName);
     }
 
@@ -311,13 +312,13 @@ public class ArtifactsController : ControllerBase
         }
 
         // Check if user owns the job
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        Claim? userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out Guid userId))
         {
             return false;
         }
 
-        var job = await _jobRepository.GetByIdAsync(jobId, ct);
+        SliceJob? job = await _jobRepository.GetByIdAsync(jobId, ct);
         return job != null && job.UserId == userId;
     }
 

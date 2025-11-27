@@ -1,8 +1,11 @@
 ﻿using System.Globalization;
+using System.Net;
 using System.Net.Http.Json;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 using Farm.Shared.Discovery;
+using Farm.Web.Shared;
 
 namespace Farm.Tools.AdminCli;
 
@@ -13,7 +16,7 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
 #pragma warning disable CA1303 // Suppress localization warnings for CLI output
-        var argsDic = ParseArgs(args);
+        Dictionary<string, string> argsDic = ParseArgs(args);
         if (argsDic.ContainsKey("help") || argsDic.Count == 0)
         {
             PrintHelp();
@@ -23,7 +26,7 @@ internal static class Program
         // Load saved discovery config and merge with CLI args (CLI args take precedence)
         if (argsDic.ContainsKey("discover") && !argsDic.ContainsKey("range"))
         {
-            var savedConfig = await LoadDiscoveryConfigAsync();
+            DiscoveryConfig? savedConfig = await LoadDiscoveryConfigAsync();
             if (savedConfig != null)
             {
                 if (!string.IsNullOrEmpty(savedConfig.Range))
@@ -46,8 +49,8 @@ internal static class Program
             }
         }
 
-        var baseUrl = argsDic.GetValueOrDefault("base-url", "http://localhost:5245").TrimEnd('/');
-        using var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        string baseUrl = argsDic.GetValueOrDefault("base-url", "http://localhost:5245").TrimEnd('/');
+        using HttpClient http = new HttpClient { BaseAddress = new Uri(baseUrl) };
 
         if (argsDic.ContainsKey("status"))
         {
@@ -67,9 +70,9 @@ internal static class Program
             return await HandleDiscoveryAsync(argsDic);
         }
 
-        var hasUsername = argsDic.TryGetValue("username", out var _);
-        var hasEmail = argsDic.TryGetValue("email", out var _);
-        var hasPassword = argsDic.TryGetValue("password", out var _);
+        bool hasUsername = argsDic.TryGetValue("username", out string? username);
+        bool hasEmail = argsDic.TryGetValue("email", out string? email);
+        bool hasPassword = argsDic.TryGetValue("password", out string? password);
         if (!hasUsername || !hasEmail || !hasPassword)
         {
             await Console.Error.WriteLineAsync("ERROR: --username, --email and --password are required unless using --status, --discover, or --sample-csv.");
@@ -77,8 +80,7 @@ internal static class Program
             return 1;
         }
 
-        var password = argsDic["password"];
-        if (password.Length < 12)
+        if (password!.Length < 12)
         {
             await Console.Error.WriteLineAsync("ERROR: Password must be at least 12 characters (server requirement).");
             return 2;
@@ -86,7 +88,7 @@ internal static class Program
 
         Console.WriteLine($"[AdminCli] Attempting initial admin creation against {baseUrl} ...");
 
-        var status = await http.GetFromJsonAsync<SetupStatus>("/api/setup/status");
+        SetupStatus? status = await http.GetFromJsonAsync<SetupStatus>("/api/setup/status");
         if (status == null)
         {
             await Console.Error.WriteLineAsync("ERROR: Could not retrieve setup status.");
@@ -100,15 +102,15 @@ internal static class Program
 
         var payload = new
         {
-            username = argsDic["username"],
-            email = argsDic["email"],
+            username,
+            email,
             password,
             firstName = argsDic.GetValueOrDefault("first-name", "Admin"),
             lastName = argsDic.GetValueOrDefault("last-name", "User")
         };
 
-        var response = await http.PostAsJsonAsync("/api/setup/initial-admin", payload, Json);
-        var body = await response.Content.ReadAsStringAsync();
+        HttpResponseMessage response = await http.PostAsJsonAsync("/api/setup/initial-admin", payload, Json);
+        string body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
         {
@@ -118,7 +120,7 @@ internal static class Program
 
         try
         {
-            var result = JsonSerializer.Deserialize<AuthResult>(body, Json);
+            AuthResult? result = JsonSerializer.Deserialize<AuthResult>(body, Json);
             if (result == null || !result.Success || string.IsNullOrWhiteSpace(result.Token))
             {
                 await Console.Error.WriteLineAsync("Unexpected response: " + body);
@@ -145,7 +147,7 @@ internal static class Program
 #pragma warning disable CA1303
         try
         {
-            var outputFile = argsDic.GetValueOrDefault("output", "");
+            string outputFile = argsDic.GetValueOrDefault("output", "");
             string csv = GenerateSampleCsv();
 
             if (!string.IsNullOrWhiteSpace(outputFile))
@@ -173,7 +175,7 @@ internal static class Program
 
     private static string GenerateSampleCsv()
     {
-        var csv = new StringBuilder();
+        StringBuilder csv = new StringBuilder();
         csv.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,IsEnabled");
 
         // Example rows for each backend type
@@ -190,13 +192,13 @@ internal static class Program
 #pragma warning disable CA1303
         try
         {
-            var outputFormat = argsDic.GetValueOrDefault("format", "json").ToLowerInvariant();
-            var outputFile = argsDic.GetValueOrDefault("output", "");
-            var noApproval = argsDic.ContainsKey("no-approval");
-            var rangeConstraints = argsDic.GetValueOrDefault("range", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).ToList();
-            var interfaceConstraints = argsDic.GetValueOrDefault("interface", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim()).ToList();
-            var probeTimeoutMs = int.TryParse(argsDic.GetValueOrDefault("timeout", "200"), out var t) ? t : 200;
-            var maxConcurrentScans = int.TryParse(argsDic.GetValueOrDefault("concurrent", "10"), out var c) ? c : 10;
+            string outputFormat = argsDic.GetValueOrDefault("format", "json").ToLowerInvariant();
+            string outputFile = argsDic.GetValueOrDefault("output", "");
+            bool noApproval = argsDic.ContainsKey("no-approval");
+            List<string> rangeConstraints = argsDic.GetValueOrDefault("range", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).ToList();
+            List<string> interfaceConstraints = argsDic.GetValueOrDefault("interface", "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(i => i.Trim()).ToList();
+            int probeTimeoutMs = int.TryParse(argsDic.GetValueOrDefault("timeout", "200"), out int t) ? t : 200;
+            int maxConcurrentScans = int.TryParse(argsDic.GetValueOrDefault("concurrent", "10"), out int c) ? c : 10;
 
             Console.WriteLine($"[AdminCli] Starting local network discovery...");
             Console.WriteLine($"  Format: {outputFormat}");
@@ -224,7 +226,7 @@ internal static class Program
             });
 
             // Create discovery probes
-            var probes = new INetworkDiscoveryProbe[]
+            INetworkDiscoveryProbe[] probes = new INetworkDiscoveryProbe[]
             {
                 new MoonrakerDiscoveryProbe(),
                 new PrusaLinkDiscoveryProbe(),
@@ -233,7 +235,7 @@ internal static class Program
             };
 
             // Perform local discovery without API dependency
-            var discovered = await PerformLocalDiscoveryAsync(probes, rangeConstraints, interfaceConstraints, probeTimeoutMs, maxConcurrentScans);
+            List<DiscoveredPrinterInfo> discovered = await PerformLocalDiscoveryAsync(probes, rangeConstraints, interfaceConstraints, probeTimeoutMs, maxConcurrentScans);
 
             Console.WriteLine($"\n[AdminCli] Discovery complete. Found {discovered.Count} printer(s).\n");
 
@@ -294,10 +296,10 @@ internal static class Program
         rangeConstraints ??= new List<string>();
         interfaceConstraints ??= new List<string>();
 
-        var discovered = new List<DiscoveredPrinterInfo>();
+        List<DiscoveredPrinterInfo> discovered = new List<DiscoveredPrinterInfo>();
 
         // Get local network interfaces
-        var interfaces = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+        List<NetworkInterface> interfaces = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
             .Where(i => i.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Ethernet ||
                         i.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211)
             .ToList();
@@ -315,23 +317,23 @@ internal static class Program
 
         Console.WriteLine($"\n[Discovery] Found {interfaces.Count} active network interface(s)\n");
 
-        foreach (var iface in interfaces)
+        foreach (NetworkInterface iface in interfaces)
         {
-            var ipProps = iface.GetIPProperties();
-            foreach (var unicast in ipProps.UnicastAddresses.Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork))
+            IPInterfaceProperties ipProps = iface.GetIPProperties();
+            foreach (UnicastIPAddressInformation? unicast in ipProps.UnicastAddresses.Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork))
             {
-                var ip = unicast.Address;
-                var subnet = unicast.IPv4Mask;
+                IPAddress ip = unicast.Address;
+                IPAddress subnet = unicast.IPv4Mask;
 
                 // Calculate network range from IP and subnet mask
-                var network = GetNetworkAddress(ip, subnet);
-                var broadcast = GetBroadcastAddress(ip, subnet);
-                var cidr = $"{network}/{GetCIDR(subnet)}";
+                IPAddress network = GetNetworkAddress(ip, subnet);
+                IPAddress broadcast = GetBroadcastAddress(ip, subnet);
+                string cidr = $"{network}/{GetCIDR(subnet)}";
 
                 // Check if this range matches any constraints
                 if (rangeConstraints.Count > 0)
                 {
-                    var matchesConstraint = rangeConstraints.Any(constraint =>
+                    bool matchesConstraint = rangeConstraints.Any(constraint =>
                     {
                         try
                         {
@@ -355,13 +357,13 @@ internal static class Program
                 Console.WriteLine($"  Range: {network} → {broadcast}");
 
                 // If range constraints exist, use the intersection of interface range and constraint range
-                var scanStart = network;
-                var scanEnd = broadcast;
+                IPAddress scanStart = network;
+                IPAddress scanEnd = broadcast;
 
                 if (rangeConstraints.Count > 0)
                 {
                     // Find the tightest (smallest) constraint that applies to this interface
-                    var applicableConstraint = rangeConstraints.FirstOrDefault(constraint =>
+                    string? applicableConstraint = rangeConstraints.FirstOrDefault(constraint =>
                     {
                         try
                         {
@@ -375,11 +377,11 @@ internal static class Program
 
                     if (applicableConstraint != null)
                     {
-                        var parts = applicableConstraint.Split('/');
-                        if (parts.Length == 2 && int.TryParse(parts[1], out var constraintCidr))
+                        string[] parts = applicableConstraint.Split('/');
+                        if (parts.Length == 2 && int.TryParse(parts[1], out int constraintCidr))
                         {
-                            var constraintIp = System.Net.IPAddress.Parse(parts[0]);
-                            var constraintSubnet = CIDRToSubnetMask(constraintCidr);
+                            IPAddress constraintIp = System.Net.IPAddress.Parse(parts[0]);
+                            IPAddress constraintSubnet = CIDRToSubnetMask(constraintCidr);
                             scanStart = GetNetworkAddress(constraintIp, constraintSubnet);
                             scanEnd = GetBroadcastAddress(constraintIp, constraintSubnet);
                             Console.WriteLine($"  Constraint applied: {scanStart}/{constraintCidr} → {scanEnd}");
@@ -388,41 +390,41 @@ internal static class Program
                 }
 
                 // Scan IP range with concurrency
-                var start = BitConverter.ToUInt32(scanStart.GetAddressBytes().Reverse().ToArray(), 0);
-                var end = BitConverter.ToUInt32(scanEnd.GetAddressBytes().Reverse().ToArray(), 0);
-                var total = end - start;
-                var scanCount = 0;
+                uint start = BitConverter.ToUInt32(scanStart.GetAddressBytes().Reverse().ToArray(), 0);
+                uint end = BitConverter.ToUInt32(scanEnd.GetAddressBytes().Reverse().ToArray(), 0);
+                uint total = end - start;
+                int scanCount = 0;
 
-                using var semaphore = new System.Threading.SemaphoreSlim(maxConcurrentScans, maxConcurrentScans);
-                var scanTasks = new List<Task>();
+                using SemaphoreSlim semaphore = new System.Threading.SemaphoreSlim(maxConcurrentScans, maxConcurrentScans);
+                List<Task> scanTasks = new List<Task>();
 
                 for (uint i = start + 1; i < end; i++)
                 {
-                    var ipValue = i; // Capture for closure
-                    var task = Task.Run(async () =>
+                    uint ipValue = i; // Capture for closure
+                    Task task = Task.Run(async () =>
                     {
                         await semaphore.WaitAsync();
                         try
                         {
-                            var scanCountLocal = Interlocked.Increment(ref scanCount);
+                            int scanCountLocal = Interlocked.Increment(ref scanCount);
 
                             // Show progress every 10 IPs scanned
                             if (scanCountLocal % 10 == 0 || scanCountLocal == 1)
                             {
-                                var progress = (int)((scanCountLocal / (double)total) * 100);
+                                int progress = (int)((scanCountLocal / (double)total) * 100);
                                 Console.Write($"\r  Scanning... [{progress}%] ({scanCountLocal}/{total} IPs checked, {discovered.Count} found)");
                             }
 
-                            var ipBytes = BitConverter.GetBytes(ipValue).Reverse().ToArray();
-                            var targetIp = new System.Net.IPAddress(ipBytes).ToString();
+                            byte[] ipBytes = BitConverter.GetBytes(ipValue).Reverse().ToArray();
+                            string targetIp = new System.Net.IPAddress(ipBytes).ToString();
 
                             // Probe with each discovery probe and collect all results
                             List<ProbeResult> probeResults = new();
-                            foreach (var probe in probes)
+                            foreach (INetworkDiscoveryProbe probe in probes)
                             {
                                 try
                                 {
-                                    var result = await probe.ProbeAsync(targetIp, probeTimeoutMs, CancellationToken.None);
+                                    ProbeResult? result = await probe.ProbeAsync(targetIp, probeTimeoutMs, CancellationToken.None);
                                     if (result != null)
                                     {
                                         probeResults.Add(result);
@@ -437,10 +439,10 @@ internal static class Program
                             // Use the result with highest confidence score
                             if (probeResults.Count > 0)
                             {
-                                var bestResult = probeResults.MaxBy(r => r.ConfidenceScore)!;
-                                var result = bestResult.Printer;
+                                ProbeResult bestResult = probeResults.MaxBy(r => r.ConfidenceScore)!;
+                                DiscoveredPrinterDto result = bestResult.Printer;
 
-                                var printerInfo = new DiscoveredPrinterInfo
+                                DiscoveredPrinterInfo printerInfo = new DiscoveredPrinterInfo
                                 {
                                     IpAddress = result.IpAddress,
                                     Backend = result.Backend.ToString(),
@@ -486,21 +488,21 @@ internal static class Program
     /// </summary>
     private static bool IpRangeContainsRange(string cidrConstraint, System.Net.IPAddress targetNetwork, System.Net.IPAddress targetBroadcast)
     {
-        var parts = cidrConstraint.Split('/');
-        if (parts.Length != 2 || !int.TryParse(parts[1], out var constraintCidr))
+        string[] parts = cidrConstraint.Split('/');
+        if (parts.Length != 2 || !int.TryParse(parts[1], out int constraintCidr))
         {
             throw new ArgumentException($"Invalid CIDR format: {cidrConstraint}");
         }
 
-        var constraintIp = System.Net.IPAddress.Parse(parts[0]);
-        var constraintSubnet = CIDRToSubnetMask(constraintCidr);
-        var constraintNetwork = GetNetworkAddress(constraintIp, constraintSubnet);
-        var constraintBroadcast = GetBroadcastAddress(constraintIp, constraintSubnet);
+        IPAddress constraintIp = System.Net.IPAddress.Parse(parts[0]);
+        IPAddress constraintSubnet = CIDRToSubnetMask(constraintCidr);
+        IPAddress constraintNetwork = GetNetworkAddress(constraintIp, constraintSubnet);
+        IPAddress constraintBroadcast = GetBroadcastAddress(constraintIp, constraintSubnet);
 
-        var targetStart = BitConverter.ToUInt32(targetNetwork.GetAddressBytes().Reverse().ToArray(), 0);
-        var targetEnd = BitConverter.ToUInt32(targetBroadcast.GetAddressBytes().Reverse().ToArray(), 0);
-        var constraintStart = BitConverter.ToUInt32(constraintNetwork.GetAddressBytes().Reverse().ToArray(), 0);
-        var constraintEnd = BitConverter.ToUInt32(constraintBroadcast.GetAddressBytes().Reverse().ToArray(), 0);
+        uint targetStart = BitConverter.ToUInt32(targetNetwork.GetAddressBytes().Reverse().ToArray(), 0);
+        uint targetEnd = BitConverter.ToUInt32(targetBroadcast.GetAddressBytes().Reverse().ToArray(), 0);
+        uint constraintStart = BitConverter.ToUInt32(constraintNetwork.GetAddressBytes().Reverse().ToArray(), 0);
+        uint constraintEnd = BitConverter.ToUInt32(constraintBroadcast.GetAddressBytes().Reverse().ToArray(), 0);
 
         // Check if constraint overlaps with or is contained in target range
         // Returns true if: constraint is fully within target, or they overlap, or target is fully within constraint
@@ -525,11 +527,11 @@ internal static class Program
             return 1;
         }
 
-        if (System.Net.IPAddress.TryParse(ip1, out var addr1) &&
-            System.Net.IPAddress.TryParse(ip2, out var addr2))
+        if (System.Net.IPAddress.TryParse(ip1, out IPAddress? addr1) &&
+            System.Net.IPAddress.TryParse(ip2, out IPAddress? addr2))
         {
-            var bytes1 = BitConverter.ToUInt32(addr1.GetAddressBytes().Reverse().ToArray(), 0);
-            var bytes2 = BitConverter.ToUInt32(addr2.GetAddressBytes().Reverse().ToArray(), 0);
+            uint bytes1 = BitConverter.ToUInt32(addr1.GetAddressBytes().Reverse().ToArray(), 0);
+            uint bytes2 = BitConverter.ToUInt32(addr2.GetAddressBytes().Reverse().ToArray(), 0);
             return bytes1.CompareTo(bytes2);
         }
 
@@ -546,14 +548,14 @@ internal static class Program
             throw new ArgumentException("CIDR must be between 0 and 32");
         }
 
-        var mask = (uint.MaxValue << (32 - cidr)) & 0xFFFFFFFF;
-        var bytes = BitConverter.GetBytes(mask).Reverse().ToArray();
+        uint mask = (uint.MaxValue << (32 - cidr)) & 0xFFFFFFFF;
+        byte[] bytes = BitConverter.GetBytes(mask).Reverse().ToArray();
         return new System.Net.IPAddress(bytes);
     }
 
     private static int GetCIDR(System.Net.IPAddress mask)
     {
-        var bytes = mask.GetAddressBytes();
+        byte[] bytes = mask.GetAddressBytes();
         int bits = 0;
         foreach (byte b in bytes)
         {
@@ -574,9 +576,9 @@ internal static class Program
 
     private static System.Net.IPAddress GetNetworkAddress(System.Net.IPAddress ip, System.Net.IPAddress mask)
     {
-        var ipBytes = ip.GetAddressBytes();
-        var maskBytes = mask.GetAddressBytes();
-        var resultBytes = new byte[ipBytes.Length];
+        byte[] ipBytes = ip.GetAddressBytes();
+        byte[] maskBytes = mask.GetAddressBytes();
+        byte[] resultBytes = new byte[ipBytes.Length];
 
         for (int i = 0; i < ipBytes.Length; i++)
         {
@@ -588,9 +590,9 @@ internal static class Program
 
     private static System.Net.IPAddress GetBroadcastAddress(System.Net.IPAddress ip, System.Net.IPAddress mask)
     {
-        var ipBytes = ip.GetAddressBytes();
-        var maskBytes = mask.GetAddressBytes();
-        var resultBytes = new byte[ipBytes.Length];
+        byte[] ipBytes = ip.GetAddressBytes();
+        byte[] maskBytes = mask.GetAddressBytes();
+        byte[] resultBytes = new byte[ipBytes.Length];
 
         for (int i = 0; i < ipBytes.Length; i++)
         {
@@ -629,15 +631,15 @@ internal static class Program
 
     private static string FormatAsCSV(DiscoveredPrinterInfo[] printers, bool setDisabledByDefault)
     {
-        var csv = new StringBuilder();
+        StringBuilder csv = new StringBuilder();
         csv.AppendLine("Name,IpAddress,Backend,BackendPort,FrontendPort,ManufacturerName,ModelName,Notes,IsEnabled");
 
-        foreach (var printer in printers)
+        foreach (DiscoveredPrinterInfo printer in printers)
         {
-            var name = printer.FriendlyName ?? $"{printer.Backend}-{printer.IpAddress}";
-            var enabled = setDisabledByDefault ? "false" : "true";
-            var backendPort = printer.BackendPort?.ToString() ?? "";
-            var frontendPort = printer.FrontendPort?.ToString() ?? "";
+            string name = printer.FriendlyName ?? $"{printer.Backend}-{printer.IpAddress}";
+            string enabled = setDisabledByDefault ? "false" : "true";
+            string backendPort = printer.BackendPort?.ToString() ?? "";
+            string frontendPort = printer.FrontendPort?.ToString() ?? "";
             csv.AppendLine($"\"{EscapeCsv(name)}\",\"{printer.IpAddress}\",\"{printer.Backend}\",{backendPort},{frontendPort},\"Unknown\",\"Unknown\",\"Auto-discovered\",{enabled}");
         }
 
@@ -653,7 +655,7 @@ internal static class Program
     {
         try
         {
-            var status = await http.GetFromJsonAsync<SetupStatus>("/api/setup/status");
+            SetupStatus? status = await http.GetFromJsonAsync<SetupStatus>("/api/setup/status");
             if (status == null)
             {
 #pragma warning disable CA1303
@@ -707,17 +709,17 @@ internal static class Program
 
     private static Dictionary<string, string> ParseArgs(string[] raw)
     {
-        var dic = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> dic = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         int i = 0;
         while (i < raw.Length)
         {
-            var token = raw[i];
+            string token = raw[i];
             if (!token.StartsWith("--", StringComparison.Ordinal))
             {
                 i++;
                 continue;
             }
-            var key = token[2..];
+            string key = token[2..];
             if (key.Length == 0)
             {
                 i++;
@@ -750,13 +752,13 @@ internal static class Program
     {
         try
         {
-            var configPath = GetConfigPath();
-            var directory = System.IO.Path.GetDirectoryName(configPath);
+            string configPath = GetConfigPath();
+            string? directory = System.IO.Path.GetDirectoryName(configPath);
             if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
             {
                 System.IO.Directory.CreateDirectory(directory);
             }
-            var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+            string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
             await System.IO.File.WriteAllTextAsync(configPath, json);
         }
         catch
@@ -769,12 +771,12 @@ internal static class Program
     {
         try
         {
-            var configPath = GetConfigPath();
+            string configPath = GetConfigPath();
             if (!System.IO.File.Exists(configPath))
             {
                 return null;
             }
-            var json = await System.IO.File.ReadAllTextAsync(configPath);
+            string json = await System.IO.File.ReadAllTextAsync(configPath);
             return JsonSerializer.Deserialize<DiscoveryConfig>(json);
         }
         catch

@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.SystemLogs;
 using Farm.Web.Api.Services.SystemLogs;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -19,7 +20,7 @@ public class SystemLogServiceTests
     [Fact]
     public async Task QueryLogsAsync_FiltersByCorrelationIdAndLevelAndMetadata()
     {
-        await using var db = CreateDbContext();
+        await using AppDbContext db = CreateDbContext();
         db.SystemLogs.AddRange(
             new SystemLog { CorrelationId = "c1", Level = "Info", Timestamp = DateTime.UtcNow.AddMinutes(-10), Metadata = "foo" },
             new SystemLog { CorrelationId = "c2", Level = "Error", Timestamp = DateTime.UtcNow.AddMinutes(-5), Metadata = "bar" },
@@ -27,9 +28,9 @@ public class SystemLogServiceTests
         );
         await db.SaveChangesAsync();
 
-        var repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
-        var svc = new SystemLogService(repo);
-        var results = await svc.QueryLogsAsync("c1", "Error", null, null, null, default);
+        EfSystemLogRepository repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
+        SystemLogService svc = new SystemLogService(repo);
+        IReadOnlyList<SystemLog> results = await svc.QueryLogsAsync("c1", "Error", null, null, null, default);
 
         Assert.Single(results);
         Assert.Equal("c1", results[0]!.CorrelationId);
@@ -39,7 +40,7 @@ public class SystemLogServiceTests
     [Fact]
     public async Task QueryAllLogsAsync_ReturnsAllMatching()
     {
-        await using var db = CreateDbContext();
+        await using AppDbContext db = CreateDbContext();
         db.SystemLogs.AddRange(
             new SystemLog { CorrelationId = "c1", Level = "Info", Timestamp = DateTime.UtcNow.AddMinutes(-10), Metadata = "foo" },
             new SystemLog { CorrelationId = "c2", Level = "Error", Timestamp = DateTime.UtcNow.AddMinutes(-5), Metadata = "bar" },
@@ -47,9 +48,9 @@ public class SystemLogServiceTests
         );
         await db.SaveChangesAsync();
 
-        var repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
-        var svc = new SystemLogService(repo);
-        var results = await svc.QueryAllLogsAsync(null, null, null, null, "ba", default);
+        EfSystemLogRepository repo = new Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository(db);
+        SystemLogService svc = new SystemLogService(repo);
+        IReadOnlyList<SystemLog> results = await svc.QueryAllLogsAsync(null, null, null, null, "ba", default);
 
         Assert.Equal(2, results.Count);
         Assert.Contains(results, r => r.Metadata!.Contains("bar"));

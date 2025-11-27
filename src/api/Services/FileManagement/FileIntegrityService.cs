@@ -176,7 +176,7 @@ public class FileIntegrityService : IFileIntegrityService
                 return null;
             }
 
-            var fileInfo = new System.IO.FileInfo(filePath);
+            System.IO.FileInfo fileInfo = new System.IO.FileInfo(filePath);
             return await Task.FromResult(fileInfo.Length);
         }
         catch (Exception ex)

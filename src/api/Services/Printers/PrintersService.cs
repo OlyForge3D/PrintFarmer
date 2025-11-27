@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Shared;
 using Farm.Web.Shared.Annotations;
@@ -440,7 +441,7 @@ namespace Farm.Web.Api.Services.Printers
 
             List<string> headerParts = new() { "Name", "IpAddress", "Backend", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
 
-            await using var writer = new System.IO.StreamWriter(response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new System.IO.StreamWriter(response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
             await writer.WriteLineAsync(string.Join(',', headerParts));
 
             foreach (Printer p in query)
@@ -532,7 +533,7 @@ namespace Farm.Web.Api.Services.Printers
             string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
             response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
 
-            await using var writer = new System.IO.StreamWriter(response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new System.IO.StreamWriter(response.Body, System.Text.Encoding.UTF8, leaveOpen: true);
             await writer.WriteAsync("[");
             bool first = true;
             await foreach (Printer? p in query.AsAsyncEnumerable().WithCancellation(ct))
@@ -555,7 +556,7 @@ namespace Farm.Web.Api.Services.Printers
 
         private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p, Farm.Infrastructure.Domain.PrinterCapabilities? cap)
         {
-            var dict = new Dictionary<string, object?>
+            Dictionary<string, object?> dict = new Dictionary<string, object?>
             {
                 ["Id"] = p.Id,
                 ["Name"] = p.Name,
@@ -721,7 +722,7 @@ namespace Farm.Web.Api.Services.Printers
             if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
             {
                 string mname = dto.NewModelName!.Trim();
-                var createReq = new Farm.Web.Api.Controllers.Requests.CreateModelRequest(
+                CreateModelRequest createReq = new Farm.Web.Api.Controllers.Requests.CreateModelRequest(
                     ManufacturerId: manufacturerId,
                     Name: mname,
                     Type: null,
@@ -1322,16 +1323,16 @@ namespace Farm.Web.Api.Services.Printers
         {
             ArgumentNullException.ThrowIfNull(printers);
 
-            var createdPrinters = new List<PrinterDto>();
-            var errorResults = new Dictionary<int, string>();
-            var skippedCount = 0;
-            var results = new List<dynamic>();
+            List<PrinterDto> createdPrinters = new List<PrinterDto>();
+            Dictionary<int, string> errorResults = new Dictionary<int, string>();
+            int skippedCount = 0;
+            List<dynamic> results = new List<dynamic>();
 
             for (int i = 0; i < printers.Length; i++)
             {
                 try
                 {
-                    var printerDto = printers[i];
+                    CreatePrinterDto printerDto = printers[i];
                     string status = "Imported";
                     string? reason = null;
                     PrinterDto? createdDto = null;
@@ -1350,8 +1351,8 @@ namespace Farm.Web.Api.Services.Printers
                         else if ((duplicateHandling ?? "skip") == "overwrite")
                         {
                             // Find and delete existing printer
-                            var allPrinters = await GetAllAsync(ct);
-                            var existing = allPrinters.FirstOrDefault(p =>
+                            List<Printer> allPrinters = await GetAllAsync(ct);
+                            Printer? existing = allPrinters.FirstOrDefault(p =>
                                 p.Name == printerDto.Name ||
                                 p.ServerUrl == printerDto.ServerUrl);
                             if (existing != null)
@@ -1397,7 +1398,7 @@ namespace Farm.Web.Api.Services.Printers
                 }
                 catch (Exception ex)
                 {
-                    var errorMessage = $"Failed to create printer: {ex.Message}";
+                    string errorMessage = $"Failed to create printer: {ex.Message}";
                     errorResults[i] = errorMessage;
                     _logger.LogWarning($"[BulkCreate] Error creating printer at index {i}: {errorMessage}");
 
@@ -1451,7 +1452,7 @@ namespace Farm.Web.Api.Services.Printers
                     case (int)Farm.Web.Shared.PrinterBackend.Moonraker:
                     {
                         string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
-                        var job = await _moon.GetJobAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                        PrinterJob? job = await _moon.GetJobAsync(moonrakerUrl, ct).ConfigureAwait(false);
                         if (job != null)
                         {
                             return new Farm.Web.Shared.PrintJobStatusDto
@@ -1475,7 +1476,7 @@ namespace Farm.Web.Api.Services.Printers
 
                     case (int)Farm.Web.Shared.PrinterBackend.SDCP:
                     {
-                        var job = await _sdcp.GetJobAsync(printer.ServerUrl, ct).ConfigureAwait(false);
+                        PrinterJob job = await _sdcp.GetJobAsync(printer.ServerUrl, ct).ConfigureAwait(false);
                         if (job != null)
                         {
                             return new Farm.Web.Shared.PrintJobStatusDto
@@ -1523,7 +1524,7 @@ namespace Farm.Web.Api.Services.Printers
                 throw new ArgumentException("File cannot be empty");
             }
 
-            var fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
+            string fileExtension = System.IO.Path.GetExtension(file.FileName).ToLowerInvariant();
             if (fileExtension != ".csv" && fileExtension != ".json")
             {
                 throw new ArgumentException("File must be CSV or JSON format");
@@ -1550,7 +1551,7 @@ namespace Farm.Web.Api.Services.Printers
                 _logger.LogInformation($"[Import] Parsed {printers.Length} printers from {fileExtension} file");
 
                 // Use existing BulkCreatePrintersAsync for actual creation
-                var result = await BulkCreatePrintersAsync(printers, duplicateHandling, ct);
+                object result = await BulkCreatePrintersAsync(printers, duplicateHandling, ct);
                 _logger.LogInformation($"[Import] Successfully imported printers from file");
                 return result;
             }
@@ -1569,12 +1570,12 @@ namespace Farm.Web.Api.Services.Printers
         /// </summary>
         private async Task<CreatePrinterDto[]> ParseCsvFileAsync(IFormFile file, CancellationToken ct)
         {
-            var printers = new List<CreatePrinterDto>();
-            var errors = new List<string>();
+            List<CreatePrinterDto> printers = new List<CreatePrinterDto>();
+            List<string> errors = new List<string>();
 
             try
             {
-                using (var reader = new System.IO.StreamReader(file.OpenReadStream()))
+                using (StreamReader reader = new System.IO.StreamReader(file.OpenReadStream()))
                 {
                     string? headerLine = await reader.ReadLineAsync(ct);
                     if (string.IsNullOrWhiteSpace(headerLine))
@@ -1583,20 +1584,20 @@ namespace Farm.Web.Api.Services.Printers
                     }
 
                     // Parse header
-                    var headers = CsvImportParser.SplitCsvLine(headerLine).Select(h => h.Trim().ToLowerInvariant()).ToArray();
-                    var nameIdx = Array.IndexOf(headers, "name");
-                    var ipAddressIdx = Array.IndexOf(headers, "ipaddress");
-                    var backendIdx = Array.IndexOf(headers, "backend");
-                    var notesIdx = Array.IndexOf(headers, "notes");
-                    var manufacturerNameIdx = Array.IndexOf(headers, "manufacturername");
-                    var modelNameIdx = Array.IndexOf(headers, "modelname");
-                    var apiKeyIdx = Array.IndexOf(headers, "apikey");
-                    var isEnabledIdx = Array.IndexOf(headers, "isenabled");
-                    var backendPortIdx = Array.IndexOf(headers, "backendport");
-                    var frontendPortIdx = Array.IndexOf(headers, "frontendport");
-                    var cameraStreamIdx = Array.IndexOf(headers, "camerastreamurl");
-                    var cameraSnapshotIdx = Array.IndexOf(headers, "camerasnapshoturl");
-                    var dateAcquiredIdx = Array.IndexOf(headers, "dateacquired");
+                    string[] headers = CsvImportParser.SplitCsvLine(headerLine).Select(h => h.Trim().ToLowerInvariant()).ToArray();
+                    int nameIdx = Array.IndexOf(headers, "name");
+                    int ipAddressIdx = Array.IndexOf(headers, "ipaddress");
+                    int backendIdx = Array.IndexOf(headers, "backend");
+                    int notesIdx = Array.IndexOf(headers, "notes");
+                    int manufacturerNameIdx = Array.IndexOf(headers, "manufacturername");
+                    int modelNameIdx = Array.IndexOf(headers, "modelname");
+                    int apiKeyIdx = Array.IndexOf(headers, "apikey");
+                    int isEnabledIdx = Array.IndexOf(headers, "isenabled");
+                    int backendPortIdx = Array.IndexOf(headers, "backendport");
+                    int frontendPortIdx = Array.IndexOf(headers, "frontendport");
+                    int cameraStreamIdx = Array.IndexOf(headers, "camerastreamurl");
+                    int cameraSnapshotIdx = Array.IndexOf(headers, "camerasnapshoturl");
+                    int dateAcquiredIdx = Array.IndexOf(headers, "dateacquired");
 
                     // Validate required columns
                     if (nameIdx < 0 || ipAddressIdx < 0 || backendIdx < 0)
@@ -1617,7 +1618,7 @@ namespace Farm.Web.Api.Services.Printers
 
                         try
                         {
-                            var values = CsvImportParser.SplitCsvLine(line).Select(v => v.Trim()).ToArray();
+                            string[] values = CsvImportParser.SplitCsvLine(line).Select(v => v.Trim()).ToArray();
 
                             if (values.Length < 3)
                             {
@@ -1626,7 +1627,7 @@ namespace Farm.Web.Api.Services.Printers
                             }
 
                             // Validate backend
-                            if (!Enum.TryParse<PrinterBackend>(values[backendIdx], true, out var backendEnum))
+                            if (!Enum.TryParse<PrinterBackend>(values[backendIdx], true, out PrinterBackend backendEnum))
                             {
                                 errors.Add($"Line {lineNumber}: Invalid backend '{values[backendIdx]}' (must be Moonraker, PrusaLink, or SDCP)");
                                 continue;
@@ -1637,7 +1638,7 @@ namespace Farm.Web.Api.Services.Printers
                             int defaultPort = backendEnum == PrinterBackend.PrusaLink ? 80 : backendEnum == PrinterBackend.SDCP ? 80 : 7125;
                             string serverUrl = $"http://{ipAddress}:{defaultPort}";
 
-                            var printer = new CreatePrinterDto
+                            CreatePrinterDto printer = new CreatePrinterDto
                             {
                                 Name = values[nameIdx],
                                 ServerUrl = serverUrl,
@@ -1646,13 +1647,13 @@ namespace Farm.Web.Api.Services.Printers
                                 NewModelName = modelNameIdx >= 0 && modelNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[modelNameIdx]) ? values[modelNameIdx] : null,
                                 ApiKey = apiKeyIdx >= 0 && apiKeyIdx < values.Length ? values[apiKeyIdx] : null,
                                 Notes = notesIdx >= 0 && notesIdx < values.Length ? values[notesIdx] : null,
-                                IsEnabled = isEnabledIdx >= 0 && isEnabledIdx < values.Length && bool.TryParse(values[isEnabledIdx], out var ie) ? ie : true,
-                                BackendPort = backendPortIdx >= 0 && backendPortIdx < values.Length && int.TryParse(values[backendPortIdx], out var bp) ? bp : null,
-                                FrontendPort = frontendPortIdx >= 0 && frontendPortIdx < values.Length && int.TryParse(values[frontendPortIdx], out var fp) ? fp : null,
+                                IsEnabled = isEnabledIdx >= 0 && isEnabledIdx < values.Length && bool.TryParse(values[isEnabledIdx], out bool ie) ? ie : true,
+                                BackendPort = backendPortIdx >= 0 && backendPortIdx < values.Length && int.TryParse(values[backendPortIdx], out int bp) ? bp : null,
+                                FrontendPort = frontendPortIdx >= 0 && frontendPortIdx < values.Length && int.TryParse(values[frontendPortIdx], out int fp) ? fp : null,
                                 CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
                                 CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,
 #pragma warning disable S6580 // SonarSource: format provider is already specified (InvariantCulture)
-                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var da) ? da : null
+                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime da) ? da : null
 #pragma warning restore S6580
                             };
 
@@ -1693,23 +1694,23 @@ namespace Farm.Web.Api.Services.Printers
         {
             try
             {
-                using (var reader = new System.IO.StreamReader(file.OpenReadStream()))
+                using (StreamReader reader = new System.IO.StreamReader(file.OpenReadStream()))
                 {
-                    var content = await reader.ReadToEndAsync(ct);
+                    string content = await reader.ReadToEndAsync(ct);
 
                     if (string.IsNullOrWhiteSpace(content))
                     {
                         throw new InvalidOperationException("JSON file is empty");
                     }
 
-                    var options = new JsonSerializerOptions
+                    JsonSerializerOptions options = new JsonSerializerOptions
                     {
                         PropertyNameCaseInsensitive = true,
                         WriteIndented = false,
                         TypeInfoResolver = new Farm.Web.Api.Serialization.ImportExportTypeInfoResolver()
                     };
 
-                    var printers = JsonSerializer.Deserialize<CreatePrinterDto[]>(content, options);
+                    CreatePrinterDto[]? printers = JsonSerializer.Deserialize<CreatePrinterDto[]>(content, options);
 
                     if (printers == null || printers.Length == 0)
                     {

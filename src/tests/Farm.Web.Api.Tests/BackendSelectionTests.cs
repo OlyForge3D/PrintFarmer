@@ -13,10 +13,10 @@ public class BackendSelectionTests
     public void NetworkDiscoverySettingsDto_ShouldAcceptBackendsParameter()
     {
         // Arrange
-        var backends = new List<PrinterBackend> { PrinterBackend.Moonraker, PrinterBackend.PrusaLink };
+        List<PrinterBackend> backends = new List<PrinterBackend> { PrinterBackend.Moonraker, PrinterBackend.PrusaLink };
 
         // Act
-        var settings = new NetworkDiscoverySettingsDto(
+        NetworkDiscoverySettingsDto settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "192.168.1.0/24" },
             TimeoutMs: 3000,
             MaxConcurrentScans: 20,
@@ -34,7 +34,7 @@ public class BackendSelectionTests
     public void NetworkDiscoverySettingsDto_ShouldAllowNullBackends()
     {
         // Arrange & Act
-        var settings = new NetworkDiscoverySettingsDto(
+        NetworkDiscoverySettingsDto settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "192.168.1.0/24" },
             TimeoutMs: 3000,
             MaxConcurrentScans: 20,
@@ -49,7 +49,7 @@ public class BackendSelectionTests
     public void NetworkDiscoverySettingsDto_DefaultConstructor_ShouldHaveNullBackends()
     {
         // Arrange & Act
-        var settings = new NetworkDiscoverySettingsDto();
+        NetworkDiscoverySettingsDto settings = new NetworkDiscoverySettingsDto();
 
         // Assert
         settings.Backends.Should().BeNull();
@@ -63,10 +63,10 @@ public class BackendSelectionTests
     public void StartDiscoveryRequest_ShouldAcceptBackendsList()
     {
         // Arrange
-        var backends = new List<PrinterBackend> { PrinterBackend.SDCP };
+        List<PrinterBackend> backends = new List<PrinterBackend> { PrinterBackend.SDCP };
 
         // Act
-        var request = new StartDiscoveryRequest(Backends: backends);
+        StartDiscoveryRequest request = new StartDiscoveryRequest(Backends: backends);
 
         // Assert
         request.Backends.Should().NotBeNull();
@@ -78,7 +78,7 @@ public class BackendSelectionTests
     public void StartDiscoveryRequest_ShouldAllowNullBackends()
     {
         // Arrange & Act
-        var request = new StartDiscoveryRequest(Backends: null);
+        StartDiscoveryRequest request = new StartDiscoveryRequest(Backends: null);
 
         // Assert
         request.Backends.Should().BeNull();
@@ -88,7 +88,7 @@ public class BackendSelectionTests
     public void StartDiscoveryRequest_DefaultConstructor_ShouldHaveNullBackends()
     {
         // Arrange & Act
-        var request = new StartDiscoveryRequest();
+        StartDiscoveryRequest request = new StartDiscoveryRequest();
 
         // Assert
         request.Backends.Should().BeNull();
@@ -102,10 +102,10 @@ public class BackendSelectionTests
     public void NetworkDiscoverySettingsDto_ShouldAcceptSingleBackend(PrinterBackend backend)
     {
         // Arrange
-        var backends = new List<PrinterBackend> { backend };
+        List<PrinterBackend> backends = new List<PrinterBackend> { backend };
 
         // Act
-        var settings = new NetworkDiscoverySettingsDto(
+        NetworkDiscoverySettingsDto settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "10.0.0.0/24" },
             Backends: backends
         );
@@ -120,7 +120,7 @@ public class BackendSelectionTests
     public void NetworkDiscoverySettingsDto_ShouldAcceptAllBackends()
     {
         // Arrange
-        var backends = new List<PrinterBackend>
+        List<PrinterBackend> backends = new List<PrinterBackend>
         {
             PrinterBackend.Moonraker,
             PrinterBackend.PrusaLink,
@@ -129,7 +129,7 @@ public class BackendSelectionTests
         };
 
         // Act
-        var settings = new NetworkDiscoverySettingsDto(
+        NetworkDiscoverySettingsDto settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "172.16.0.0/16" },
             Backends: backends
         );
@@ -147,10 +147,10 @@ public class BackendSelectionTests
     public void NetworkDiscoverySettingsDto_ShouldAcceptEmptyBackendsList()
     {
         // Arrange
-        var backends = new List<PrinterBackend>();
+        List<PrinterBackend> backends = new List<PrinterBackend>();
 
         // Act
-        var settings = new NetworkDiscoverySettingsDto(
+        NetworkDiscoverySettingsDto settings = new NetworkDiscoverySettingsDto(
             NetworkRanges: new List<string> { "192.168.0.0/16" },
             Backends: backends
         );

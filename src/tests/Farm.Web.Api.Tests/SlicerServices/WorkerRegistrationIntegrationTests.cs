@@ -32,7 +32,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
     public async Task WorkerRegistration_ShouldSucceed_AndAppearInList()
     {
         // Arrange
-        var registrationDto = new RegisterSlicerDto
+        RegisterSlicerDto registrationDto = new RegisterSlicerDto
         {
             Name = "test-orca-worker",
             SlicerType = 0, // OrcaSlicer
@@ -47,20 +47,20 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             Tags = "test,integration"
         };
 
-        var json = JsonSerializer.Serialize(registrationDto);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        string json = JsonSerializer.Serialize(registrationDto);
+        StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
         // Act - Register
         _output.WriteLine("Registering test worker...");
-        using var client = CreateClient();
-        var registerResponse = await client.PostAsync("/api/slicers/register", content);
+        using HttpClient client = CreateClient();
+        HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", content);
 
         // Assert - Registration succeeded
         registerResponse.Should().BeSuccessful();
-        var registerResult = await registerResponse.Content.ReadAsStringAsync();
+        string registerResult = await registerResponse.Content.ReadAsStringAsync();
         _output.WriteLine($"Registration result: {registerResult}");
 
-        var registrationResponse = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
+        RegistrationResult? registrationResponse = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
@@ -72,14 +72,14 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         _output.WriteLine($"Worker registered with ID: {registrationResponse.Id}");
 
         // Act - List workers
-        var listResponse = await client.GetAsync("/api/slicers");
+        HttpResponseMessage listResponse = await client.GetAsync("/api/slicers");
 
         // Assert - Worker appears in list
         listResponse.Should().BeSuccessful();
-        var listJson = await listResponse.Content.ReadAsStringAsync();
+        string listJson = await listResponse.Content.ReadAsStringAsync();
         _output.WriteLine($"Workers list: {listJson}");
 
-        var workers = JsonSerializer.Deserialize<SlicerServiceDto[]>(listJson, new JsonSerializerOptions
+        SlicerServiceDto[]? workers = JsonSerializer.Deserialize<SlicerServiceDto[]>(listJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
@@ -92,7 +92,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
     public async Task WorkerHeartbeat_ShouldUpdateStatus()
     {
         // Arrange - Register worker first
-        var registrationDto = new RegisterSlicerDto
+        RegisterSlicerDto registrationDto = new RegisterSlicerDto
         {
             Name = "test-heartbeat-worker",
             SlicerType = 0,
@@ -102,12 +102,12 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             Tags = "test"
         };
 
-        var registerJson = JsonSerializer.Serialize(registrationDto);
-        var registerContent = new StringContent(registerJson, Encoding.UTF8, "application/json");
-        using var client = CreateClient();
-        var registerResponse = await client.PostAsync("/api/slicers/register", registerContent);
-        var registerResult = await registerResponse.Content.ReadAsStringAsync();
-        var registration = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
+        string registerJson = JsonSerializer.Serialize(registrationDto);
+        StringContent registerContent = new StringContent(registerJson, Encoding.UTF8, "application/json");
+        using HttpClient client = CreateClient();
+        HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", registerContent);
+        string registerResult = await registerResponse.Content.ReadAsStringAsync();
+        RegistrationResult? registration = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
@@ -116,31 +116,31 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         _output.WriteLine($"Registered worker: {registration!.Id}");
 
         // Act - Send heartbeat
-        var heartbeatDto = new HeartbeatDto
+        HeartbeatDto heartbeatDto = new HeartbeatDto
         {
             Status = "Busy",
             FreeSlots = 0
         };
 
-        var heartbeatJson = JsonSerializer.Serialize(heartbeatDto);
-        var heartbeatContent = new StringContent(heartbeatJson, Encoding.UTF8, "application/json");
+        string heartbeatJson = JsonSerializer.Serialize(heartbeatDto);
+        StringContent heartbeatContent = new StringContent(heartbeatJson, Encoding.UTF8, "application/json");
 
         // Add API key header
         client.DefaultRequestHeaders.Clear();
         client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
 
-        var heartbeatResponse = await client.PostAsync($"/api/slicers/{registration.Id}/heartbeat", heartbeatContent);
+        HttpResponseMessage heartbeatResponse = await client.PostAsync($"/api/slicers/{registration.Id}/heartbeat", heartbeatContent);
 
         // Assert - Heartbeat succeeded
         heartbeatResponse.Should().BeSuccessful();
         _output.WriteLine("Heartbeat sent successfully");
 
         // Verify worker status was updated
-        var getResponse = await client.GetAsync($"/api/slicers/{registration.Id}");
+        HttpResponseMessage getResponse = await client.GetAsync($"/api/slicers/{registration.Id}");
         getResponse.Should().BeSuccessful();
 
-        var workerJson = await getResponse.Content.ReadAsStringAsync();
-        var worker = JsonSerializer.Deserialize<SlicerServiceDto>(workerJson, new JsonSerializerOptions
+        string workerJson = await getResponse.Content.ReadAsStringAsync();
+        SlicerServiceDto? worker = JsonSerializer.Deserialize<SlicerServiceDto>(workerJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
@@ -153,7 +153,7 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
     public async Task WorkerDeregister_ShouldRemoveFromList()
     {
         // Arrange - Register worker
-        var registrationDto = new RegisterSlicerDto
+        RegisterSlicerDto registrationDto = new RegisterSlicerDto
         {
             Name = "test-deregister-worker",
             SlicerType = 0,
@@ -163,12 +163,12 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
             Tags = "test"
         };
 
-        var registerJson = JsonSerializer.Serialize(registrationDto);
-        var registerContent = new StringContent(registerJson, Encoding.UTF8, "application/json");
-        using var client = CreateClient();
-        var registerResponse = await client.PostAsync("/api/slicers/register", registerContent);
-        var registerResult = await registerResponse.Content.ReadAsStringAsync();
-        var registration = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
+        string registerJson = JsonSerializer.Serialize(registrationDto);
+        StringContent registerContent = new StringContent(registerJson, Encoding.UTF8, "application/json");
+        using HttpClient client = CreateClient();
+        HttpResponseMessage registerResponse = await client.PostAsync("/api/slicers/register", registerContent);
+        string registerResult = await registerResponse.Content.ReadAsStringAsync();
+        RegistrationResult? registration = JsonSerializer.Deserialize<RegistrationResult>(registerResult, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
@@ -180,16 +180,16 @@ public class WorkerRegistrationIntegrationTests : IClassFixture<CustomWebApplica
         client.DefaultRequestHeaders.Clear();
         client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
 
-        var deregisterResponse = await client.PostAsync($"/api/slicers/{registration.Id}/deregister", null);
+        HttpResponseMessage deregisterResponse = await client.PostAsync($"/api/slicers/{registration.Id}/deregister", null);
 
         // Assert - Deregistration succeeded
         deregisterResponse.Should().BeSuccessful();
         _output.WriteLine("Worker deregistered successfully");
 
         // Verify worker no longer appears in list
-        var listResponse = await client.GetAsync("/api/slicers");
-        var listJson = await listResponse.Content.ReadAsStringAsync();
-        var workers = JsonSerializer.Deserialize<SlicerServiceDto[]>(listJson, new JsonSerializerOptions
+        HttpResponseMessage listResponse = await client.GetAsync("/api/slicers");
+        string listJson = await listResponse.Content.ReadAsStringAsync();
+        SlicerServiceDto[]? workers = JsonSerializer.Deserialize<SlicerServiceDto[]>(listJson, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });

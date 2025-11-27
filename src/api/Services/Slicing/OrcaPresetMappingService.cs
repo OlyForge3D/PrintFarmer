@@ -20,41 +20,41 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 
     public async Task<OrcaBundleMappingResult> MapBundlePresetsAsync(OrcaBundlePreviewDto preview, CancellationToken ct = default)
     {
-        var result = new OrcaBundleMappingResult();
+        OrcaBundleMappingResult result = new OrcaBundleMappingResult();
 
         // Load catalog data for matching
-        var printerModels = await _db.Models
+        List<PrinterModel> printerModels = await _db.Models
             .Include(pm => pm.Manufacturer)
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var manufacturers = await _db.Manufacturers
+        List<Manufacturer> manufacturers = await _db.Manufacturers
             .AsNoTracking()
             .ToListAsync(ct);
 
         // Map printer presets
-        foreach (var printer in preview.Printers)
+        foreach (OrcaPrinterPresetDto printer in preview.Printers)
         {
-            var match = MapPrinterPreset(printer, printerModels);
+            PrinterPresetMatch match = MapPrinterPreset(printer, printerModels);
             result.PrinterMatches.Add(match);
         }
 
         // Map filament presets
-        foreach (var filament in preview.Filaments)
+        foreach (OrcaFilamentPresetDto filament in preview.Filaments)
         {
-            var match = MapFilamentPreset(filament);
+            FilamentPresetMatch match = MapFilamentPreset(filament);
             result.FilamentMatches.Add(match);
         }
 
         // Map process presets
-        foreach (var process in preview.Processes)
+        foreach (OrcaProcessPresetDto process in preview.Processes)
         {
-            var match = MapProcessPreset(process);
+            ProcessPresetMatch match = MapProcessPreset(process);
             result.ProcessMatches.Add(match);
         }
 
         // Calculate statistics
-        var allMatches = result.PrinterMatches.Select(m => m.ConfidenceScore)
+        List<double> allMatches = result.PrinterMatches.Select(m => m.ConfidenceScore)
             .Concat(result.FilamentMatches.Select(m => m.ConfidenceScore))
             .Concat(result.ProcessMatches.Select(m => m.ConfidenceScore))
             .ToList();
@@ -71,7 +71,7 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
         OrcaPrinterPresetDto preset,
         List<PrinterModel> catalogModels)
     {
-        var match = new PrinterPresetMatch
+        PrinterPresetMatch match = new PrinterPresetMatch
         {
             Preset = preset,
             ConfidenceScore = 0.0
@@ -79,12 +79,12 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 
         PrinterModel? bestMatch = null;
         double bestScore = 0.0;
-        var reasons = new List<string>();
+        List<string> reasons = new List<string>();
 
-        foreach (var model in catalogModels)
+        foreach (PrinterModel model in catalogModels)
         {
             double score = 0.0;
-            var matchReasons = new List<string>();
+            List<string> matchReasons = new List<string>();
 
             // Model name similarity (40% weight)
             double nameScore = CalculateStringSimilarity(preset.PrinterModel ?? preset.Name, model.Name);
@@ -147,14 +147,14 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 
     private FilamentPresetMatch MapFilamentPreset(OrcaFilamentPresetDto preset)
     {
-        var match = new FilamentPresetMatch
+        FilamentPresetMatch match = new FilamentPresetMatch
         {
             Preset = preset,
             ConfidenceScore = 0.0
         };
 
         // Known material types mapping
-        var knownMaterials = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, string> knownMaterials = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             { "PLA", "PLA" },
             { "PETG", "PETG" },
@@ -170,7 +170,7 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
         if (!string.IsNullOrWhiteSpace(preset.FilamentType))
         {
             // Direct match
-            if (knownMaterials.TryGetValue(preset.FilamentType, out var mapped))
+            if (knownMaterials.TryGetValue(preset.FilamentType, out string? mapped))
             {
                 match.MatchedMaterialType = mapped;
                 match.ConfidenceScore = 1.0;
@@ -211,7 +211,7 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 
     private ProcessPresetMatch MapProcessPreset(OrcaProcessPresetDto preset)
     {
-        var match = new ProcessPresetMatch
+        ProcessPresetMatch match = new ProcessPresetMatch
         {
             Preset = preset,
             ConfidenceScore = 1.0 // Process presets are always high confidence as they map to internal quality levels
@@ -331,7 +331,7 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 
     private string NormalizeQuality(string quality)
     {
-        var normalized = quality.ToLowerInvariant().Trim();
+        string normalized = quality.ToLowerInvariant().Trim();
 
         return normalized switch
         {

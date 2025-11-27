@@ -27,10 +27,10 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_ValidOrcaBundle_ReturnsPreview()
     {
         // Arrange
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
         // Sample minimal Orca bundle with one printer, one filament, one process
-        var bundleJson = """
+        string bundleJson = """
         {
             "printer": [
                 {
@@ -64,24 +64,24 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
         }
         """;
 
-        var request = new ImportOrcaBundleDto
+        ImportOrcaBundleDto request = new ImportOrcaBundleDto
         {
             BundleJson = bundleJson
         };
 
-        var content = new StringContent(
+        StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
 
         // Act
-        var response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
+        HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var responseBody = await response.Content.ReadAsStringAsync();
-        var preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(responseBody, new JsonSerializerOptions
+        string responseBody = await response.Content.ReadAsStringAsync();
+        OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(responseBody, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
@@ -105,20 +105,20 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_InvalidBundleFormat_ReturnsBadRequest()
     {
         // Arrange
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
-        var request = new ImportOrcaBundleDto
+        ImportOrcaBundleDto request = new ImportOrcaBundleDto
         {
             BundleJson = "{ \"invalid\": \"structure\" }" // Missing printer/filament/process sections
         };
 
-        var content = new StringContent(
+        StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
 
         // Act
-        var response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
+        HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -128,20 +128,20 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_EmptyBundleJson_ReturnsBadRequest()
     {
         // Arrange
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
-        var request = new ImportOrcaBundleDto
+        ImportOrcaBundleDto request = new ImportOrcaBundleDto
         {
             BundleJson = ""
         };
 
-        var content = new StringContent(
+        StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
 
         // Act
-        var response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
+        HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -151,9 +151,9 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_MultiplePresetsPerSection_ParsesAll()
     {
         // Arrange
-        var client = _factory.CreateClient();
+        HttpClient client = _factory.CreateClient();
 
-        var bundleJson = """
+        string bundleJson = """
         {
             "printer": [
                 { "name": "Printer A", "nozzle_diameter": 0.4 },
@@ -172,16 +172,16 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
         }
         """;
 
-        var request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        var content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
+        ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
+        StringContent content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
 
         // Act
-        var response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
+        HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var responseBody = await response.Content.ReadAsStringAsync();
-        var preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(responseBody, new JsonSerializerOptions
+        string responseBody = await response.Content.ReadAsStringAsync();
+        OrcaBundlePreviewDto? preview = JsonSerializer.Deserialize<OrcaBundlePreviewDto>(responseBody, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });

@@ -5,6 +5,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Shared.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -31,9 +33,9 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     public async Task Claim_Returns_401_When_Header_Missing()
     {
         // Arrange - create a queued job first
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Queued,
@@ -46,14 +48,14 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
 
-        var request = new ClaimJobRequest
+        ClaimJobRequest request = new ClaimJobRequest
         {
             WorkerId = Guid.NewGuid(),
             Capabilities = new[] { "orcaslicer" }
         };
 
         // Act - attempt claim without header
-        var response = await _client.PostAsJsonAsync("/api/slice/claim", request);
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/slice/claim", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -63,9 +65,9 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     public async Task Claim_Returns_401_When_Header_Invalid()
     {
         // Arrange - create a queued job first
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Queued,
@@ -78,19 +80,19 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
 
-        var request = new ClaimJobRequest
+        ClaimJobRequest request = new ClaimJobRequest
         {
             WorkerId = Guid.NewGuid(),
             Capabilities = new[] { "orcaslicer" }
         };
 
         // Act - attempt claim with wrong key
-        var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
+        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
         {
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "wrong-key-value");
-        var response = await _client.SendAsync(requestMessage);
+        HttpResponseMessage response = await _client.SendAsync(requestMessage);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -100,9 +102,9 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     public async Task Progress_Returns_401_When_Header_Missing()
     {
         // Arrange - create a processing job
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -117,14 +119,14 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
 
-        var request = new SliceJobProgressUpdateRequest
+        SliceJobProgressUpdateRequest request = new SliceJobProgressUpdateRequest
         {
             ProgressPercent = 50,
             ProgressMessage = "Processing layers"
         };
 
         // Act - attempt progress update without header
-        var response = await _client.PostAsJsonAsync($"/api/slice/{job.Id}/progress", request);
+        HttpResponseMessage response = await _client.PostAsJsonAsync($"/api/slice/{job.Id}/progress", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -134,9 +136,9 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     public async Task Progress_Returns_401_When_Header_Invalid()
     {
         // Arrange - create a processing job
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -151,19 +153,19 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
 
-        var request = new SliceJobProgressUpdateRequest
+        SliceJobProgressUpdateRequest request = new SliceJobProgressUpdateRequest
         {
             ProgressPercent = 50,
             ProgressMessage = "Processing layers"
         };
 
         // Act - attempt progress update with wrong key
-        var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/progress")
+        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/progress")
         {
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "wrong-key-value");
-        var response = await _client.SendAsync(requestMessage);
+        HttpResponseMessage response = await _client.SendAsync(requestMessage);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -173,11 +175,11 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     public async Task Completion_Returns_401_When_Header_Missing()
     {
         // Arrange - create a processing job with artifact
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -193,17 +195,17 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
         await jobRepo.SaveChangesAsync();
 
         // Create a dummy artifact using helper
-        var bytes = System.Text.Encoding.UTF8.GetBytes("; gcode");
-        var formFile = new TestFormFile(bytes, "output.gcode", "application/gcode");
-        var artifact = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("; gcode");
+        TestFormFile formFile = new TestFormFile(bytes, "output.gcode", "application/gcode");
+        Artifact artifact = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
 
-        var request = new CompleteSliceJobRequest
+        CompleteSliceJobRequest request = new CompleteSliceJobRequest
         {
             PrimaryArtifactId = artifact.Id
         };
 
         // Act - attempt completion without header
-        var response = await _client.PostAsJsonAsync($"/api/slice/{job.Id}/complete", request);
+        HttpResponseMessage response = await _client.PostAsJsonAsync($"/api/slice/{job.Id}/complete", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -213,11 +215,11 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     public async Task Completion_Returns_401_When_Header_Invalid()
     {
         // Arrange - create a processing job with artifact
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.Artifacts.IArtifactsService>();
 
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Processing,
@@ -233,22 +235,22 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
         await jobRepo.SaveChangesAsync();
 
         // Create a dummy artifact using helper
-        var bytes = System.Text.Encoding.UTF8.GetBytes("; gcode");
-        var formFile = new TestFormFile(bytes, "output.gcode", "application/gcode");
-        var artifact = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("; gcode");
+        TestFormFile formFile = new TestFormFile(bytes, "output.gcode", "application/gcode");
+        Artifact artifact = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
 
-        var request = new CompleteSliceJobRequest
+        CompleteSliceJobRequest request = new CompleteSliceJobRequest
         {
             PrimaryArtifactId = artifact.Id
         };
 
         // Act - attempt completion with wrong key
-        var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
+        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
         {
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "wrong-key-value");
-        var response = await _client.SendAsync(requestMessage);
+        HttpResponseMessage response = await _client.SendAsync(requestMessage);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -258,9 +260,9 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     public async Task Claim_Succeeds_With_Valid_Key()
     {
         // Arrange - create a queued job
-        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        var jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
-        var job = new Farm.Infrastructure.Domain.SliceJob
+        using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository>();
+        SliceJob job = new Farm.Infrastructure.Domain.SliceJob
         {
             Id = Guid.NewGuid(),
             Status = Farm.Infrastructure.Domain.SliceJobStatus.Queued,
@@ -273,23 +275,23 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
 
-        var request = new ClaimJobRequest
+        ClaimJobRequest request = new ClaimJobRequest
         {
             WorkerId = Guid.NewGuid(),
             Capabilities = new[] { "orcaslicer" }
         };
 
         // Act - claim with valid key
-        var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
+        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
         {
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
-        var response = await _client.SendAsync(requestMessage);
+        HttpResponseMessage response = await _client.SendAsync(requestMessage);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await response.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        SliceJobStatusResponse? result = await response.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
         result.Should().NotBeNull();
         result!.Id.Should().NotBeEmpty();
         result.Status.Should().Be(SliceJobStatus.Processing);

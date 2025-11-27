@@ -56,7 +56,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             throw new ValidationException("At least one valid subnet is required.");
         }
-        foreach (var subnet in DiscoverySubnets)
+        foreach (string subnet in DiscoverySubnets)
         {
             if (!IsValidCidr(subnet))
             {
@@ -71,11 +71,11 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             return;
         }
-        var unique = DiscoverySubnets.Distinct().ToList();
+        List<string> unique = DiscoverySubnets.Distinct().ToList();
         if (unique.Count != DiscoverySubnets.Count)
         {
             DiscoverySubnets.Clear();
-            foreach (var subnet in unique)
+            foreach (string? subnet in unique)
             {
                 DiscoverySubnets.Add(subnet);
             }
@@ -89,7 +89,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         {
             return false;
         }
-        var parts = cidr.Split('/');
+        string[] parts = cidr.Split('/');
         if (parts.Length != 2)
         {
             return false;
