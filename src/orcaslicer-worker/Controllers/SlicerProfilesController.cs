@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core;
 using Farm.Web.Shared;
 using Microsoft.AspNetCore.Mvc;
