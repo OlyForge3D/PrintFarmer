@@ -5,7 +5,9 @@ namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 /// <summary>
 /// OrcaSlicer v2.3.1 slicer library implementation.
 /// </summary>
+#pragma warning disable S101 // Class name required to match version numbering for plugin discovery
 public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
+#pragma warning restore S101
 {
     private readonly ISlicerProfilesProvider _profilesProvider;
     private readonly ISlicerAssetRegistry _assetRegistry;
