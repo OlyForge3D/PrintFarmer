@@ -5,9 +5,14 @@
 
 FROM postgres:16-alpine
 
+# Cache-busting argument: change this to force fresh apk updates
+# Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
+ARG CACHE_BUST=latest
+
 # Update and upgrade all packages, then clean cache
 # This creates a fully-patched base image that can be cached offline
-RUN apk update && \
+RUN echo "Cache bust: ${CACHE_BUST}" && \
+    apk update && \
     apk upgrade && \
     apk cache clean && \
     rm -rf /tmp/* /var/tmp/*

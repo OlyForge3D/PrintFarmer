@@ -5,9 +5,14 @@
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim
 
+# Cache-busting argument: change this to force fresh apt updates
+# Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
+ARG CACHE_BUST=latest
+
 # Update and upgrade all packages, then clean cache
 # This creates a fully-patched base image that can be cached offline
-RUN apt-get update && \
+RUN echo "Cache bust: ${CACHE_BUST}" && \
+    apt-get update && \
     apt-get upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
