@@ -159,7 +159,7 @@ public static class Program
                     .Distinct()
                     .ToHashSet();
 
-                app.Logger.LogInformation($"Found {availableManufacturers.Count} manufacturers with {machines.Count} machine profiles in {machineStart.ElapsedMilliseconds}ms");
+                app.Logger.LogInformation("Found {ManufacturerCount} manufacturers with {MachineCount} machine profiles in {ElapsedMilliseconds}ms", availableManufacturers.Count, machines.Count, machineStart.ElapsedMilliseconds);
 
                 // Load catalog manufacturers via HTTP (call the API)
                 var httpClient = app.Services.GetRequiredService<IHttpClientFactory>().CreateClient();
@@ -180,14 +180,13 @@ public static class Program
                             .Select(m => m.Name)
                             .ToHashSet() ?? new HashSet<string>();
 
-                        app.Logger.LogInformation($"Catalog has {catalogManufacturers.Count} manufacturers");
+                        app.Logger.LogInformation("Catalog has {CatalogManufacturerCount} manufacturers", catalogManufacturers.Count);
 
                         // Load filament and process profiles only for manufacturers in catalog
                         var filamentStart = System.Diagnostics.Stopwatch.StartNew();
                         var filaments = await profileService.ListAvailableFilamentProfilesAsync();
                         var catalogFilaments = filaments
-                            .Where(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer))
-                            .Count();
+                            .Count(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer));
                         filamentStart.Stop();
 
                         var processStart = System.Diagnostics.Stopwatch.StartNew();
@@ -197,20 +196,25 @@ public static class Program
                         stopwatch.Stop();
 
                         app.Logger.LogInformation(
-                            $"OrcaSlicer profiles preloaded in {stopwatch.ElapsedMilliseconds}ms: " +
-                            $"{machines.Count} machines ({machineStart.ElapsedMilliseconds}ms), " +
-                            $"{catalogFilaments}/{filaments.Count} filaments for catalog ({filamentStart.ElapsedMilliseconds}ms), " +
-                            $"{processes.Count} processes ({processStart.ElapsedMilliseconds}ms)"
+                            "OrcaSlicer profiles preloaded in {TotalElapsed}ms: {MachineCount} machines ({MachineElapsed}ms), {CatalogFilaments}/{TotalFilaments} filaments for catalog ({FilamentElapsed}ms), {ProcessCount} processes ({ProcessElapsed}ms)",
+                            stopwatch.ElapsedMilliseconds,
+                            machines.Count,
+                            machineStart.ElapsedMilliseconds,
+                            catalogFilaments,
+                            filaments.Count,
+                            filamentStart.ElapsedMilliseconds,
+                            processes.Count,
+                            processStart.ElapsedMilliseconds
                         );
                     }
                     else
                     {
-                        app.Logger.LogWarning($"Failed to fetch catalog manufacturers: {response.StatusCode}. Skipping filtered preload.");
+                        app.Logger.LogWarning("Failed to fetch catalog manufacturers: {StatusCode}. Skipping filtered preload.", response.StatusCode);
                     }
                 }
                 catch (Exception ex)
                 {
-                    app.Logger.LogWarning($"Error fetching catalog manufacturers: {ex.Message}. Loading all profiles instead.");
+                    app.Logger.LogWarning("Error fetching catalog manufacturers: {Exception}. Loading all profiles instead.", ex.Message);
 
                     // Fallback: load all profiles if catalog API is unavailable
                     var filamentStart = System.Diagnostics.Stopwatch.StartNew();
@@ -224,16 +228,20 @@ public static class Program
                     stopwatch.Stop();
 
                     app.Logger.LogInformation(
-                        $"OrcaSlicer profiles preloaded (fallback) in {stopwatch.ElapsedMilliseconds}ms: " +
-                        $"{machines.Count} machines ({machineStart.ElapsedMilliseconds}ms), " +
-                        $"{filaments.Count} filaments ({filamentStart.ElapsedMilliseconds}ms), " +
-                        $"{processes.Count} processes ({processStart.ElapsedMilliseconds}ms)"
+                        "OrcaSlicer profiles preloaded (fallback) in {TotalElapsed}ms: {MachineCount} machines ({MachineElapsed}ms), {FilamentCount} filaments ({FilamentElapsed}ms), {ProcessCount} processes ({ProcessElapsed}ms)",
+                        stopwatch.ElapsedMilliseconds,
+                        machines.Count,
+                        machineStart.ElapsedMilliseconds,
+                        filaments.Count,
+                        filamentStart.ElapsedMilliseconds,
+                        processes.Count,
+                        processStart.ElapsedMilliseconds
                     );
                 }
             }
             catch (Exception ex)
             {
-                app.Logger.LogError($"Error preloading OrcaSlicer profiles: {ex.Message}");
+                app.Logger.LogError("Error preloading OrcaSlicer profiles: {Exception}", ex.Message);
             }
         });
 

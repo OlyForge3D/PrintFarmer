@@ -1648,7 +1648,7 @@ public class PrinterModelProfilesDto
 /// Legacy: Machine profiles grouped by manufacturer name (from bundle file name).
 /// Example: { "Prusa": [machine1, machine2, ...], "Creality": [...], ... }
 /// </summary>
-public class AllProfilesResponseDto_Deprecated
+public class AllProfilesResponseDtoDeprecated
 {
     /// <summary>
     /// Machine profiles grouped by manufacturer name (from bundle file name).
@@ -1887,8 +1887,7 @@ public class MachineProfileListItemDto : IProfileListItem
     public string ProfileType => "machine";
 }
 
-// Backwards compatibility alias
-public class SlicerProfileListItemDto : ProcessProfileListItemDto { }
+// Backwards compatibility alias - use ProcessProfileListItemDto directly
 
 /// <summary>
 /// Response containing all profile types organized separately

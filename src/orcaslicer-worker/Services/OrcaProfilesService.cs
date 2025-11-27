@@ -705,8 +705,10 @@ public class OrcaProfilesService : ISlicerProfilesService
         return profile;
     }
 
+#pragma warning disable S1172 // Unused parameters are required by interface
     private FilamentProfileDto? ParseFilamentProfile(JsonElement root, string filePath)
     {
+#pragma warning restore S1172
         var profile = new FilamentProfileDto();
 
         if (root.TryGetProperty("name", out var nameElem))
@@ -760,8 +762,10 @@ public class OrcaProfilesService : ISlicerProfilesService
         return profile;
     }
 
+#pragma warning disable S1172 // Unused parameters are required by interface
     private ProcessProfileDto? ParseProcessProfile(JsonElement root, string filePath)
     {
+#pragma warning restore S1172
         var profile = new ProcessProfileDto();
 
         if (root.TryGetProperty("name", out var nameElem))

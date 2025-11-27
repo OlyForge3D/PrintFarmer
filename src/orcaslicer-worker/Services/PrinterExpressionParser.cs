@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using Farm.Web.Shared;
 
@@ -178,13 +179,13 @@ public static class PrinterExpressionParser
         private string ParseRegexPattern()
         {
             Consume('/');
-            var pattern = "";
+            var pattern = new StringBuilder();
             while (!Peek("/") && _position < _expression.Length)
             {
-                pattern += _expression[_position++];
+                pattern.Append(_expression[_position++]);
             }
             Consume('/');
-            return pattern;
+            return pattern.ToString();
         }
 
         private string ParseValue()
@@ -195,13 +196,13 @@ public static class PrinterExpressionParser
             if (Peek('"'))
             {
                 Consume('"');
-                var value = "";
+                var value = new StringBuilder();
                 while (!Peek('"') && _position < _expression.Length)
                 {
-                    value += _expression[_position++];
+                    value.Append(_expression[_position++]);
                 }
                 Consume('"');
-                return value;
+                return value.ToString();
             }
 
             // Handle unquoted numbers or identifiers
@@ -216,27 +217,27 @@ public static class PrinterExpressionParser
 
         private string ReadIdentifier()
         {
-            var id = "";
+            var id = new StringBuilder();
             while (_position < _expression.Length && (char.IsLetterOrDigit(_expression[_position]) || _expression[_position] == '_' || _expression[_position] == '.'))
             {
-                id += _expression[_position++];
+                id.Append(_expression[_position++]);
             }
-            return id;
+            return id.ToString();
         }
 
         private string ReadNumber()
         {
-            var num = "";
+            var num = new StringBuilder();
             if (Peek('-'))
             {
-                num += _expression[_position++];
+                num.Append(_expression[_position++]);
             }
 
             while (_position < _expression.Length && (char.IsDigit(_expression[_position]) || _expression[_position] == '.'))
             {
-                num += _expression[_position++];
+                num.Append(_expression[_position++]);
             }
-            return num;
+            return num.ToString();
         }
 
         private void SkipWhitespace()

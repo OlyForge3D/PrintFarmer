@@ -87,12 +87,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return stlFilePath;
     }
 
+#pragma warning disable S1172 // Unused parameters are required by interface
     private static async Task<string> PrepareSlicerConfigAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
     {
         // Deprecated: profiles are now generated directly from database JSON in RunOrcaSlicerAsync
         // This method is kept for backward compatibility with the interface
         return workDir;
     }
+#pragma warning restore S1172
 
     private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(SlicerProfileDto? profile, string workDir, CancellationToken cancellationToken)
     {
@@ -122,6 +124,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         };
     }
 
+#pragma warning disable S1172 // configPath is kept for method signature compatibility
     private async Task<string> RunOrcaSlicerAsync(string stlPath, string configPath, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         var gcodeOutputDir = Path.Combine(workDir, "output");
@@ -173,6 +176,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
         return gcodeFilePath;
     }
+#pragma warning restore S1172
 
     private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
     {
