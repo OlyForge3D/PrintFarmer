@@ -32,6 +32,10 @@ public class OrcaProfilesService : ISlicerProfilesService
     // Key: full file path, Value: JSON string
     private readonly Dictionary<string, string> _profileJsonCache = new();
     private readonly object _cacheLock = new();
+    
+    // Cache for available machines to support compatible_printers_condition evaluation
+    private IList<MachineProfileDto>? _availableMachinesCache;
+    private readonly object _machinesCacheLock = new();
 
     public OrcaProfilesService(IUnifiedLoggingService logger)
     {
@@ -595,10 +599,29 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (root.TryGetProperty("travel_speed", out var speedElem))
             profile.PrintSpeed = ParseIntValue(speedElem) ?? 50;
 
-        // Profile is now fully resolved - compatible_printers should be directly in the profile
+        // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out var compatibleElem))
         {
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
+        }
+        
+        // If no compatible_printers, try compatible_printers_condition expression
+        if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
+            root.TryGetProperty("compatible_printers_condition", out var conditionElem))
+        {
+            var condition = conditionElem.GetString();
+            if (!string.IsNullOrEmpty(condition))
+            {
+                var machines = GetAvailableMachinesForExpression();
+                if (machines?.Count > 0)
+                {
+                    var matchedMachines = PrinterExpressionParser.EvaluateCondition(condition, machines.ToList());
+                    if (matchedMachines?.Count > 0)
+                    {
+                        profile.CompatiblePrinters = matchedMachines;
+                    }
+                }
+            }
         }
 
         // Store all settings as raw JSON for flexibility
@@ -626,10 +649,29 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (root.TryGetProperty("enable_support", out var supportsElem))
             profile.Supports = ParseBoolValue(supportsElem);
 
-        // Profile is now fully resolved - compatible_printers should be directly in the profile
+        // Profile is now fully resolved - check for compatible_printers first
         if (root.TryGetProperty("compatible_printers", out var compatibleElem))
         {
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
+        }
+        
+        // If no compatible_printers, try compatible_printers_condition expression
+        if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
+            root.TryGetProperty("compatible_printers_condition", out var conditionElem))
+        {
+            var condition = conditionElem.GetString();
+            if (!string.IsNullOrEmpty(condition))
+            {
+                var machines = GetAvailableMachinesForExpression();
+                if (machines?.Count > 0)
+                {
+                    var matchedMachines = PrinterExpressionParser.EvaluateCondition(condition, machines.ToList());
+                    if (matchedMachines?.Count > 0)
+                    {
+                        profile.CompatiblePrinters = matchedMachines;
+                    }
+                }
+            }
         }
 
         // Determine quality based on layer height
@@ -738,4 +780,36 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
         }
     }
+
+    /// <summary>
+    /// Gets available machines for expression evaluation with caching.
+    /// Used by compatible_printers_condition expressions to match against machine properties.
+    /// </summary>
+    private IList<MachineProfileDto>? GetAvailableMachinesForExpression()
+    {
+        // Return cached value if available
+        lock (_machinesCacheLock)
+        {
+            if (_availableMachinesCache != null)
+                return _availableMachinesCache;
+        }
+
+        // Load machines synchronously (blocking call for cache population)
+        try
+        {
+            var machines = ListAvailableMachineProfilesAsync().GetAwaiter().GetResult();
+            
+            lock (_machinesCacheLock)
+            {
+                _availableMachinesCache = machines;
+            }
+            
+            return machines;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
+
