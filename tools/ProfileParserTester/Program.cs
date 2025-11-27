@@ -78,6 +78,7 @@ class ProfileParserTester
             if (processProfiles.Count > 0)
             {
                 var withCompatible = processProfiles.Count(p => p.CompatiblePrinters?.Count > 0);
+                var withoutCompatible = processProfiles.Where(p => p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0).ToList();
                 Console.WriteLine($"Process Profiles: {processProfiles.Count} total, {withCompatible} with compatiblePrinters");
                 
                 // Show first few profiles
@@ -85,6 +86,16 @@ class ProfileParserTester
                 {
                     var compatibleCount = profile.CompatiblePrinters?.Count ?? 0;
                     Console.WriteLine($"  - {profile.Name}: {compatibleCount} compatible printers");
+                }
+                
+                // Show profiles without compatible_printers
+                if (withoutCompatible.Count > 0)
+                {
+                    Console.WriteLine($"\n⚠️  {withoutCompatible.Count} profiles without compatible_printers:");
+                    foreach (var profile in withoutCompatible)
+                    {
+                        Console.WriteLine($"  - {profile.Name}");
+                    }
                 }
             }
 

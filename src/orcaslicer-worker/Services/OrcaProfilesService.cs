@@ -33,9 +33,15 @@ public class OrcaProfilesService : ISlicerProfilesService
     private readonly Dictionary<string, string> _profileJsonCache = new();
     private readonly object _cacheLock = new();
     
-    // Cache for available machines to support compatible_printers_condition evaluation
-    private IList<MachineProfileDto>? _availableMachinesCache;
-    private readonly object _machinesCacheLock = new();
+    // Cache for machines by manufacturer to support compatible_printers_condition evaluation
+    private Dictionary<string, List<MachineProfileDto>>? _machinesByManufacturerCache;
+    private readonly object _machineCacheLock = new();
+    
+    // Cache for fully loaded profile lists to avoid reparsing on subsequent calls
+    private IList<MachineProfileDto>? _allMachineProfilesCache;
+    private IList<FilamentProfileDto>? _allFilamentProfilesCache;
+    private IList<ProcessProfileDto>? _allProcessProfilesCache;
+    private readonly object _profilesCacheLock = new();
 
     public OrcaProfilesService(IUnifiedLoggingService logger)
     {
@@ -56,6 +62,16 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
     {
+        // Return from cache if available
+        lock (_profilesCacheLock)
+        {
+            if (_allMachineProfilesCache != null)
+            {
+                _logger.LogInformation($"Returning {_allMachineProfilesCache.Count} machine profiles from cache");
+                return _allMachineProfilesCache;
+            }
+        }
+
         var profiles = new List<MachineProfileDto>();
         
         try
@@ -135,6 +151,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             _logger.LogInformation($"Loaded {successCount} machine profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            
+            // Cache the results
+            lock (_profilesCacheLock)
+            {
+                _allMachineProfilesCache = profiles;
+            }
+            
             return profiles;
         }
         catch (Exception ex)
@@ -146,6 +169,16 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     public async Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default)
     {
+        // Return from cache if available
+        lock (_profilesCacheLock)
+        {
+            if (_allFilamentProfilesCache != null)
+            {
+                _logger.LogInformation($"Returning {_allFilamentProfilesCache.Count} filament profiles from cache");
+                return _allFilamentProfilesCache;
+            }
+        }
+
         var profiles = new List<FilamentProfileDto>();
         
         try
@@ -157,6 +190,9 @@ public class OrcaProfilesService : ISlicerProfilesService
                 _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
                 return profiles;
             }
+
+            // Ensure machines are cached first so we can evaluate compatible_printers_condition
+            await EnsureMachinesCachedAsync();
 
             var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
                 .Where(f => !Path.GetFileName(f).StartsWith("."))
@@ -174,6 +210,9 @@ public class OrcaProfilesService : ISlicerProfilesService
                     var bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.FilamentList != null)
                     {
+                        // Get machines for this manufacturer to evaluate conditions
+                        var manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+
                         foreach (var entry in bundle.FilamentList)
                         {
                             try
@@ -189,6 +228,22 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 var profile = LoadProfileFromFile<FilamentProfileDto>(profilePath);
                                 if (profile != null)
                                 {
+                                    profile.Manufacturer = bundle.Name;
+                                    
+                                    // If no explicit compatible_printers, try to evaluate the condition
+                                    if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
+                                        !string.IsNullOrEmpty(profile.CompatiblePrintersCondition) &&
+                                        manufacturerMachines?.Count > 0)
+                                    {
+                                        var matchedMachines = PrinterExpressionParser.EvaluateCondition(
+                                            profile.CompatiblePrintersCondition, 
+                                            manufacturerMachines);
+                                        if (matchedMachines?.Count > 0)
+                                        {
+                                            profile.CompatiblePrinters = matchedMachines;
+                                        }
+                                    }
+                                    
                                     profiles.Add(profile);
                                     successCount++;
                                 }
@@ -213,6 +268,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             _logger.LogInformation($"Loaded {successCount} filament profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            
+            // Cache the results
+            lock (_profilesCacheLock)
+            {
+                _allFilamentProfilesCache = profiles;
+            }
+            
             return profiles;
         }
         catch (Exception ex)
@@ -224,6 +286,16 @@ public class OrcaProfilesService : ISlicerProfilesService
 
     public async Task<IList<ProcessProfileDto>> ListAvailableProcessProfilesAsync(CancellationToken ct = default)
     {
+        // Return from cache if available
+        lock (_profilesCacheLock)
+        {
+            if (_allProcessProfilesCache != null)
+            {
+                _logger.LogInformation($"Returning {_allProcessProfilesCache.Count} process profiles from cache");
+                return _allProcessProfilesCache;
+            }
+        }
+
         var profiles = new List<ProcessProfileDto>();
         
         try
@@ -235,6 +307,9 @@ public class OrcaProfilesService : ISlicerProfilesService
                 _logger.LogWarning($"OrcaSlicer profiles directory not found: {_orcaProfilesPath}");
                 return profiles;
             }
+
+            // Ensure machines are cached first so we can evaluate compatible_printers_condition
+            await EnsureMachinesCachedAsync();
 
             var bundleFiles = Directory.GetFiles(_orcaProfilesPath, "*.json", SearchOption.TopDirectoryOnly)
                 .Where(f => !Path.GetFileName(f).StartsWith("."))
@@ -252,6 +327,9 @@ public class OrcaProfilesService : ISlicerProfilesService
                     var bundle = ParseManufacturerBundle(bundleFile);
                     if (bundle?.ProcessList != null)
                     {
+                        // Get machines for this manufacturer to evaluate conditions
+                        var manufacturerMachines = GetCachedMachinesForManufacturer(bundle.Name);
+
                         foreach (var entry in bundle.ProcessList)
                         {
                             try
@@ -267,6 +345,22 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 var profile = LoadProfileFromFile<ProcessProfileDto>(profilePath);
                                 if (profile != null)
                                 {
+                                    profile.Manufacturer = bundle.Name;
+                                    
+                                    // If no explicit compatible_printers, try to evaluate the condition
+                                    if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
+                                        !string.IsNullOrEmpty(profile.CompatiblePrintersCondition) &&
+                                        manufacturerMachines?.Count > 0)
+                                    {
+                                        var matchedMachines = PrinterExpressionParser.EvaluateCondition(
+                                            profile.CompatiblePrintersCondition, 
+                                            manufacturerMachines);
+                                        if (matchedMachines?.Count > 0)
+                                        {
+                                            profile.CompatiblePrinters = matchedMachines;
+                                        }
+                                    }
+                                    
                                     profiles.Add(profile);
                                     successCount++;
                                 }
@@ -291,6 +385,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             }
 
             _logger.LogInformation($"Loaded {successCount} process profiles ({failureCount} failures from {bundleFiles.Count} bundles)");
+            
+            // Cache the results
+            lock (_profilesCacheLock)
+            {
+                _allProcessProfilesCache = profiles;
+            }
+            
             return profiles;
         }
         catch (Exception ex)
@@ -605,22 +706,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
         }
         
-        // If no compatible_printers, try compatible_printers_condition expression
-        if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
-            root.TryGetProperty("compatible_printers_condition", out var conditionElem))
+        // Store compatible_printers_condition for later evaluation
+        if (root.TryGetProperty("compatible_printers_condition", out var conditionElem))
         {
             var condition = conditionElem.GetString();
             if (!string.IsNullOrEmpty(condition))
             {
-                var machines = GetAvailableMachinesForExpression();
-                if (machines?.Count > 0)
-                {
-                    var matchedMachines = PrinterExpressionParser.EvaluateCondition(condition, machines.ToList());
-                    if (matchedMachines?.Count > 0)
-                    {
-                        profile.CompatiblePrinters = matchedMachines;
-                    }
-                }
+                profile.CompatiblePrintersCondition = condition;
             }
         }
 
@@ -655,22 +747,13 @@ public class OrcaProfilesService : ISlicerProfilesService
             ParseCompatiblePrinters(compatibleElem, profile.CompatiblePrinters);
         }
         
-        // If no compatible_printers, try compatible_printers_condition expression
-        if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
-            root.TryGetProperty("compatible_printers_condition", out var conditionElem))
+        // Store compatible_printers_condition for later evaluation
+        if (root.TryGetProperty("compatible_printers_condition", out var conditionElem))
         {
             var condition = conditionElem.GetString();
             if (!string.IsNullOrEmpty(condition))
             {
-                var machines = GetAvailableMachinesForExpression();
-                if (machines?.Count > 0)
-                {
-                    var matchedMachines = PrinterExpressionParser.EvaluateCondition(condition, machines.ToList());
-                    if (matchedMachines?.Count > 0)
-                    {
-                        profile.CompatiblePrinters = matchedMachines;
-                    }
-                }
+                profile.CompatiblePrintersCondition = condition;
             }
         }
 
@@ -785,31 +868,36 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// Gets available machines for expression evaluation with caching.
     /// Used by compatible_printers_condition expressions to match against machine properties.
     /// </summary>
-    private IList<MachineProfileDto>? GetAvailableMachinesForExpression()
+    private async Task EnsureMachinesCachedAsync()
     {
-        // Return cached value if available
-        lock (_machinesCacheLock)
+        lock (_machineCacheLock)
         {
-            if (_availableMachinesCache != null)
-                return _availableMachinesCache;
+            if (_machinesByManufacturerCache != null)
+                return;
         }
 
-        // Load machines synchronously (blocking call for cache population)
-        try
+        // Load all machines and group by manufacturer
+        var allMachines = await ListAvailableMachineProfilesAsync();
+        var grouped = allMachines
+            .GroupBy(m => m.Manufacturer ?? "Unknown")
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        lock (_machineCacheLock)
         {
-            var machines = ListAvailableMachineProfilesAsync().GetAwaiter().GetResult();
-            
-            lock (_machinesCacheLock)
+            _machinesByManufacturerCache = grouped;
+        }
+    }
+
+    private List<MachineProfileDto>? GetCachedMachinesForManufacturer(string manufacturerName)
+    {
+        lock (_machineCacheLock)
+        {
+            if (_machinesByManufacturerCache?.TryGetValue(manufacturerName, out var machines) == true)
             {
-                _availableMachinesCache = machines;
+                return machines;
             }
-            
-            return machines;
         }
-        catch
-        {
-            return null;
-        }
+        return null;
     }
 }
 

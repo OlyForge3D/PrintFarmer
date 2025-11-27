@@ -1535,6 +1535,8 @@ public class FilamentProfileDto
     public int PrintSpeed { get; set; } = 50;
     [JsonPropertyName("compatible_printers")]
     public IList<string> CompatiblePrinters { get; set; } = new List<string>();
+    [JsonIgnore]
+    public string? CompatiblePrintersCondition { get; set; }
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -1550,9 +1552,12 @@ public class ProcessProfileDto
     public int InfillPercentage { get; set; } = 20;
     public int PrintSpeed { get; set; } = 50;
     public bool Supports { get; set; }
+    public string? Manufacturer { get; set; }
     public string? Description { get; set; }
     [JsonPropertyName("compatible_printers")]
     public IList<string> CompatiblePrinters { get; set; } = new List<string>();
+    [JsonIgnore]
+    public string? CompatiblePrintersCondition { get; set; }
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 

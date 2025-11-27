@@ -137,6 +137,106 @@ public static class Program
             app.Logger.LogWarning("OrcaSlicer binary not present (stub in use) - readiness will be unhealthy for orca_binary.");
         }
 
+        // Preload profiles for catalog manufacturers at startup and measure timing
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                app.Logger.LogInformation("Starting OrcaSlicer profile preload for catalog manufacturers...");
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+                var profileService = app.Services.GetRequiredService<ISlicerProfilesService>();
+                
+                // First load all machines to get the list of available manufacturers
+                var machineStart = System.Diagnostics.Stopwatch.StartNew();
+                var machines = await profileService.ListAvailableMachineProfilesAsync();
+                machineStart.Stop();
+                
+                // Get the set of manufacturers available in OrcaSlicer profiles
+                var availableManufacturers = machines
+                    .Where(m => !string.IsNullOrEmpty(m.Manufacturer))
+                    .Select(m => m.Manufacturer!)
+                    .Distinct()
+                    .ToHashSet();
+
+                app.Logger.LogInformation($"Found {availableManufacturers.Count} manufacturers with {machines.Count} machine profiles in {machineStart.ElapsedMilliseconds}ms");
+
+                // Load catalog manufacturers via HTTP (call the API)
+                var httpClient = app.Services.GetRequiredService<IHttpClientFactory>().CreateClient();
+                var catalogUrl = Environment.GetEnvironmentVariable("CATALOG_API_URL") ?? "http://localhost:5245";
+                
+                try
+                {
+                    var response = await httpClient.GetAsync($"{catalogUrl}/api/catalog/manufacturers");
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var content = await response.Content.ReadAsStringAsync();
+                        var manufacturerDtos = System.Text.Json.JsonSerializer.Deserialize<List<ManufacturerDto>>(
+                            content, 
+                            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                        );
+                        
+                        var catalogManufacturers = manufacturerDtos?
+                            .Select(m => m.Name)
+                            .ToHashSet() ?? new HashSet<string>();
+
+                        app.Logger.LogInformation($"Catalog has {catalogManufacturers.Count} manufacturers");
+
+                        // Load filament and process profiles only for manufacturers in catalog
+                        var filamentStart = System.Diagnostics.Stopwatch.StartNew();
+                        var filaments = await profileService.ListAvailableFilamentProfilesAsync();
+                        var catalogFilaments = filaments
+                            .Where(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer))
+                            .Count();
+                        filamentStart.Stop();
+                        
+                        var processStart = System.Diagnostics.Stopwatch.StartNew();
+                        var processes = await profileService.ListAvailableProcessProfilesAsync();
+                        processStart.Stop();
+
+                        stopwatch.Stop();
+
+                        app.Logger.LogInformation(
+                            $"OrcaSlicer profiles preloaded in {stopwatch.ElapsedMilliseconds}ms: " +
+                            $"{machines.Count} machines ({machineStart.ElapsedMilliseconds}ms), " +
+                            $"{catalogFilaments}/{filaments.Count} filaments for catalog ({filamentStart.ElapsedMilliseconds}ms), " +
+                            $"{processes.Count} processes ({processStart.ElapsedMilliseconds}ms)"
+                        );
+                    }
+                    else
+                    {
+                        app.Logger.LogWarning($"Failed to fetch catalog manufacturers: {response.StatusCode}. Skipping filtered preload.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    app.Logger.LogWarning($"Error fetching catalog manufacturers: {ex.Message}. Loading all profiles instead.");
+                    
+                    // Fallback: load all profiles if catalog API is unavailable
+                    var filamentStart = System.Diagnostics.Stopwatch.StartNew();
+                    var filaments = await profileService.ListAvailableFilamentProfilesAsync();
+                    filamentStart.Stop();
+                    
+                    var processStart = System.Diagnostics.Stopwatch.StartNew();
+                    var processes = await profileService.ListAvailableProcessProfilesAsync();
+                    processStart.Stop();
+
+                    stopwatch.Stop();
+
+                    app.Logger.LogInformation(
+                        $"OrcaSlicer profiles preloaded (fallback) in {stopwatch.ElapsedMilliseconds}ms: " +
+                        $"{machines.Count} machines ({machineStart.ElapsedMilliseconds}ms), " +
+                        $"{filaments.Count} filaments ({filamentStart.ElapsedMilliseconds}ms), " +
+                        $"{processes.Count} processes ({processStart.ElapsedMilliseconds}ms)"
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogError($"Error preloading OrcaSlicer profiles: {ex.Message}");
+            }
+        });
+
         app.Run();
     }
 }

@@ -29,6 +29,7 @@ public class ProfilesController : ControllerBase
     /// <remarks>
     /// Returns profiles organized as: Manufacturer -> Model -> (Machine Profiles + Filament Profiles + Process Profiles)
     /// Filament and process profiles are associated with machine profiles via the compatible_printers array.
+    /// Compatible printers are resolved from both explicit compatible_printers arrays and compatible_printers_condition expressions.
     /// </remarks>
     /// <param name="ct">Cancellation token</param>
     /// <returns>All available profiles organized by manufacturer and model</returns>

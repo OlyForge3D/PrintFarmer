@@ -9,28 +9,26 @@ namespace Farm.OrcaSlicer.Worker.Services;
 /// <summary>
 /// Parser for OrcaSlicer printer condition expressions (compatible_printers_condition).
 /// 
-/// Supports expressions like:
-/// - "printer_notes=~/.*PRINTER_VENDOR_PRUSA3D.*/ and printer_notes=~/.*PRINTER_MODEL_MK3.*/ and nozzle_diameter[0]==0.4"
-/// - "printer_notes=~/.*PRINTER_MODEL_VORON.*/"
-/// 
-/// Syntax:
+/// Evaluates arbitrary boolean expressions with proper operator precedence:
 /// - Regex matching: property=~/pattern/
-/// - Equality: property==value or property[index]==value
-/// - Logical operators: and, or
+/// - Equality: property==value or property[index]==value  
+/// - Logical operators: and, or (AND has higher precedence than OR)
 /// - Properties: printer_notes (from Settings), nozzle_diameter
+///
+/// Examples:
+/// - printer_notes=~/.*PRINTER_VENDOR_PRUSA3D.*/ and nozzle_diameter[0]==0.4
+/// - printer_notes=~/.*PRINTER_MODEL_COREONE.*/ and nozzle_diameter[0]==0.8 and printer_notes=~/.*HF_NOZZLE.*/
 /// </summary>
 public static class PrinterExpressionParser
 {
     /// <summary>
-    /// Evaluates a compatible_printers_condition expression against machine metadata.
-    /// Returns null if condition cannot be parsed (treated as empty condition).
+    /// Evaluates a compatible_printers_condition expression against available machines.
+    /// Returns list of matching machine names, or null if expression cannot be evaluated.
     /// </summary>
     public static List<string>? EvaluateCondition(string condition, List<MachineProfileDto> availableMachines)
     {
         if (string.IsNullOrWhiteSpace(condition))
-        {
-            return null; // No condition, handled by caller
-        }
+            return null;
 
         try
         {
@@ -38,7 +36,7 @@ public static class PrinterExpressionParser
 
             foreach (var machine in availableMachines)
             {
-                if (EvaluateExpressionForMachine(condition, machine))
+                if (EvaluateExpression(condition, machine))
                 {
                     matchingMachines.Add(machine.Name ?? "");
                 }
@@ -48,145 +46,16 @@ public static class PrinterExpressionParser
         }
         catch
         {
-            // If parsing fails, return null (condition will be skipped)
             return null;
         }
     }
 
-    private static bool EvaluateExpressionForMachine(string expression, MachineProfileDto machine)
+    private static bool EvaluateExpression(string expression, MachineProfileDto machine)
     {
-        // Split by top-level 'and' and 'or' operators
-        // Handle precedence: 'and' binds tighter than 'or'
-        
-        var tokens = TokenizeExpression(expression);
-        return EvaluateTokens(tokens, machine);
-    }
-
-    private static bool EvaluateTokens(List<Token> tokens, MachineProfileDto machine)
-    {
-        // First pass: evaluate all comparison operators
-        var evaluatedTokens = new List<Token>();
-        
-        for (int i = 0; i < tokens.Count; i++)
-        {
-            var token = tokens[i];
-            
-            if (token.Type == TokenType.Comparison)
-            {
-                var result = EvaluateComparison(token.Value ?? "", machine);
-                evaluatedTokens.Add(new Token { Type = TokenType.Boolean, Value = result.ToString().ToLowerInvariant() });
-            }
-            else
-            {
-                evaluatedTokens.Add(token);
-            }
-        }
-
-        // Second pass: process logical operators (AND has higher precedence than OR)
-        // Process all ANDs first
-        var andProcessed = new List<Token>();
-        for (int i = 0; i < evaluatedTokens.Count; i++)
-        {
-            if (i < evaluatedTokens.Count - 2 && 
-                evaluatedTokens[i + 1].Type == TokenType.Operator && 
-                evaluatedTokens[i + 1].Value == "and")
-            {
-                var left = evaluatedTokens[i].Value == "true";
-                var right = evaluatedTokens[i + 2].Value == "true";
-                var result = left && right;
-                andProcessed.Add(new Token { Type = TokenType.Boolean, Value = result.ToString().ToLowerInvariant() });
-                i += 2; // Skip operator and right operand
-            }
-            else if (evaluatedTokens[i].Type != TokenType.Operator)
-            {
-                andProcessed.Add(evaluatedTokens[i]);
-            }
-        }
-
-        // Third pass: process ORs
-        bool finalResult = andProcessed.Count > 0 && andProcessed[0].Value == "true";
-        for (int i = 1; i < andProcessed.Count; i += 2)
-        {
-            if (i + 1 < andProcessed.Count)
-            {
-                var right = andProcessed[i + 1].Value == "true";
-                finalResult = finalResult || right;
-            }
-        }
-
-        return finalResult;
-    }
-
-    private static List<Token> TokenizeExpression(string expression)
-    {
-        var tokens = new List<Token>();
-        var parts = expression.Split(new[] { " and ", " or " }, StringSplitOptions.None);
-        
-        // Track operators
-        int operatorCount = 0;
-        foreach (var part in parts)
-        {
-            tokens.Add(new Token { Type = TokenType.Comparison, Value = part.Trim() });
-            
-            // Add operator if not last part
-            operatorCount++;
-            if (operatorCount < parts.Length)
-            {
-                // Figure out which operator was used
-                int findIndex = 0;
-                for (int i = 0; i < operatorCount - 1; i++)
-                {
-                    int andIndex = expression.IndexOf(" and ", findIndex, StringComparison.OrdinalIgnoreCase);
-                    int orIndex = expression.IndexOf(" or ", findIndex, StringComparison.OrdinalIgnoreCase);
-                    
-                    findIndex = andIndex >= 0 && (orIndex < 0 || andIndex < orIndex) ? andIndex + 5 : orIndex + 4;
-                }
-                
-                var op = expression.Contains(" and ", StringComparison.OrdinalIgnoreCase) ? "and" : "or";
-                tokens.Add(new Token { Type = TokenType.Operator, Value = op });
-            }
-        }
-
-        return tokens;
-    }
-
-    private static bool EvaluateComparison(string comparison, MachineProfileDto machine)
-    {
-        comparison = comparison.Trim();
-
-        // Handle regex matching: property=~/pattern/
-        var regexMatch = Regex.Match(comparison, @"(\w+)\s*=~\s*/(.+)/", RegexOptions.IgnoreCase);
-        if (regexMatch.Success)
-        {
-            var property = regexMatch.Groups[1].Value.ToLowerInvariant();
-            var pattern = regexMatch.Groups[2].Value;
-            
-            return EvaluateRegexMatch(property, pattern, machine);
-        }
-
-        // Handle equality: property==value or property[index]==value
-        var eqMatch = Regex.Match(comparison, @"(\w+)(?:\[(\d+)\])?\s*==\s*(.+)", RegexOptions.IgnoreCase);
-        if (eqMatch.Success)
-        {
-            var property = eqMatch.Groups[1].Value.ToLowerInvariant();
-            var indexStr = eqMatch.Groups[2].Value;
-            var value = eqMatch.Groups[3].Value.Trim();
-
-            return EvaluateEquality(property, indexStr, value, machine);
-        }
-
-        return false; // Unknown comparison format
-    }
-
-    private static bool EvaluateRegexMatch(string property, string pattern, MachineProfileDto machine)
-    {
-        var value = GetPropertyValue(property, machine);
-        if (value == null)
-            return false;
-
         try
         {
-            return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase);
+            var parser = new ExpressionParser(expression, machine);
+            return parser.Parse();
         }
         catch
         {
@@ -194,116 +63,325 @@ public static class PrinterExpressionParser
         }
     }
 
-    private static bool EvaluateEquality(string property, string indexStr, string expectedValue, MachineProfileDto machine)
+    /// <summary>
+    /// Recursive descent parser for boolean expressions with proper operator precedence.
+    /// Precedence: comparison (highest) > AND > OR (lowest)
+    /// </summary>
+    private class ExpressionParser
     {
-        var value = GetPropertyValue(property, indexStr, machine);
-        if (value == null)
-            return false;
+        private readonly string _expression;
+        private readonly MachineProfileDto _machine;
+        private int _position = 0;
 
-        // Normalize comparison (trim quotes, handle numeric comparison)
-        expectedValue = expectedValue.Trim('"', '\'');
-        
-        if (double.TryParse(value, out var numValue) && double.TryParse(expectedValue, out var expectedNum))
+        public ExpressionParser(string expression, MachineProfileDto machine)
         {
-            return Math.Abs(numValue - expectedNum) < 0.0001; // Float comparison with tolerance
+            _expression = expression;
+            _machine = machine;
         }
 
-        return value.Equals(expectedValue, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? GetPropertyValue(string property, MachineProfileDto machine)
-    {
-        return property.ToLowerInvariant() switch
+        public bool Parse()
         {
-            "printer_notes" => ExtractPrinterNotes(machine),
-            "name" => machine.Name,
-            _ => null
-        };
-    }
-
-    private static string? ExtractPrinterNotes(MachineProfileDto machine)
-    {
-        // printer_notes are stored in Settings dictionary
-        if (machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out var notes))
-        {
-            return notes?.ToString();
+            SkipWhitespace();
+            var result = ParseOr();
+            SkipWhitespace();
+            if (_position < _expression.Length)
+                throw new FormatException($"Unexpected characters at position {_position}");
+            return result;
         }
 
-        // Fallback: try to find from raw JSON
-        if (machine.Settings != null && machine.Settings.TryGetValue("printer_model", out var model))
+        private bool ParseOr()
         {
-            return model?.ToString();
-        }
+            var left = ParseAnd();
 
-        return null;
-    }
-
-    private static string? GetPropertyValue(string property, string? indexStr, MachineProfileDto machine)
-    {
-        // Properties that support indexing
-        if (property.Equals("nozzle_diameter", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrEmpty(indexStr) || !int.TryParse(indexStr, out int index))
+            while (PeekKeyword("or"))
             {
-                return null;
+                ConsumeKeyword("or");
+                SkipWhitespace();
+                var right = ParseAnd();
+                left = left || right;
             }
 
-            // First try to use the dedicated NozzleDiameter property
-            if (index == 0 && machine.NozzleDiameter.HasValue)
+            return left;
+        }
+
+        private bool ParseAnd()
+        {
+            var left = ParseComparison();
+
+            while (PeekKeyword("and"))
             {
-                return machine.NozzleDiameter.Value.ToString("F1");
+                ConsumeKeyword("and");
+                SkipWhitespace();
+                var right = ParseComparison();
+                left = left && right;
             }
 
-            // Try Settings dictionary
-            if (machine.Settings != null && machine.Settings.TryGetValue("nozzle_diameter", out var nozzle))
+            return left;
+        }
+
+        private bool ParseComparison()
+        {
+            SkipWhitespace();
+
+            // Parse property with optional index: property or property[index]
+            var (property, index) = ParseProperty();
+            
+            SkipWhitespace();
+
+            // Check for regex match: =~
+            if (Peek("=~"))
             {
-                if (index == 0 && nozzle != null)
+                Consume('=');
+                Consume('~');
+                SkipWhitespace();
+                var pattern = ParseRegexPattern();
+                return EvaluateRegexMatch(property, pattern);
+            }
+
+            // Check for equality: ==
+            if (Peek("=="))
+            {
+                Consume('=');
+                Consume('=');
+                SkipWhitespace();
+                var value = ParseValue();
+                return EvaluateEquality(property, index, value);
+            }
+
+            throw new FormatException($"Invalid comparison at position {_position}");
+        }
+
+        private (string property, int? index) ParseProperty()
+        {
+            var property = ReadIdentifier();
+            int? index = null;
+
+            SkipWhitespace();
+
+            if (Peek('['))
+            {
+                Consume('[');
+                SkipWhitespace();
+                index = int.Parse(ReadNumber());
+                SkipWhitespace();
+                Consume(']');
+            }
+
+            return (property, index);
+        }
+
+        private string ParseRegexPattern()
+        {
+            Consume('/');
+            var pattern = "";
+            while (!Peek("/") && _position < _expression.Length)
+            {
+                pattern += _expression[_position++];
+            }
+            Consume('/');
+            return pattern;
+        }
+
+        private string ParseValue()
+        {
+            SkipWhitespace();
+            
+            // Handle quoted strings
+            if (Peek('"'))
+            {
+                Consume('"');
+                var value = "";
+                while (!Peek('"') && _position < _expression.Length)
                 {
-                    return nozzle.ToString();
+                    value += _expression[_position++];
+                }
+                Consume('"');
+                return value;
+            }
+
+            // Handle unquoted numbers or identifiers
+            var ch = Peek();
+            if (ch.HasValue && (char.IsDigit(ch.Value) || (ch == '-' && _position + 1 < _expression.Length && char.IsDigit(_expression[_position + 1]))))
+            {
+                return ReadNumber();
+            }
+
+            return ReadIdentifier();
+        }
+
+        private string ReadIdentifier()
+        {
+            var id = "";
+            while (_position < _expression.Length && (char.IsLetterOrDigit(_expression[_position]) || _expression[_position] == '_' || _expression[_position] == '.'))
+            {
+                id += _expression[_position++];
+            }
+            return id;
+        }
+
+        private string ReadNumber()
+        {
+            var num = "";
+            if (Peek('-'))
+                num += _expression[_position++];
+            
+            while (_position < _expression.Length && (char.IsDigit(_expression[_position]) || _expression[_position] == '.'))
+            {
+                num += _expression[_position++];
+            }
+            return num;
+        }
+
+        private void SkipWhitespace()
+        {
+            while (_position < _expression.Length && char.IsWhiteSpace(_expression[_position]))
+            {
+                _position++;
+            }
+        }
+
+        private bool Peek(string str)
+        {
+            return _expression.Substring(_position).StartsWith(str, StringComparison.Ordinal);
+        }
+
+        private bool Peek(char ch)
+        {
+            return _position < _expression.Length && _expression[_position] == ch;
+        }
+
+        private char? Peek()
+        {
+            return _position < _expression.Length ? _expression[_position] : null;
+        }
+
+        private bool PeekKeyword(string keyword)
+        {
+            if (!Peek(keyword))
+                return false;
+
+            // Ensure it's a whole word (not part of another identifier)
+            var endPos = _position + keyword.Length;
+            if (endPos < _expression.Length)
+            {
+                var nextChar = _expression[endPos];
+                return !char.IsLetterOrDigit(nextChar) && nextChar != '_';
+            }
+
+            return true;
+        }
+
+        private void Consume(char ch)
+        {
+            if (!Peek(ch))
+                throw new FormatException($"Expected '{ch}' at position {_position}");
+            _position++;
+        }
+
+        private void ConsumeKeyword(string keyword)
+        {
+            if (!Peek(keyword))
+                throw new FormatException($"Expected '{keyword}' at position {_position}");
+            _position += keyword.Length;
+        }
+
+        private bool EvaluateRegexMatch(string property, string pattern)
+        {
+            var value = GetPropertyValue(property);
+            if (value == null)
+                return false;
+
+            try
+            {
+                return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool EvaluateEquality(string property, int? index, string expectedValue)
+        {
+            var value = GetPropertyValue(property, index);
+            if (value == null)
+                return false;
+
+            // Numeric comparison with tolerance
+            if (double.TryParse(value, out var numValue) && double.TryParse(expectedValue, out var expectedNum))
+            {
+                return Math.Abs(numValue - expectedNum) < 0.0001;
+            }
+
+            // String comparison
+            return value.Equals(expectedValue, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string? GetPropertyValue(string property)
+        {
+            return property.ToLowerInvariant() switch
+            {
+                "printer_notes" => ExtractPrinterNotes(_machine),
+                "name" => _machine.Name,
+                _ => null
+            };
+        }
+
+        private string? GetPropertyValue(string property, int? index)
+        {
+            // Properties with indexing support
+            if (property.Equals("nozzle_diameter", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!index.HasValue || index < 0)
+                    return null;
+
+                // Try dedicated property first
+                if (index == 0 && _machine.NozzleDiameter.HasValue)
+                {
+                    return _machine.NozzleDiameter.Value.ToString("G");
+                }
+
+                // Try settings
+                if (_machine.Settings != null && _machine.Settings.TryGetValue("nozzle_diameter", out var nozzle))
+                {
+                    if (index == 0 && nozzle != null)
+                        return nozzle.ToString();
+                }
+
+                // Try extracting from name as fallback
+                if (index == 0)
+                {
+                    return ExtractNozzleDiameterFromName(_machine.Name);
                 }
             }
 
-            // Try to extract from name as fallback
-            var nozzleDiameter = ExtractNozzleDiameterFromName(machine.Name);
-            if (index == 0 && nozzleDiameter != null)
+            return GetPropertyValue(property);
+        }
+
+        private static string? ExtractPrinterNotes(MachineProfileDto machine)
+        {
+            if (machine.Settings != null && machine.Settings.TryGetValue("printer_notes", out var notes))
             {
-                return nozzleDiameter;
+                return notes?.ToString();
             }
 
             return null;
         }
 
-        return GetPropertyValue(property, machine);
-    }
-
-    private static string? ExtractNozzleDiameterFromName(string? machineName)
-    {
-        if (string.IsNullOrEmpty(machineName))
-            return null;
-
-        // Try to extract nozzle diameter from name
-        // Common patterns: "X 0.4 nozzle", "X (0.4)", "X 0.6mm", etc.
-        var matches = Regex.Matches(machineName, @"(\d+\.?\d*)\s*mm?", RegexOptions.IgnoreCase);
-        if (matches.Count > 0)
+        private static string? ExtractNozzleDiameterFromName(string? machineName)
         {
-            // Last number is likely the nozzle diameter (first is usually part of model name)
-            var lastMatch = matches[matches.Count - 1];
-            return lastMatch.Groups[1].Value;
+            if (string.IsNullOrEmpty(machineName))
+                return null;
+
+            // Look for pattern: space + number + optional decimal + space/end/nozzle
+            // e.g., "Prusa MK4S 0.25 nozzle" → "0.25"
+            var match = Regex.Match(machineName, @"\s(\d+\.?\d*)\s*(nozzle|mm)?(\s|$)", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                return match.Groups[1].Value;
+            }
+
+            return null;
         }
-
-        return null;
-    }
-
-    private class Token
-    {
-        public TokenType Type { get; set; }
-        public string? Value { get; set; }
-    }
-
-    private enum TokenType
-    {
-        Comparison,
-        Operator,
-        Boolean
     }
 }
