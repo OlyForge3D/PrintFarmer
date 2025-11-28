@@ -1049,9 +1049,6 @@ All components require:
 - `tailwindcss` - For utility classes
 - PrintFarmer color tokens configured in `tailwind.config.js`
 
-ProgressBar additionally requires:
-- `ProgressBar.module.css` - CSS module for data-attribute width styling
-
 ---
 
 ## Testing

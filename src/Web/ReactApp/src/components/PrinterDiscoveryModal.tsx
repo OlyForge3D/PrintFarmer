@@ -490,7 +490,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 {/* Initial state - before any scan */}
                 {!isActive && foundPrinters.length === 0 && !isCompleted && (
                   <div className="text-center py-8 text-pf-text-secondary">
-                    Click "Start Network Scan" to search for printers on your network
+                    Click "Start Scan" to search for printers on your network
                   </div>
                 )}
 
@@ -561,9 +561,9 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 variant="primary"
                 onClick={handleStartDiscovery}
                 disabled={startDiscoveryMutation.isPending || selectedBackends.size === 0}
+                iconLeft={<Search className="h-4 w-4" />}
               >
-                <Search className="h-4 w-4 mr-2" />
-                {hasScanRun ? 'Scan Again' : 'Start Network Scan'}
+                {hasScanRun ? 'Scan Again' : 'Start Scan'}
               </Button>
             )}
           </div>

@@ -1,6 +1,5 @@
 import React from 'react';
 import clsx from 'clsx';
-import styles from './ProgressBar.module.css';
 
 export interface ProgressBarProps {
   value: number; // 0-100
@@ -47,12 +46,18 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
       <div
         className={clsx('w-full bg-pf-bg-1 rounded-full overflow-hidden', heightMap[size])}
         role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
         aria-label={label || 'Progress'}
       >
-        {/* Using data-width attribute so CSS can be leveraged if inline styles are disallowed */}
         <div
-          className={clsx(colorMap[color], 'h-full transition-all duration-300', animated && 'animate-none', styles['progressbar-fill'])}
-          data-width={pct}
+          className={clsx(
+            colorMap[color], 
+            'h-full rounded-full',
+            animated && 'transition-[width] duration-200 ease-out'
+          )}
+          style={{ width: `${pct}%` }}
         />
       </div>
     </div>
