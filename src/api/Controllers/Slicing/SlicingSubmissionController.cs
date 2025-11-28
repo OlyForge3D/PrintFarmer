@@ -14,12 +14,10 @@ public class SlicingSubmissionController : ControllerBase
 {
     private static readonly HashSet<string> AllowedEngines = new(StringComparer.OrdinalIgnoreCase) { "prusaslicer", "orcaslicer" };
     private readonly ISlicingSubmissionService _submissionService;
-    private readonly IUnifiedLoggingService _logger;
     private readonly IHostEnvironment _env;
 
     public SlicingSubmissionController(
         ISlicingSubmissionService submissionService,
-        IUnifiedLoggingService logger,
         IConfiguration cfg,
         Infrastructure.Temp.ITempPathProvider tempPathProvider,
         IHostEnvironment env)
@@ -27,7 +25,6 @@ public class SlicingSubmissionController : ControllerBase
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentNullException.ThrowIfNull(tempPathProvider);
         _submissionService = submissionService ?? throw new ArgumentNullException(nameof(submissionService));
-        _logger = logger;
         _env = env ?? throw new ArgumentNullException(nameof(env));
         // Ensure temp root exists but do not keep provider/paths as fields to avoid analyzer suggestions
         string tempRoot = Path.GetFullPath(tempPathProvider.GetTempRoot());

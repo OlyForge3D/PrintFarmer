@@ -9,7 +9,6 @@ public class RegistrationBackgroundService : BackgroundService
 {
     private readonly ISlicerRegistrationClient _registrationClient;
     private readonly IWorkerStateService _workerState;
-    private readonly IConfiguration _configuration;
     private readonly ILogger<RegistrationBackgroundService> _logger;
     private readonly IHostApplicationLifetime _lifetime;
 
@@ -28,7 +27,7 @@ public class RegistrationBackgroundService : BackgroundService
     {
         _registrationClient = registrationClient ?? throw new ArgumentNullException(nameof(registrationClient));
         _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        ArgumentNullException.ThrowIfNull(configuration);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
 

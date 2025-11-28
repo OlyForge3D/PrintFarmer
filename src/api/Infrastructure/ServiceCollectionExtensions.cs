@@ -151,10 +151,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
 
-        // Profile Parsing and Import Services
-        _ = services.AddScoped<IProfileParsingService, ProfileParsingService>();
-        _ = services.AddScoped<IProfileImportService, ProfileImportService>();
-
         // Slicer Library Registration
         // Dynamically discover and register slicer library plugins using SlicerPluginAttribute.
         // Each slicer library project declares itself via assembly attribute, eliminating

@@ -67,12 +67,10 @@ namespace Farm.Web.Api.Services
     {
         private readonly ILogger<AssetService> _logger;
         private readonly string _manifestPath;
-        private readonly Dictionary<string, ManufacturerAssetsDto> _manufacturerCache;
 
         public AssetService(ILogger<AssetService> logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _manufacturerCache = new();
 
             // Manifest is served from React app public assets
             // For API usage, we'll reference URLs only (no file I/O in API)

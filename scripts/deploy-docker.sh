@@ -103,6 +103,7 @@ DOCKER_BASE_IMAGES=(
     "node:22-alpine"
     "postgres:16-alpine"
     "nginx:alpine"
+    "docker/dockerfile:1"  # BuildKit Dockerfile frontend parser (required for # syntax=docker/dockerfile:1)
 )
 
 # Pre-upgraded base images with apt/apk updates and tools pre-installed
@@ -114,6 +115,7 @@ DOCKER_UPGRADED_IMAGES=(
     "node:22-alpine-upgraded"
     "postgres:16-alpine-upgraded"
     "nginx:alpine-upgraded"
+    "docker/dockerfile:1"  # No upgrade needed - just cache the original
 )
 
 # Locally-built images for offline deployment (built during --prepare-offline, not pulled from registry)
@@ -267,6 +269,17 @@ auto_load_cached_images() {
     
     # Use the core loading function
     _load_tar_images "$images_dir" "quiet"
+    
+    # After loading, check if orcaslicer-binaries was loaded and set ORCA_ASSET_IMAGE
+    # This enables the build system to skip downloading OrcaSlicer from GitHub
+    for local_image in "${DOCKER_LOCAL_IMAGES[@]}"; do
+        if docker image inspect "$local_image" >/dev/null 2>&1; then
+            if [[ "$local_image" == orcaslicer-binaries:* ]]; then
+                export ORCA_ASSET_IMAGE="$local_image"
+                print_info "Loaded prebuilt OrcaSlicer binaries: $local_image"
+            fi
+        fi
+    done
 }
 
 # Find OrcaSlicer AppImage in common cache locations
@@ -1216,6 +1229,18 @@ load_images_from_tar() {
         echo
         print_success "All images loaded successfully!"
         print_info "Images are now available in local Docker daemon"
+        
+        # Check if orcaslicer-binaries was loaded and set ORCA_ASSET_IMAGE
+        # This enables the build system to skip downloading OrcaSlicer from GitHub
+        for local_image in "${DOCKER_LOCAL_IMAGES[@]}"; do
+            if docker image inspect "$local_image" >/dev/null 2>&1; then
+                if [[ "$local_image" == orcaslicer-binaries:* ]]; then
+                    export ORCA_ASSET_IMAGE="$local_image"
+                    print_info "🚀 Using prebuilt OrcaSlicer binaries: $local_image (skipping GitHub download)"
+                fi
+            fi
+        done
+        
         return 0
     else
         return 1
@@ -1433,9 +1458,24 @@ build_base_images() {
     fi
     echo
     
+    # Pull BuildKit Dockerfile frontend (required for # syntax=docker/dockerfile:1)
+    print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    print_info "Pulling: docker/dockerfile:1"
+    print_info "  BuildKit Dockerfile frontend parser"
+    print_info "  Required for advanced Dockerfile syntax features"
+    print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if docker pull docker/dockerfile:1 > /dev/null 2>&1; then
+        print_success "✓ Pulled: docker/dockerfile:1"
+        ((successful++))
+    else
+        print_warning "⚠ Failed to pull docker/dockerfile:1 (builds may require network)"
+    fi
+    echo
+    
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     print_header "Base Image Build Summary"
-    print_info "Successful: $successful/$((total_images + 1))"
+    print_info "Successful: $successful/$((total_images + 2))"
     print_info "Failed: $failed/$total_images"
     
     if [ "$failed" -gt 0 ]; then
@@ -4632,9 +4672,17 @@ deploy_containers() {
 
         if [ -n "$ORCA_ASSET_IMAGE" ]; then
             print_info "Using Orca assets image: $ORCA_ASSET_IMAGE"
-            docker pull "$ORCA_ASSET_IMAGE" || print_warning "Failed to pull $ORCA_ASSET_IMAGE; continuing and hoping it's local"
-            # Tag locally so Dockerfile can refer to orcaslicer-assets:ci
-            docker tag "$ORCA_ASSET_IMAGE" orcaslicer-assets:ci || true
+            # Only try to pull if image doesn't exist locally AND looks like a registry image
+            if ! docker image inspect "$ORCA_ASSET_IMAGE" >/dev/null 2>&1; then
+                # Check if it looks like a registry image (contains / or .)
+                if [[ "$ORCA_ASSET_IMAGE" == *"/"* ]] || [[ "$ORCA_ASSET_IMAGE" == *"."* ]]; then
+                    docker pull "$ORCA_ASSET_IMAGE" || print_warning "Failed to pull $ORCA_ASSET_IMAGE; continuing and hoping it's local"
+                else
+                    print_warning "Image $ORCA_ASSET_IMAGE not found locally and doesn't look like a registry image"
+                fi
+            else
+                print_info "Image $ORCA_ASSET_IMAGE found locally (skipping pull)"
+            fi
         elif [ -n "$ORCA_ASSET_PATH" ]; then
             if [ -d "$ORCA_ASSET_PATH" ]; then
                 print_info "Copying Orca assets from $ORCA_ASSET_PATH into temporary build context"
@@ -4712,6 +4760,33 @@ deploy_containers() {
         # Note: slicer-base stage is now part of Dockerfile.multistage (orcaslicer-worker target)
         # No separate build needed - docker compose build will handle it automatically
         
+        # If we have a prebuilt orcaslicer-binaries image, create an override compose file
+        # that uses additional_contexts to make Docker use the cached image instead of rebuilding
+        ORCA_OVERRIDE_FILE=""
+        cleanup_orca_override() {
+            if [ -n "${ORCA_OVERRIDE_FILE:-}" ] && [ -f "${ORCA_OVERRIDE_FILE}" ]; then
+                rm -f "${ORCA_OVERRIDE_FILE}"
+            fi
+        }
+        # Build command - may include override file for orcaslicer binaries caching
+        local build_compose_cmd=("${compose_cmd[@]}")
+        if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ] && [ -n "${ORCA_VERSION:-}" ]; then
+            ORCA_OVERRIDE_FILE="${SCRIPT_DIR}/.orca-binaries-override.yml"
+            cat > "${ORCA_OVERRIDE_FILE}" << EOF
+# Auto-generated: Use prebuilt orcaslicer-binaries image instead of building
+services:
+  orcaslicer-worker:
+    build:
+      additional_contexts:
+        orcaslicer-binaries: docker-image://orcaslicer-binaries:${ORCA_VERSION}
+EOF
+            print_info "Using prebuilt orcaslicer-binaries:${ORCA_VERSION} (via additional_contexts override)"
+            # Add override file to BUILD command only (not the main compose_cmd used for 'up')
+            build_compose_cmd+=(-f "${ORCA_OVERRIDE_FILE}")
+            # Ensure cleanup on exit
+            trap cleanup_orca_override EXIT
+        fi
+        
         # Now build all services
         # Support passing --platform to docker compose build when requested
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
@@ -4719,12 +4794,12 @@ deploy_containers() {
             # Try using the --platform flag first (supported on modern compose). If it fails
             # (for example older compose binary that reports unknown flag), fall back to
             # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
-            if "${compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}" --platform "${DOCKER_BUILD_PLATFORM}"; then
+            if "${build_compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}" --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
                 print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
                 export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
-                if "${compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
+                if "${build_compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
                     print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
                 else
                     print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
@@ -4733,7 +4808,7 @@ deploy_containers() {
                 fi
             fi
         else
-            if "${compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
+            if "${build_compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
                 print_success "Docker images built successfully"
             else
                 print_error "Failed to build Docker images"
@@ -4742,6 +4817,9 @@ deploy_containers() {
                 exit 1
             fi
         fi
+        
+        # Clean up the temporary override file if it was created
+        cleanup_orca_override
     fi
     
     print_info "Step 2/3: Starting containers..."

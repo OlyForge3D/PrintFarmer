@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
-using Farm.Infrastructure.Telemetry;
 using Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Queue
@@ -14,18 +13,13 @@ namespace Farm.Web.Api.Services.Queue
     {
         private readonly IQueueRepository _repo;
         private readonly IQueueDataService _dataService;
-        private readonly IUnifiedLoggingService _logger;
 
-        public JobQueueService(IQueueRepository repo, IQueueDataService dataService, IUnifiedLoggingService logger)
+        public JobQueueService(IQueueRepository repo, IQueueDataService dataService)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(dataService);
-            ArgumentNullException.ThrowIfNull(logger);
             _repo = repo;
             _dataService = dataService;
-            _logger = logger;
-            _repo = repo;
-            _logger = logger;
         }
 
         public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct)

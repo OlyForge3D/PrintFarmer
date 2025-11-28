@@ -13,17 +13,14 @@ namespace Farm.Web.Api.Controllers;
 public class UnifiedSettingsController : ControllerBase
 {
     private readonly ISettingsService _modularSettingsService;
-    private readonly IConfiguration _config;
     private readonly Dictionary<string, string> _keyNameToClassNameMap;
     private readonly ILogger<UnifiedSettingsController> _logger;
 
     public UnifiedSettingsController(
         ISettingsService modularSettingsService,
-        IConfiguration config,
         ILogger<UnifiedSettingsController> logger)
     {
         _modularSettingsService = modularSettingsService;
-        _config = config;
         _logger = logger;
         _keyNameToClassNameMap = BuildKeyNameToClassNameMap();
     }

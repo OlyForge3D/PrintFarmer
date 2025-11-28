@@ -37,12 +37,11 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IPrinterCapabilityDiscoveryService _capabilityDiscovery;
         private readonly IDefaultCatalogService _defaultCatalog;
         private readonly IHttpClientFactory _httpClientFactory;
-        private readonly INetworkUrlRewriteService _urlRewriter;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
         private readonly AutoMapper.IMapper _mapper;
         private readonly IHubContext<Hubs.PrinterHub> _hubContext;
 
-        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, INetworkUrlRewriteService urlRewriter, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper, IHubContext<Hubs.PrinterHub> hubContext)
+        public PrintersService(Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo, IMoonrakerClient moon, IPrusaLinkClient prusa, ISdcpClient sdcp, IOctoPrintClient octoprint, ICircuitBreakerService circuitBreaker, IPrinterCapabilityDiscoveryService capabilityDiscovery, IDefaultCatalogService defaultCatalog, Catalog.ICatalogService catalogService, IHttpClientFactory httpClientFactory, Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger, AutoMapper.IMapper mapper, IHubContext<Hubs.PrinterHub> hubContext)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _moon = moon ?? throw new ArgumentNullException(nameof(moon));
@@ -54,7 +53,6 @@ namespace Farm.Web.Api.Services.Printers
             _defaultCatalog = defaultCatalog ?? throw new ArgumentNullException(nameof(defaultCatalog));
             _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-            _urlRewriter = urlRewriter ?? throw new ArgumentNullException(nameof(urlRewriter));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
             _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));

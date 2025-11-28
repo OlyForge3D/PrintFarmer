@@ -15,7 +15,6 @@ public class AccountLockoutService : IAccountLockoutService
     private readonly IAuthAuditService _authAuditService;
     private readonly int _maxFailedAttempts;
     private readonly int _lockoutDurationMinutes;
-    private readonly int _attemptWindowMinutes;
 
     public AccountLockoutService(AppDbContext context, IConfiguration configuration, IAuthAuditService authAuditService)
     {
@@ -26,7 +25,6 @@ public class AccountLockoutService : IAccountLockoutService
         // Read lockout settings from configuration with sensible defaults
         _maxFailedAttempts = int.Parse(_configuration["AccountLockout:MaxFailedAttempts"] ?? "5");
         _lockoutDurationMinutes = int.Parse(_configuration["AccountLockout:LockoutDurationMinutes"] ?? "15");
-        _attemptWindowMinutes = int.Parse(_configuration["AccountLockout:AttemptWindowMinutes"] ?? "15");
     }
 
     public async Task<bool> IsLockedOutAsync(Guid userId)

@@ -30,6 +30,8 @@ x-nginx-healthcheck: &nginx-healthcheck
   retries: 3
 
 # Build definitions
+# When USE_PREBUILT_ORCA_BINARIES=true and orcaslicer-binaries:VERSION image exists,
+# Docker will use the prebuilt image instead of downloading from GitHub
 x-orcaslicer-build: &orcaslicer-build
   context: .
   dockerfile: Dockerfile.multistage

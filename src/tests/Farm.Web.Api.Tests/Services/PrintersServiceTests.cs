@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
@@ -39,7 +38,6 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<IDefaultCatalogService>();
             Mock<ICatalogService> catalogMock = new Mock<ICatalogService>();
             Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<IHttpClientFactory>();
-            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<INetworkUrlRewriteService>();
             Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
             Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<IHubContext<PrinterHub>>();
 
@@ -47,7 +45,7 @@ namespace Farm.Web.Api.Tests.Services
             MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
 
-            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
+            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
 
             Printer? printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
@@ -72,14 +70,13 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<IDefaultCatalogService>();
             Mock<ICatalogService> catalogMock = new Mock<ICatalogService>();
             Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<IHttpClientFactory>();
-            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<INetworkUrlRewriteService>();
             Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
             Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<IHubContext<PrinterHub>>();
 
             MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
 
-            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, urlRewriterMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
+            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
 
             Printer? printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
@@ -211,7 +208,6 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IDefaultCatalogService> defaultCatalogMock = new Mock<IDefaultCatalogService>();
             Mock<ICatalogService> catalogMock = new Mock<ICatalogService>();
             Mock<IHttpClientFactory> httpClientFactoryMock = new Mock<IHttpClientFactory>();
-            Mock<INetworkUrlRewriteService> urlRewriterMock = new Mock<INetworkUrlRewriteService>();
             Mock<IUnifiedLoggingService> loggerMock = new Mock<IUnifiedLoggingService>();
             Mock<IHubContext<PrinterHub>> hubContextMock = new Mock<IHubContext<PrinterHub>>();
 
@@ -229,7 +225,6 @@ namespace Farm.Web.Api.Tests.Services
                 defaultCatalogMock.Object,
                 catalogMock.Object,
                 httpClientFactoryMock.Object,
-                urlRewriterMock.Object,
                 loggerMock.Object,
                 mapper,
                 hubContextMock.Object);

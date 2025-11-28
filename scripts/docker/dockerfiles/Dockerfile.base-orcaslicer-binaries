@@ -4,8 +4,12 @@
 # This layer is used in the multistage build as a cache layer
 ############################################################
 
-FROM ubuntu:24.04 AS orcaslicer-binaries-base
+# Global ARG - must be declared before first FROM to be available across stages
 ARG ORCASLICER_VERSION=2.3.1
+
+FROM ubuntu:24.04 AS orcaslicer-binaries-base
+# Re-declare ARG to use in this stage (inherits value from global or --build-arg)
+ARG ORCASLICER_VERSION
 ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
 ARG GITHUB_TOKEN
 ARG CACHE_BUST=latest
@@ -109,8 +113,11 @@ RUN set -e; \
     find /orcaslicer-dist -type f | head -20
 
 # Stage 2: Create a minimal runtime layer with just the extracted binaries
+# IMPORTANT: Keep the /orcaslicer-dist prefix to match Dockerfile.multistage expectations
 FROM scratch AS orcaslicer-binaries
-COPY --from=orcaslicer-binaries-base /orcaslicer-dist /
+# Re-declare ARG to use in this stage (inherits value from global or --build-arg)
+ARG ORCASLICER_VERSION
+COPY --from=orcaslicer-binaries-base /orcaslicer-dist /orcaslicer-dist
 
 # Set label to identify this as a pre-cached image
 LABEL prebuild="true" purpose="orcaslicer-binaries" version="${ORCASLICER_VERSION}"

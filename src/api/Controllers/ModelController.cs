@@ -25,9 +25,6 @@ public class ModelController : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger;
     private readonly IModelService _modelService;
-    private readonly IModelAnalysisService _analysisService;
-    private readonly IVirusScanner _virusScanner;
-    private readonly IThumbnailGenerationService _thumbnailService;
     private readonly string _modelsPath;
     private readonly Services.IO.IFileSystem _fileSystem;
     private readonly IFileManagementService _fileManagementService;
@@ -38,9 +35,6 @@ public class ModelController : ControllerBase
         IUnifiedLoggingService logger,
         IModelService modelService,
         IConfiguration configuration,
-        IModelAnalysisService analysisService,
-        IVirusScanner virusScanner,
-        IThumbnailGenerationService thumbnailService,
         Services.IO.IFileSystem fileSystem,
         IFileManagementService fileManagementService,
         ITagService tagService,
@@ -54,9 +48,6 @@ public class ModelController : ControllerBase
         _modelRepo = modelRepo ?? throw new ArgumentNullException(nameof(modelRepo));
         ArgumentNullException.ThrowIfNull(configuration);
         _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
-        _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
-        _virusScanner = virusScanner ?? throw new ArgumentNullException(nameof(virusScanner));
-        _thumbnailService = thumbnailService ?? throw new ArgumentNullException(nameof(thumbnailService));
 
         if (!_fileSystem.DirectoryExists(_modelsPath))
         {
