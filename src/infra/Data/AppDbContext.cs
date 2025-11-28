@@ -98,6 +98,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(p => p.IpAddress).HasMaxLength(64);
             _ = b.Property(p => p.Backend).HasDefaultValue(0);
             _ = b.Property(p => p.ApiKey);
+            // Prevent duplicate printers by IP address (unique constraint)
+            // SQLite allows multiple NULLs in unique index by default
+            // SQL Server needs a filtered index to allow NULLs
+            IndexBuilder<Printer> ipIndex = b.HasIndex(p => p.IpAddress).IsUnique();
+            if (Database.ProviderName != null && Database.ProviderName.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = ipIndex.HasFilter("[IpAddress] IS NOT NULL");
+            }
             _ = b.HasOne(p => p.Manufacturer)
              .WithMany()
              .HasForeignKey(p => p.ManufacturerId)

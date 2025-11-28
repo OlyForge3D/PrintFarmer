@@ -10,6 +10,12 @@ import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import { X, Search } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
+import { Label } from '@/components/ui/Label';
+import { Alert } from '@/components/ui/Alert';
+import { ProgressBar } from '@/components/ui/ProgressBar';
 
 interface PrinterDiscoveryModalProps {
   isOpen: boolean;
@@ -82,7 +88,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       }
       resetDiscovery(); // Clear previous results
       const backends = selectedBackends.size > 0 ? Array.from(selectedBackends) : undefined;
-      const result = await startDiscoveryMutation.mutateAsync({ backends });
+      const result = await startDiscoveryMutation.mutateAsync({ backends, autoRegister: false });
       if (!result || !('sessionId' in result) || !result.sessionId) {
         console.error('[PrintFarmer] startDiscovery returned no sessionId', result);
         setSessionId(null);
@@ -143,12 +149,12 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
           name: printer.name || `${printer.manufacturer || 'Unknown'} Printer`,
           serverUrl: printer.serverUrl,
           backend: printer.backend,
-          notes: `Auto-discovered at ${printer.ipAddress}:${printer.port}`,
+          notes: `Auto-discovered at ${printer.ipAddress}:${printer.backendPort ?? 'unknown'}`,
           manufacturerId: config.manufacturerId,
           modelId: config.modelId,
           newManufacturerName: config.newManufacturerName,
           newModelName: config.newModelName,
-          backendPort: printer.port,
+          backendPort: printer.backendPort ?? undefined,
           frontendPort: printer.frontendPort ?? undefined,
           cameraStreamUrl: printer.cameraStreamUrl ?? undefined,
           cameraSnapshotUrl: printer.cameraSnapshotUrl ?? undefined,
@@ -199,15 +205,14 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
         <div className="relative inline-block align-bottom bg-pf-bg-1 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl border border-pf-border">
           {/* Close X button in corner */}
           <div className="absolute top-0 right-0 pt-4 pr-4">
-            <button
-              type="button"
+            <Button
+              variant="subtle"
+              size="sm"
               aria-label="Close discovery modal"
-              title="Close"
-              className="bg-pf-bg-1 rounded-md text-pf-text-secondary hover:text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
               onClick={onClose}
             >
-              <X className="h-6 w-6" />
-            </button>
+              <X className="h-5 w-5" />
+            </Button>
           </div>
 
           {/* Modal content */}
@@ -225,9 +230,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   
                   {/* Backend selection */}
                   <div className="mb-4">
-                    <label className="block text-sm font-medium text-pf-text-primary mb-2">
-                      Select backends to scan:
-                    </label>
+                    <Label className="mb-2">Select backends to scan:</Label>
                     <div className="flex flex-wrap gap-3">
                       {[
                         { value: PrinterBackend.Moonraker, label: 'Moonraker' },
@@ -235,90 +238,64 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                         { value: PrinterBackend.SDCP, label: 'SDCP' },
                         { value: PrinterBackend.OctoPrint, label: 'OctoPrint' }
                       ].map(backend => (
-                        <label key={backend.value} className="inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={selectedBackends.has(backend.value)}
-                            onChange={(e) => {
-                              const newBackends = new Set(selectedBackends);
-                              if (e.target.checked) {
-                                newBackends.add(backend.value);
-                              } else {
-                                newBackends.delete(backend.value);
-                              }
-                              setSelectedBackends(newBackends);
-                            }}
-                            disabled={!!isActive}
-                            className="rounded border-pf-border text-pf-accent focus:ring-pf-accent focus:ring-offset-pf-bg-1 disabled:opacity-50"
-                          />
-                          <span className="ml-2 text-sm text-pf-text-primary">{backend.label}</span>
-                        </label>
+                        <Checkbox
+                          key={backend.value}
+                          label={backend.label}
+                          checked={selectedBackends.has(backend.value)}
+                          onChange={(e) => {
+                            const newBackends = new Set(selectedBackends);
+                            if (e.target.checked) {
+                              newBackends.add(backend.value);
+                            } else {
+                              newBackends.delete(backend.value);
+                            }
+                            setSelectedBackends(newBackends);
+                          }}
+                          disabled={!!isActive}
+                        />
                       ))}
                     </div>
                   </div>
                   
                   {selectedBackends.size === 0 && (
-                    <p className="text-xs text-pf-error-text mt-2">Please select at least one backend to scan</p>
+                    <Alert type="error" className="mt-2">Please select at least one backend to scan</Alert>
                   )}
                   {startError && (
-                    <div className="mt-2 p-2 bg-pf-error border border-pf-error-border rounded">
-                      <p className="text-xs text-pf-error-text">{startError}</p>
-                    </div>
+                    <Alert type="error" className="mt-2">{startError}</Alert>
                   )}
                   <div className="mt-2 text-xs text-pf-text-tertiary">SignalR: {isSignalRConnected ? 'connected' : 'disconnected'}</div>
                 </div>
 
                 {/* Progress bar during active scan */}
-                {isActive && progress && (() => {
-                  const valueNow: number = Math.round(progress.progressPercentage);
-                  return (
-                    <div className="text-center py-4 mb-4">
-                      {(() => {
-                        const ariaProps = {
-                          role: 'progressbar',
-                          'aria-label': 'Network discovery progress',
-                          'aria-valuemin': 0,
-                          'aria-valuemax': 100,
-                          'aria-valuenow': valueNow,
-                          'data-progress': valueNow,
-                        } as const;
-                        return (
-                          <div
-                            {...ariaProps}
-                            className="w-full bg-pf-bg-2 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar border border-pf-border"
-                          >
-                            {(() => {
-                              const pct = Math.min(100, Math.max(0, valueNow));
-                              const step = pct >= 99 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
-                              return <ProgressFill pct={pct} step={step} />;
-                            })()}
-                          </div>
-                        );
-                      })()}
-                      
-                      <p className="text-xs text-pf-text-tertiary mb-2">Session: {progress.sessionId}</p>
-                      {progress.networkRanges && progress.networkRanges.length > 0 && (
-                        <p className="text-xs text-pf-text-tertiary mb-2">
-                          Networks: {progress.networkRanges.join(', ')} {progress.autoDetectedNetworks && '(auto-detected)'}
-                        </p>
-                      )}
-                      <p className="text-sm text-pf-text-secondary mb-2">
-                        Scanning {progress.currentNetwork} - {progress.currentIp}
+                {isActive && progress && (
+                  <div className="text-center py-4 mb-4">
+                    <ProgressBar 
+                      value={Math.round(progress.progressPercentage)} 
+                      label="Network discovery progress"
+                      showPercent={true}
+                      className="mb-2"
+                    />
+                    
+                    <p className="text-xs text-pf-text-tertiary mb-2">Session: {progress.sessionId}</p>
+                    {progress.networkRanges && progress.networkRanges.length > 0 && (
+                      <p className="text-xs text-pf-text-tertiary mb-2">
+                        Networks: {progress.networkRanges.join(', ')} {progress.autoDetectedNetworks && '(auto-detected)'}
                       </p>
-                      <p className="text-xs text-pf-text-tertiary">
-                        {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
-                      </p>
-                    </div>
-                  );
-                })()}
+                    )}
+                    <p className="text-sm text-pf-text-secondary mb-2">
+                      Scanning {progress.currentNetwork} - {progress.currentIp}
+                    </p>
+                    <p className="text-xs text-pf-text-tertiary">
+                      {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
+                    </p>
+                  </div>
+                )}
 
                 {/* Error message */}
                 {startDiscoveryMutation.error && (
-                  <div className="mb-4 p-3 bg-pf-error border border-pf-error-border rounded-md">
-                    <p className="text-sm text-pf-error-text">
-                      Failed to start network scan: {startDiscoveryMutation.error.message}
-                    </p>
-                  </div>
+                  <Alert type="error" className="mb-4">
+                    Failed to start network scan: {startDiscoveryMutation.error.message}
+                  </Alert>
                 )}
 
                 {/* Found printers list */}
@@ -334,13 +311,9 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       <h4 className="text-md font-medium text-pf-text-primary">
                         Found {foundPrinters.length} printer{foundPrinters.length !== 1 ? 's' : ''}
                       </h4>
-                      <button
-                        type="button"
-                        onClick={handleSelectAll}
-                        className="text-sm text-pf-accent hover:text-pf-accent-hover"
-                      >
+                      <Button variant="subtle" size="sm" onClick={handleSelectAll}>
                         {selectedPrinters.size === foundPrinters.length ? 'Deselect All' : 'Select All'}
-                      </button>
+                      </Button>
                     </div>
 
                     <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-md p-2 bg-pf-bg-0">
@@ -378,7 +351,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                 </div>
                                 
                                 <p className="text-sm text-pf-text-secondary mb-2">
-                                  {printer.ipAddress}:{printer.port} • {printer.serverUrl}
+                                  {printer.ipAddress}:{printer.backendPort ?? 'unknown'} • {printer.serverUrl}
                                 </p>
                                 
                                 {/* Inline Manufacturer and Model Selection */}
@@ -386,7 +359,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     {/* Manufacturer Selection */}
                                     <div>
-                                      <select
+                                      <Select
                                         value={config?.manufacturerId || ''}
                                         onChange={(e) => {
                                           const newConfig = { 
@@ -401,19 +374,19 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                             setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
                                           }
                                         }}
-                                        className="w-full px-2 py-1 text-xs border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:ring-1 focus:ring-pf-accent"
-                                        title="Select manufacturer"
+                                        className="w-full text-xs"
+                                        aria-label="Select manufacturer"
                                       >
                                         <option value="">Select manufacturer...</option>
                                         {manufacturers.filter(m => m.name.toLowerCase() !== 'unknown').map(m => (
                                           <option key={m.id} value={m.id}>{m.name}</option>
                                         ))}
-                                      </select>
+                                      </Select>
                                     </div>
 
                                     {/* Model Selection */}
                                     <div>
-                                      <select
+                                      <Select
                                         value={config?.modelId || ''}
                                         onChange={(e) => {
                                           const newConfig = { 
@@ -427,8 +400,8 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                             setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
                                           }
                                         }}
-                                        className="w-full px-2 py-1 text-xs border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary focus:ring-1 focus:ring-pf-accent"
-                                        title="Select model"
+                                        className="w-full text-xs"
+                                        aria-label="Select model"
                                         disabled={!config?.manufacturerId}
                                       >
                                         <option value="">Select model...</option>
@@ -438,7 +411,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                             <option key={m.id} value={m.id}>{m.name}</option>
                                           ))
                                         }
-                                      </select>
+                                      </Select>
                                     </div>
                                   </div>
 
@@ -497,16 +470,13 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                               </div>
                               
                               <div className="flex items-center">
-                                <input
-                                  type="checkbox"
+                                <Checkbox
                                   aria-label={`Select printer ${printer.name || printer.serverUrl}`}
-                                  title={`Select printer ${printer.name || printer.serverUrl}`}
                                   checked={selectedPrinters.has(printer.serverUrl)}
                                   onChange={(e) => {
                                     e.stopPropagation();
                                     handleToggleSelection(printer.serverUrl);
                                   }}
-                                  className="h-4 w-4 text-pf-accent focus:ring-pf-accent border-pf-border rounded"
                                 />
                               </div>
                             </div>
@@ -555,53 +525,46 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
           <div className="flex items-center justify-end space-x-3 pt-4 mt-4 border-t border-pf-border">
             {/* During scan: Cancel Scan button */}
             {isActive && (
-              <button
-                type="button"
+              <Button
+                variant="danger"
                 onClick={handleCancelDiscovery}
                 disabled={cancelDiscoveryMutation.isPending}
-                className="px-4 py-2 border border-pf-error text-sm font-medium rounded-md text-pf-error hover:bg-pf-error hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-error disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel Scan
-              </button>
+              </Button>
             )}
 
             {/* Before scan or after scan: Close button */}
             {!isActive && (
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 border border-pf-border rounded-md text-sm font-medium text-pf-text-primary bg-pf-bg-1 hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
-              >
+              <Button variant="secondary" onClick={onClose}>
                 Close
-              </button>
+              </Button>
             )}
 
             {/* After scan with printers: Add Selected button */}
             {foundPrinters.length > 0 && !isActive && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={handleAddSelected}
                 disabled={selectedPrinters.size === 0 || createPrinterMutation.isPending}
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {createPrinterMutation.isPending 
                   ? 'Adding...' 
                   : `Add ${selectedPrinters.size} Selected Printer${selectedPrinters.size !== 1 ? 's' : ''}`
                 }
-              </button>
+              </Button>
             )}
 
             {/* Scan button - changes label based on state */}
             {!isActive && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={handleStartDiscovery}
                 disabled={startDiscoveryMutation.isPending || selectedBackends.size === 0}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Search className="h-4 w-4 mr-2" />
                 {hasScanRun ? 'Scan Again' : 'Start Network Scan'}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -609,16 +572,3 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     </div>
   );
 }
-
-// Separate component to avoid inline style lint for CSS variable usage
-const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct }) => {
-  const ref = React.useRef<HTMLDivElement | null>(null);
-  
-  React.useLayoutEffect(() => {
-    if (ref.current) {
-      ref.current.style.setProperty('--pf-progress', pct + '%');
-    }
-  }, [pct]);
-  
-  return <div ref={ref} className="pf-progress-fill bg-pf-accent h-2 rounded-full" aria-hidden="true" />;
-};

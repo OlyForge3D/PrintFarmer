@@ -1,7 +1,7 @@
 import React from 'react';
 import clsx from 'clsx';
 
-interface FormFieldProps {
+export interface FormFieldProps {
   label?: string;
   htmlFor?: string;
   helper?: string | React.ReactNode;

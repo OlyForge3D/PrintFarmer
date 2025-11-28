@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { CheckCircle, AlertCircle, Loader } from 'lucide-react';
 import type { HarvestOptions, HarvestDiscoveredFile } from '../HarvestWizard';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 
 interface HarvestWizardStep3FileSelectionProps {
   printerId?: string;
@@ -71,24 +73,30 @@ export function HarvestWizardStep3FileSelection({
         </p>
 
         {isDiscovering && (
-          <div className="flex items-center gap-3 p-3 bg-pf-info-bg border border-pf-info rounded-lg">
-            <Loader className="w-5 h-5 text-pf-info animate-spin" />
-            <span className="text-sm text-pf-info">Scanning printer for G-code files...</span>
-          </div>
+          <Alert type="info">
+            <div className="flex items-center gap-3">
+              <Loader className="w-5 h-5 animate-spin" />
+              <span>Scanning printer for G-code files...</span>
+            </div>
+          </Alert>
         )}
 
         {!isDiscovering && files.length > 0 && (
-          <div className="flex items-center gap-3 p-3 bg-pf-success-bg border border-pf-success rounded-lg">
-            <CheckCircle className="w-5 h-5 text-pf-success" />
-            <span className="text-sm text-pf-success font-medium">Scan complete. {files.length} file{files.length !== 1 ? 's' : ''} discovered.</span>
-          </div>
+          <Alert type="success">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5" />
+              <span className="font-medium">Scan complete. {files.length} file{files.length !== 1 ? 's' : ''} discovered.</span>
+            </div>
+          </Alert>
         )}
 
         {!isDiscovering && files.length === 0 && (
-          <div className="flex items-center gap-3 p-3 bg-pf-warning-bg border border-pf-warning rounded-lg">
-            <AlertCircle className="w-5 h-5 text-pf-warning" />
-            <span className="text-sm text-pf-warning">No G-code files found on the printer.</span>
-          </div>
+          <Alert type="warning">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5" />
+              <span>No G-code files found on the printer.</span>
+            </div>
+          </Alert>
         )}
       </div>
 
@@ -138,30 +146,36 @@ export function HarvestWizardStep3FileSelection({
           </div>
 
           {selectedFileIds.size > 0 && (
-            <div className="flex items-center gap-2 p-3 bg-pf-success-bg border border-pf-success rounded-lg">
-              <CheckCircle className="w-5 h-5 text-pf-success flex-shrink-0" />
-              <span className="text-sm text-pf-success">
-                {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected for import
-              </span>
-            </div>
+            <Alert type="success">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                <span>
+                  {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected for import
+                </span>
+              </div>
+            </Alert>
           )}
 
           {selectedFileIds.size === 0 && files.length > 0 && (
-            <div className="flex items-center gap-2 p-3 bg-pf-warning-bg border border-pf-warning rounded-lg">
-              <AlertCircle className="w-5 h-5 text-pf-warning flex-shrink-0" />
-              <span className="text-sm text-pf-warning">
-                Please select at least one file to continue
-              </span>
-            </div>
+            <Alert type="warning">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <span>
+                  Please select at least one file to continue
+                </span>
+              </div>
+            </Alert>
           )}
 
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={handleContinue}
             disabled={selectedFileIds.size === 0}
-            className="w-full px-4 py-2 bg-pf-accent text-white rounded-lg hover:bg-pf-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+            className="w-full"
           >
             Import Selected Files ({selectedFileIds.size})
-          </button>
+          </Button>
         </div>
       )}
     </div>

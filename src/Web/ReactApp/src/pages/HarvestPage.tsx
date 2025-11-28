@@ -233,7 +233,7 @@ export const HarvestPage: React.FC = () => {
                     toast.error('Failed to cancel operations');
                   }
                 }}
-                className="pf-btn pf-btn-danger text-sm"
+                className="btn-base btn-sm btn-danger"
                 disabled={cancelHarvestMutation.isPending}
               >
                 {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel All'}
@@ -281,7 +281,7 @@ export const HarvestPage: React.FC = () => {
                           toast.error(`Failed to restart discovery: ${op.printerName}`);
                         }
                       }}
-                      className="pf-btn pf-btn-secondary text-xs flex-shrink-0"
+                      className="btn-base btn-xs btn-secondary flex-shrink-0"
                       disabled={restartHarvestDiscoveryMutation.isPending}
                       title="Restart file discovery for this harvest"
                     >
@@ -299,7 +299,7 @@ export const HarvestPage: React.FC = () => {
                           toast.error(`Failed to cancel: ${op.printerName}`);
                         }
                       }}
-                      className="pf-btn pf-btn-danger text-xs flex-shrink-0"
+                      className="btn-base btn-xs btn-danger flex-shrink-0"
                       disabled={cancelHarvestMutation.isPending}
                     >
                       {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel'}

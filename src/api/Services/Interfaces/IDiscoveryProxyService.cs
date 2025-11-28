@@ -13,10 +13,12 @@ public interface IDiscoveryProxyService
     /// Returns a session ID that can be used to receive discovery progress via SignalR.
     /// </summary>
     /// <param name="backends">Optional list of backends to filter discovery</param>
+    /// <param name="autoRegister">If true, automatically register discovered printers (default: false)</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Session ID and message from the discovery service</returns>
     Task<DiscoveryStreamResponse> StartDiscoveryStreamAsync(
         IReadOnlyList<PrinterBackend>? backends = null,
+        bool autoRegister = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

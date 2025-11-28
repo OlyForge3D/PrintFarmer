@@ -59,6 +59,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         maxBedTemp: printerDetails.capabilities?.maxBedTemp,
         supportsAutoLeveling: printerDetails.capabilities?.supportsAutoLeveling,
         maxPrintSpeed: printerDetails.capabilities?.maxPrintSpeed,
+        backendPort: printerDetails.backendPort ?? undefined,
+        frontendPort: printerDetails.frontendPort ?? undefined,
       });
       // Prevent applying model defaults immediately after loading existing printer
       setLastModelId(printerDetails.modelId);
@@ -205,8 +207,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   <label className="block text-sm font-medium text-pf-text-secondary mb-1">Backend Port (API)</label>
                   <input
                     type="number"
-                    value={formData.backendPort ?? 7125}
-                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || 7125)}
+                    value={formData.backendPort ?? ''}
+                    onChange={e => handleInputChange('backendPort', e.target.value ? parseInt(e.target.value, 10) : undefined)}
                     className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                     placeholder="7125"
                     min={1}
@@ -217,8 +219,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   <label className="block text-sm font-medium text-pf-text-secondary mb-1">Frontend Port (UI)</label>
                   <input
                     type="number"
-                    value={formData.frontendPort ?? 80}
-                    onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10) || 80)}
+                    value={formData.frontendPort ?? ''}
+                    onChange={e => handleInputChange('frontendPort', e.target.value ? parseInt(e.target.value, 10) : undefined)}
                     className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                     placeholder="80"
                     min={1}

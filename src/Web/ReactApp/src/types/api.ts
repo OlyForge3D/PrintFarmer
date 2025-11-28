@@ -413,6 +413,8 @@ export interface PrinterDetails {
   apiKey?: string;
   originalServerUrl?: string;
   ipAddress?: string;
+  backendPort?: number | null;
+  frontendPort?: number | null;
   capabilities?: PrinterCapabilitiesDto;
 }
 
@@ -844,7 +846,6 @@ export interface ChangePasswordRequest {
 
 export interface DiscoveredPrinterDto {
   ipAddress: string;
-  port: number;
   backendPort?: number | null;
   frontendPort?: number | null;
   serverUrl: string;
@@ -878,6 +879,7 @@ export enum DiscoveryStatus {
 
 export interface StartDiscoveryRequest {
   backends?: PrinterBackend[];
+  autoRegister?: boolean;
 }
 
 export interface DiscoveryProgressDto {

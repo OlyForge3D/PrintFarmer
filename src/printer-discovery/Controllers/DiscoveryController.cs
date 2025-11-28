@@ -60,7 +60,7 @@ public class DiscoveryController : ControllerBase
                     await _streamingDiscoveryService.ScanWithProgressAsync(
                         sessionId,
                         request?.Backends,
-                        request?.AutoRegister ?? true,
+                        request?.AutoRegister ?? false,
                         request?.Subnets,
                         request?.ProbeTimeoutMs,
                         request?.MaxConcurrentProbes,
@@ -240,7 +240,7 @@ public class StreamingDiscoveryRequest
     /// <summary>
     /// Whether to automatically register discovered printers with the API.
     /// </summary>
-    public bool AutoRegister { get; set; } = true;
+    public bool AutoRegister { get; set; } = false;
 
     /// <summary>
     /// List of subnets to scan (CIDR notation). If not provided, uses configured defaults.

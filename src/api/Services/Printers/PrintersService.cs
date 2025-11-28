@@ -396,7 +396,7 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
-            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP : Farm.Infrastructure.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, IsEnabled: p.IsEnabled)).ToArray();
+            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP : Farm.Infrastructure.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, BackendPort: p.BackendPort, FrontendPort: p.FrontendPort, IsEnabled: p.IsEnabled)).ToArray();
         }
 
         private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
@@ -408,8 +408,8 @@ namespace Farm.Web.Api.Services.Printers
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
 
-            // Export minimum required fields for re-import (IDs are not portable between systems)
-            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
+            // Export fields matching AdminCli CSV format for consistency
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
 
             StringBuilder csv = new();
             _ = csv.AppendLine(string.Join(',', headerParts));
@@ -417,7 +417,9 @@ namespace Farm.Web.Api.Services.Printers
             foreach (Printer printer in printers)
             {
                 string backendName = printer.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? "PrusaLink" : printer.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? "SDCP" : "Moonraker";
-                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{printer.IsEnabled}");
+                string backendPort = printer.BackendPort?.ToString() ?? "";
+                string frontendPort = printer.FrontendPort?.ToString() ?? "";
+                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{printer.IsEnabled}");
             }
 
             return Encoding.UTF8.GetBytes(csv.ToString());
@@ -436,12 +438,12 @@ namespace Farm.Web.Api.Services.Printers
                 return;
             }
 
-            // CSV - export minimum required fields for re-import
+            // CSV - export fields matching AdminCli CSV format for consistency
             response.ContentType = "text/csv";
             string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
             response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
 
-            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
 
             await using StreamWriter writer = new StreamWriter(response.Body, Encoding.UTF8, leaveOpen: true);
             await writer.WriteLineAsync(string.Join(',', headerParts));
@@ -449,7 +451,9 @@ namespace Farm.Web.Api.Services.Printers
             foreach (Printer p in query)
             {
                 string backendName = p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? "PrusaLink" : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? "SDCP" : "Moonraker";
-                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{p.IsEnabled}";
+                string backendPort = p.BackendPort?.ToString() ?? "";
+                string frontendPort = p.FrontendPort?.ToString() ?? "";
+                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{p.IsEnabled}";
                 await writer.WriteLineAsync(csvLine);
                 await writer.FlushAsync();
             }
@@ -700,6 +704,20 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
         {
+            // Check for duplicate printer by serverUrl or name
+            int defaultPort = dto.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : dto.Backend == Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125;
+            string normalizedUrl = NormalizeServerUrl(dto.ServerUrl, defaultPort);
+            List<Printer> existingPrinters = await _repo.GetAllAsync(ct).ConfigureAwait(false);
+            Printer? duplicate = existingPrinters.FirstOrDefault(p => 
+                NormalizeServerUrl(p.ServerUrl, defaultPort) == normalizedUrl || 
+                p.IpAddress == normalizedUrl.Replace("http://", "").Replace("https://", "").Split(':')[0]);
+            
+            if (duplicate != null)
+            {
+                _logger.LogWarning($"Duplicate printer detected: {dto.Name} at {dto.ServerUrl} - existing printer: {duplicate.Name} ({duplicate.Id})");
+                throw new InvalidOperationException($"A printer already exists at this address: {duplicate.Name}");
+            }
+
             // resolve or create manufacturer/model
             Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
             if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
@@ -762,7 +780,7 @@ namespace Farm.Web.Api.Services.Printers
                 }
             }
 
-            int defaultPort = dto.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : dto.Backend == Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125;
+            // defaultPort was already calculated at the start for duplicate checking
             string normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
             string resolvedBase = normalizedInput;
             string? resolvedIp = null;

@@ -45,9 +45,10 @@ public class DiscoveryProxyService : IDiscoveryProxyService
 
     public async Task<DiscoveryStreamResponse> StartDiscoveryStreamAsync(
         IReadOnlyList<PrinterBackend>? backends = null,
+        bool autoRegister = false,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation($"[DISCOVERY] Forwarding discovery request to printer-discovery service at {_discoveryServiceUrl}");
+        _logger.LogInformation($"[DISCOVERY] Forwarding discovery request to printer-discovery service at {_discoveryServiceUrl} (autoRegister={autoRegister})");
 
         try
         {
@@ -65,7 +66,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
             var request = new
             {
                 backends,
-                autoRegister = true,
+                autoRegister,
                 subnets = settings.DiscoverySubnets.ToArray(),
                 probeTimeoutMs = settings.ClientTimeoutMs,
                 maxConcurrentProbes = settings.MaxConcurrentRequests

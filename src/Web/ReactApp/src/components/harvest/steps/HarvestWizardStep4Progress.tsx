@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle, AlertCircle, Loader, X } from 'lucide-react';
 import { signalRService } from '@/services/harvest-signalr';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 
 interface HarvestDiscoveredFile {
   id: string;
@@ -289,7 +291,9 @@ export function HarvestWizardStep4Progress({
                   <div className="flex gap-2 pt-1">
                     {file.status === 'failed' && (
                       <>
-                        <button
+                        <Button
+                          variant="primary"
+                          size="sm"
                           onClick={() => {
                             // Retry - mark as pending so it can be reimported
                             setFileStatuses(prev =>
@@ -300,14 +304,15 @@ export function HarvestWizardStep4Progress({
                               )
                             );
                           }}
-                          className="text-xs px-2 py-1 bg-pf-accent text-white rounded hover:bg-pf-accent-hover transition-colors"
                         >
                           Retry
-                        </button>
+                        </Button>
                       </>
                     )}
                     {file.status === 'importing' && (
-                      <button
+                      <Button
+                        variant="danger"
+                        size="sm"
                         onClick={() => {
                           // Cancel - mark as skipped
                           setFileStatuses(prev =>
@@ -318,10 +323,9 @@ export function HarvestWizardStep4Progress({
                             )
                           );
                         }}
-                        className="text-xs px-2 py-1 bg-pf-error text-white rounded hover:bg-pf-error-hover transition-colors"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     )}
                   </div>
                 )}
@@ -334,31 +338,33 @@ export function HarvestWizardStep4Progress({
       {/* Actions */}
       <div className="flex gap-3">
         {isImporting && onCancel && (
-          <button
+          <Button
+            variant="secondary"
+            size="md"
             onClick={onCancel}
-            className="flex-1 px-4 py-2 border border-pf-border text-pf-text-primary rounded-lg hover:bg-pf-hover transition-colors font-medium"
+            iconLeft={<X className="w-4 h-4" />}
+            className="flex-1"
           >
-            <X className="w-4 h-4 inline mr-2" />
             Cancel Import
-          </button>
+          </Button>
         )}
         {!isImporting && (
-          <button
+          <Button
+            variant="primary"
+            size="md"
             onClick={onCompleted}
-            className="flex-1 px-4 py-2 bg-pf-accent text-white rounded-lg hover:bg-pf-accent-hover transition-colors font-medium"
+            iconLeft={<CheckCircle className="w-4 h-4" />}
+            className="flex-1"
           >
-            <CheckCircle className="w-4 h-4 inline mr-2" />
             Complete
-          </button>
+          </Button>
         )}
       </div>
 
       {!isImporting && (
-        <div className="p-3 bg-pf-success-bg border border-pf-success rounded-lg">
-          <p className="text-sm text-pf-success font-medium">
-            ✓ Import completed! {completedCount} file{completedCount !== 1 ? 's' : ''} imported successfully.
-          </p>
-        </div>
+        <Alert type="success">
+          ✓ Import completed! {completedCount} file{completedCount !== 1 ? 's' : ''} imported successfully.
+        </Alert>
       )}
     </div>
   );

@@ -1,6 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { Printer, PrinterBackend, GcodeHarvestOperation } from '@/types/api';
 import { CheckCircle, X } from 'lucide-react';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { Button } from '@/components/ui/Button';
 
 interface HarvestWizardStep1SelectionProps {
   printers: Printer[];
@@ -13,6 +16,7 @@ interface HarvestWizardStep1SelectionProps {
 function backendToString(backend: PrinterBackend | undefined): string {
   if (backend === undefined) return 'Unknown';
   const backendNames: Record<PrinterBackend, string> = {
+    [PrinterBackend.Unknown]: 'Unknown',
     [PrinterBackend.Moonraker]: 'Moonraker',
     [PrinterBackend.PrusaLink]: 'PrusaLink',
     [PrinterBackend.SDCP]: 'SDCP',
@@ -113,12 +117,12 @@ export function HarvestWizardStep1Selection({
               <label className="text-xs font-medium text-pf-text-secondary block mb-1">
                 Search Printers
               </label>
-              <input
+              <Input
                 type="text"
                 placeholder="Name, model, backend..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-pf-border bg-pf-background text-pf-text-primary placeholder-pf-text-secondary focus:outline-none focus:border-pf-accent text-sm"
+                className="w-full"
               />
             </div>
 
@@ -128,11 +132,11 @@ export function HarvestWizardStep1Selection({
                 <label htmlFor="backend-filter" className="text-xs font-medium text-pf-text-secondary block mb-1">
                   Backend
                 </label>
-                <select
+                <Select
                   id="backend-filter"
                   value={selectedBackend ?? ''}
                   onChange={e => setSelectedBackend(e.target.value ? parseInt(e.target.value) as PrinterBackend : undefined)}
-                  className="w-full px-3 py-2 rounded-lg border border-pf-border bg-pf-background text-pf-text-primary focus:outline-none focus:border-pf-accent text-sm"
+                  className="w-full"
                 >
                   <option value="">All backends</option>
                   {uniqueBackends.map(backend => (
@@ -140,7 +144,7 @@ export function HarvestWizardStep1Selection({
                       {backendToString(backend)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             )}
 
@@ -150,11 +154,11 @@ export function HarvestWizardStep1Selection({
                 <label htmlFor="model-filter" className="text-xs font-medium text-pf-text-secondary block mb-1">
                   Make - Model
                 </label>
-                <select
+                <Select
                   id="model-filter"
                   value={selectedModel}
                   onChange={e => setSelectedModel(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-pf-border bg-pf-background text-pf-text-primary focus:outline-none focus:border-pf-accent text-sm"
+                  className="w-full"
                 >
                   <option value="">All models</option>
                   {uniqueModels.map(model => (
@@ -162,19 +166,20 @@ export function HarvestWizardStep1Selection({
                       {model}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             )}
 
             {/* Clear Filters Button */}
             {hasActiveFilters && (
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={clearFilters}
-                className="px-3 py-2 rounded-lg bg-pf-background text-pf-text-secondary border border-pf-border hover:bg-pf-hover text-sm transition-colors flex items-center gap-1"
+                iconLeft={<X className="w-4 h-4" />}
               >
-                <X className="w-4 h-4" />
                 Clear
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -221,12 +226,12 @@ export function HarvestWizardStep1Selection({
             <label className="text-xs font-medium text-pf-text-secondary block mb-1">
               Search Printers
             </label>
-            <input
+            <Input
               type="text"
               placeholder="Name, model, backend..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-pf-border bg-pf-background text-pf-text-primary placeholder-pf-text-secondary focus:outline-none focus:border-pf-accent text-sm"
+              className="w-full"
             />
           </div>
 
@@ -236,10 +241,10 @@ export function HarvestWizardStep1Selection({
               <label className="text-xs font-medium text-pf-text-secondary block mb-1">
                 Backend
               </label>
-              <select
+              <Select
                 value={selectedBackend ?? ''}
                 onChange={e => setSelectedBackend(e.target.value ? parseInt(e.target.value) as PrinterBackend : undefined)}
-                className="w-full px-3 py-2 rounded-lg border border-pf-border bg-pf-background text-pf-text-primary focus:outline-none focus:border-pf-accent text-sm"
+                className="w-full"
                 title="Filter by backend type"
               >
                 <option value="">All backends</option>
@@ -248,7 +253,7 @@ export function HarvestWizardStep1Selection({
                     {backendToString(backend)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           )}
 
@@ -258,10 +263,10 @@ export function HarvestWizardStep1Selection({
               <label className="text-xs font-medium text-pf-text-secondary block mb-1">
                 Make - Model
               </label>
-              <select
+              <Select
                 value={selectedModel}
                 onChange={e => setSelectedModel(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-pf-border bg-pf-background text-pf-text-primary focus:outline-none focus:border-pf-accent text-sm"
+                className="w-full"
                 title="Filter by printer model"
               >
                 <option value="">All models</option>
@@ -270,19 +275,21 @@ export function HarvestWizardStep1Selection({
                     {model}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           )}
 
           {/* Clear Filters Button */}
           {hasActiveFilters && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={clearFilters}
-              className="px-3 py-2 rounded-lg bg-pf-background text-pf-text-secondary border border-pf-border hover:bg-pf-hover text-sm transition-colors flex items-center gap-1 flex-shrink-0"
+              iconLeft={<X className="w-4 h-4" />}
+              className="flex-shrink-0"
             >
-              <X className="w-4 h-4" />
               Clear
-            </button>
+            </Button>
           )}
         </div>
       </div>

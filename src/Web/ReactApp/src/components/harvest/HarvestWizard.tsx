@@ -6,6 +6,7 @@ import { HarvestWizardStep3FileSelection } from './steps/HarvestWizardStep3FileS
 import { HarvestWizardStep4Progress } from './steps/HarvestWizardStep4Progress';
 import { apiClient } from '@/services/api';
 import { signalRService } from '@/services/harvest-signalr';
+import { Button } from '@/components/ui/Button';
 
 export interface HarvestDiscoveredFile {
   id: string;
@@ -354,22 +355,26 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
 
       {/* Footer - Navigation buttons */}
       <div className="border-t border-pf-border pt-4 flex justify-between items-center">
-        <button
+        <Button
+          variant="secondary"
+          size="md"
           onClick={handleBack}
           disabled={step === 1 || step === 4}
-          className="px-4 py-2 rounded border border-pf-border text-pf-text-primary hover:bg-pf-hover disabled:opacity-50 disabled:cursor-not-allowed"
+          className="min-w-24"
         >
           Back
-        </button>
+        </Button>
         <div className="text-sm text-pf-text-secondary">
           Step {step} of 4
         </div>
-        <button
+        <Button
+          variant="secondary"
+          size="md"
           onClick={handleCancel}
-          className="px-4 py-2 rounded border border-pf-border text-pf-text-primary hover:bg-pf-hover"
+          className="min-w-24"
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );

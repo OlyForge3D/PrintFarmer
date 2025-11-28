@@ -10,20 +10,14 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { toast } from 'sonner';
-import { Trash2, Edit } from 'lucide-react';
+import { Trash2, Edit, CheckSquare, Square } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Alert } from '@/components/ui/Alert';
+import { Tooltip } from '@/components/ui/Tooltip';
+import { Label } from '@/components/ui/Label';
 import type { Printer } from '@/types/api';
-
-function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
 
 export function PrintersAdminPage() {
   const queryClient = useQueryClient();
@@ -145,24 +139,6 @@ export function PrintersAdminPage() {
     setShowExportOptions(true);
   };
 
-  const exportSelectedAsJson = async () => {
-    if (!printers || printers.length === 0) return toast('No printers to export');
-    const ids = selectedIds.length > 0 ? selectedIds : printers.map(p => p.id);
-    const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.json`;
-    try {
-      setExporting(true);
-      const exported = await apiClient.exportPrintersByIds(ids);
-      downloadJson(filename, exported);
-      toast.success('Printers exported (JSON)');
-    } catch (err) {
-      console.error('Export JSON failed', err);
-      toast.error('Export failed');
-    } finally {
-      setShowExportOptions(false);
-      setExporting(false);
-    }
-  };
-
   const exportSelectedServerJson = async () => {
     if (!printers || printers.length === 0) return toast('No printers to export');
     const ids = selectedIds.length > 0 ? selectedIds : printers.map(p => p.id);
@@ -174,10 +150,10 @@ export function PrintersAdminPage() {
         if (total && total > 0) setExportProgress(Math.round((loaded / total) * 100));
         else setExportProgress(null);
       });
-      toast.success('Printers exported (server JSON)');
+      toast.success('Printers exported (JSON)');
     } catch (err) {
-      console.error('Server export failed', err);
-      toast.error('Server export failed');
+      console.error('Export failed', err);
+      toast.error('Export failed');
     } finally {
       setShowExportOptions(false);
       setExportProgress(null);
@@ -196,65 +172,14 @@ export function PrintersAdminPage() {
         if (total && total > 0) setExportProgress(Math.round((loaded / total) * 100));
         else setExportProgress(null);
       });
-      toast.success('Printers exported (server CSV)');
-    } catch (err) {
-      console.error('Server CSV export failed', err);
-      toast.error('Server CSV export failed');
-    } finally {
-      setShowExportOptions(false);
-      setExportProgress(null);
-      setExporting(false);
-    }
-  };
-
-  const toCsv = (rows: Record<string, unknown>[], headers: string[]) => {
-    const escape = (v: unknown) => {
-      if (v === null || v === undefined) return '';
-      const s = String(v);
-      if (s.includes('"')) return `"${s.replace(/"/g, '""')}"`;
-      if (s.includes(',') || s.includes('\n') || s.includes('\r')) return `"${s}"`;
-      return s;
-    };
-    const sb: string[] = [];
-    sb.push(headers.join(','));
-    for (const r of rows) {
-      const line = headers.map(h => escape((r as Record<string, unknown>)[h] ?? '')).join(',');
-      sb.push(line);
-    }
-    return sb.join('\n');
-  };
-
-  const exportSelectedAsCsv = async () => {
-    if (!printers || printers.length === 0) return toast('No printers to export');
-    const ids = selectedIds.length > 0 ? selectedIds : printers.map(p => p.id);
-    try {
-      const exported = await apiClient.exportPrintersByIds(ids);
-      // Normalize and pick columns per requirement
-      type MinimalExport = { name?: string; manufacturerName?: string; modelName?: string; backend?: number | string; ipAddress?: string };
-      const rows = (exported as MinimalExport[]).map((p) => ({
-        Name: p.name ?? '',
-        ManufacturerName: p.manufacturerName ?? '',
-        ModelName: p.modelName ?? '',
-        Backend: p.backend !== undefined ? String(p.backend) : '',
-        IpAddress: p.ipAddress ?? ''
-      }));
-      const csv = toCsv(rows, ['Name', 'ManufacturerName', 'ModelName', 'Backend', 'IpAddress']);
-      const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.csv`;
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
       toast.success('Printers exported (CSV)');
     } catch (err) {
       console.error('Export CSV failed', err);
       toast.error('Export failed');
     } finally {
       setShowExportOptions(false);
+      setExportProgress(null);
+      setExporting(false);
     }
   };
 
@@ -557,26 +482,46 @@ export function PrintersAdminPage() {
         <div className="gap-md flex flex-col">
           <div className="flex items-center gap-3">
             {discoveryAvailable && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 aria-label="Trigger network discovery to find printers on local network"
                 onClick={() => setShowDiscovery(true)}
-                className="btn-base btn-md btn-primary"
               >
                 Discover Printers
-              </button>
+              </Button>
             )}
-            <button type="button" aria-label="Export printers as JSON" onClick={handleExport} className="btn-base btn-md btn-primary" disabled={exporting}>
+            <Button variant="primary" aria-label="Export printers as JSON" onClick={handleExport} disabled={exporting}>
               {exporting ? (
                 <span className="flex items-center gap-2">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
                   Exporting...
                 </span>
               ) : 'Export printers'}
-            </button>
-            <button type="button" aria-label="Open file picker to import printers" onClick={handleImportClick} className="btn-base btn-md btn-primary">Import printers</button>
+            </Button>
+            <Button variant="primary" aria-label="Open file picker to import printers" onClick={handleImportClick}>Import printers</Button>
             <input aria-label="Import printers CSV or JSON file" ref={fileInputRef} type="file" accept=".csv,.json,text/csv,application/json" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </div>
+
+          {showExportOptions && (
+            <div className="gap-md flex flex-col">
+              <div className="flex gap-2 flex-wrap">
+                <Button size="sm" variant="secondary" onClick={exportSelectedServerJson} disabled={exporting}>Export JSON</Button>
+                <Button size="sm" variant="secondary" onClick={exportSelectedServerCsv} disabled={exporting}>Export CSV</Button>
+                <Button size="sm" variant="secondary" onClick={() => setShowExportOptions(false)} disabled={exporting}>Cancel</Button>
+              </div>
+              {exportProgress !== null && (
+                <div className="w-full bg-pf-bg-1 rounded overflow-hidden h-3">
+                  {(() => {
+                    const pct = Math.max(0, Math.min(100, exportProgress ?? 0));
+                    const nearest = Math.round(pct / 5) * 5; // nearest 5%
+                    const cls = `bg-pf-accent h-3 pf-export-progress-bar pf-export-progress-var-${nearest}`;
+                    return <div className={cls} />;
+                  })()}
+                  <div className="text-xs text-pf-text-tertiary mt-1">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="card">
             <div className="card-header">
@@ -586,53 +531,36 @@ export function PrintersAdminPage() {
               {isLoading ? (
                 <div className="text-sm text-pf-text-secondary">Loading...</div>
               ) : error ? (
-                <div className="alert-base alert-error">
-                  <div className="alert-title">Error</div>
-                  <div>Failed to load printers</div>
-                </div>
+                <Alert type="error" title="Error">
+                  Failed to load printers
+                </Alert>
               ) : (!printers || printers.length === 0) ? (
                 <div className="text-sm text-pf-text-secondary">No printers found</div>
               ) : (
                 <div className="gap-md flex flex-col">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-pf-text-secondary">{printers.length} printers</div>
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={() => { setSelectedIds(printers.map(p => p.id)); }} className="btn-base btn-sm btn-secondary">Select all</button>
-                      <button type="button" onClick={() => { setSelectedIds([]); }} className="btn-base btn-sm btn-secondary">Select none</button>
-                      <button type="button" onClick={handleExport} className="btn-base btn-sm btn-primary">Export</button>
+                    <div className="flex items-center gap-1">
+                      <Tooltip content="Select all">
+                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds(printers.map(p => p.id)); }}>
+                          <CheckSquare className="w-4 h-4" />
+                        </Button>
+                      </Tooltip>
+                      <Tooltip content="Select none">
+                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds([]); }}>
+                          <Square className="w-4 h-4" />
+                        </Button>
+                      </Tooltip>
                     </div>
                   </div>
-                  {showExportOptions && (
-                    <div className="gap-md flex flex-col">
-                      <div className="flex gap-2 flex-wrap">
-                        <button type="button" onClick={exportSelectedAsJson} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export JSON</button>
-                        <button type="button" onClick={exportSelectedServerJson} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export (server JSON)</button>
-                        <button type="button" onClick={exportSelectedServerCsv} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export (server CSV)</button>
-                        <button type="button" onClick={exportSelectedAsCsv} className="btn-base btn-sm btn-secondary" disabled={exporting}>Export CSV</button>
-                        <button type="button" onClick={() => setShowExportOptions(false)} className="btn-base btn-sm btn-secondary" disabled={exporting}>Cancel</button>
-                      </div>
-                      {exportProgress !== null && (
-                        <div className="w-full bg-pf-bg-1 rounded overflow-hidden h-3">
-                          {(() => {
-                            const pct = Math.max(0, Math.min(100, exportProgress ?? 0));
-                            const nearest = Math.round(pct / 5) * 5; // nearest 5%
-                            const cls = `bg-pf-accent h-3 pf-export-progress-bar pf-export-progress-var-${nearest}`;
-                            return <div className={cls} />;
-                          })()}
-                          <div className="text-xs text-pf-text-tertiary mt-1">{typeof exportProgress === 'number' ? `${exportProgress}%` : 'Downloading...'}</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
 
                   <div className="overflow-x-auto">
                     <table>
                       <thead>
                         <tr>
                           <th>
-                            <input
+                            <Checkbox
                               aria-label="Select all printers"
-                              type="checkbox"
                               checked={selectedIds.length === printers.length && printers.length > 0}
                               onChange={(e) => {
                                 if (e.target.checked) setSelectedIds(printers.map(p => p.id));
@@ -642,6 +570,7 @@ export function PrintersAdminPage() {
                           </th>
                           <th>Printer Name</th>
                           <th>Backend</th>
+                          <th>Port</th>
                           <th>Manufacturer</th>
                           <th>Model</th>
                           <th>Server URL</th>
@@ -653,9 +582,8 @@ export function PrintersAdminPage() {
                         {printers.map(p => (
                           <tr key={p.id}>
                             <td>
-                              <input
+                              <Checkbox
                                 aria-label={`Select printer ${p.name}`}
-                                type="checkbox"
                                 checked={selectedIds.includes(p.id)}
                                 onChange={(e) => {
                                   if (e.target.checked) setSelectedIds(prev => Array.from(new Set([...prev, p.id])));
@@ -665,37 +593,42 @@ export function PrintersAdminPage() {
                             </td>
                             <td className="text-pf-text-primary font-medium">{p.name}</td>
                             <td className="text-pf-text-secondary text-xs">{getPrinterBackendName(p.backend) || '-'}</td>
+                            <td className="text-pf-text-secondary text-xs">{p.backendPort ?? <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.modelName || <span className="text-pf-warning-text">-</span>}</td>
                             <td className="text-pf-text-secondary">{p.ipAddress ?? p.serverUrl ?? ''}</td>
                             <td className="text-center">
-                              <input
-                                type="checkbox"
-                                checked={p.isEnabled ?? true}
-                                disabled={togglingEnabledId === p.id}
-                                aria-label={`Toggle ${p.name} enabled status`}
-                                onChange={() => handleToggleEnabled(p)}
-                                title={p.isEnabled ? 'Disable printer' : 'Enable printer'}
-                              />
+                              <Tooltip content={p.isEnabled ? 'Disable printer' : 'Enable printer'}>
+                                <Checkbox
+                                  checked={p.isEnabled ?? true}
+                                  disabled={togglingEnabledId === p.id}
+                                  aria-label={`Toggle ${p.name} enabled status`}
+                                  onChange={() => handleToggleEnabled(p)}
+                                />
+                              </Tooltip>
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex items-center justify-center space-x-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleEditClick(p)}
-                                  className="p-2 text-pf-text-tertiary hover:text-pf-accent transition-colors rounded-md hover:bg-pf-bg-2"
-                                  title="Edit printer"
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeletePrinter(p)}
-                                  className="p-2 text-pf-text-tertiary hover:text-pf-error-text transition-colors rounded-md hover:bg-pf-error-bg"
-                                  title="Delete printer"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                <Tooltip content="Edit printer">
+                                  <Button
+                                    size="sm"
+                                    variant="subtle"
+                                    onClick={() => handleEditClick(p)}
+                                    className="!p-2 text-pf-text-tertiary hover:text-pf-accent hover:bg-pf-bg-2"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                </Tooltip>
+                                <Tooltip content="Delete printer">
+                                  <Button
+                                    size="sm"
+                                    variant="subtle"
+                                    onClick={() => handleDeletePrinter(p)}
+                                    className="!p-2 text-pf-text-tertiary hover:text-pf-error-text hover:bg-pf-error-bg"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </Tooltip>
                               </div>
                             </td>
                           </tr>
@@ -709,77 +642,82 @@ export function PrintersAdminPage() {
                       <div className="text-sm font-semibold mb-3">Bulk operations ({selectedIds.length} selected)</div>
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div className="form-group">
-                          <label className="text-sm text-pf-text-secondary mb-1 block" htmlFor="bulk-manufacturer">Set Manufacturer</label>
-                          <select
+                          <Label htmlFor="bulk-manufacturer" className="mb-1">Set Manufacturer</Label>
+                          <Select
                             id="bulk-manufacturer"
                             value={bulkManufacturerId}
                             onChange={(e) => setBulkManufacturerId(e.target.value)}
-                            className="input-base input-sm w-full"
+                            className="w-full"
                           >
                             <option value="">-- Keep unchanged --</option>
                             {/* Manufacturers would be populated from API - placeholder for now */}
                             <option value="">No manufacturers loaded</option>
-                          </select>
+                          </Select>
                         </div>
                         <div className="form-group">
-                          <label className="text-sm text-pf-text-secondary mb-1 block" htmlFor="bulk-model">Set Model</label>
-                          <select
+                          <Label htmlFor="bulk-model" className="mb-1">Set Model</Label>
+                          <Select
                             id="bulk-model"
                             value={bulkModelId}
                             onChange={(e) => setBulkModelId(e.target.value)}
-                            className="input-base input-sm w-full"
+                            className="w-full"
                           >
                             <option value="">-- Keep unchanged --</option>
                             {/* Models would be populated from API - placeholder for now */}
                             <option value="">No models loaded</option>
-                          </select>
+                          </Select>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div className="form-group">
-                          <label className="text-sm text-pf-text-secondary mb-2 block">Enabled Status</label>
+                          <Label className="mb-2">Enabled Status</Label>
                           <div className="flex gap-2">
-                            <button
-                              type="button"
+                            <Button
+                              size="sm"
+                              variant={bulkIsEnabled === true ? 'primary' : 'secondary'}
                               onClick={() => setBulkIsEnabled(true)}
-                              className={`btn-base btn-sm flex-1 ${bulkIsEnabled === true ? 'btn-primary' : 'btn-secondary'}`}
+                              className="flex-1"
                             >
                               Enable
-                            </button>
-                            <button
-                              type="button"
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={bulkIsEnabled === false ? 'primary' : 'secondary'}
                               onClick={() => setBulkIsEnabled(false)}
-                              className={`btn-base btn-sm flex-1 ${bulkIsEnabled === false ? 'btn-primary' : 'btn-secondary'}`}
+                              className="flex-1"
                             >
                               Disable
-                            </button>
-                            <button
-                              type="button"
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={bulkIsEnabled === null ? 'primary' : 'secondary'}
                               onClick={() => setBulkIsEnabled(null)}
-                              className={`btn-base btn-sm flex-1 ${bulkIsEnabled === null ? 'btn-primary' : 'btn-secondary'}`}
+                              className="flex-1"
                             >
                               Skip
-                            </button>
+                            </Button>
                           </div>
                         </div>
                         <div className="flex items-end">
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
+                            variant="primary"
                             onClick={handleBulkUpdate}
                             disabled={bulkOperating}
-                            className="btn-base btn-sm btn-primary w-full"
+                            className="w-full"
                           >
                             {bulkOperating ? 'Updating...' : 'Apply to selected'}
-                          </button>
+                          </Button>
                         </div>
                       </div>
-                      <button
-                        type="button"
+                      <Button
+                        size="sm"
+                        variant="secondary"
                         onClick={() => setSelectedIds([])}
-                        className="btn-base btn-sm btn-secondary w-full"
+                        className="w-full"
                       >
                         Clear selection
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -856,15 +794,17 @@ export function PrintersAdminPage() {
                               )}
                             </td>
                             <td className="text-center">
-                              <button
-                                disabled={retryingIndex !== null || importResult?.status !== 'Failed'}
-                                onClick={() => handleRetryRow(item)}
-                                className="btn-base btn-sm btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-                                aria-label={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Retry (only available for failed imports)'}
-                                title={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Only failed imports can be retried'}
-                              >
-                                {retryingIndex === item.__index ? '↻' : '↻'}
-                              </button>
+                              <Tooltip content={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Only failed imports can be retried'}>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={retryingIndex !== null || importResult?.status !== 'Failed'}
+                                  onClick={() => handleRetryRow(item)}
+                                  aria-label={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Retry (only available for failed imports)'}
+                                >
+                                  {retryingIndex === item.__index ? '↻' : '↻'}
+                                </Button>
+                              </Tooltip>
                             </td>
                           </tr>
                         );
@@ -874,17 +814,19 @@ export function PrintersAdminPage() {
                 </div>
 
                 <div className="flex gap-md flex-wrap items-center">
-                  <label className="form-group inline">
-                    <span className="text-pf-text-secondary">Duplicate handling:</span>
-                    <select value={duplicateHandling} onChange={e => setDuplicateHandling(e.target.value as 'skip' | 'overwrite' | 'rename')} className="input-base input-sm">
+                  <div className="form-group inline flex items-center gap-2">
+                    <Label>Duplicate handling:</Label>
+                    <Select value={duplicateHandling} onChange={e => setDuplicateHandling(e.target.value as 'skip' | 'overwrite' | 'rename')}>
                       <option value="skip">Skip</option>
                       <option value="overwrite">Overwrite</option>
                       <option value="rename">Rename</option>
-                    </select>
-                  </label>
-                  <button type="button" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport} className="btn-base btn-sm btn-primary disabled:opacity-50">{importing ? 'Importing...' : 'Confirm Import'}</button>
-                  <button type="button" disabled={importing} aria-label="Return to main printers table to see imported printers" onClick={() => { setPreviewItems(null); setImportResults(null); }} className="btn-base btn-sm btn-secondary disabled:opacity-50">{importing ? 'Importing...' : 'Close'}</button>
-                  <button type="button" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" title={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'} onClick={handleRetryAllFailed} className="btn-base btn-sm btn-secondary disabled:opacity-50">Retry All</button>
+                    </Select>
+                  </div>
+                  <Button size="sm" variant="primary" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport}>{importing ? 'Importing...' : 'Confirm Import'}</Button>
+                  <Button size="sm" variant="secondary" disabled={importing} aria-label="Return to main printers table to see imported printers" onClick={() => { setPreviewItems(null); setImportResults(null); }}>{importing ? 'Importing...' : 'Close'}</Button>
+                  <Tooltip content={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'}>
+                    <Button size="sm" variant="secondary" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" onClick={handleRetryAllFailed}>Retry All</Button>
+                  </Tooltip>
                 </div>
               </div>
             </div>

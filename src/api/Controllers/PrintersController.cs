@@ -757,6 +757,16 @@ public class PrintersController(
             p.ApiKey = dto.ApiKey;
         }
 
+        // Update port settings
+        if (dto.BackendPort.HasValue)
+        {
+            p.BackendPort = dto.BackendPort.Value;
+        }
+        if (dto.FrontendPort.HasValue)
+        {
+            p.FrontendPort = dto.FrontendPort.Value;
+        }
+
         // Update IsEnabled if provided
         if (dto.IsEnabled.HasValue)
         {
@@ -1767,10 +1777,14 @@ public class PrintersController(
     {
         try
         {
-            _logger.LogInformation("[DISCOVERY] Starting discovery stream via API endpoint");
+            bool autoRegister = request?.AutoRegister ?? false;
+            _logger.LogInformation($"[DISCOVERY] Starting discovery stream via API endpoint (autoRegister={autoRegister})");
 
             IReadOnlyList<PrinterBackend>? backends = request?.Backends?.ToList();
-            Services.Interfaces.DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(backends, ct);
+            Services.Interfaces.DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
+                backends: backends, 
+                autoRegister: autoRegister, 
+                cancellationToken: ct);
 
             return Ok(new { sessionId = result.SessionId, message = result.Message });
         }

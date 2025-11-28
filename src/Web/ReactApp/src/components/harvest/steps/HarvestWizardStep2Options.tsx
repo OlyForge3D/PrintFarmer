@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import type { HarvestOptions } from '../HarvestWizard';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { Button } from '@/components/ui/Button';
 
 interface HarvestWizardStep2OptionsProps {
   options: HarvestOptions;
@@ -108,14 +111,14 @@ export function HarvestWizardStep2Options({
         <label htmlFor="fileExtensions" className="block text-sm font-medium text-pf-text-primary mb-2">
           File Extensions
         </label>
-        <input
+        <Input
           id="fileExtensions"
           type="text"
           value={extensionsDisplay}
           onChange={e => handleFileExtensionsChange(e.target.value)}
           placeholder=".gcode,.gco,.g"
           title="File extensions to harvest (comma-separated)"
-          className="w-full px-3 py-2 border border-pf-border rounded-lg text-pf-text-primary bg-pf-surface placeholder-pf-text-secondary focus:border-pf-accent focus:outline-none"
+          className="w-full"
         />
         <p className="text-xs text-pf-text-secondary mt-1">
           Comma-separated list of file extensions to harvest (e.g., .gcode,.gco,.g)
@@ -130,14 +133,14 @@ export function HarvestWizardStep2Options({
           <label htmlFor="maxFileSize" className="block text-sm font-medium text-pf-text-primary mb-2">
             Maximum File Size (MB)
           </label>
-          <input
+          <Input
             id="maxFileSize"
             type="number"
             value={maxFileSizeMB}
             onChange={e => handleMaxFileSizeChange(e.target.value)}
-            min="1"
+            min={1}
             title="Maximum file size in megabytes"
-            className="w-full px-3 py-2 border border-pf-border rounded-lg text-pf-text-primary bg-pf-surface focus:border-pf-accent focus:outline-none"
+            className="w-full"
           />
           {errors.maxFileSize && (
             <p className="text-xs text-pf-error mt-1">{errors.maxFileSize}</p>
@@ -148,14 +151,14 @@ export function HarvestWizardStep2Options({
           <label htmlFor="minFileSize" className="block text-sm font-medium text-pf-text-primary mb-2">
             Minimum File Size (KB)
           </label>
-          <input
+          <Input
             id="minFileSize"
             type="number"
             value={minFileSizeKB}
             onChange={e => handleMinFileSizeChange(e.target.value)}
-            min="0"
+            min={0}
             title="Minimum file size in kilobytes"
-            className="w-full px-3 py-2 border border-pf-border rounded-lg text-pf-text-primary bg-pf-surface focus:border-pf-accent focus:outline-none"
+            className="w-full"
           />
           {errors.minFileSize && (
             <p className="text-xs text-pf-error mt-1">{errors.minFileSize}</p>
@@ -187,19 +190,19 @@ export function HarvestWizardStep2Options({
         <label htmlFor="duplicateHandling" className="block text-sm font-medium text-pf-text-primary mb-2">
           Duplicate Handling
         </label>
-        <select
+        <Select
           id="duplicateHandling"
           value={localOptions.duplicateHandling}
           onChange={e =>
             handleDuplicateHandlingChange(e.target.value)
           }
           title="How to handle files that already exist"
-          className="w-full px-3 py-2 border border-pf-border rounded-lg text-pf-text-primary bg-pf-surface focus:border-pf-accent focus:outline-none"
+          className="w-full"
         >
           <option value="skip">Skip duplicates</option>
           <option value="replace">Replace existing files</option>
           <option value="keep">Keep both (rename new)</option>
-        </select>
+        </Select>
         <p className="text-xs text-pf-text-secondary mt-1">
           Choose how to handle files that already exist in the library
         </p>
@@ -215,12 +218,14 @@ export function HarvestWizardStep2Options({
         </ul>
       </div>
 
-      <button
+      <Button
+        variant="primary"
+        size="md"
         onClick={validateAndSubmit}
-        className="w-full px-4 py-2 bg-pf-accent text-white rounded-lg hover:bg-pf-accent-hover transition-colors font-medium"
+        className="w-full"
       >
         Continue with These Settings
-      </button>
+      </Button>
     </div>
   );
 }
