@@ -1506,6 +1506,38 @@ prepare_offline_deployment() {
                 # Don't fail overall if OrcaSlicer download fails
             fi
         fi
+        
+        # Cleanup: Remove dangling images and original base images to save disk space
+        if [ "$succeeded" = true ]; then
+            echo
+            print_header "CLEANUP: Removing Redundant Images"
+            print_info "Removing dangling images and original base images (upgraded versions exported)..."
+            
+            # Remove dangling images (leftover from builds)
+            local dangling_count
+            dangling_count=$(docker images -f "dangling=true" -q | wc -l)
+            if [ "$dangling_count" -gt 0 ]; then
+                docker image prune -f > /dev/null 2>&1
+                print_success "✓ Removed $dangling_count dangling image(s)"
+            fi
+            
+            # Remove original base images (we have upgraded versions exported)
+            local removed_count=0
+            for image in "${DOCKER_BASE_IMAGES[@]}"; do
+                if docker images --quiet "$image" 2>/dev/null | grep -q .; then
+                    if docker rmi "$image" > /dev/null 2>&1; then
+                        print_info "  Removed: $image"
+                        ((removed_count++))
+                    fi
+                fi
+            done
+            
+            if [ "$removed_count" -gt 0 ]; then
+                print_success "✓ Removed $removed_count original base image(s)"
+            fi
+            
+            print_success "✓ Cleanup complete - only upgraded images remain"
+        fi
     fi
     
     local end_time
