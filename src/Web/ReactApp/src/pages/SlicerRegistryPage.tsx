@@ -118,7 +118,7 @@ export default function SlicerRegistryPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-pf-text-primary mb-2">Slicer Worker Registry</h1>
         <p className="text-pf-text-secondary">
-          Manage and monitor registered slicer workers. Workers auto-register on startup and send periodic heartbeats.
+          View active slicing jobs across all workers. Track job progress and worker load in real-time.
         </p>
         {connection?.state === 'Connected' && (
           <div className="mt-2 flex items-center text-sm text-pf-success">

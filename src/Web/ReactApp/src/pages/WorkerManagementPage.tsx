@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
-import { workerService, WorkerResponse, WorkerStatus } from '@/services/workerService';
+import { workerService, WorkerResponse, WorkerStatus, WorkerJobResponse } from '@/services/workerService';
 import { slicerHubService, SlicerRegisteredEvent, SlicerHeartbeatEvent, SlicerDeregisteredEvent } from '@/services/slicerHubService';
+import { PageTemplate } from '@/components/PageTemplate';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
+import { Badge } from '@/components/ui/Badge';
+import { Modal } from '@/components/ui/Modal';
+import { Label } from '@/components/ui/Label';
+import { Textarea } from '@/components/ui/Textarea';
+import { Input } from '@/components/ui/Input';
+import { ProgressBar } from '@/components/ui/ProgressBar';
+import { RefreshCw, Wrench, ChevronDown, ChevronRight } from 'lucide-react';
 
 export default function WorkerManagementPage() {
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
@@ -9,8 +19,13 @@ export default function WorkerManagementPage() {
   const [selectedWorker, setSelectedWorker] = useState<WorkerResponse | null>(null);
   const [showDisableDialog, setShowDisableDialog] = useState(false);
   const [disableReason, setDisableReason] = useState('');
+  const [showEditSlotsDialog, setShowEditSlotsDialog] = useState(false);
+  const [editSlotsValue, setEditSlotsValue] = useState('');
   const [filter, setFilter] = useState<'all' | WorkerStatus>('all');
   const [isConnected, setIsConnected] = useState(false);
+  const [expandedWorker, setExpandedWorker] = useState<string | null>(null);
+  const [workerJobs, setWorkerJobs] = useState<Map<string, WorkerJobResponse[]>>(new Map());
+  const [loadingJobs, setLoadingJobs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let isMounted = true;
@@ -72,14 +87,18 @@ export default function WorkerManagementPage() {
   const handleWorkerHeartbeat = (event: SlicerHeartbeatEvent) => {
     console.log('Worker heartbeat:', event);
     // Update worker status in real-time
+    // NOTE: Don't recalculate activeJobs from totalSlots - freeSlots because:
+    // - totalSlots might have been recently updated in the UI
+    // - freeSlots from heartbeat is based on old totalSlots value
+    // This causes incorrect calculations. Just update status and freeSlots,
+    // and let the next full worker reload sync activeJobs correctly.
     setWorkers(prev => prev.map(worker =>
       worker.id === event.id
         ? {
           ...worker,
           status: event.status,
           freeSlots: event.freeSlots,
-          lastHeartbeat: event.lastSeen,
-          activeJobs: worker.totalSlots - event.freeSlots
+          lastHeartbeat: event.lastSeen
         }
         : worker
     ));
@@ -144,189 +163,320 @@ export default function WorkerManagementPage() {
     }
   };
 
-  const getStatusBadgeClass = (status: string) => {
+  const handleEditSlots = (worker: WorkerResponse) => {
+    setSelectedWorker(worker);
+    setEditSlotsValue(worker.totalSlots.toString());
+    setShowEditSlotsDialog(true);
+  };
+
+  const handleUpdateSlots = async () => {
+    if (!selectedWorker) return;
+    const newSlots = parseInt(editSlotsValue, 10);
+    if (isNaN(newSlots) || newSlots < 1) {
+      setError('Total slots must be a number greater than 0');
+      return;
+    }
+
+    try {
+      await workerService.updateWorkerSlots(selectedWorker.id, newSlots);
+      setShowEditSlotsDialog(false);
+      setEditSlotsValue('');
+      setSelectedWorker(null);
+      loadWorkers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update worker slots');
+    }
+  };
+
+  const handleToggleExpanded = async (workerId: string) => {
+    if (expandedWorker === workerId) {
+      setExpandedWorker(null);
+    } else {
+      setExpandedWorker(workerId);
+      if (!workerJobs.has(workerId)) {
+        const loading = new Set(loadingJobs);
+        loading.add(workerId);
+        setLoadingJobs(loading);
+        try {
+          const jobs = await workerService.getWorkerJobs(workerId);
+          const map = new Map(workerJobs);
+          map.set(workerId, jobs);
+          setWorkerJobs(map);
+        } catch (err) {
+          console.error('Failed to load worker jobs:', err);
+        } finally {
+          const loading = new Set(loadingJobs);
+          loading.delete(workerId);
+          setLoadingJobs(loading);
+        }
+      }
+    }
+  };
+
+  const getStatusBadgeVariant = (status: string) => {
     switch (status) {
       case WorkerStatus.Online:
-        return 'bg-green-100 text-green-800';
+        return 'success';
       case WorkerStatus.Busy:
-        return 'bg-yellow-100 text-yellow-800';
+        return 'warning';
       case WorkerStatus.Offline:
-        return 'bg-gray-100 text-gray-800';
+        return 'default';
       case WorkerStatus.Error:
-        return 'bg-red-100 text-red-800';
+        return 'error';
       case WorkerStatus.Draining:
-        return 'bg-blue-100 text-blue-800';
+        return 'info';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'default';
     }
   };
 
   if (loading) {
     return (
-      <div className="container mx-auto p-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-lg">Loading workers...</div>
+      <PageTemplate
+        title="Worker Management"
+        subtitle="Monitor and manage your Slicer workers"
+        icon={Wrench}
+        maxWidth="max-w-7xl"
+      >
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
         </div>
-      </div>
+      </PageTemplate>
     );
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Worker Management</h1>
-          <div className="flex items-center gap-2 mt-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-            <span className="text-sm text-gray-600">
-              {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
-            </span>
-          </div>
-        </div>
-        <button
+    <PageTemplate
+      title="Worker Management"
+      subtitle="Monitor and manage your Slicer workers"
+      icon={Wrench}
+      maxWidth="max-w-7xl"
+      actions={
+        <Button
+          variant="secondary"
+          size="md"
           onClick={loadWorkers}
-          className="btn-base btn-md btn-primary"
+          iconLeft={<RefreshCw className="h-4 w-4" />}
         >
           Refresh
-        </button>
+        </Button>
+      }
+    >
+      {/* Connection status */}
+      <div className="mb-4 flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
+        <span className="text-sm text-pf-text-secondary">
+          {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
+        </span>
       </div>
 
       {error && (
-        <div className="alert-base alert-error mb-4" role="alert">
+        <Alert type="error" className="mb-4" onClose={() => setError(null)}>
           {error}
-        </div>
+        </Alert>
       )}
 
       {/* Filter tabs */}
-      <div className="mb-4 flex gap-sm">
-        <button
+      <div className="mb-4 flex gap-2 flex-wrap">
+        <Button
+          variant={filter === 'all' ? 'primary' : 'secondary'}
+          size="sm"
           onClick={() => setFilter('all')}
-          className={filter === 'all' ? 'btn-base btn-md btn-primary' : 'btn-base btn-md btn-secondary'}
         >
           All ({workers.length})
-        </button>
+        </Button>
         {Object.values(WorkerStatus).map(status => (
-          <button
+          <Button
             key={status}
-            onClick={() => setFilter(status)}
-            className={filter === status ? 'btn-base btn-md btn-primary' : 'btn-base btn-md btn-secondary'}
+            variant={filter === status ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setFilter(status as WorkerStatus)}
           >
-            {status}
-          </button>
+            {status} ({workers.filter(w => w.status === status).length})
+          </Button>
         ))}
       </div>
 
       {/* Workers table */}
-      <div className="card">
-        <table>
-          <thead>
+      <div className="bg-pf-bg-1 rounded border border-pf-border overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-pf-bg-2 border-b border-pf-border">
             <tr>
-              <th>Worker</th>
-              <th>Status</th>
-              <th>Capacity</th>
-              <th>Statistics</th>
-              <th>Performance</th>
-              <th>Actions</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Worker</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Capacity</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Statistics</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Performance</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-pf-border">
             {workers.map(worker => (
-              <tr key={worker.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex flex-col">
-                    <div className="text-sm font-medium text-gray-900">{worker.name}</div>
-                    <div className="text-xs text-gray-500">{worker.endpointUrl}</div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      {worker.capabilities.join(', ')}
+              <>
+                <tr key={worker.id} className="hover:bg-pf-bg-2 transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-start gap-2">
+                      <button
+                        onClick={() => handleToggleExpanded(worker.id)}
+                        className="flex-shrink-0 text-pf-text-secondary hover:text-pf-text-primary transition-colors"
+                      >
+                        {expandedWorker === worker.id ? (
+                          <ChevronDown size={18} />
+                        ) : (
+                          <ChevronRight size={18} />
+                        )}
+                      </button>
+                      <div className="flex flex-col">
+                        <div className="text-sm font-medium text-pf-text-primary">{worker.name}</div>
+                        <div className="text-xs text-pf-text-secondary">{worker.endpointUrl}</div>
+                        <div className="text-xs text-pf-text-tertiary mt-1">
+                          {worker.capabilities.join(', ')}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </td>
+                  </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeClass(worker.status)}`}>
+                  <Badge variant={getStatusBadgeVariant(worker.status)}>
                     {worker.status}
-                  </span>
+                  </Badge>
                   {worker.isDisabled && (
-                    <div className="text-xs text-red-600 mt-1">
+                    <div className="text-xs text-pf-error mt-1">
                       Disabled: {worker.disabledReason}
                     </div>
                   )}
                   {workerService.isHeartbeatStale(worker) && (
-                    <div className="text-xs text-orange-600 mt-1">
+                    <div className="text-xs text-pf-warning mt-1">
                       ⚠️ Stale heartbeat
                     </div>
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">
+                  <div className="text-sm text-pf-text-primary">
                     {worker.totalSlots - worker.freeSlots} / {worker.totalSlots} slots used
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-pf-text-secondary">
                     {workerService.calculateUtilization(worker).toFixed(0)}% utilization
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-1 overflow-hidden">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full"
-                      style={{
-                        width: `${Math.min(100, Math.max(0, workerService.calculateUtilization(worker)))}%`,
-                        transition: 'width 0.3s ease-in-out'
-                      }}
-                    />
-                  </div>
+                  <ProgressBar
+                    value={workerService.calculateUtilization(worker)}
+                    size="xs"
+                    showPercent={false}
+                    className="mt-1"
+                  />
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">
+                  <div className="text-sm text-pf-text-primary">
                     Active: {worker.activeJobs}
                   </div>
-                  <div className="text-xs text-green-600">
+                  <div className="text-xs text-pf-success">
                     ✓ Completed: {worker.completedJobs}
                   </div>
-                  <div className="text-xs text-red-600">
+                  <div className="text-xs text-pf-error">
                     ✗ Failed: {worker.failedJobs}
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-pf-text-secondary">
                     Success: {(workerService.calculateSuccessRate(worker) ?? 0).toFixed(1)}%
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">
+                  <div className="text-sm text-pf-text-primary">
                     Avg: {(worker.averageProcessingTimeSeconds ?? 0).toFixed(0)}s
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-pf-text-secondary">
                     Uptime: {workerService.getUptime(worker)}
                   </div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-pf-text-tertiary">
                     v{worker.version}
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  <div className="gap-sm flex-col">
+                  <div className="flex gap-2">
                     {worker.isDisabled ? (
-                      <button
+                      <Button
+                        variant="success"
+                        size="sm"
                         onClick={() => handleEnableWorker(worker)}
-                        className="btn-base btn-sm btn-success"
                       >
                         Enable
-                      </button>
+                      </Button>
                     ) : (
-                      <button
+                      <Button
+                        variant="subtle"
+                        size="sm"
                         onClick={() => {
                           setSelectedWorker(worker);
                           setShowDisableDialog(true);
                         }}
-                        className="btn-base btn-sm btn-subtle"
                       >
                         Disable
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      variant="danger"
+                      size="sm"
                       onClick={() => handleDeleteWorker(worker)}
-                      className="btn-base btn-sm btn-danger"
                     >
                       Delete
-                    </button>
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleEditSlots(worker)}
+                    >
+                      Edit Slots
+                    </Button>
                   </div>
                 </td>
               </tr>
+
+              {/* Jobs expansion row */}
+              {expandedWorker === worker.id && (
+                <tr className="bg-pf-bg-2">
+                  <td colSpan={6} className="px-6 py-4">
+                    <div className="ml-8">
+                      {loadingJobs.has(worker.id) ? (
+                        <div className="text-sm text-pf-text-secondary">Loading jobs...</div>
+                      ) : workerJobs.get(worker.id)?.length === 0 ? (
+                        <div className="text-sm text-pf-text-secondary">No active jobs</div>
+                      ) : (
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-medium text-pf-text-primary mb-3">Active Slicing Jobs:</h4>
+                          <div className="space-y-2">
+                            {workerJobs.get(worker.id)?.map(job => (
+                              <div key={job.jobId} className="bg-pf-bg-1 rounded p-3 border border-pf-border">
+                                <div className="flex justify-between items-start mb-2">
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-pf-text-primary">{job.modelFileName}</div>
+                                    <div className="text-xs text-pf-text-secondary">Job ID: {job.jobId}</div>
+                                  </div>
+                                  <Badge variant={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'error' : 'default'}>
+                                    {job.status}
+                                  </Badge>
+                                </div>
+                                <div className="mb-2">
+                                  <div className="text-xs text-pf-text-secondary mb-1">
+                                    Progress: {job.progressPercent}%
+                                  </div>
+                                  <ProgressBar value={job.progressPercent} size="sm" showPercent={false} />
+                                </div>
+                                {job.progressMessage && (
+                                  <div className="text-xs text-pf-text-secondary">{job.progressMessage}</div>
+                                )}
+                                {job.startedAt && (
+                                  <div className="text-xs text-pf-text-tertiary mt-1">
+                                    Started: {new Date(job.startedAt).toLocaleString()}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </>
             ))}
           </tbody>
         </table>
@@ -340,48 +490,103 @@ export default function WorkerManagementPage() {
 
       {/* Disable Worker Dialog */}
       {showDisableDialog && selectedWorker && (
-        <div className="modal-overlay">
-          <div className="modal modal-sm">
-            <div className="modal-header">
-              <h2 className="modal-header-title">Disable Worker</h2>
-            </div>
-            <div className="modal-body">
-              <p className="mb-4">
-                Disable worker: <strong>{selectedWorker.name}</strong>
-              </p>
-              <div className="form-group">
-                <label className="form-label">Reason (required)</label>
-                <textarea
-                  value={disableReason}
-                  onChange={(e) => setDisableReason(e.target.value)}
-                  className="input-base w-full"
-                  rows={3}
-                  placeholder="Enter reason for disabling this worker..."
-                />
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                onClick={() => {
-                  setShowDisableDialog(false);
-                  setDisableReason('');
-                  setSelectedWorker(null);
-                }}
-                className="btn-base btn-md btn-secondary"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDisableWorker}
-                disabled={!disableReason.trim()}
-                className="btn-base btn-md btn-danger"
-              >
-                Disable Worker
-              </button>
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setShowDisableDialog(false);
+            setDisableReason('');
+            setSelectedWorker(null);
+          }}
+          title="Disable Worker"
+        >
+          <div>
+            <p className="mb-4">
+              Disable worker: <strong>{selectedWorker.name}</strong>
+            </p>
+            <div className="mb-4">
+              <Label htmlFor="disable-reason">Reason (required)</Label>
+              <Textarea
+                id="disable-reason"
+                value={disableReason}
+                onChange={(e) => setDisableReason(e.target.value)}
+                rows={3}
+                placeholder="Enter reason for disabling this worker..."
+              />
             </div>
           </div>
-        </div>
+          <div className="flex gap-2 justify-end mt-6">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowDisableDialog(false);
+                setDisableReason('');
+                setSelectedWorker(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!disableReason.trim()}
+              onClick={handleDisableWorker}
+            >
+              Disable Worker
+            </Button>
+          </div>
+        </Modal>
       )}
-    </div>
+
+      {/* Edit Slots Dialog */}
+      {showEditSlotsDialog && selectedWorker && (
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setShowEditSlotsDialog(false);
+            setEditSlotsValue('');
+            setSelectedWorker(null);
+          }}
+          title="Edit Worker Slots"
+        >
+          <div>
+            <p className="mb-4">
+              Update total slots for worker: <strong>{selectedWorker.name}</strong>
+            </p>
+            <div className="mb-4">
+              <Label htmlFor="edit-slots-value">Total Slots</Label>
+              <Input
+                id="edit-slots-value"
+                type="number"
+                min="1"
+                value={editSlotsValue}
+                onChange={(e) => setEditSlotsValue(e.target.value)}
+                placeholder="Enter total slots..."
+              />
+              <p className="text-xs text-pf-text-tertiary mt-2">
+                Current: {selectedWorker.totalSlots} slots | Active: {selectedWorker.activeJobs}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end mt-6">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowEditSlotsDialog(false);
+                setEditSlotsValue('');
+                setSelectedWorker(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!editSlotsValue || parseInt(editSlotsValue, 10) < 1}
+              onClick={handleUpdateSlots}
+            >
+              Update Slots
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </PageTemplate>
   );
 }

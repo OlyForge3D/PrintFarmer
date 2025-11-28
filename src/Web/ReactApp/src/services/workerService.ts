@@ -31,6 +31,16 @@ export interface DisableWorkerRequest {
   reason: string;
 }
 
+export interface WorkerJobResponse {
+  jobId: string;
+  modelFileName: string;
+  status: string;
+  progressPercent: number;
+  progressMessage?: string;
+  startedAt?: string;
+  priority: number;
+}
+
 // Worker statuses
 export enum WorkerStatus {
   Offline = 'Offline',
@@ -97,6 +107,29 @@ export class WorkerService {
    */
   async deleteWorker(id: string): Promise<void> {
     await apiClient.request({ url: `/workers/${id}`, method: 'DELETE' });
+  }
+
+  /**
+   * Update worker total slots (admin only)
+   */
+  async updateWorkerSlots(id: string, totalSlots: number): Promise<WorkerResponse> {
+    const response = await apiClient.request<WorkerResponse>({ 
+      url: `/workers/${id}/slots`, 
+      method: 'PUT', 
+      data: { totalSlots } 
+    });
+    return response;
+  }
+
+  /**
+   * Get active jobs for a worker
+   */
+  async getWorkerJobs(workerId: string): Promise<WorkerJobResponse[]> {
+    const response = await apiClient.request<WorkerJobResponse[]>({ 
+      url: `/workers/${workerId}/jobs`, 
+      method: 'GET' 
+    });
+    return response;
   }
 
   /**

@@ -255,6 +255,17 @@ public class EfWorkerRepository : IWorkerRepository
         }
     }
 
+    public async Task UpdateTotalSlotsAsync(Guid id, int totalSlots)
+    {
+        Worker? worker = await _context.Workers.FindAsync(id);
+        if (worker != null)
+        {
+            worker.TotalSlots = totalSlots;
+            worker.FreeSlots = Math.Max(0, totalSlots - worker.ActiveJobs);
+            worker.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
     public async Task SaveChangesAsync()
     {
         _ = await _context.SaveChangesAsync();

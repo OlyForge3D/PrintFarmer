@@ -213,6 +213,46 @@ public class WorkersController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Update worker total slots (admin operation)
+    /// </summary>
+    /// <param name="id">Worker ID</param>
+    /// <param name="totalSlots">New total slots value</param>
+    /// <returns>Updated worker details</returns>
+    [HttpPut("{id}/slots")]
+    [Authorize(Policy = "farm_admin")] // Admin-only: update slots
+    [ProducesResponseType(typeof(WorkerResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UpdateWorkerSlotsAsync(Guid id, [FromBody] UpdateWorkerSlotsRequest request)
+    {
+        if (request.TotalSlots < 1)
+        {
+            return BadRequest("Total slots must be at least 1");
+        }
+
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker == null)
+        {
+            return NotFound($"Worker {id} not found");
+        }
+
+        string workerName = worker.Name;
+        await _workerRepository.UpdateTotalSlotsAsync(id, request.TotalSlots);
+        await _workerRepository.SaveChangesAsync();
+
+        // Fetch updated worker to get recalculated FreeSlots
+        Worker? updatedWorker = await _workerRepository.GetByIdAsync(id);
+        if (updatedWorker == null)
+        {
+            return NotFound($"Worker {id} not found after update");
+        }
+
+        _logger.LogInformation("Worker {WorkerId} ({WorkerName}) total slots updated to {TotalSlots}", id, workerName, request.TotalSlots);
+
+        return Ok(MapToResponse(updatedWorker));
+    }
+
     private static WorkerResponse MapToResponse(Worker worker)
     {
         string[]? capabilities = null;

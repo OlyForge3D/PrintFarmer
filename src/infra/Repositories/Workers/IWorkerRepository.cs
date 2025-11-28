@@ -83,6 +83,11 @@ public interface IWorkerRepository
     Task DeleteAsync(Guid id);
 
     /// <summary>
+    /// Update worker total slots
+    /// </summary>
+    Task UpdateTotalSlotsAsync(Guid id, int totalSlots);
+
+    /// <summary>
     /// Save changes to database
     /// </summary>
     Task SaveChangesAsync();

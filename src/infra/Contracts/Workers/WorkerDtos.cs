@@ -37,6 +37,14 @@ public class DisableWorkerRequest
 }
 
 /// <summary>
+/// Request to update worker total slots
+/// </summary>
+public class UpdateWorkerSlotsRequest
+{
+    public int TotalSlots { get; set; }
+}
+
+/// <summary>
 /// Response for active job assigned to a worker
 /// </summary>
 public class WorkerJobResponse

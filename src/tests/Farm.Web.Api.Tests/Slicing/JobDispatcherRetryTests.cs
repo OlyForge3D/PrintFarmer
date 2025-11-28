@@ -155,6 +155,7 @@ public class JobDispatcherRetryTests
         public Task DisableWorkerAsync(Guid id, string reason) => Task.CompletedTask;
         public Task EnableWorkerAsync(Guid id) => Task.CompletedTask;
         public Task DeleteAsync(Guid id) => Task.CompletedTask;
+        public Task UpdateTotalSlotsAsync(Guid id, int totalSlots) => Task.CompletedTask;
         public Task SaveChangesAsync() => Task.CompletedTask;
     }
     private class StubSliceJobEventService : ISliceJobEventService
