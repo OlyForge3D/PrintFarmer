@@ -2,7 +2,6 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 COPY ["src/printer-discovery/PrinterDiscoveryService.csproj", "src/printer-discovery/"]
-COPY ["src/shared/Farm.Web.Shared.csproj", "src/shared/"]
 
 RUN dotnet restore "src/printer-discovery/PrinterDiscoveryService.csproj"
 

@@ -20,7 +20,6 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS dotnet-build
 WORKDIR /src
 
 # Copy project files for dependency restoration
-COPY src/shared/*.csproj ./shared/
 COPY src/infra/*.csproj ./infra/
 COPY src/import/*.csproj ./import/
 COPY src/api/*.csproj ./api/
