@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Gcode;
+﻿namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Extracts metadata from G-code files as a fallback when printer API doesn't provide complete info.

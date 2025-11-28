@@ -16,8 +16,6 @@ using System.Diagnostics.CodeAnalysis;
     Justification = "Queue naming is intentional and part of the public API surface; renaming would be a breaking change.",
     Scope = "type",
     Target = "~T:Farm.Web.Api.Services.InMemoryHarvestQueue")]
-[assembly: SuppressMessage("Style", "IDE0300:Simplify collection initialization", Justification = "<Pending>", Scope = "member", Target = "~M:Farm.Web.Api.Services.NetworkUrlRewriteService.IsDockerDesktop~System.Boolean")]
-
 [assembly: SuppressMessage(
     "Security",
     "CA3003:Review code for file path injection vulnerabilities",

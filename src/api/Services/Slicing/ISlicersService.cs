@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Contracts.Slicing;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Slicing
 {

@@ -1,6 +1,6 @@
 ﻿using System.Reflection;
-using Farm.Web.Api.Services;
 using Farm.Infrastructure;
+using Farm.Web.Api.Services;
 
 namespace Farm.Web.Api.Tests;
 

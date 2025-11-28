@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Runtime.InteropServices;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;

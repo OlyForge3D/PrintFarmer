@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Resilience;
 

@@ -6,9 +6,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core;
-using Farm.Infrastructure;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 

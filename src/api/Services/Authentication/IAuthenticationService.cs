@@ -1,6 +1,6 @@
 ﻿using System.Security.Claims;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Authentication;
 

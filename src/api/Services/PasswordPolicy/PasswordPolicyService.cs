@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.PasswordPolicy;
-using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.PasswordPolicy;
 

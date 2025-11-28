@@ -1,8 +1,8 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Contracts.Workers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
-using Farm.Infrastructure.Contracts.Workers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

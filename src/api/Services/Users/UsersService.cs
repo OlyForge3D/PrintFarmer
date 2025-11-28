@@ -2,10 +2,10 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Users
 {

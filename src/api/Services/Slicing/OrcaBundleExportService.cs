@@ -2,9 +2,9 @@
 
 using System.Linq;
 using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 /// <summary>

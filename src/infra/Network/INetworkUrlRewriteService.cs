@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Network;
+﻿namespace Farm.Infrastructure.Network;
 
 /// <summary>
 /// Abstraction for URL rewriting so consumers can depend on an interface.

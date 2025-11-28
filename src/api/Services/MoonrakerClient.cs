@@ -2,11 +2,11 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Printers.Moonraker;
 
 namespace Farm.Web.Api.Services;
 

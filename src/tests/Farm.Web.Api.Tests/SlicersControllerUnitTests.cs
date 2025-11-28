@@ -1,5 +1,6 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
@@ -8,7 +9,6 @@ using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;

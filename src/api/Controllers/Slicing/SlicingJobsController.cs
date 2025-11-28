@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
-using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;

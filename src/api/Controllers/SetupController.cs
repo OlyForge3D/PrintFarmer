@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Services.Setup;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
+using Farm.Web.Api.Services.Setup;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;

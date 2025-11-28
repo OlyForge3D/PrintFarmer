@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 // DTOs: allow mutable collection setters for JSON serialization/deserialization
 #pragma warning disable CA2227 // Collection properties should be read only
 #pragma warning disable CA1056 // URI-like properties should not be strings (JSON transport models)

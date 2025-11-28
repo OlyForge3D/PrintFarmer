@@ -1,12 +1,12 @@
 ﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Services.Catalog;
-using Farm.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;

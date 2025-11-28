@@ -1,14 +1,14 @@
 ﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+// ClaimJobRequest now lives in shared contracts
+using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.Slicing;
-// ClaimJobRequest now lives in shared contracts
-using Farm.Infrastructure.Contracts.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

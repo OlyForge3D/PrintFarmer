@@ -1,8 +1,8 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.PasswordPolicy;
-using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;

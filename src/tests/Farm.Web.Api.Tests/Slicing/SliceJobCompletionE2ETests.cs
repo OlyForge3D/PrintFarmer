@@ -2,10 +2,10 @@
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Web.Api.Services.Artifacts;
-using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;

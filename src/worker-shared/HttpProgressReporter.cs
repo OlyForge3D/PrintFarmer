@@ -1,7 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.Slicer.Worker.Core;

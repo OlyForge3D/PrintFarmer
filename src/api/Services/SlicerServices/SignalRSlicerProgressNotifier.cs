@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.SlicerServices;

@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Services;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
+using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Hubs;

@@ -1,11 +1,11 @@
 ﻿using System.Text;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.PrinterCapabilities;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services;
 

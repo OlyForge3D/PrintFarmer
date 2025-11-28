@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Interfaces;
 

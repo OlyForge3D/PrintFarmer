@@ -1,6 +1,6 @@
 ﻿using System.Reflection;
-using Farm.Slicers.OrcaSlicer.v2_3_1;
 using Farm.Infrastructure.Contracts.Slicing.Libraries;
+using Farm.Slicers.OrcaSlicer.v2_3_1;
 
 // Declare this assembly as a slicer library plugin
 #pragma warning disable S101 // Class names required to match version numbering for plugin discovery

@@ -2,9 +2,9 @@
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services;
 

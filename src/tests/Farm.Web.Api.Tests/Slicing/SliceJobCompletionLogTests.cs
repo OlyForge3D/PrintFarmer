@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
@@ -9,7 +10,6 @@ using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Workers;
-using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

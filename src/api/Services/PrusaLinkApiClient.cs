@@ -3,8 +3,8 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 

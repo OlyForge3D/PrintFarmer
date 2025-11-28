@@ -7,12 +7,12 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Hubs;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.Slicing

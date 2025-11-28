@@ -1,8 +1,8 @@
 ﻿using System.Threading.Tasks;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Moq;
 using Xunit;
 

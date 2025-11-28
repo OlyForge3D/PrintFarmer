@@ -2,8 +2,8 @@
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
-using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 
 namespace PrinterDiscovery.Services;
 

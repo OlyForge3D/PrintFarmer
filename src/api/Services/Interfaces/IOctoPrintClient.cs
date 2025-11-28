@@ -1,8 +1,8 @@
 ﻿using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Interfaces
 {

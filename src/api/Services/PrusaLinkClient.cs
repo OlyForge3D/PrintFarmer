@@ -1,9 +1,9 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Infrastructure;
-using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 
 namespace Farm.Web.Api.Services;
 

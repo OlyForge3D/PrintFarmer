@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Gcode;

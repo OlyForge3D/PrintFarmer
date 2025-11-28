@@ -4,9 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Importing.Services.Adapters;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure;
 using FluentValidation.Results;
 using Microsoft.EntityFrameworkCore;
 
