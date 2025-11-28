@@ -10,13 +10,12 @@ using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Model;
 using Farm.Web.Api.Tests.Services;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
-using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.Controllers
 {

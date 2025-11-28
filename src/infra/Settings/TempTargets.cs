@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Infrastructure.Settings
 {

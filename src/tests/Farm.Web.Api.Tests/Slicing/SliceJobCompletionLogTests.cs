@@ -9,7 +9,7 @@ using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Workers;
-using Farm.Web.Shared.Contracts.Slicing;
+using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

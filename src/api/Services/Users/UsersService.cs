@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Users
 {
@@ -27,7 +27,7 @@ namespace Farm.Web.Api.Services.Users
             return await _users.GetUsersAsync(ct);
         }
 
-        public async Task<UserDto> CreateUserAsync(Shared.CreateUserRequest request, CancellationToken ct)
+        public async Task<UserDto> CreateUserAsync(CreateUserRequest request, CancellationToken ct)
         {
             User user = new User
             {

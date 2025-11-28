@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
-using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using System.Diagnostics;
 
 namespace Farm.Slicers.PrusaSlicer.v2_9_x.lib;

@@ -2,7 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Web.Api.Controllers;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Gcode
 {

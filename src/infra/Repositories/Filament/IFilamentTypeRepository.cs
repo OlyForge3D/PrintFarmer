@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Infrastructure.Repositories.Filament;
 

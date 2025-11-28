@@ -16,11 +16,11 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Printers.Moonraker;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
-using MoonrakerDir = Farm.Web.Shared.Contracts.Printers.Moonraker.MoonrakerDirectoryInfo;
+using MoonrakerDir = Farm.Infrastructure.Contracts.Printers.Moonraker.MoonrakerDirectoryInfo;
 
 namespace Farm.Web.Api.Services;
 

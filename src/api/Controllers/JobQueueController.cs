@@ -3,7 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;

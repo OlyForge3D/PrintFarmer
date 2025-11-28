@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core; // base consumer + abstractions
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.PrusaSlicer.Worker.Services;

@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 

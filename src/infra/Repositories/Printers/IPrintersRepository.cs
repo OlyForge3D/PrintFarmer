@@ -1,5 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Infrastructure.Repositories.Printers;
 

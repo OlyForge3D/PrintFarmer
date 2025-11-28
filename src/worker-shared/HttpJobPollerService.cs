@@ -2,8 +2,8 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Slicing; // ClaimJobRequest & completion DTOs
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Slicing; // ClaimJobRequest & completion DTOs
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.PasswordPolicy;
 using Farm.Web.Api.Services.PasswordPolicy;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Moq;
 using Xunit;
 

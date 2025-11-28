@@ -1,7 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Admin;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Admin;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;

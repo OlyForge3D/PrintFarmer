@@ -14,7 +14,7 @@ using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Tests.TestInfrastructure;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;

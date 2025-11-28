@@ -2,10 +2,11 @@
 using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -82,12 +83,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task SuccessfulLogin_CreatesAuditLogEntry()
     {
         // Arrange - Create a user
-        RegisterRequest registerRequest = new RegisterRequest(
-            "auditloginuser",
-            "auditlogin@test.com",
-            "SecurePassword123!",
-            "Audit",
-            "User");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = "auditloginuser",
+            Email = "auditlogin@test.com",
+            Password = "SecurePassword123!",
+            ConfirmPassword = "SecurePassword123!",
+            FirstName = "Audit",
+            LastName = "User"
+        };
 
         HttpResponseMessage registerResponse = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -110,8 +114,8 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         _ = await context.SaveChangesAsync();
 
         // Act - Login
-        LoginRequest loginRequest = new LoginRequest("auditloginuser", "SecurePassword123!");
-        HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+        LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "auditloginuser", Password = "SecurePassword123!" };
+        HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.UsernameOrEmail, Password = loginRequest.Password });
         // Dump HTTP response for diagnostics
         await DumpResponse(loginResponse, "loginResponse");
 
@@ -135,12 +139,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task FailedLogin_CreatesAuditLogEntry()
     {
         // Arrange - Create a user
-        RegisterRequest registerRequest = new RegisterRequest(
-            "auditfailuser",
-            "auditfail@test.com",
-            "SecurePassword123!",
-            "Audit",
-            "Fail");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = "auditfailuser",
+            Email = "auditfail@test.com",
+            Password = "SecurePassword123!",
+            ConfirmPassword = "SecurePassword123!",
+            FirstName = "Audit",
+            LastName = "Fail"
+        };
 
         _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -160,8 +167,8 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         _ = await context.SaveChangesAsync();
 
         // Act - Failed login with wrong password
-        LoginRequest loginRequest = new LoginRequest("auditfailuser", "WrongPassword123!");
-        HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+        LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "auditfailuser", Password = "WrongPassword123!" };
+        HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.UsernameOrEmail, Password = loginRequest.Password });
 
         // Assert - Check audit log for failed login
         using IServiceScope verifyScope = _factory.Services.CreateScope();
@@ -184,12 +191,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
     public async Task Registration_CreatesAuditLogEntry()
     {
         // Arrange & Act - Register a new user
-        RegisterRequest registerRequest = new RegisterRequest(
-            $"auditreg{Guid.NewGuid():N}",
-            $"auditreg{Guid.NewGuid():N}@test.com",
-            "SecurePassword123!",
-            "Audit",
-            "Register");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = $"auditreg{Guid.NewGuid():N}",
+            Email = $"auditreg{Guid.NewGuid():N}@test.com",
+            Password = "SecurePassword123!",
+            ConfirmPassword = "SecurePassword123!",
+            FirstName = "Audit",
+            LastName = "Register"
+        };
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -227,12 +237,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         string username = $"auditpwchange{Guid.NewGuid():N}";
         string email = $"{username}@test.com";
 
-        RegisterRequest registerRequest = new RegisterRequest(
-            username,
-            email,
-            "OldPassword123!",
-            "Audit",
-            "PwChange");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = username,
+            Email = email,
+            Password = "OldPassword123!",
+            ConfirmPassword = "OldPassword123!",
+            FirstName = "Audit",
+            LastName = "PwChange"
+        };
 
         _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -277,12 +290,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Arrange - Create user
         string email = $"auditreset{Guid.NewGuid():N}@test.com";
 
-        RegisterRequest registerRequest = new RegisterRequest(
-            $"auditreset{Guid.NewGuid():N}",
-            email,
-            "SecurePassword123!",
-            "Audit",
-            "Reset");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = $"auditreset{Guid.NewGuid():N}",
+            Email = email,
+            Password = "SecurePassword123!",
+            ConfirmPassword = "SecurePassword123!",
+            FirstName = "Audit",
+            LastName = "Reset"
+        };
 
         _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -295,7 +311,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         });
 
         // Act - Initiate password reset
-        Shared.Contracts.Auth.ForgotPasswordRequest forgotPasswordRequest = new Shared.Contracts.Auth.ForgotPasswordRequest
+        ForgotPasswordRequest forgotPasswordRequest = new ForgotPasswordRequest
         {
             Email = email
         };
@@ -325,12 +341,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         string username = $"auditresetcomp{Guid.NewGuid():N}";
         string email = $"{username}@test.com";
 
-        RegisterRequest registerRequest = new RegisterRequest(
-            username,
-            email,
-            "OldPassword123!",
-            "Audit",
-            "ResetComp");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = username,
+            Email = email,
+            Password = "OldPassword123!",
+            ConfirmPassword = "OldPassword123!",
+            FirstName = "Audit",
+            LastName = "ResetComp"
+        };
 
         _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -364,7 +383,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         _ = await context.SaveChangesAsync();
 
         // Act - Complete password reset
-        Shared.Contracts.Auth.ResetPasswordRequest resetPasswordRequest = new Shared.Contracts.Auth.ResetPasswordRequest
+        ResetPasswordRequest resetPasswordRequest = new ResetPasswordRequest
         {
             Token = "test-reset-token-123",
             Email = email,
@@ -396,12 +415,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         string username = $"auditlockuser{Guid.NewGuid():N}";
         string email = $"{username}@test.com";
 
-        RegisterRequest registerRequest = new RegisterRequest(
-            username,
-            email,
-            "SecurePassword123!",
-            "Audit",
-            "Lock");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = username,
+            Email = email,
+            Password = "SecurePassword123!",
+            ConfirmPassword = "SecurePassword123!",
+            FirstName = "Audit",
+            LastName = "Lock"
+        };
 
         _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -423,8 +445,8 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         // Act - Trigger account lockout with 5 failed login attempts
         for (int i = 0; i < 5; i++)
         {
-            LoginRequest loginRequest = new LoginRequest(username, "WrongPassword!");
-            _ = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+            LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = username, Password = "WrongPassword!" };
+            _ = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.UsernameOrEmail, Password = loginRequest.Password });
         }
 
         // Assert - Check audit log for account locked event
@@ -450,12 +472,15 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         string username = $"auditgetlog{Guid.NewGuid():N}";
         string email = $"{username}@test.com";
 
-        RegisterRequest registerRequest = new RegisterRequest(
-            username,
-            email,
-            "SecurePassword123!",
-            "Audit",
-            "GetLog");
+        RegisterRequest registerRequest = new RegisterRequest
+        {
+            Username = username,
+            Email = email,
+            Password = "SecurePassword123!",
+            ConfirmPassword = "SecurePassword123!",
+            FirstName = "Audit",
+            LastName = "GetLog"
+        };
 
         _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -475,8 +500,8 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         _ = await context.SaveChangesAsync();
 
         // Perform login
-        LoginRequest loginRequest = new LoginRequest(username, "SecurePassword123!");
-        _ = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.Username, Password = loginRequest.Password });
+        LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = username, Password = "SecurePassword123!" };
+        _ = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.UsernameOrEmail, Password = loginRequest.Password });
 
         // Act - Get audit log via service
         IAuthAuditService auditService = scope.ServiceProvider.GetRequiredService<IAuthAuditService>();

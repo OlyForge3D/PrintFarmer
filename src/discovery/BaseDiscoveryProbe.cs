@@ -3,9 +3,9 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
-namespace Farm.Shared.Discovery;
+namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Base class for HTTP-based discovery probes.

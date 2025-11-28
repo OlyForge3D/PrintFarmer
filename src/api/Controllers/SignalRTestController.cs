@@ -19,7 +19,7 @@ public class SignalRTestController(
     /// Test endpoint to verify SignalR hub can send messages
     /// </summary>
     [HttpPost("send-test-message")]
-    public async Task<IActionResult> SendTestMessageAsync([FromBody] Shared.Contracts.SignalR.SignalRTestRequest request)
+    public async Task<IActionResult> SendTestMessageAsync([FromBody] SignalRTestRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         try
@@ -38,7 +38,7 @@ public class SignalRTestController(
     /// Test discovery group functionality specifically
     /// </summary>
     [HttpPost("test-discovery-group")]
-    public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] Shared.Contracts.SignalR.DiscoveryTestRequest request)
+    public async Task<IActionResult> TestDiscoveryGroupAsync([FromBody] DiscoveryTestRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         try

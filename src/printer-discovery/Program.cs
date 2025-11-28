@@ -1,4 +1,4 @@
-﻿using Farm.Shared.Discovery;
+﻿using Farm.Infrastructure.Discovery;
 using PrinterDiscovery.BackgroundServices;
 using PrinterDiscovery.Services;
 

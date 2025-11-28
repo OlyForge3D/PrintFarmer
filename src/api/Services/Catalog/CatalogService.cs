@@ -5,7 +5,7 @@ using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Exceptions;
 using Farm.Web.Api.Infrastructure.Normalization;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 namespace Farm.Web.Api.Services.Catalog;
 

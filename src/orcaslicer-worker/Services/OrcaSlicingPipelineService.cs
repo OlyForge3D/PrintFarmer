@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core; // shared interfaces
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 

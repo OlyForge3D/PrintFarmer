@@ -2,10 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Shared.Discovery;
+namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Core printer discovery service using probe-based detection.

@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Importing.Services.Import;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
 using FluentValidation.Results;

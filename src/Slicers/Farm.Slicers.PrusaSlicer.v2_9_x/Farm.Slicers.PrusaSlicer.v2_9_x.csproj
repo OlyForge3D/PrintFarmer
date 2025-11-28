@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../shared/Farm.Web.Shared.csproj" />
+    <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
 
   <!-- Embed official profiles and assets -->

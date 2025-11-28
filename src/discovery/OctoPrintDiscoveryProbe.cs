@@ -2,9 +2,9 @@
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
-namespace Farm.Shared.Discovery;
+namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Discovery probe for OctoPrint-based 3D printers.

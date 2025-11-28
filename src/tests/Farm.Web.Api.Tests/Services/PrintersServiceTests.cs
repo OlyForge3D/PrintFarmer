@@ -12,7 +12,6 @@ using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Printers;
-using Farm.Web.Shared;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;

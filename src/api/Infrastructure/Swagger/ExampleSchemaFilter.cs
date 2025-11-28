@@ -1,6 +1,10 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Auth;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
+
+// Explicit using to disambiguate from Moonraker's LoginRequest
+using AuthLoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
 
 namespace Farm.Web.Api.Infrastructure.Swagger;
 
@@ -96,7 +100,7 @@ public static class ExampleSchemaFilter
                 ["quality"] = new OpenApiString("standard")
             };
         }
-        else if (t == typeof(LoginRequest))
+        else if (t == typeof(AuthLoginRequest))
         {
             schema.Example = new OpenApiObject
             {

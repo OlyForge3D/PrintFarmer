@@ -22,7 +22,7 @@ using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Slicing.Abstractions;
-using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 
@@ -377,9 +377,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.Slicing.IOrcaBundleExportService, Services.Slicing.OrcaBundleExportService>();
 
         // Job queue and orchestration
-        _ = services.AddScoped<Shared.ISlicerJobQueue, Services.SlicerServices.DbSlicerJobQueue>();
-        _ = services.AddSingleton<Shared.ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
-        _ = services.AddScoped<Shared.ISlicerOrchestrator, Services.SlicerServices.SlicerOrchestrator>();
+        _ = services.AddScoped<ISlicerJobQueue, Services.SlicerServices.DbSlicerJobQueue>();
+        _ = services.AddSingleton<ISlicerProgressNotifier, Services.SlicerServices.SignalRSlicerProgressNotifier>();
+        _ = services.AddScoped<ISlicerOrchestrator, Services.SlicerServices.SlicerOrchestrator>();
         _ = services.AddScoped<Services.Slicing.ISliceJobEventService, Services.Slicing.SliceJobEventService>();
         _ = services.AddScoped<Services.Queue.IQueueDataService, Services.Queue.QueueDataService>();
         _ = services.AddScoped<Services.Queue.IJobQueueService, Services.Queue.JobQueueService>();
@@ -397,7 +397,7 @@ public static class ServiceCollectionExtensions
         // Submission and file storage
         _ = services.AddScoped<Services.Slicing.ISlicingSubmissionService, Services.Slicing.SlicingSubmissionService>();
         _ = services.AddScoped<Services.SlicerServices.LocalSlicerFileStorage>();
-        _ = services.AddScoped<Shared.ISlicerFileStorage>(sp => sp.GetRequiredService<Services.SlicerServices.LocalSlicerFileStorage>());
+        _ = services.AddScoped<ISlicerFileStorage>(sp => sp.GetRequiredService<Services.SlicerServices.LocalSlicerFileStorage>());
 
         // Slicer Library Registration (plugin discovery)
         _ = services

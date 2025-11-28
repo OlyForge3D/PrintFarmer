@@ -6,8 +6,8 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using Farm.Shared.Discovery;
-using Farm.Web.Shared;
+using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure;
 
 namespace Farm.Tools.AdminCli;
 

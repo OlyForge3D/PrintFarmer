@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Catalog;
 

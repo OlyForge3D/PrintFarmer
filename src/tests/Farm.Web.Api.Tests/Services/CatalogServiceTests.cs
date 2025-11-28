@@ -6,7 +6,7 @@ using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Services.Catalog;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;

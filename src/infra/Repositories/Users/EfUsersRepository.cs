@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Users;
@@ -27,18 +27,20 @@ public class EfUsersRepository : IUsersRepository
             .AsNoTracking()
             .ToListAsync(ct);
 
-        return users.Select(u => new UserDto(
-            u.Id,
-            u.Username,
-            u.Email,
-            u.FirstName,
-            u.LastName,
-            u.IsActive,
-            u.EmailConfirmed,
-            u.LastLogin,
-            u.CreatedAt,
-            u.UserRoles.Where(ur => ur.IsActive).Select(ur => ur.Role.Name).ToArray(),
-            Array.Empty<string>())).ToList();
+        return users.Select(u => new UserDto
+        {
+            Id = u.Id,
+            Username = u.Username,
+            Email = u.Email,
+            FirstName = u.FirstName,
+            LastName = u.LastName,
+            IsActive = u.IsActive,
+            EmailConfirmed = u.EmailConfirmed,
+            LastLogin = u.LastLogin,
+            CreatedAt = u.CreatedAt,
+            Roles = u.UserRoles.Where(ur => ur.IsActive).Select(ur => ur.Role.Name).ToList(),
+            Permissions = new List<string>()
+        }).ToList();
     }
 
     public async Task<User?> GetUserEntityAsync(Guid id, CancellationToken ct = default)
@@ -117,23 +119,21 @@ public class EfUsersRepository : IUsersRepository
             .AsNoTracking()
             .ToListAsync(ct);
 
-        return roles.Select(r => new RoleDto(
-            r.Id,
-            r.Name,
-            r.DisplayName,
-            r.Description,
-            r.IsSystemRole,
-            r.IsActive,
-            r.CreatedAt,
-            r.RolePermissions.Select(rp => new RolePermissionDto(
-                rp.Id,
-                rp.RoleId,
-                rp.ResourceId,
-                rp.ActionId,
-                rp.Resource.Name,
-                rp.Action.Name,
-                rp.Granted
-            )).ToArray())).ToList();
+        return roles.Select(r => new RoleDto
+        {
+            Id = r.Id,
+            Name = r.Name,
+            DisplayName = r.DisplayName,
+            Description = r.Description,
+            IsSystemRole = r.IsSystemRole,
+            IsActive = r.IsActive,
+            Permissions = r.RolePermissions.Select(rp => new PermissionDto
+            {
+                Resource = rp.Resource.Name,
+                Action = rp.Action.Name,
+                Granted = rp.Granted
+            }).ToList()
+        }).ToList();
     }
 
     public Task<bool> UsernameExistsAsync(string username, CancellationToken ct = default)

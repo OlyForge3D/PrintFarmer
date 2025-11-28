@@ -6,7 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Moq;
 using Xunit;
 

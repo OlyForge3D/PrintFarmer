@@ -8,9 +8,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Filament;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
-using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Filament
 {

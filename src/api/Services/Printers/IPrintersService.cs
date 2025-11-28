@@ -23,21 +23,21 @@ namespace Farm.Web.Api.Services.Printers
         Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct);
         Task<Farm.Infrastructure.Domain.PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct);
         // Higher-level orchestration methods that encapsulate external client calls and status aggregation
-        Task<Shared.PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct);
-        Task<Shared.PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct);
-        Task<Shared.PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct);
-        Task<Shared.PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct);
-        Task<Shared.PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct);
+        Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct);
+        Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct);
+        Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct);
+        Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct);
+        Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct);
         // Export helpers: build CSV bytes or stream export directly
         Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct);
         Task StreamExportToResponseAsync(Guid[]? ids, string format, HttpResponse response, CancellationToken ct);
         // Return ready-to-serialize DTOs combining printer identity and capabilities
-        Task<Shared.PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct);
+        Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct);
         // Create a printer from DTO (resolves manufacturer/model, normalizes host, persists printer and returns DTO)
-        Task<Shared.PrinterDto> CreatePrinterFromDtoAsync(Shared.CreatePrinterDto dto, CancellationToken ct);
+        Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct);
 
         // Resolve hostname: returns normalized base url and resolved IP when available
-        Task<Shared.ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, Shared.PrinterBackend backend, CancellationToken ct);
+        Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct);
 
         // Extract a thumbnail URL from provider metadata given the base printer server URL
         string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl);
@@ -51,9 +51,9 @@ namespace Farm.Web.Api.Services.Printers
         Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct);
         Task<(string? streamUrl, string? snapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct);
         // History related operations (wrap Moonraker client and return shared DTOs)
-        Task<Shared.HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct);
-        Task<Shared.HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
-        Task<Shared.HistoryTotals> GetHistoryTotalsAsync(Guid printerId, CancellationToken ct);
+        Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct);
+        Task<HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
+        Task<HistoryTotals> GetHistoryTotalsAsync(Guid printerId, CancellationToken ct);
         Task<bool> DeleteHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
         Task<bool> EnableCameraAsync(Guid id, CancellationToken ct);
         Task<bool> DisableCameraAsync(Guid id, CancellationToken ct);
@@ -73,10 +73,10 @@ namespace Farm.Web.Api.Services.Printers
         Task<string[]> GetFileListAsync(Guid id, CancellationToken ct);
 
         // Get current print job status for a printer
-        Task<Shared.PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct);
+        Task<PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct);
 
         // Bulk operations
-        Task<object> BulkCreatePrintersAsync(Shared.CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
+        Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
 
         // File-based import
         Task<object> ImportFromFileAsync(IFormFile file, string duplicateHandling = "skip", CancellationToken ct = default);

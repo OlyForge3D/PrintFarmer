@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Farm.Slicer.Worker.Core; // shared interfaces
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.PrusaSlicer.Worker.Services;
 

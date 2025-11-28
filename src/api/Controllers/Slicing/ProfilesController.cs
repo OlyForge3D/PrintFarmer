@@ -8,7 +8,7 @@ using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

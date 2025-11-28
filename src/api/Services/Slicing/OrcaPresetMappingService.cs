@@ -1,7 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Slicing;

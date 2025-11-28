@@ -1,5 +1,5 @@
 using System.Reflection;
-using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Farm.Infrastructure.Contracts.Slicing.Libraries;
 
 namespace Farm.Slicers.PrusaSlicer.v2_9_x.lib;
 

@@ -58,11 +58,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\shared\Farm.Web.Shared.csproj" />
     <ProjectReference Include="..\import\Farm.Importing.csproj" />
     <!-- Slicer libraries -->
     <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
-  <!-- Removed old Farm.Infrastructure reference after folder rename -->
   </ItemGroup>
 
   <ItemGroup>

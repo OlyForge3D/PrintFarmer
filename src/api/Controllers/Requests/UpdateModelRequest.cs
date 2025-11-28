@@ -1,6 +1,6 @@
 ﻿namespace Farm.Web.Api.Controllers.Requests;
 
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 public record UpdateModelRequest(
     string Name,

@@ -8,7 +8,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Web.Api.Services.Artifacts;
-using Farm.Web.Shared.Contracts.Slicing;
+using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;

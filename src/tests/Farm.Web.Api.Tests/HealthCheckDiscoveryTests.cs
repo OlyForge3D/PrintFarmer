@@ -4,7 +4,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Moq;

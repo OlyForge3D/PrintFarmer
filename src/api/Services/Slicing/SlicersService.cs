@@ -11,8 +11,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Hubs;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.Slicing

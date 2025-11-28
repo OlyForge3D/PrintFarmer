@@ -8,7 +8,7 @@ using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Web.Shared.Contracts.Slicing;
+using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;

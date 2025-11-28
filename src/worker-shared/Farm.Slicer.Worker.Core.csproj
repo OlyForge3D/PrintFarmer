@@ -14,7 +14,6 @@
     <PackageReference Include="System.Text.Json" Version="9.0.9" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../shared/Farm.Web.Shared.csproj" />
-  <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

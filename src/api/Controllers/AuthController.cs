@@ -2,17 +2,17 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Auth;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ChangePasswordRequest = Farm.Web.Shared.Contracts.Auth.ChangePasswordRequest;
-using ConfirmEmailRequest = Farm.Web.Shared.ConfirmEmailRequest;
-using ForgotPasswordRequest = Farm.Web.Shared.Contracts.Auth.ForgotPasswordRequest;
-using LoginRequest = Farm.Web.Shared.Contracts.Auth.LoginRequest;
-using RegisterRequest = Farm.Web.Shared.Contracts.Auth.RegisterRequest;
-using ResetPasswordRequest = Farm.Web.Shared.Contracts.Auth.ResetPasswordRequest;
-using UserDto = Farm.Web.Shared.Contracts.Auth.UserDto;
+using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordRequest;
+using ConfirmEmailRequest = Farm.Infrastructure.ConfirmEmailRequest;
+using ForgotPasswordRequest = Farm.Infrastructure.Contracts.Auth.ForgotPasswordRequest;
+using LoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
+using RegisterRequest = Farm.Infrastructure.Contracts.Auth.RegisterRequest;
+using ResetPasswordRequest = Farm.Infrastructure.Contracts.Auth.ResetPasswordRequest;
+using UserDto = Farm.Infrastructure.Contracts.Auth.UserDto;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -61,13 +61,15 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
         }
 
         // Map the new DTO to the old service DTO
-        Shared.RegisterRequest serviceRequest = new Shared.RegisterRequest(
-            request.Username,
-            request.Email,
-            request.Password,
-            request.FirstName,
-            request.LastName
-        );
+        RegisterRequest serviceRequest = new RegisterRequest
+        {
+            Username = request.Username,
+            Email = request.Email,
+            Password = request.Password,
+            ConfirmPassword = request.Password,  // Assume they match for self-registration
+            FirstName = request.FirstName,
+            LastName = request.LastName
+        };
 
         AuthenticationResult result = await _authService.RegisterAsync(serviceRequest);
 
@@ -122,7 +124,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
             return Unauthorized();
         }
 
-        Shared.UserDto? serviceUser = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+        UserDto? serviceUser = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
         if (serviceUser == null)
         {
             return NotFound();
@@ -326,7 +328,7 @@ public class AuthController(IAuthenticationService authService, IUnifiedLoggingS
                 return BadRequest(new ResendConfirmationResponse(false, "Invalid user authentication"));
             }
 
-            Shared.UserDto? userDto = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+            UserDto? userDto = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
             if (userDto == null)
             {
                 return NotFound();

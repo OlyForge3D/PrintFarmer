@@ -3,9 +3,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
-namespace Farm.Shared.Discovery;
+namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Discovery probe for SDCP (Snapmaker Discovery Protocol) printers using UDP broadcast.

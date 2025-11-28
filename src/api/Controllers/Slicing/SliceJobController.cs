@@ -8,7 +8,7 @@ using Farm.Web.Api.Services.Artifacts;
 using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.Slicing;
 // ClaimJobRequest now lives in shared contracts
-using Farm.Web.Shared.Contracts.Slicing;
+using Farm.Infrastructure.Contracts.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

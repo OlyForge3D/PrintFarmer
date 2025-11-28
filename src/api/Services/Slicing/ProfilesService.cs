@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Slicing
 {

@@ -7,7 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Tags

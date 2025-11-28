@@ -1,5 +1,5 @@
 ﻿using System.Threading.Tasks;
-using Farm.Web.Shared.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 
 namespace Farm.Web.Api.Services.Interfaces;
 

@@ -7,7 +7,7 @@ using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Slicing;
-using Farm.Web.Shared.Contracts.Slicing;
+using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;

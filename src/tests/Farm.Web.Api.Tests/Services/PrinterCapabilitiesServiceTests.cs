@@ -7,7 +7,7 @@ using Farm.Infrastructure.Repositories.PrinterCapabilities;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.PrinterCapabilities;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Moq;

@@ -30,7 +30,7 @@ public class SlicersController : ControllerBase
     // Registration uses static key
 
     [HttpPost("register")]
-    public async Task<IActionResult> RegisterAsync([FromBody] Shared.Contracts.Slicing.RegisterSlicerDto dto)
+    public async Task<IActionResult> RegisterAsync([FromBody] RegisterSlicerDto dto)
     {
         SlicerService svc = new SlicerService
         {
@@ -74,7 +74,7 @@ public class SlicersController : ControllerBase
 
     [HttpPost("{id}/heartbeat")]
     [RequireSlicerServiceApiKey]
-    public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] Shared.Contracts.Slicing.HeartbeatDto dto)
+    public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] HeartbeatDto dto)
     {
         CancellationToken ct = HttpContext?.RequestAborted ?? CancellationToken.None;
         bool ok = await _service.HeartbeatAsync(id, dto, ct);
@@ -105,4 +105,4 @@ public class SlicersController : ControllerBase
     }
 }
 
-// DTOs moved to Farm.Web.Shared.Contracts.Slicing.SlicerDtos.cs
+// DTOs moved to Farm.Infrastructure.Contracts.Slicing.SlicerDtos.cs

@@ -17,7 +17,7 @@ using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Mvc;
@@ -731,7 +731,7 @@ public class PrintersController(
         int defaultPort = dto.Backend.HasValue ?
             (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 :
              dto.Backend.Value == PrinterBackend.SDCP ? 80 : 7125) :
-            (p.Backend == (int)Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : p.Backend == (int)Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125);
+            (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125);
 
         // Delegate normalization and optional hostname resolution to the PrintersService
         PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
@@ -859,8 +859,8 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
         // Delegate hostname normalization and resolution to the service
-        int defaultPort = body.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 :
-                         body.Backend == Farm.Web.Shared.PrinterBackend.SDCP ? 80 : 7125;
+        int defaultPort = body.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 :
+                         body.Backend == Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125;
         try
         {
             ResolveHostnameResponse resp = await _printersService.ResolveHostnameAsync(body.ServerUrl, body.Backend, ct);
@@ -1304,14 +1304,14 @@ public class PrintersController(
     // ===== HISTORY ENDPOINTS =====
 
     [HttpGet("{id}/history")]
-    [ProducesResponseType(typeof(Shared.HistoryListResponse), 200)]
+    [ProducesResponseType(typeof(HistoryListResponse), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Shared.HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
+    public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
         try
         {
-            Shared.HistoryListResponse resp = await _printersService.GetHistoryListAsync(id, limit, start, since, before, order, ct);
+            HistoryListResponse resp = await _printersService.GetHistoryListAsync(id, limit, start, since, before, order, ct);
             return Ok(resp);
         }
         catch (KeyNotFoundException)
@@ -1321,22 +1321,22 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Failed to get history for printer {id}: {ex.Message}");
-            return new Shared.HistoryListResponse { Count = 0, Jobs = Array.Empty<Shared.HistoryJob>() };
+            return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
         }
     }
 
     [HttpGet("{id}/history/{jobId}")]
-    [ProducesResponseType(typeof(Shared.HistoryJob), 200)]
+    [ProducesResponseType(typeof(HistoryJob), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(408)]
     [ProducesResponseType(502)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Shared.HistoryJob>> GetHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
+    public async Task<ActionResult<HistoryJob>> GetHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
         try
         {
-            Shared.HistoryJob job = await _printersService.GetHistoryJobAsync(id, jobId, ct);
+            HistoryJob job = await _printersService.GetHistoryJobAsync(id, jobId, ct);
             return Ok(job);
         }
         catch (ArgumentException)
@@ -1367,14 +1367,14 @@ public class PrintersController(
     }
 
     [HttpGet("{id}/history/totals")]
-    [ProducesResponseType(typeof(Shared.HistoryTotals), 200)]
+    [ProducesResponseType(typeof(HistoryTotals), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<Shared.HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
+    public async Task<ActionResult<HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
         try
         {
-            Shared.HistoryTotals totals = await _printersService.GetHistoryTotalsAsync(id, ct);
+            HistoryTotals totals = await _printersService.GetHistoryTotalsAsync(id, ct);
             return Ok(totals);
         }
         catch (KeyNotFoundException)
@@ -1384,7 +1384,7 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError($"Failed to get history totals for printer {id}: {ex.Message}");
-            return new Shared.HistoryTotals { JobTotals = new Shared.JobTotals() };
+            return new HistoryTotals { JobTotals = new JobTotals() };
         }
     }
 

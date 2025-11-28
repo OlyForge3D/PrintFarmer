@@ -7,8 +7,8 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Printers.Moonraker;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services;
@@ -362,7 +362,7 @@ public sealed class MoonrakerSubscriptionService(
                 return false;
             }
 
-            if (current.Backend != (int)Farm.Web.Shared.PrinterBackend.Moonraker)
+            if (current.Backend != (int)Farm.Infrastructure.PrinterBackend.Moonraker)
             {
                 _logger.LogInformation($"Printer {printerId} backend changed from Moonraker (Backend={current.Backend})");
                 return false;

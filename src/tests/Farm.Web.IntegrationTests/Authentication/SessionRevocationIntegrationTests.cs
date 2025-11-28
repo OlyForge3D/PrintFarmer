@@ -5,13 +5,13 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.IntegrationTests;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using LoginRequest = Farm.Web.Shared.Contracts.Auth.LoginRequest;
-using RegisterRequest = Farm.Web.Shared.Contracts.Auth.RegisterRequest;
+using LoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
+using RegisterRequest = Farm.Infrastructure.Contracts.Auth.RegisterRequest;
 
 namespace Farm.Web.Api.Tests.Authentication;
 

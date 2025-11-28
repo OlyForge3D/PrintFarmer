@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Farm.Importing.Services.Adapters;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using FluentValidation.Results;
 using Microsoft.EntityFrameworkCore;
 
@@ -141,7 +141,7 @@ public class ImportProcessorService : IImportProcessorService
         }
     }
 
-    private async Task<Farm.Web.Shared.PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
+    private async Task<Farm.Infrastructure.PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
     {
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
         if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
@@ -185,7 +185,7 @@ public class ImportProcessorService : IImportProcessorService
             }
         }
 
-        int defaultPort = dto.Backend == Farm.Web.Shared.PrinterBackend.PrusaLink ? 80 : 7125;
+        int defaultPort = dto.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : 7125;
         string normalizedInput = dto.ServerUrl ?? string.Empty;
 
         // Strip port from ServerUrl - port is managed via FrontendPort field, not stored in ServerUrl
@@ -218,7 +218,7 @@ public class ImportProcessorService : IImportProcessorService
         }
         catch { }
 
-        return new Farm.Web.Shared.PrinterDto(
+        return new Farm.Infrastructure.PrinterDto(
             Id: p.Id,
             Name: p.Name,
             ServerUrl: p.ServerUrl,
@@ -239,7 +239,7 @@ public class ImportProcessorService : IImportProcessorService
             BedTemp: null,
             HotendTarget: null,
             BedTarget: null,
-            Backend: (Farm.Web.Shared.PrinterBackend)p.Backend,
+            Backend: (Farm.Infrastructure.PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
             IpAddress: p.IpAddress

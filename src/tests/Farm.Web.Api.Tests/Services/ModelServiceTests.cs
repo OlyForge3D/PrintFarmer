@@ -10,14 +10,13 @@ using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Model;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
-using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.Services
 {

@@ -2,7 +2,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Farm.Web.IntegrationTests;
-using Farm.Web.Shared.Contracts.Auth;
+using Farm.Infrastructure.Contracts.Auth;
 using FluentAssertions;
 using Xunit;
 

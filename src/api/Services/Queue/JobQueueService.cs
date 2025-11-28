@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Queue
 {
@@ -75,7 +75,7 @@ namespace Farm.Web.Api.Services.Queue
                 AssignedPrinterName = j.AssignedPrinter?.Name ?? string.Empty
             }).ToList();
 
-            List<JobQueuePrintJobDto> queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Web.Shared.PrintJobStatus.Queued || d.Status.Value == Farm.Web.Shared.PrintJobStatus.Assigned)).ToList();
+            List<JobQueuePrintJobDto> queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Infrastructure.PrintJobStatus.Queued || d.Status.Value == Farm.Infrastructure.PrintJobStatus.Assigned)).ToList();
             for (int i = 0; i < queued.Count; i++)
             {
                 queued[i].QueuePosition = i + 1;

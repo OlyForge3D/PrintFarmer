@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Slicer.Messaging;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Slicer.Messaging;
 
 namespace Farm.Web.Api.Services.SlicerServices;
 

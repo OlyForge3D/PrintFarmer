@@ -7,9 +7,8 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
-using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Controllers;
 

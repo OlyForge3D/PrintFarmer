@@ -8,7 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Gcode

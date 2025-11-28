@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Shared.Contracts.Printers.PrusaLink;
+using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 
 namespace Farm.Web.Api.Services;
 

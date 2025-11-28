@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Reflection;
-using Farm.Web.Shared.Contracts.Slicing.Libraries;
+using Farm.Infrastructure.Contracts.Slicing.Libraries;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services.Slicing.Abstractions;

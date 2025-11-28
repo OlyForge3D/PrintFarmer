@@ -5,7 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.RateLimiting;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Web.Api.Services.Authentication;
@@ -590,17 +590,19 @@ public class AuthenticationService(
             .Select(p => $"{p.Resource}:{p.Action}")
             .Distinct()
             .ToArray();
-        return new UserDto(
-            user.Id,
-            user.Username,
-            user.Email,
-            user.FirstName,
-            user.LastName,
-            user.IsActive,
-            user.EmailConfirmed,
-            user.LastLogin,
-            user.CreatedAt,
-            roles,
-            permissions);
+        return new UserDto
+        {
+            Id = user.Id,
+            Username = user.Username,
+            Email = user.Email,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            IsActive = user.IsActive,
+            EmailConfirmed = user.EmailConfirmed,
+            LastLogin = user.LastLogin,
+            CreatedAt = user.CreatedAt,
+            Roles = roles.ToList(),
+            Permissions = permissions.ToList()
+        };
     }
 }

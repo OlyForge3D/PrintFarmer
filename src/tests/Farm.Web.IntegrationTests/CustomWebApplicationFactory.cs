@@ -1,4 +1,5 @@
 ﻿using System;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -29,7 +30,7 @@ namespace Farm.Web.IntegrationTests
             _ = builder.ConfigureServices(services =>
             {
                 // Provide a lightweight test orchestrator so integration tests can run without full worker infrastructure.
-                _ = services.AddSingleton<Shared.ISlicerOrchestrator, TestSlicerOrchestrator>();
+                _ = services.AddSingleton<ISlicerOrchestrator, TestSlicerOrchestrator>();
             });
         }
 

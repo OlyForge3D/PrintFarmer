@@ -1,8 +1,9 @@
 ﻿using AutoMapper;
 using Farm.Web.Api.Services;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Printers.Moonraker;
-using SharedModels = Farm.Web.Shared;
+using Farm.Infrastructure;
+
+// Alias for Infrastructure types used in mappings
+using SharedModels = Farm.Infrastructure;
 
 namespace Farm.Web.Api.Mapping
 {

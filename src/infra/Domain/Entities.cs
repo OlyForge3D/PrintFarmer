@@ -1,8 +1,8 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Diagnostics.CodeAnalysis;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Annotations;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Annotations;
 
 namespace Farm.Infrastructure.Domain;
 

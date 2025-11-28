@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Worker.Core;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.OrcaSlicer.Worker.Controllers;

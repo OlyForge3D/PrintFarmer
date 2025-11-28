@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Xunit;

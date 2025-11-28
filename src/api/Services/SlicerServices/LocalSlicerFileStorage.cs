@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.IO;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.SlicerServices;

@@ -8,7 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Web.Api.Services.JobDispatch;
-using Farm.Web.Shared.Contracts.Slicing;
+using Farm.Infrastructure.Contracts.Slicing;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;

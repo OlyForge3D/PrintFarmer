@@ -3,8 +3,8 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Annotations;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Annotations;
 
 namespace Farm.Web.Api.Serialization;
 

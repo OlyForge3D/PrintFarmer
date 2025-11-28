@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services;
 

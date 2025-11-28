@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
 namespace Farm.Importing.Services.Import;
 
@@ -60,7 +60,7 @@ public class ImportParserService : IImportParserService
                 dto.NewManufacturerName = string.IsNullOrWhiteSpace(GetCol("ManufacturerName")) ? null : GetCol("ManufacturerName");
                 dto.NewModelName = string.IsNullOrWhiteSpace(GetCol("ModelName")) ? null : GetCol("ModelName");
                 var backendVal = GetCol("Backend");
-                dto.Backend = Enum.TryParse<Farm.Web.Shared.PrinterBackend>(backendVal, true, out var b) ? b : Farm.Web.Shared.PrinterBackend.Moonraker;
+                dto.Backend = Enum.TryParse<Farm.Infrastructure.PrinterBackend>(backendVal, true, out var b) ? b : Farm.Infrastructure.PrinterBackend.Moonraker;
                 var dateStr = GetCol("DateAcquired");
                 dto.DateAcquired = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) ? dt : null;
 

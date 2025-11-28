@@ -8,7 +8,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/shared/Farm.Web.Shared.csproj" />
     <ProjectReference Include="../../src/orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj" />
     <ProjectReference Include="../../src/infra/Farm.Infrastructure.csproj" />
   </ItemGroup>

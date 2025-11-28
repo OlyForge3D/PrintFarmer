@@ -2,8 +2,8 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
-using Farm.Web.Shared.Contracts.Printers.PrusaLink;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 
 namespace Farm.Web.Api.Services;
 

@@ -2,7 +2,7 @@
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Moq;
 using Xunit;
 

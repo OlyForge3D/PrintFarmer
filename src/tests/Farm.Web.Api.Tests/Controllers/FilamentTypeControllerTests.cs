@@ -5,11 +5,10 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
-using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Tests.Controllers
 {

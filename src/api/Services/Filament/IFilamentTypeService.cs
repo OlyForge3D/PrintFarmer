@@ -1,18 +1,17 @@
 ﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Filament
 {
     public interface IFilamentTypeService
     {
-        Task<IReadOnlyList<Shared.FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct);
-        Task<Shared.FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct);
-        Task<Shared.FilamentTypeDto> CreateFilamentTypeAsync(Shared.CreateFilamentTypeRequest req, CancellationToken ct);
-        Task UpdateFilamentTypeAsync(Guid id, Shared.UpdateFilamentTypeRequest req, CancellationToken ct);
+        Task<IReadOnlyList<FilamentTypeDto>> GetFilamentTypesAsync(CancellationToken ct);
+        Task<FilamentPresetsDto> GetFilamentPresetsAsync(CancellationToken ct);
+        Task<FilamentTypeDto> CreateFilamentTypeAsync(CreateFilamentTypeRequest req, CancellationToken ct);
+        Task UpdateFilamentTypeAsync(Guid id, UpdateFilamentTypeRequest req, CancellationToken ct);
         Task DeleteFilamentTypeAsync(Guid id, CancellationToken ct);
-        Task SaveFilamentPresetsAsync(Shared.FilamentPresetsDto presets, CancellationToken ct);
-        Task<Shared.SpoolmanFilamentImportResult> ImportFromSpoolmanAsync(CancellationToken ct);
+        Task SaveFilamentPresetsAsync(FilamentPresetsDto presets, CancellationToken ct);
+        Task<SpoolmanFilamentImportResult> ImportFromSpoolmanAsync(CancellationToken ct);
     }
 }

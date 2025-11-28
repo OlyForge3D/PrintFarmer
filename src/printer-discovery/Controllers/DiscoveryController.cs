@@ -1,4 +1,4 @@
-﻿using Farm.Web.Shared;
+﻿using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 using PrinterDiscovery.Services;
 

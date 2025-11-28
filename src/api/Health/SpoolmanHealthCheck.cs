@@ -1,5 +1,5 @@
 ﻿using Farm.Web.Api.Services;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.Web.Api.Health;

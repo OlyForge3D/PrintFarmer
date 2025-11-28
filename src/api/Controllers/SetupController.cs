@@ -1,5 +1,5 @@
 ﻿using Farm.Web.Api.Services.Setup;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -31,7 +31,7 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// </summary>
     [HttpPost("initial-admin")]
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
-        [FromBody] Shared.Contracts.Setup.CreateInitialAdminRequest request,
+        [FromBody] CreateInitialAdminRequest request,
         CancellationToken ct)
     {
         AuthenticationResult result = await _setupService.CreateInitialAdminAsync(request, ct);

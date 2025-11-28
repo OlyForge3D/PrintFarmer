@@ -5,8 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../shared/Farm.Web.Shared.csproj" />
-  <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="11.0.0" />

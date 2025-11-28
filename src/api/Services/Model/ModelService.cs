@@ -13,7 +13,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Shared = Farm.Web.Shared;
 
 namespace Farm.Web.Api.Services.Model
 {
@@ -50,11 +49,11 @@ namespace Farm.Web.Api.Services.Model
             }
         }
 
-        public async Task<IReadOnlyList<Shared.Model3DDto>> ListModelsAsync(CancellationToken ct)
+        public async Task<IReadOnlyList<Model3DDto>> ListModelsAsync(CancellationToken ct)
         {
             IReadOnlyList<Model3D> models = await _repository.ListValidAsync(ct);
 
-            return models.Select(m => new Shared.Model3DDto
+            return models.Select(m => new Model3DDto
             {
                 Id = m.Id,
                 Name = m.DisplayName,
@@ -67,7 +66,7 @@ namespace Farm.Web.Api.Services.Model
             }).ToList();
         }
 
-        public async Task<Shared.Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
+        public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _repository.GetByIdAsync(id, ct);
             if (model == null)
@@ -75,7 +74,7 @@ namespace Farm.Web.Api.Services.Model
                 return null;
             }
 
-            return new Shared.Model3DDto
+            return new Model3DDto
             {
                 Id = model.Id,
                 Name = model.DisplayName,
@@ -131,7 +130,7 @@ namespace Farm.Web.Api.Services.Model
             }
         }
 
-        public Shared.Model3DValidationResultDto ValidateModel(IFormFile modelFile)
+        public Model3DValidationResultDto ValidateModel(IFormFile modelFile)
         {
             if (modelFile == null || modelFile.Length == 0)
             {
@@ -156,14 +155,14 @@ namespace Farm.Web.Api.Services.Model
                 issues.Add("File size exceeds 100MB limit");
             }
 
-            return new Shared.Model3DValidationResultDto
+            return new Model3DValidationResultDto
             {
                 Valid = issues.Count == 0,
                 Issues = issues.Count > 0 ? issues.ToArray() : null
             };
         }
 
-        public async Task<Shared.Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct)
+        public async Task<Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct)
         {
             if (modelFile == null || modelFile.Length == 0)
             {
@@ -262,7 +261,7 @@ namespace Farm.Web.Api.Services.Model
                             _fileSystem.DeleteFile(tempFilePath);
                         }
 
-                        return new Shared.Model3DUploadResultDto
+                        return new Model3DUploadResultDto
                         {
                             Id = existingModel.Id,
                             Name = existingModel.DisplayName,
@@ -360,7 +359,7 @@ namespace Farm.Web.Api.Services.Model
                     // Don't rethrow - upload should succeed even if thumbnail generation fails
                 }
 
-                return new Shared.Model3DUploadResultDto
+                return new Model3DUploadResultDto
                 {
                     Id = modelId,
                     Name = model.DisplayName,

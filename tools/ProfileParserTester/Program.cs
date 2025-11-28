@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Services;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

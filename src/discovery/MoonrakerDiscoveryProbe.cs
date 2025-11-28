@@ -3,9 +3,9 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Shared;
+using Farm.Infrastructure;
 
-namespace Farm.Shared.Discovery;
+namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Advanced discovery probe for Moonraker-based 3D printers (Klipper firmware).

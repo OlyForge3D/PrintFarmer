@@ -72,7 +72,7 @@ namespace Farm.Web.Api
             HashSet<string> suggestions = new(StringComparer.OrdinalIgnoreCase);
             try
             {
-                foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                foreach (System.Net.NetworkInformation.NetworkInterface ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
                 {
                     if (ni.OperationalStatus != OperationalStatus.Up)
                     {
