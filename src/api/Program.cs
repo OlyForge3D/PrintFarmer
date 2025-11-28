@@ -77,13 +77,11 @@ catch
     // Best-effort; do not fail startup if environment or hosting APIs unavailable
 }
 
-// Register all PrintFarmer services
-builder.Services.AddPrintFarmerServices(builder.Configuration);
-
-builder.Services.AddApiApplicationServices(builder.Configuration, builder.Environment);
-
 // Register database with multi-provider support
 builder.Services.AddPrintFarmerDatabase(builder.Configuration);
+
+// Register all PrintFarmer services
+builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
 
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.
