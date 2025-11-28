@@ -376,21 +376,26 @@ docker_check_port_conflicts() {
 }
 
 # Docker system cleanup (prune unused resources)
-# Usage: docker_system_cleanup [aggressive]
+# Usage: docker_system_cleanup [aggressive|preserve-base]
 docker_system_cleanup() {
-    local aggressive="${1:-}"
+    local mode="${1:-}"
     
     print_info "🐳 Docker system cleanup..."
     
-    if [[ "$aggressive" == "aggressive" ]]; then
+    if [[ "$mode" == "aggressive" ]]; then
         print_info "Removing unused networks, volumes, images, and build cache..."
         docker system prune -af --volumes 2>/dev/null || true
+    elif [[ "$mode" == "preserve-base" ]]; then
+        # Prune dangling images, unused networks, and volumes, but NOT all unused images
+        # This preserves base images (sdk, aspnet, node, nginx, postgres, ubuntu)
+        print_info "Removing dangling images, unused networks, and volumes (preserving base images)..."
+        docker system prune -f --volumes 2>/dev/null || true
     else
         print_info "Removing unused networks, volumes, and containers..."
         docker system prune -f --volumes 2>/dev/null || true
     fi
     
-    audit_log "system-prune" "mode: ${aggressive:-standard}"
+    audit_log "system-prune" "mode: ${mode:-standard}"
     print_success "Docker system cleanup completed"
 }
 

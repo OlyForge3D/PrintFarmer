@@ -212,7 +212,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
     {
         FileInfo fileInfo = new FileInfo(gcodeFilePath);
-        string[] lines = await File.ReadAllLinesAsync(gcodeFilePath, cancellationToken);
+        string[] lines = await File.ReadAllLinesAsync(gcodeFilePath, cancellationToken).ConfigureAwait(false);
         GcodeMetadata metadata = new GcodeMetadata();
         Regex printTimeRegex = MyRegex();
         Regex printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
@@ -225,31 +225,31 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             Match tm = printTimeRegex.Match(line);
             if (tm.Success)
             {
-                metadata.PrintTimeSeconds = int.Parse(tm.Groups[1].Value) * 3600 + int.Parse(tm.Groups[2].Value) * 60;
+                metadata.PrintTimeSeconds = int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600 + int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60;
             }
             else
             {
                 Match ts = printTimeSecondsRegex.Match(line);
                 if (ts.Success)
                 {
-                    metadata.PrintTimeSeconds = int.Parse(ts.Groups[1].Value);
+                    metadata.PrintTimeSeconds = int.Parse(ts.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
             }
             Match fm = filamentRegex.Match(line);
             if (fm.Success)
             {
-                double amount = double.Parse(fm.Groups[1].Value);
-                metadata.FilamentUsageGrams = line.Contains("mm") ? amount * 0.0025 : amount;
+                double amount = double.Parse(fm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                metadata.FilamentUsageGrams = line.Contains("mm", StringComparison.Ordinal) ? amount * 0.0025 : amount;
             }
             Match lc = layerRegex.Match(line);
             if (lc.Success)
             {
-                metadata.LayerCount = int.Parse(lc.Groups[1].Value);
+                metadata.LayerCount = int.Parse(lc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
             }
             Match lcm = layerCommentRegex.Match(line);
             if (lcm.Success)
             {
-                maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value));
+                maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
             }
         }
         if (metadata.LayerCount == 0 && maxLayer > 0)
@@ -267,7 +267,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
         if (metadata.LayerCount == 0)
         {
-            metadata.LayerCount = lines.Count(l => l.StartsWith("G1 Z") || l.StartsWith("G0 Z"));
+            metadata.LayerCount = lines.Count(l => l.StartsWith("G1 Z", StringComparison.Ordinal) || l.StartsWith("G0 Z", StringComparison.Ordinal));
         }
         if (metadata.LayerCount == 0)
         {

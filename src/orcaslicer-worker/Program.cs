@@ -18,6 +18,9 @@ internal static class WorkerConstants
 
 public static class Program
 {
+    // Cached JsonSerializerOptions for performance (CA1869)
+    private static readonly JsonSerializerOptions s_jsonOptions = new() { PropertyNameCaseInsensitive = true };
+
     public static void Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -170,24 +173,24 @@ public static class Program
 
                 try
                 {
-                    HttpResponseMessage response = await httpClient.GetAsync($"{catalogUrl}/api/catalog/manufacturers");
+                    HttpResponseMessage response = await httpClient.GetAsync(new Uri($"{catalogUrl}/api/catalog/manufacturers")).ConfigureAwait(false);
                     if (response.IsSuccessStatusCode)
                     {
-                        string content = await response.Content.ReadAsStringAsync();
+                        string content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                         List<ManufacturerDto>? manufacturerDtos = JsonSerializer.Deserialize<List<ManufacturerDto>>(
                             content,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                            s_jsonOptions
                         );
 
                         HashSet<string> catalogManufacturers = manufacturerDtos?
                             .Select(m => m.Name)
-                            .ToHashSet() ?? new HashSet<string>();
+                            .ToHashSet() ?? [];
 
                         app.Logger.LogInformation("Catalog has {CatalogManufacturerCount} manufacturers", catalogManufacturers.Count);
 
                         // Load filament and process profiles only for manufacturers in catalog
                         Stopwatch filamentStart = Stopwatch.StartNew();
-                        IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync();
+                        IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync().ConfigureAwait(false);
                         int catalogFilaments = filaments
                             .Count(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer));
                         filamentStart.Stop();

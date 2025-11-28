@@ -663,9 +663,9 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
     }
 
-    private string EscapeJsonKey(string key)
+    private static string EscapeJsonKey(string key)
     {
-        return key.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return key.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
     private MachineProfileDto? ParseMachineProfile(JsonElement root, string filePath)
@@ -832,7 +832,7 @@ public class OrcaProfilesService : ISlicerProfilesService
     }
 #pragma warning restore S1172
 
-    private int? ParseIntValue(JsonElement elem)
+    private static int? ParseIntValue(JsonElement elem)
     {
         if (elem.ValueKind == JsonValueKind.Number)
         {
@@ -840,13 +840,13 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         else if (elem.ValueKind == JsonValueKind.String)
         {
-            return int.TryParse(elem.GetString(), out int val) ? val : null;
+            return int.TryParse(elem.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int val) ? val : null;
         }
 
         return null;
     }
 
-    private double? ParseDoubleValue(JsonElement elem)
+    private static double? ParseDoubleValue(JsonElement elem)t elem)
     {
         if (elem.ValueKind == JsonValueKind.Number)
         {
@@ -854,13 +854,13 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         else if (elem.ValueKind == JsonValueKind.String)
         {
-            return double.TryParse(elem.GetString(), out double val) ? val : null;
+            return double.TryParse(elem.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double val) ? val : null;
         }
 
         return null;
     }
 
-    private bool ParseBoolValue(JsonElement elem)
+    private static bool ParseBoolValue(JsonElement elem)t elem)
     {
         if (elem.ValueKind == JsonValueKind.True)
         {
@@ -868,13 +868,14 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
         else if (elem.ValueKind == JsonValueKind.String)
         {
-            return elem.GetString() == "true" || elem.GetString() == "1";
+            string? val = elem.GetString();
+            return string.Equals(val, "true", StringComparison.OrdinalIgnoreCase) || val == "1";
         }
 
         return false;
     }
 
-    private Dictionary<string, object> SerializeElementToDict(JsonElement elem)
+    private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)t elem)
     {
         Dictionary<string, object> dict = new Dictionary<string, object>();
         try
@@ -887,14 +888,14 @@ public class OrcaProfilesService : ISlicerProfilesService
                 }
             }
         }
-        catch
+        catch (JsonException)
         {
             // If serialization fails, return empty dict
         }
         return dict;
     }
 
-    private void ParseCompatiblePrinters(JsonElement compatibleElem, IList<string> targetList)
+    private static void ParseCompatiblePrinters(JsonElement compatibleElem, IList<string> targetList)etList)
     {
         if (compatibleElem.ValueKind == JsonValueKind.Array)
         {
@@ -936,7 +937,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         }
                     }
                 }
-                catch
+                catch (JsonException)
                 {
                     // If parsing fails, skip
                 }

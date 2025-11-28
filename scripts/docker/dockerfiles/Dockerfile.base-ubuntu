@@ -1,5 +1,5 @@
-# Dockerfile for pre-caching upgraded Ubuntu base image
-# Usage: docker build -f Dockerfile.base-ubuntu -t ubuntu:24.04-upgraded .
+# Dockerfile for pre-caching upgraded Ubuntu base image with tools
+# Usage: docker build -f dockerfiles/Dockerfile.base-ubuntu -t ubuntu:24.04-upgraded .
 # Then: docker save -o ubuntu-24.04-upgraded.tar ubuntu:24.04-upgraded
 # This image is used as base for orcaslicer-binaries stage
 
@@ -9,13 +9,23 @@ FROM ubuntu:24.04
 # Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
 ARG CACHE_BUST=latest
 
-# Update and upgrade all packages, then clean cache
-# This creates a fully-patched base image that can be cached offline
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update, upgrade, and install all required tools for AppImage extraction
+# OrcaSlicer binary extraction needs: curl, ca-certificates, jq, p7zip-full,
+#                                     squashfs-tools, libarchive-tools, file, wget
 RUN echo "Cache bust: ${CACHE_BUST}" && \
     apt-get update && \
     apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates jq p7zip-full squashfs-tools \
+        libarchive-tools file wget && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Set a label to identify this as a pre-cached image
-LABEL prebuild="true" purpose="base-image" updated="true"
+LABEL prebuild="true" \
+      purpose="base-image" \
+      updated="true" \
+      tools="curl,jq,p7zip-full,squashfs-tools,libarchive-tools,file,wget"

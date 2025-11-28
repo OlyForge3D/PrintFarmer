@@ -1,7 +1,7 @@
-# Dockerfile for pre-caching upgraded Nginx Alpine base image
-# Usage: docker build -f Dockerfile.base-nginx -t nginx:alpine-upgraded .
+# Dockerfile for pre-caching upgraded Nginx Alpine base image with tools
+# Usage: docker build -f dockerfiles/Dockerfile.base-nginx -t nginx:alpine-upgraded .
 # Then: docker save -o nginx-alpine-upgraded.tar nginx:alpine-upgraded
-# This image is used as the reverse proxy service in docker-compose
+# This image is used as the frontend runtime and reverse proxy service
 
 FROM nginx:alpine
 
@@ -9,13 +9,33 @@ FROM nginx:alpine
 # Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
 ARG CACHE_BUST=latest
 
-# Update and upgrade all packages, then clean cache
-# This creates a fully-patched base image that can be cached offline
+# Update, upgrade, and install all required tools in one layer
+# Frontend runtime needs: curl (for health checks)
 RUN echo "Cache bust: ${CACHE_BUST}" && \
     apk update && \
     apk upgrade && \
-    apk cache clean && \
-    rm -rf /tmp/* /var/tmp/*
+    apk add --no-cache curl && \
+    # Create nginx cache and temp directories with proper permissions
+    mkdir -p /var/cache/nginx/client_temp \
+             /var/cache/nginx/proxy_temp \
+             /var/cache/nginx/fastcgi_temp \
+             /var/cache/nginx/uwsgi_temp \
+             /var/cache/nginx/scgi_temp && \
+    chown -R nginx:nginx /var/cache/nginx && \
+    chmod -R 755 /var/cache/nginx && \
+    # Ensure /run directory exists for pid file
+    mkdir -p /run/nginx && \
+    chown nginx:nginx /run/nginx && \
+    chmod 755 /run/nginx && \
+    # Ensure /var/log/nginx has proper permissions
+    mkdir -p /var/log/nginx && \
+    chown nginx:nginx /var/log/nginx && \
+    chmod 755 /var/log/nginx && \
+    # Clean cache
+    rm -rf /tmp/* /var/tmp/* /var/cache/apk/*
 
 # Set a label to identify this as a pre-cached image
-LABEL prebuild="true" purpose="base-image" updated="true"
+LABEL prebuild="true" \
+      purpose="base-image" \
+      updated="true" \
+      tools="curl"

@@ -94,8 +94,8 @@ CACHE_ORCASLICER=false
 LOAD_CACHED_ORCASLICER=false
 IMAGES_DIR="./docker-images"
 
-# Base container images for offline deployment
-# Same as PowerShell version for consistency
+# Base container images for offline deployment (standard upstream images)
+# These are pulled as fallback if upgraded images aren't available
 DOCKER_BASE_IMAGES=(
     "mcr.microsoft.com/dotnet/sdk:9.0"
     "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim"
@@ -103,6 +103,17 @@ DOCKER_BASE_IMAGES=(
     "node:22-alpine"
     "postgres:16-alpine"
     "nginx:alpine"
+)
+
+# Pre-upgraded base images with apt/apk updates and tools pre-installed
+# These are built during --prepare-offline and preferred over standard images
+DOCKER_UPGRADED_IMAGES=(
+    "mcr.microsoft.com/dotnet/sdk:9.0-upgraded"
+    "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded"
+    "ubuntu:24.04-upgraded"
+    "node:22-alpine-upgraded"
+    "postgres:16-alpine-upgraded"
+    "nginx:alpine-upgraded"
 )
 
 # Locally-built images for offline deployment (built during --prepare-offline, not pulled from registry)
@@ -156,6 +167,66 @@ find_cached_images_dir() {
 }
 
 # Auto-load cached images if they exist and are not in Docker
+# Core function to load Docker images from TAR files
+# Usage: _load_tar_images <images_dir> [quiet]
+# Returns: 0 on success, 1 on failure
+# Arguments:
+#   images_dir: Directory containing .tar files
+#   quiet: If "quiet", minimal output (for auto-load scenarios)
+_load_tar_images() {
+    local images_dir="$1"
+    local quiet="${2:-}"
+    
+    if [ ! -d "$images_dir" ]; then
+        [ "$quiet" != "quiet" ] && print_error "Images directory not found: $images_dir"
+        return 1
+    fi
+    
+    local tar_files
+    tar_files=$(find "$images_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
+    
+    if [ -z "$tar_files" ]; then
+        [ "$quiet" != "quiet" ] && print_error "No TAR files found in $images_dir"
+        return 1
+    fi
+    
+    local tar_count
+    tar_count=$(echo "$tar_files" | wc -l)
+    print_info "Found $tar_count cached image TAR file(s). Loading from $images_dir..."
+    
+    local success_count=0
+    local fail_count=0
+    
+    # Save tar_files to a temporary file to avoid here-string stdin issues with docker load
+    local tar_list_file
+    tar_list_file=$(mktemp)
+    echo "$tar_files" > "$tar_list_file"
+    
+    while IFS= read -r tar_file; do
+        [ -z "$tar_file" ] && continue
+        local basename
+        basename=$(basename "$tar_file")
+        print_info "Loading $basename..."
+        if docker load -i "$tar_file" > /dev/null 2>&1; then
+            print_success "Loaded: $basename"
+            ((++success_count)) || true  # Avoid set -e exit on ((0++))
+        else
+            print_warning "Failed to load $basename"
+            ((++fail_count)) || true
+        fi
+    done < "$tar_list_file"
+    rm -f "$tar_list_file"
+    
+    if [ $fail_count -gt 0 ]; then
+        print_warning "Failed to load $fail_count images from cache"
+        return 1
+    fi
+    
+    print_success "Successfully loaded $success_count/$tar_count images"
+    return 0
+}
+
+# Auto-load cached images if they exist and are not already in Docker
 auto_load_cached_images() {
     local images_dir="${1:-.}"
     
@@ -194,34 +265,8 @@ auto_load_cached_images() {
         return 0
     fi
     
-    local tar_count
-    tar_count=$(echo "$tar_files" | wc -l)
-    print_info "Found $tar_count cached image TAR file(s). Loading missing images from cache ($images_dir)..."
-    
-    # Load the missing images
-    local success_count=0
-    local fail_count=0
-    
-    while IFS= read -r tar_file; do
-        local basename
-        basename=$(basename "$tar_file")
-        print_info "Loading $basename..."
-        if docker load -i "$tar_file" 2>&1; then
-            print_success "Loaded: $basename"
-            ((success_count++))
-        else
-            print_warning "Failed to load $basename"
-            ((fail_count++))
-        fi
-    done <<< "$tar_files"
-    
-    if [ $fail_count -gt 0 ]; then
-        print_warning "Failed to load $fail_count images from cache"
-        return 1
-    fi
-    
-    print_success "All cached images loaded successfully"
-    return 0
+    # Use the core loading function
+    _load_tar_images "$images_dir" "quiet"
 }
 
 # Find OrcaSlicer AppImage in common cache locations
@@ -1027,9 +1072,17 @@ save_images_to_tar() {
     local success_count=0
     local fail_count=0
     local total_size=0
+    local exported_images=()
     
-    # Export standard base images
-    for image in "${DOCKER_BASE_IMAGES[@]}"; do
+    # Export upgraded base images first (preferred)
+    print_info "Exporting pre-upgraded base images (with tools pre-installed)..."
+    for image in "${DOCKER_UPGRADED_IMAGES[@]}"; do
+        # Check if upgraded image exists
+        if ! docker images --quiet "$image" >/dev/null 2>&1; then
+            print_info "  Skipping $image (not built)"
+            continue
+        fi
+        
         # Replace special characters in image name for filename
         local safe_name
         safe_name=$(echo "$image" | sed 's|[:/ ]|-|g')
@@ -1043,9 +1096,49 @@ save_images_to_tar() {
             total_size=$((total_size + file_size))
             
             print_success "✓ Exported: $image - Size: ${file_size_mb} MB"
+            exported_images+=("$image")
             ((success_count++))
         else
             print_warning "✗ Failed to export $image"
+            ((fail_count++))
+        fi
+    done
+    
+    # Export standard base images only if upgraded version wasn't exported
+    print_info "Checking for fallback base images..."
+    for i in "${!DOCKER_BASE_IMAGES[@]}"; do
+        local base_image="${DOCKER_BASE_IMAGES[$i]}"
+        local upgraded_image="${DOCKER_UPGRADED_IMAGES[$i]}"
+        
+        # Skip if upgraded version was already exported
+        if [[ " ${exported_images[*]} " =~ " ${upgraded_image} " ]]; then
+            print_info "  Skipping $base_image (using upgraded version)"
+            continue
+        fi
+        
+        # Check if base image exists
+        if ! docker images --quiet "$base_image" >/dev/null 2>&1; then
+            print_info "  Skipping $base_image (not present)"
+            continue
+        fi
+        
+        # Replace special characters in image name for filename
+        local safe_name
+        safe_name=$(echo "$base_image" | sed 's|[:/ ]|-|g')
+        local tar_file="$target_dir/$safe_name.tar"
+        
+        print_info "Exporting $base_image to $tar_file..."
+        if docker save -o "$tar_file" "$base_image" > /dev/null 2>&1; then
+            local file_size
+            file_size=$(stat -f%z "$tar_file" 2>/dev/null || stat -c%s "$tar_file" 2>/dev/null)
+            local file_size_mb=$((file_size / 1048576))
+            total_size=$((total_size + file_size))
+            
+            print_success "✓ Exported: $base_image - Size: ${file_size_mb} MB"
+            exported_images+=("$base_image")
+            ((success_count++))
+        else
+            print_warning "✗ Failed to export $base_image"
             ((fail_count++))
         fi
     done
@@ -1071,6 +1164,7 @@ save_images_to_tar() {
             total_size=$((total_size + file_size))
             
             print_success "✓ Exported: $image - Size: ${file_size_mb} MB"
+            exported_images+=("$image")
             ((success_count++))
         else
             print_warning "⚠ Failed to export $image (optional)"
@@ -1094,11 +1188,10 @@ save_images_to_tar() {
     print_info "TAR files location: $target_dir"
     print_info "You can now transfer this folder to offline machines"
     
-    # Create manifest
+    # Create manifest with actually exported images
     local manifest_path="$target_dir/manifest.txt"
     {
-        printf "%s\n" "${DOCKER_BASE_IMAGES[@]}"
-        printf "%s\n" "${DOCKER_LOCAL_IMAGES[@]}"
+        printf "%s\n" "${exported_images[@]}"
     } > "$manifest_path"
     print_info "Created manifest file: $manifest_path"
     
@@ -1106,6 +1199,7 @@ save_images_to_tar() {
 }
 
 # Load images from TAR files
+# Load images from TAR files (for --load-images flag)
 load_images_from_tar() {
     local source_dir="${1:-.}"
     
@@ -1117,48 +1211,15 @@ load_images_from_tar() {
         return 1
     fi
     
-    local tar_files
-    tar_files=$(find "$source_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
-    
-    if [ -z "$tar_files" ]; then
-        print_error "No TAR files found in $source_dir"
+    # Use the core loading function
+    if _load_tar_images "$source_dir"; then
+        echo
+        print_success "All images loaded successfully!"
+        print_info "Images are now available in local Docker daemon"
+        return 0
+    else
         return 1
     fi
-    
-    local tar_count
-    tar_count=$(echo "$tar_files" | wc -l)
-    print_info "Found $tar_count image TAR file(s) to load"
-    echo
-    
-    local success_count=0
-    local fail_count=0
-    
-    while IFS= read -r tar_file; do
-        local basename
-        basename=$(basename "$tar_file")
-        print_info "Loading $basename..."
-        if docker load -i "$tar_file" 2>&1; then
-            print_success "✓ Loaded: $basename"
-            ((success_count++))
-        else
-            print_warning "✗ Failed to load $basename"
-            ((fail_count++))
-        fi
-    done <<< "$tar_files"
-    
-    echo
-    print_header "Load Summary"
-    print_success "Successfully loaded: $success_count/$tar_count"
-    
-    if [ $fail_count -gt 0 ]; then
-        print_warning "Failed to load: $fail_count images"
-        return 1
-    fi
-    
-    print_success "All images loaded successfully!"
-    print_info "Images are now available in local Docker daemon"
-    
-    return 0
 }
 
 # Download and cache OrcaSlicer AppImage
@@ -1394,7 +1455,7 @@ prepare_offline_deployment() {
     print_info "This process prepares all materials needed for offline deployment:"
     print_info "  1. Build pre-upgraded base images with apt/apk updates (300-500MB)"
     print_info "  2. Build OrcaSlicer binary layer (100-200MB)"
-    print_info "  3. Pull and export all images to TAR files (450-700MB)"
+    print_info "  3. Export all images to TAR files (450-700MB)"
     print_info "  4. Download and cache OrcaSlicer AppImage (100-200MB)"
     print_info ""
     print_info "Total time: ~25-35 minutes (depends on internet speed and system performance)"
@@ -1403,17 +1464,26 @@ prepare_offline_deployment() {
     local start_time
     start_time=$(date +%s)
     local succeeded=true
+    local upgraded_built=false
     
     # Step 1: Build pre-upgraded base images (including OrcaSlicer binaries)
     print_header "STEP 1/4: Building Pre-Upgraded Base Images & OrcaSlicer Binary Layer"
-    if ! build_base_images "$target_dir"; then
-        print_warning "Some base images failed to build, continuing with standard images"
-        # Don't fail - we'll use standard images instead
+    if build_base_images "$target_dir"; then
+        upgraded_built=true
+        print_success "Pre-upgraded base images built successfully"
+    else
+        print_warning "Some base images failed to build, will use standard images as fallback"
     fi
     
-    if [ "$succeeded" = true ]; then
+    # Step 2: Only pull standard base images if upgraded versions weren't built
+    if [ "$upgraded_built" = true ]; then
         echo
-        print_header "STEP 2/4: Pulling Base Container Images"
+        print_header "STEP 2/4: Skipping Base Image Pull (Using Pre-Upgraded Images)"
+        print_info "Pre-upgraded base images are available, no need to pull standard images"
+        print_success "✓ Using pre-upgraded images with tools pre-installed"
+    else
+        echo
+        print_header "STEP 2/4: Pulling Base Container Images (Fallback)"
         if ! pull_base_images; then
             print_error "Failed to pull base images"
             succeeded=false
@@ -1515,7 +1585,7 @@ tear_down_deployment() {
     echo "  1. Stop and remove ALL Docker containers"
     echo "  2. Remove ALL Docker volumes (⚠️  ALL DATA WILL BE DELETED!)"
     echo "  3. Remove all PrintFarmer Docker images"
-    echo "  4. Prune orphaned and dangling images"
+    echo "  4. Prune dangling images (base images are preserved)"
     echo "  5. Clear Docker builder cache"
     echo "  6. Clean up generated configuration files"
     echo
@@ -1592,13 +1662,14 @@ tear_down_deployment() {
             fi
         done
 
-        # Finally, bring remaining services down and remove volumes/images as a cleanup step
-        print_info "Running: docker compose ${env_file:+--env-file $env_file} -f $compose_file down --volumes --rmi all"
+        # Finally, bring remaining services down and remove volumes
+        # Use --rmi local to only remove locally-built images, preserving base images
+        print_info "Running: docker compose ${env_file:+--env-file $env_file} -f $compose_file down --volumes --rmi local"
         # shellcheck disable=SC2086
         if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
-            docker compose --env-file "$env_file" -f "$compose_file" down --volumes --rmi all || true
+            docker compose --env-file "$env_file" -f "$compose_file" down --volumes --rmi local || true
         else
-            docker compose -f "$compose_file" down --volumes --rmi all || true
+            docker compose -f "$compose_file" down --volumes --rmi local || true
         fi
     }
 
@@ -1688,8 +1759,8 @@ tear_down_deployment() {
     # 4. Remove PrintFarmer images
     docker_cleanup_printfarmer_images force
     
-    # 5-6. Docker system cleanup
-    docker_system_cleanup aggressive
+    # 5-6. Docker system cleanup (preserve base images for faster rebuilds)
+    docker_system_cleanup preserve-base
     
     # Clear Docker builder cache for next build
     print_info "Step 6/7: Clearing Docker builder cache..."
@@ -1870,17 +1941,25 @@ EXAMPLES:
 
     # === OFFLINE DEPLOYMENT ===
     
-    # Prepare ALL offline materials on machine WITH internet
-    ./scripts/deploy-docker.sh --prepare-offline
+    # Prepare ALL offline materials to auto-discoverable location (RECOMMENDED)
+    ./scripts/deploy-docker.sh --prepare-offline --images-dir ./docker-images
+    ./scripts/deploy-docker.sh --prepare-offline --images-dir ~/docker-images
     
-    # Deploy from cache on machine WITHOUT internet (auto-detects images)
+    # Prepare to USB drive (specify path when deploying)
+    ./scripts/deploy-docker.sh --prepare-offline --images-dir /media/usb/docker-images
+    
+    # Deploy from cache (auto-discovers ./docker-images or ~/docker-images)
     ./scripts/deploy-docker.sh --deploy-offline
+    
+    # Deploy from a specific cache location (e.g., USB drive)
+    ./scripts/deploy-docker.sh --deploy-offline --images-dir /media/usb/docker-images
     
     # Manual image management
     ./scripts/deploy-docker.sh --pull-images                    # Download images
     ./scripts/deploy-docker.sh --pull-images --save-images      # Download and export TAR
-    ./scripts/deploy-docker.sh --load-images                    # Load from existing TAR
-    ./scripts/deploy-docker.sh --cache-orcaslicer               # Download OrcaSlicer AppImage
+    ./scripts/deploy-docker.sh --save-images --images-dir ~/docker-images  # Export to auto-discoverable path
+    ./scripts/deploy-docker.sh --load-images                    # Load from auto-discovered path
+    ./scripts/deploy-docker.sh --cache-orcaslicer --images-dir ~/docker-images  # Cache to auto-discoverable path
     
     # Deploy specific architecture with additional services
     ./scripts/deploy-docker.sh --architecture microservices --include-monitoring

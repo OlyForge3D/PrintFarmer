@@ -10,10 +10,18 @@ ARG ORCASLICER_VERSION=2.3.1
 ARG TARGETPLATFORM=linux/amd64
 ARG BUILD_VERBOSITY=quiet
 
+# Base image tags - use pre-cached upgraded images for faster builds
+# Build these with: docker build -f dockerfiles/Dockerfile.base-sdk -t mcr.microsoft.com/dotnet/sdk:9.0-upgraded .
+ARG SDK_TAG=9.0-upgraded
+ARG ASPNET_TAG=9.0-bookworm-slim-upgraded
+ARG NODE_TAG=22-alpine
+ARG NGINX_TAG=alpine-upgraded
+ARG UBUNTU_TAG=24.04-upgraded
+
 ############################################################
 # Shared Build Stage - Build all .NET projects once
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/sdk:9.0 AS shared-build
+FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
 WORKDIR /src
 
 # Copy all project files for dependency resolution
@@ -67,18 +75,13 @@ RUN echo "Checking published artifacts..." && \
 ############################################################
 # API Runtime Container
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS api-runtime
+FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
 WORKDIR /app
 EXPOSE 5000
 
-# Install network tools for enhanced Docker Desktop networking
-RUN apt-get update && \
-    apt-get install -y curl iputils-ping iproute2 net-tools dnsutils && \
-    rm -rf /var/lib/apt/lists/* && \
-    # Create non-root user for runtime
-    groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --create-home appuser && \
-    # Create necessary directories with proper ownership
-    mkdir -p /app/uploads /app/gcode /app/slicers /data /app/wwwroot/gcode-library && \
+# Create necessary directories with proper ownership
+# Note: appuser (UID 1000) is pre-created in base image, tools are pre-installed
+RUN mkdir -p /app/uploads /app/gcode /app/slicers /data /app/wwwroot/gcode-library && \
     chown -R appuser:appuser /app
 
 # Copy API binaries from shared build stage (as appuser)
@@ -104,18 +107,14 @@ ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)
 ############################################################
-FROM --platform=${TARGETPLATFORM} ubuntu:24.04 AS orcaslicer-binaries
+FROM --platform=${TARGETPLATFORM} ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
 ARG ALLOW_STUB=true
 ARG GITHUB_TOKEN
 WORKDIR /tmp
 
-# Install extraction tools with comprehensive fallback support
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools \
-    file wget && rm -rf /var/lib/apt/lists/*
+# Note: All extraction tools (curl, jq, p7zip-full, squashfs-tools, etc.) are pre-installed in base image
 
 # Download and extract OrcaSlicer binaries with robust error handling
 RUN set -e; \
@@ -222,21 +221,10 @@ RUN set -e; \
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS slicer-base
+FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
 WORKDIR /app
 
-# Avoid interactive prompts and install a minimal, compatible set of runtime
-# dependencies. Keep the list conservative to improve cross-distro compatibility
-# (some hosts/providers may not have exact versioned package names like libicu74).
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    curl wget ca-certificates \
-    libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 xvfb fuse \
-    squashfs-tools file p7zip-full && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user for runtime
-RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --create-home appuser
+# Note: All runtime dependencies (libgtk-3-0, xvfb, fuse, etc.) and appuser are pre-installed in base image
 
 # Create necessary directories and set ownership for appuser
 RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
@@ -299,7 +287,7 @@ ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 ############################################################
 # React Frontend Build Stage
 ############################################################
-FROM --platform=${TARGETPLATFORM} node:22-alpine AS frontend-build
+FROM --platform=${TARGETPLATFORM} node:${NODE_TAG} AS frontend-build
 WORKDIR /app
 
 # Accept build arguments for frontend configuration
@@ -307,8 +295,9 @@ ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 
-# Copy Slicer workspace packages first (needed for file: dependencies)
-COPY src/Slicers /src/Slicers
+# Copy Slicer workspace packages first (needed for vite alias resolution)
+# The vite alias resolves to /Slicers in Docker builds
+COPY src/Slicers /Slicers
 
 # Copy package files
 COPY src/Web/ReactApp/package*.json ./
@@ -326,7 +315,7 @@ RUN VITE_API_BASE_URL=${VITE_API_BASE_URL} \
 ############################################################
 # React Frontend Runtime Container
 ############################################################
-FROM --platform=${TARGETPLATFORM} nginx:alpine AS frontend-runtime
+FROM --platform=${TARGETPLATFORM} nginx:${NGINX_TAG} AS frontend-runtime
 WORKDIR /usr/share/nginx/html
 
 # Copy built React app
@@ -335,25 +324,7 @@ COPY --from=frontend-build /app/dist .
 # Copy nginx configuration
 COPY scripts/docker/nginx.conf /etc/nginx/nginx.conf
 
-# Install curl for health checks and pre-create nginx directories with proper permissions
-RUN apk add --no-cache curl && \
-    # Create nginx cache and temp directories
-    mkdir -p /var/cache/nginx/client_temp \
-             /var/cache/nginx/proxy_temp \
-             /var/cache/nginx/fastcgi_temp \
-             /var/cache/nginx/uwsgi_temp \
-             /var/cache/nginx/scgi_temp && \
-    # Set proper ownership and permissions for cache directories
-    chown -R nginx:nginx /var/cache/nginx && \
-    chmod -R 755 /var/cache/nginx && \
-    # Also ensure /run directory exists and has proper permissions for pid file
-    mkdir -p /run/nginx && \
-    chown nginx:nginx /run/nginx && \
-    chmod 755 /run/nginx && \
-    # Ensure /var/log/nginx has proper permissions
-    mkdir -p /var/log/nginx && \
-    chown nginx:nginx /var/log/nginx && \
-    chmod 755 /var/log/nginx
+# Note: curl and nginx directories are pre-configured in base image
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
@@ -368,12 +339,12 @@ CMD ["nginx", "-g", "daemon off;"]
 ############################################################
 # Printer Discovery Service Runtime Container
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS printer-discovery-runtime
+FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
 WORKDIR /app
 
-# Create non-root user for security
+# Create discovery user (different from appuser for service isolation)
+# Note: curl and other tools are pre-installed in base image
 RUN groupadd -r discovery && useradd -r -g discovery discovery && \
-    # Create app directory with proper ownership
     chown -R discovery:discovery /app
 
 # Copy published printer discovery service (as discovery user)

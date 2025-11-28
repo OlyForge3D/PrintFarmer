@@ -1,7 +1,7 @@
-# Dockerfile for pre-caching upgraded .NET Aspnet base image
-# Usage: docker build -f Dockerfile.base-aspnet -t mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded .
+# Dockerfile for pre-caching upgraded .NET Aspnet base image with tools
+# Usage: docker build -f dockerfiles/Dockerfile.base-aspnet -t mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded .
 # Then: docker save -o aspnet-9.0-bookworm-slim-upgraded.tar mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim-upgraded
-# This image is used as base for api-runtime and slicer-base stages
+# This image is used as base for api-runtime, slicer-base, and printer-discovery stages
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim
 
@@ -9,13 +9,34 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim
 # Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
 ARG CACHE_BUST=latest
 
-# Update and upgrade all packages, then clean cache
-# This creates a fully-patched base image that can be cached offline
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update, upgrade, and install all required runtime tools in one layer
+# API runtime needs: curl, iputils-ping, iproute2, net-tools, dnsutils
+# Slicer runtime needs: curl, wget, ca-certificates, libgtk-3-0, libgl1-mesa-glx, 
+#                       libglib2.0-0, libstdc++6, libopengl0, xvfb, fuse, 
+#                       squashfs-tools, file, p7zip-full
 RUN echo "Cache bust: ${CACHE_BUST}" && \
     apt-get update && \
     apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        # Network tools (for API and diagnostics)
+        curl wget ca-certificates iputils-ping iproute2 net-tools dnsutils \
+        # OrcaSlicer runtime dependencies
+        libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 \
+        # AppImage extraction and virtual display
+        xvfb fuse squashfs-tools file p7zip-full && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# Pre-create common user (appuser with UID/GID 1000)
+# This user is used by api-runtime and slicer-base stages
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid appuser --create-home appuser
+
 # Set a label to identify this as a pre-cached image
-LABEL prebuild="true" purpose="base-image" updated="true"
+LABEL prebuild="true" \
+      purpose="base-image" \
+      updated="true" \
+      tools="curl,wget,iputils-ping,iproute2,net-tools,dnsutils,libgtk-3-0,xvfb,fuse"

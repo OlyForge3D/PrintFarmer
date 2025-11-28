@@ -210,9 +210,9 @@ public class ApiClient : IApiClient
         {
             // Send discovered printer directly to API (single object, not array)
             string json = JsonSerializer.Serialize(printer);
-            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            HttpResponseMessage response = await _httpClient.PostAsync("/api/printers/discovered", content, cancellationToken);
+            using HttpResponseMessage response = await _httpClient.PostAsync(new Uri("/api/printers/discovered", UriKind.Relative), content, cancellationToken).ConfigureAwait(false);
             _ = response.EnsureSuccessStatusCode();
 
             _logger.LogDebug("Successfully registered printer with API");
@@ -228,7 +228,7 @@ public class ApiClient : IApiClient
 /// <summary>
 /// Simple CIDR subnet parser
 /// </summary>
-public class SubnetParser
+public sealed class SubnetParser
 {
     public IPAddress FirstUsable { get; set; } = IPAddress.Parse("0.0.0.0");
 
@@ -236,16 +236,16 @@ public class SubnetParser
 
     public static SubnetParser Parse(string cidr)
     {
+        ArgumentNullException.ThrowIfNull(cidr);
         string[] parts = cidr.Split('/');
         if (parts.Length != 2)
         {
-            throw new ArgumentException("Invalid CIDR format");
+            throw new ArgumentException("Invalid CIDR format", nameof(cidr));
         }
 
         IPAddress ip = IPAddress.Parse(parts[0]);
-        int prefixLength = int.Parse(parts[1]);
+        int prefixLength = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
 
-        byte[] ipBytes = ip.GetAddressBytes();
         int hostBits = 32 - prefixLength;
         long total = (long)Math.Pow(2, hostBits);
 
@@ -259,9 +259,9 @@ public class SubnetParser
     public IPAddress AddToFirstUsable(int offset)
     {
         byte[] bytes = FirstUsable.GetAddressBytes();
-        uint value = BitConverter.ToUInt32(new[] { bytes[3], bytes[2], bytes[1], bytes[0] }, 0);
+        uint value = BitConverter.ToUInt32([bytes[3], bytes[2], bytes[1], bytes[0]], 0);
         value += (uint)offset;
         byte[] newBytes = BitConverter.GetBytes(value);
-        return new IPAddress(new[] { newBytes[3], newBytes[2], newBytes[1], newBytes[0] });
+        return new IPAddress([newBytes[3], newBytes[2], newBytes[1], newBytes[0]]);
     }
 }

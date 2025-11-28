@@ -250,11 +250,11 @@ public class ProfilesController : ControllerBase
     /// Extract the base model name from a machine profile name.
     /// e.g., "Prusa CORE One 0.4 nozzle" -> "Prusa CORE One"
     /// </summary>
-    private string ExtractModelName(string machineName)
+    private static string ExtractModelName(string machineName)
     {
         // Machine profile names follow pattern: "{Model} {Variant}" where variant is like "0.4 nozzle"
         // We need to remove nozzle size suffixes
-        string[] parts = machineName.Split(new[] { " 0." }, StringSplitOptions.None);
+        string[] parts = machineName.Split([" 0."], StringSplitOptions.None);
         if (parts.Length > 1)
         {
             return parts[0].Trim();
@@ -266,9 +266,9 @@ public class ProfilesController : ControllerBase
     /// Generate a model identifier from manufacturer and model name.
     /// e.g., "Prusa", "CORE One" -> "Prusa_CORE_One"
     /// </summary>
-    private string GenerateModelId(string manufacturer, string modelName)
+    private static string GenerateModelId(string manufacturer, string modelName)
     {
-        string modelIdentifier = modelName.Replace(" ", "_");
+        string modelIdentifier = modelName.Replace(" ", "_", StringComparison.Ordinal);
         return $"{manufacturer}_{modelIdentifier}";
     }
 }

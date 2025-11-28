@@ -46,10 +46,10 @@ public class HeartbeatBackgroundService : BackgroundService
                     using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                     cts.CancelAfter(TimeSpan.FromSeconds(10)); // 10 second timeout for heartbeat
 
-                    HttpResponseMessage response = await _httpClient.PostAsJsonAsync(
+                    using HttpResponseMessage response = await _httpClient.PostAsJsonAsync(
                         heartbeatUrl,
                         new { timestamp = DateTime.UtcNow },
-                        cts.Token);
+                        cts.Token).ConfigureAwait(false);
 
                     if (response.IsSuccessStatusCode)
                     {

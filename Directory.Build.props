@@ -5,7 +5,28 @@
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
     <WarningsAsErrors>Nullable</WarningsAsErrors>
-  <NoWarn>$(NoWarn);CA1812</NoWarn>
+    <!-- 
+      Suppressed warnings (non-performance impacting):
+      CA1812: Avoid uninstantiated internal classes (DI instantiated)
+      CA1515: Make types internal (API types need to be public)
+      CA1848: Use LoggerMessage delegates (code complexity vs minimal perf gain)
+      CA1031: Catch more specific exceptions (intentional catch-all in error handlers)
+      CA2007: ConfigureAwait (ASP.NET Core apps don't need this)
+      CA1062: Validate parameters (handled by framework/DI)
+      CA2234: Pass Uri instead of string (convenience vs type safety)
+      CA1852: Seal types (minor optimization, adds maintenance burden)
+      CA1861: Prefer static readonly arrays (unavoidable in some Split calls)
+      CA1308: Use ToUpperInvariant (ToLowerInvariant is intentional for URLs/identifiers)
+      S1075: Hardcoded URIs (configuration values)
+      S1481: Remove unused locals (false positives)
+      S2139: Log and rethrow (intentional pattern)
+      S2325: Make method static (low priority, fixed critical ones)
+      S6667: Pass exception to logging (intentional in some cases)
+      S6966: Await RunAsync (startup pattern)
+      IDISP004: Don't ignore IDisposable (false positives with using)
+      IDISP001: Dispose created (false positives, disposed via using)
+    -->
+    <NoWarn>$(NoWarn);CA1812;CA1515;CA1848;CA1031;CA2007;CA1062;CA2234;CA1852;CA1861;CA1308;S1075;S1481;S2139;S2325;S6667;S6966;IDISP004;IDISP001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
