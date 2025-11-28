@@ -2,7 +2,7 @@
 # Single-provider template for use in multi-database deployments
 # NOTE: This file contains just the service configuration to be inserted under services.database:
 
-image: postgres:15-alpine
+image: ${POSTGRES_IMAGE:-postgres:16-alpine-upgraded}
 container_name: printfarmer-database-postgres
 environment:
   POSTGRES_DB: ${POSTGRES_DB:-printfarmer}

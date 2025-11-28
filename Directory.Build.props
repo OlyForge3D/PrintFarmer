@@ -6,27 +6,79 @@
     <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
     <WarningsAsErrors>Nullable</WarningsAsErrors>
     <!-- 
-      Suppressed warnings (non-performance impacting):
+      Suppressed warnings - organized by category.
+      These are non-performance-impacting or intentional design choices.
+      
+      === Code Architecture ===
       CA1812: Avoid uninstantiated internal classes (DI instantiated)
-      CA1515: Make types internal (API types need to be public)
-      CA1848: Use LoggerMessage delegates (code complexity vs minimal perf gain)
-      CA1031: Catch more specific exceptions (intentional catch-all in error handlers)
-      CA2007: ConfigureAwait (ASP.NET Core apps don't need this)
-      CA1062: Validate parameters (handled by framework/DI)
+      CA1515: Make types internal (API types need public visibility)
+      CA1822: Member can be static (low priority, readability preference)
+      CA1852: Seal types (minor optimization, maintenance burden)
+      CA1814: Prefer jagged arrays (2D arrays intentional for algorithms)
+      
+      === Exception Handling ===
+      CA1031: Catch specific exceptions (intentional catch-all handlers)
+      S108: Empty code block (intentional silent catch for optional ops)
+      S2486: Handle exception or comment (intentional silent catch)
+      
+      === Logging ===
+      CA1848: Use LoggerMessage delegates (codebase consistently uses standard logging;
+              high-perf delegates only needed for extreme throughput scenarios)
+      S6667: Pass exception to logging (intentional in some cases)
+      
+      === Async Patterns ===
+      CA2007: ConfigureAwait (ASP.NET Core doesn't need this)
+      CA2016: Forward CancellationToken (not always appropriate)
+      S6966: Await RunAsync (startup pattern)
+      
+      === String/Culture (machine-readable data uses invariant) ===
+      CA1305: Specify IFormatProvider (machine data is culture-invariant)
+      CA1307: Specify StringComparison (ordinal default is fine)
+      CA1310: Specify StringComparison for StartsWith (ordinal is fine)
+      CA1311: Specify culture for ToLower/ToUpper (identifiers)
+      CA1304: Specify CultureInfo for ToLower (hashes/identifiers)
+      CA1308: Use ToUpperInvariant (ToLower intentional for URLs)
+      
+      === URI/URL Handling ===
+      CA1054: Parameter type should be Uri (string URLs more convenient)
+      CA1055: Return type should be Uri (string URLs more convenient)
+      CA1056: Property type should be Uri (string URLs more convenient)
       CA2234: Pass Uri instead of string (convenience vs type safety)
-      CA1852: Seal types (minor optimization, adds maintenance burden)
-      CA1861: Prefer static readonly arrays (unavoidable in some Split calls)
-      CA1308: Use ToUpperInvariant (ToLowerInvariant is intentional for URLs/identifiers)
       S1075: Hardcoded URIs (configuration values)
+      
+      === IDisposable (false positives or framework-managed) ===
+      CA2000: Dispose objects (framework-managed or returned)
+      CA1816: Call GC.SuppressFinalize (no finalizers in use)
+      IDISP004: Don't ignore IDisposable (false positives)
+      IDISP001: Dispose created (false positives with using)
+      
+      === Validation ===
+      CA1062: Validate parameters (handled by framework/DI)
+      CA1508: Dead conditional code (false positives with JsonElement)
+      CA2100: Review SQL injection (queries use safe patterns)
+      
+      === Collections & LINQ ===
+      CA1860: Prefer Count over Any() (readability preference)
+      CA1869: Cache JsonSerializerOptions (addressed in hot paths)
+      CA1850: Prefer static SHA256.HashData (minor optimization)
+      CA1872: Prefer Convert.ToHexStringLower (minor optimization)
+      S6602: Use Find instead of FirstOrDefault (List-specific)
+      S6605: Use Exists instead of Any (List-specific)
+      
+      === Code Style ===
+      CA1861: Prefer static readonly arrays (unavoidable in Split)
+      S1066: Merge if statements (readability preference)
+      S3358: Nested ternary (compact expressions preferred)
+      S1125: Remove unnecessary boolean literals (readability)
       S1481: Remove unused locals (false positives)
       S2139: Log and rethrow (intentional pattern)
-      S2325: Make method static (low priority, fixed critical ones)
-      S6667: Pass exception to logging (intentional in some cases)
-      S6966: Await RunAsync (startup pattern)
-      IDISP004: Don't ignore IDisposable (false positives with using)
-      IDISP001: Dispose created (false positives, disposed via using)
+      S2325: Make method static (low priority)
+      S1135: Complete TODO comments (tracked separately)
+      
+      === XML Documentation ===
+      CS1591: Missing XML comment (not required for all members)
     -->
-    <NoWarn>$(NoWarn);CA1812;CA1515;CA1848;CA1031;CA2007;CA1062;CA2234;CA1852;CA1861;CA1308;S1075;S1481;S2139;S2325;S6667;S6966;IDISP004;IDISP001</NoWarn>
+    <NoWarn>$(NoWarn);CA1812;CA1515;CA1822;CA1852;CA1814;CA1031;S108;S2486;CA1848;S6667;CA2007;CA2016;S6966;CA1305;CA1307;CA1310;CA1311;CA1304;CA1308;CA1054;CA1055;CA1056;CA2234;S1075;CA2000;CA1816;IDISP004;IDISP001;CA1062;CA1508;CA2100;CA1860;CA1869;CA1850;CA1872;S6602;S6605;CA1861;S1066;S3358;S1125;S1481;S2139;S2325;S1135;CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

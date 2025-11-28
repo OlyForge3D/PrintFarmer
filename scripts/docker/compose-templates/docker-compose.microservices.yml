@@ -6,7 +6,7 @@
 services:
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
-    image: ${POSTGRES_IMAGE:-postgres:15}
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine-upgraded}
     container_name: printfarmer-database
     environment:
       # PostgreSQL (default)
@@ -42,9 +42,7 @@ services:
       context: .
       dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: api-runtime
-      args:
-        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
-    image: printfarmer-api-multistage
+    image: printfarmer-api
     container_name: printfarmer-api
     ports:
       - "${API_PORT:-5245}:5245"
@@ -84,7 +82,7 @@ services:
   orcaslicer-worker:
     build:
       <<: *orcaslicer-build
-    image: printfarmer-orcaslicer-worker-multistage
+    image: printfarmer-orcaslicer-worker
     container_name: printfarmer-orcaslicer-worker
     ports:
       - "8081:8080"
@@ -121,7 +119,7 @@ services:
         VITE_API_BASE_URL: /api
         VITE_SIGNALR_PRINTERS_URL: /hubs/printers
         VITE_SIGNALR_HARVEST_URL: /hubs/harvest
-    image: printfarmer-frontend-multistage
+    image: printfarmer-frontend
     container_name: printfarmer-frontend
     # In microservices architecture the frontend is served internally and proxied
     # by the nginx-proxy service. Avoid binding the frontend directly to the
@@ -140,7 +138,7 @@ services:
         condition: service_healthy
     healthcheck: *frontend-healthcheck
   nginx-proxy:
-    image: nginx:alpine
+    image: ${NGINX_IMAGE:-nginx:alpine-upgraded}
     container_name: printfarmer-nginx-proxy
     ports:
       - "${HTTP_PORT:-8080}:80"

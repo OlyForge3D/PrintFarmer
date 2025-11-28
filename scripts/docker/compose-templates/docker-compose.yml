@@ -10,9 +10,7 @@ services:
       context: .
       dockerfile: Dockerfile.multistage
       target: api-runtime
-      args:
-        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
-    image: printfarmer-api-multistage
+    image: printfarmer-api
     container_name: printfarmer-api
     ports:
       - "5245:5245" # HTTP API / SignalR (bind host 5245 -> container 5245)
@@ -66,7 +64,7 @@ services:
         VITE_API_BASE_URL: "http://localhost:${API_PORT:-5245}/api"
         VITE_SIGNALR_PRINTERS_URL: "http://localhost:${API_PORT:-5245}/hubs/printers"
         VITE_SIGNALR_HARVEST_URL: "http://localhost:${API_PORT:-5245}/hubs/harvest"
-    image: printfarmer-frontend-multistage
+    image: printfarmer-frontend
     container_name: printfarmer-frontend
     ports:
       - "${HTTP_PORT:-3000}:80"
@@ -86,7 +84,7 @@ services:
   orcaslicer-worker:
     build:
       <<: *orcaslicer-build
-    image: printfarmer-orcaslicer-worker-multistage
+    image: printfarmer-orcaslicer-worker
     container_name: printfarmer-orcaslicer-worker
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
@@ -109,7 +107,7 @@ services:
 
   # Optional: Load balancer / Reverse proxy
   nginx-proxy:
-    image: nginx:alpine
+    image: ${NGINX_IMAGE:-nginx:alpine-upgraded}
     container_name: printfarmer-nginx-proxy
     ports:
       - "8080:80"

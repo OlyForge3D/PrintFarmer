@@ -7,7 +7,6 @@
 
 # Global build arguments
 ARG ORCASLICER_VERSION=2.3.1
-ARG TARGETPLATFORM=linux/amd64
 ARG BUILD_VERBOSITY=quiet
 
 # Base image tags - use pre-cached upgraded images for faster builds
@@ -21,7 +20,7 @@ ARG UBUNTU_TAG=24.04-upgraded
 ############################################################
 # Shared Build Stage - Build all .NET projects once
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
+FROM mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
 WORKDIR /src
 
 # Copy all project files for dependency resolution
@@ -75,7 +74,7 @@ RUN echo "Checking published artifacts..." && \
 ############################################################
 # API Runtime Container
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
 WORKDIR /app
 EXPOSE 5000
 
@@ -107,7 +106,7 @@ ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)
 ############################################################
-FROM --platform=${TARGETPLATFORM} ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
+FROM ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
 ARG ALLOW_STUB=true
@@ -221,7 +220,7 @@ RUN set -e; \
 ############################################################
 # Slicer Base Runtime (shared runtime for all workers)
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
 WORKDIR /app
 
 # Note: All runtime dependencies (libgtk-3-0, xvfb, fuse, etc.) and appuser are pre-installed in base image
@@ -232,7 +231,7 @@ RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
 ############################################################
 # OrcaSlicer Worker Runtime Container  
 ############################################################
-FROM --platform=${TARGETPLATFORM} slicer-base AS orcaslicer-worker
+FROM slicer-base AS orcaslicer-worker
 ARG ORCASLICER_VERSION
 ARG ALLOW_STUB
 
@@ -287,7 +286,7 @@ ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 ############################################################
 # React Frontend Build Stage
 ############################################################
-FROM --platform=${TARGETPLATFORM} node:${NODE_TAG} AS frontend-build
+FROM node:${NODE_TAG} AS frontend-build
 WORKDIR /app
 
 # Accept build arguments for frontend configuration
@@ -315,7 +314,7 @@ RUN VITE_API_BASE_URL=${VITE_API_BASE_URL} \
 ############################################################
 # React Frontend Runtime Container
 ############################################################
-FROM --platform=${TARGETPLATFORM} nginx:${NGINX_TAG} AS frontend-runtime
+FROM nginx:${NGINX_TAG} AS frontend-runtime
 WORKDIR /usr/share/nginx/html
 
 # Copy built React app
@@ -339,7 +338,7 @@ CMD ["nginx", "-g", "daemon off;"]
 ############################################################
 # Printer Discovery Service Runtime Container
 ############################################################
-FROM --platform=${TARGETPLATFORM} mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
 WORKDIR /app
 
 # Create discovery user (different from appuser for service isolation)

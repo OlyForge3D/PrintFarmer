@@ -21,9 +21,7 @@ services:
       context: .
       dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: printer-discovery-runtime
-      args:
-        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
-    image: printfarmer-printer-discovery-multistage
+    image: printfarmer-printer-discovery
     container_name: printfarmer-printer-discovery
     # Use bridge network for microservices deployments (host network reserved for specific scenarios)
     networks:

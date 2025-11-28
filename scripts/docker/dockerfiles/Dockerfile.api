@@ -1,6 +1,5 @@
 # API-Only Dockerfile
 # Build with configurable platform (defaults to linux/amd64 to avoid ARM64 protoc issues)
-ARG TARGETPLATFORM=linux/amd64
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 5000

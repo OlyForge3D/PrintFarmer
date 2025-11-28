@@ -846,7 +846,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         return null;
     }
 
-    private static double? ParseDoubleValue(JsonElement elem)t elem)
+    private static double? ParseDoubleValue(JsonElement elem)
     {
         if (elem.ValueKind == JsonValueKind.Number)
         {
@@ -860,7 +860,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         return null;
     }
 
-    private static bool ParseBoolValue(JsonElement elem)t elem)
+    private static bool ParseBoolValue(JsonElement elem)
     {
         if (elem.ValueKind == JsonValueKind.True)
         {
@@ -875,7 +875,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         return false;
     }
 
-    private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)t elem)
+    private static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
     {
         Dictionary<string, object> dict = new Dictionary<string, object>();
         try
@@ -895,7 +895,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         return dict;
     }
 
-    private static void ParseCompatiblePrinters(JsonElement compatibleElem, IList<string> targetList)etList)
+    private static void ParseCompatiblePrinters(JsonElement compatibleElem, IList<string> targetList)
     {
         if (compatibleElem.ValueKind == JsonValueKind.Array)
         {
