@@ -11,21 +11,104 @@ namespace PrinterDiscovery.Controllers;
 [ApiController]
 [Route("api/discovery")]
 [Tags("Discovery")]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "S6960:This controller has multiple responsibilities", Justification = "Discovery endpoints are logically grouped")]
 public class DiscoveryController : ControllerBase
 {
     private readonly INetworkDiscoveryService _discoveryService;
+    private readonly IStreamingDiscoveryService _streamingDiscoveryService;
     private readonly ILogger<DiscoveryController> _logger;
 
     public DiscoveryController(
         INetworkDiscoveryService discoveryService,
+        IStreamingDiscoveryService streamingDiscoveryService,
         ILogger<DiscoveryController> logger)
     {
         _discoveryService = discoveryService ?? throw new ArgumentNullException(nameof(discoveryService));
+        _streamingDiscoveryService = streamingDiscoveryService ?? throw new ArgumentNullException(nameof(streamingDiscoveryService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
-    /// Manually trigger a single discovery scan
+    /// Start a streaming discovery scan with progress updates via SignalR.
+    /// Returns immediately with a session ID that can be used to receive progress via SignalR.
+    /// </summary>
+    /// <param name="request">Optional request with backend filters and discovery settings</param>
+    [HttpPost("stream")]
+    [ProducesResponseType(typeof(StreamingDiscoveryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public IActionResult StartStreamingDiscovery([FromBody] StreamingDiscoveryRequest? request)
+    {
+        try
+        {
+            string sessionId = Guid.NewGuid().ToString("N");
+            _logger.LogInformation("Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
+                sessionId,
+                request?.Subnets != null ? string.Join(", ", request.Subnets) : "default",
+                request?.Backends != null ? string.Join(", ", request.Backends) : "all",
+                request?.ProbeTimeoutMs?.ToString() ?? "default",
+                request?.MaxConcurrentProbes?.ToString() ?? "default");
+
+            // Start the discovery in the background with a small delay
+            // This gives the frontend time to receive the sessionId and join the SignalR group
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // Wait for frontend to join the SignalR group
+                    await Task.Delay(500);
+                    
+                    await _streamingDiscoveryService.ScanWithProgressAsync(
+                        sessionId,
+                        request?.Backends,
+                        request?.AutoRegister ?? true,
+                        request?.Subnets,
+                        request?.ProbeTimeoutMs,
+                        request?.MaxConcurrentProbes,
+                        CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Streaming discovery failed for session {SessionId}", sessionId);
+                }
+            });
+
+            return Ok(new StreamingDiscoveryResponse
+            {
+                SessionId = sessionId,
+                Message = "Discovery started - connect to SignalR hub for progress updates"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to start streaming discovery");
+            return StatusCode(500, new { error = "Failed to start discovery", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Cancel an active streaming discovery session.
+    /// </summary>
+    /// <param name="sessionId">The session ID to cancel</param>
+    [HttpPost("stream/{sessionId}/cancel")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult CancelStreamingDiscovery([FromRoute] string sessionId)
+    {
+        try
+        {
+            _logger.LogInformation("Cancelling streaming discovery session {SessionId}", sessionId);
+            _streamingDiscoveryService.CancelSession(sessionId);
+            return Ok(new { message = "Discovery session cancelled" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to cancel discovery session {SessionId}", sessionId);
+            return StatusCode(500, new { error = "Failed to cancel discovery", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Manually trigger a single discovery scan (synchronous).
     /// Returns list of discovered printers without registering them
     /// </summary>
     /// <param name="autoRegister">If true, automatically register discovered printers with API</param>
@@ -142,4 +225,44 @@ public class ServiceInfo
     public bool PeriodicDiscoveryEnabled { get; set; }
     public string ApiBaseUrl { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
+}
+
+/// <summary>
+/// Request to start a streaming discovery scan.
+/// </summary>
+public class StreamingDiscoveryRequest
+{
+    /// <summary>
+    /// Optional list of backends to filter discovery.
+    /// </summary>
+    public PrinterBackend[]? Backends { get; set; }
+
+    /// <summary>
+    /// Whether to automatically register discovered printers with the API.
+    /// </summary>
+    public bool AutoRegister { get; set; } = true;
+
+    /// <summary>
+    /// List of subnets to scan (CIDR notation). If not provided, uses configured defaults.
+    /// </summary>
+    public string[]? Subnets { get; set; }
+
+    /// <summary>
+    /// Timeout for each probe in milliseconds. If not provided, uses configured default.
+    /// </summary>
+    public int? ProbeTimeoutMs { get; set; }
+
+    /// <summary>
+    /// Maximum number of concurrent probes. If not provided, uses configured default.
+    /// </summary>
+    public int? MaxConcurrentProbes { get; set; }
+}
+
+/// <summary>
+/// Response from starting a streaming discovery.
+/// </summary>
+public class StreamingDiscoveryResponse
+{
+    public string SessionId { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
 }

@@ -191,6 +191,12 @@ public interface IApiClient
     /// The API will deduplicate and persist the printer in the database.
     /// </summary>
     Task RegisterDiscoveredPrinterAsync(DiscoveredPrinterDto printer, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get the list of server URLs for printers already registered in the system.
+    /// Used to filter out already-known printers during discovery.
+    /// </summary>
+    Task<HashSet<string>> GetRegisteredPrinterUrlsAsync(CancellationToken cancellationToken = default);
 }
 
 public class ApiClient : IApiClient
@@ -221,6 +227,46 @@ public class ApiClient : IApiClient
         {
             _logger.LogError(ex, "Failed to register printer with API");
             throw;
+        }
+    }
+
+    public async Task<HashSet<string>> GetRegisteredPrinterUrlsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using HttpResponseMessage response = await _httpClient.GetAsync(new Uri("/api/printers", UriKind.Relative), cancellationToken).ConfigureAwait(false);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to get registered printers: {StatusCode}", response.StatusCode);
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            
+            // Parse JSON array and extract serverUrl from each printer
+            using JsonDocument doc = JsonDocument.Parse(json);
+            HashSet<string> urls = new(StringComparer.OrdinalIgnoreCase);
+            
+            foreach (JsonElement printer in doc.RootElement.EnumerateArray())
+            {
+                if (printer.TryGetProperty("serverUrl", out JsonElement urlElement))
+                {
+                    string? url = urlElement.GetString();
+                    if (!string.IsNullOrEmpty(url))
+                    {
+                        urls.Add(url);
+                    }
+                }
+            }
+            
+            _logger.LogDebug("Found {Count} registered printers", urls.Count);
+            return urls;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get registered printers from API");
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
     }
 }

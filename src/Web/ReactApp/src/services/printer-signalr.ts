@@ -169,16 +169,7 @@ export class PrinterSignalRService {
     });
     // Discovery events - register only lowercase names for consistency
     const handleDiscoveryProgress = (progress: DiscoveryProgressDto) => {
-      try {
-        const win = window as unknown as {
-          PrintFarmerDebug?: Record<string, unknown>;
-        };
-        if (win.PrintFarmerDebug?.discovery) {
-          console.debug("[printerSignalR] DiscoveryProgress event", progress);
-        }
-      } catch {
-        /* ignore */
-      }
+      console.log("[printerSignalR] DiscoveryProgress event received", progress);
       this.discoveryProgressCallbacks.forEach((cb) => {
         try {
           cb(progress);
@@ -188,16 +179,7 @@ export class PrinterSignalRService {
       });
     };
     const handleDiscoveryPrinterFound = (found: DiscoveryPrinterFoundDto) => {
-      try {
-        const win = window as unknown as {
-          PrintFarmerDebug?: Record<string, unknown>;
-        };
-        if (win.PrintFarmerDebug?.discovery) {
-          console.debug("[printerSignalR] DiscoveryPrinterFound event", found);
-        }
-      } catch {
-        /* ignore */
-      }
+      console.log("[printerSignalR] DiscoveryPrinterFound event received", found);
       this.discoveryPrinterFoundCallbacks.forEach((cb) => {
         try {
           cb(found);
@@ -207,16 +189,7 @@ export class PrinterSignalRService {
       });
     };
     const handleDiscoveryCompleted = (completed: DiscoveryCompletedDto) => {
-      try {
-        const win = window as unknown as {
-          PrintFarmerDebug?: Record<string, unknown>;
-        };
-        if (win.PrintFarmerDebug?.discovery) {
-          console.debug("[printerSignalR] DiscoveryCompleted event", completed);
-        }
-      } catch {
-        /* ignore */
-      }
+      console.log("[printerSignalR] DiscoveryCompleted event received", completed);
       this.discoveryCompletedCallbacks.forEach((cb) => {
         try {
           cb(completed);

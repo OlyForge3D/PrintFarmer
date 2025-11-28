@@ -51,7 +51,19 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   const { data: allModels = [] } = useModels();
   
   // Use the discovery stream hook to listen for real-time updates
-  const { progress, foundPrinters, resetDiscovery, isActive } = useDiscoveryStream(sessionId || undefined);
+  const { progress, foundPrinters, completed, resetDiscovery, isActive, isCompleted } = useDiscoveryStream(sessionId || undefined);
+
+  // Debug logging for state changes
+  React.useEffect(() => {
+    console.log('[PrinterDiscoveryModal] State changed:', {
+      sessionId,
+      isActive,
+      isCompleted,
+      foundPrintersCount: foundPrinters.length,
+      progressStatus: progress?.status,
+      completedPrinters: completed?.totalPrintersFound,
+    });
+  }, [sessionId, isActive, isCompleted, foundPrinters.length, progress?.status, completed?.totalPrintersFound]);
 
   // When modal is being closed, reset session so a new discovery can start fresh next open
   if (!isOpen) {
@@ -136,10 +148,10 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
           modelId: config.modelId,
           newManufacturerName: config.newManufacturerName,
           newModelName: config.newModelName,
-          backendPort: printer.port,                           // Backend port detected during discovery
-          frontendPort: printer.frontendPort ?? undefined,     // Frontend port discovered, convert null to undefined
-          cameraStreamUrl: printer.cameraStreamUrl ?? undefined,   // Camera stream URL from discovery
-          cameraSnapshotUrl: printer.cameraSnapshotUrl ?? undefined, // Camera snapshot URL from discovery
+          backendPort: printer.port,
+          frontendPort: printer.frontendPort ?? undefined,
+          cameraStreamUrl: printer.cameraStreamUrl ?? undefined,
+          cameraSnapshotUrl: printer.cameraSnapshotUrl ?? undefined,
         });
       }
       
@@ -174,8 +186,10 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     }
   };
 
+  // Determine if scan has been run (either completed or has results)
+  const hasScanRun = isCompleted || foundPrinters.length > 0;
+
   return (
-    <>
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
         <div className="fixed inset-0 bg-black bg-opacity-75 transition-opacity" onClick={onClose} />
@@ -183,6 +197,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
 
         <div className="relative inline-block align-bottom bg-pf-bg-1 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl border border-pf-border">
+          {/* Close X button in corner */}
           <div className="absolute top-0 right-0 pt-4 pr-4">
             <button
               type="button"
@@ -195,6 +210,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
             </button>
           </div>
 
+          {/* Modal content */}
           <div className="sm:flex sm:items-start">
             <div className="w-full">
               <div className="text-center sm:text-left">
@@ -241,28 +257,6 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                     </div>
                   </div>
                   
-                  <button
-                    type="button"
-                    onClick={handleStartDiscovery}
-                    disabled={startDiscoveryMutation.isPending || !!isActive || selectedBackends.size === 0}
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Search className="h-4 w-4 mr-2" />
-                    {isActive ? 'Scanning...' : 'Start Network Scan'}
-                  </button>
-                  
-                  {isActive && (
-                    <button
-                      type="button"
-                      onClick={handleCancelDiscovery}
-                      disabled={cancelDiscoveryMutation.isPending}
-                      className="ml-2 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-error hover:bg-pf-error-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-error disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Stop the current network discovery scan"
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Cancel Scan
-                    </button>
-                  )}
                   {selectedBackends.size === 0 && (
                     <p className="text-xs text-pf-error-text mt-2">Please select at least one backend to scan</p>
                   )}
@@ -274,50 +268,51 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   <div className="mt-2 text-xs text-pf-text-tertiary">SignalR: {isSignalRConnected ? 'connected' : 'disconnected'}</div>
                 </div>
 
+                {/* Progress bar during active scan */}
                 {isActive && progress && (() => {
                   const valueNow: number = Math.round(progress.progressPercentage);
-                  // valueNow used for aria-valuenow; linter workaround by casting
                   return (
-                  <div className="text-center py-4 mb-4">
-                    {(() => {
-                      const ariaProps = {
-                        role: 'progressbar',
-                        'aria-label': 'Network discovery progress',
-                        'aria-valuemin': 0,
-                        'aria-valuemax': 100,
-                        'aria-valuenow': valueNow,
-                        'data-progress': valueNow,
-                      } as const;
-                      return (
-                        <div
-                          {...ariaProps}
-                          className="w-full bg-pf-bg-2 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar border border-pf-border"
-                        >
-                          {(() => {
-                            const pct = Math.min(100, Math.max(0, valueNow));
-                            const step = pct >= 99 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
-                            return <ProgressFill pct={pct} step={step} />;
-                          })()}
-                        </div>
-                      );
-                    })()}
-                    
-                    <p className="text-xs text-pf-text-tertiary mb-2">Session: {progress.sessionId}</p>
-                    {progress.networkRanges && progress.networkRanges.length > 0 && (
-                      <p className="text-xs text-pf-text-tertiary mb-2">
-                        Networks: {progress.networkRanges.join(', ')} {progress.autoDetectedNetworks && '(auto-detected)'}
+                    <div className="text-center py-4 mb-4">
+                      {(() => {
+                        const ariaProps = {
+                          role: 'progressbar',
+                          'aria-label': 'Network discovery progress',
+                          'aria-valuemin': 0,
+                          'aria-valuemax': 100,
+                          'aria-valuenow': valueNow,
+                          'data-progress': valueNow,
+                        } as const;
+                        return (
+                          <div
+                            {...ariaProps}
+                            className="w-full bg-pf-bg-2 rounded-full h-2 mb-2 overflow-hidden pf-progress-bar border border-pf-border"
+                          >
+                            {(() => {
+                              const pct = Math.min(100, Math.max(0, valueNow));
+                              const step = pct >= 99 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+                              return <ProgressFill pct={pct} step={step} />;
+                            })()}
+                          </div>
+                        );
+                      })()}
+                      
+                      <p className="text-xs text-pf-text-tertiary mb-2">Session: {progress.sessionId}</p>
+                      {progress.networkRanges && progress.networkRanges.length > 0 && (
+                        <p className="text-xs text-pf-text-tertiary mb-2">
+                          Networks: {progress.networkRanges.join(', ')} {progress.autoDetectedNetworks && '(auto-detected)'}
+                        </p>
+                      )}
+                      <p className="text-sm text-pf-text-secondary mb-2">
+                        Scanning {progress.currentNetwork} - {progress.currentIp}
                       </p>
-                    )}
-                    <p className="text-sm text-pf-text-secondary mb-2">
-                      Scanning {progress.currentNetwork} - {progress.currentIp}
-                    </p>
-                    <p className="text-xs text-pf-text-tertiary">
-                      {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
-                    </p>
-                  </div>
+                      <p className="text-xs text-pf-text-tertiary">
+                        {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
+                      </p>
+                    </div>
                   );
                 })()}
 
+                {/* Error message */}
                 {startDiscoveryMutation.error && (
                   <div className="mb-4 p-3 bg-pf-error border border-pf-error-border rounded-md">
                     <p className="text-sm text-pf-error-text">
@@ -326,6 +321,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   </div>
                 )}
 
+                {/* Found printers list */}
                 {foundPrinters.length > 0 && (
                   <div className="space-y-4">
                     {/* Debug panel (gated) */}
@@ -396,12 +392,11 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                           const newConfig = { 
                                             ...config, 
                                             manufacturerId: e.target.value || undefined,
-                                            modelId: undefined, // Reset model when manufacturer changes
+                                            modelId: undefined,
                                             newManufacturerName: undefined 
                                           };
                                           setPrinterConfigs(prev => ({ ...prev, [printer.serverUrl]: newConfig }));
                                           
-                                          // Auto-select checkbox when manufacturer is set (and model was already set)
                                           if (e.target.value && (config?.modelId || config?.newModelName)) {
                                             setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
                                           }
@@ -428,7 +423,6 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                           };
                                           setPrinterConfigs(prev => ({ ...prev, [printer.serverUrl]: newConfig }));
                                           
-                                          // Auto-select checkbox when both manufacturer and model are set
                                           if ((config?.manufacturerId || config?.newManufacturerName) && e.target.value) {
                                             setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
                                           }
@@ -520,51 +514,106 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                         );
                       })}
                     </div>
-
-                    <div className="flex items-center justify-end space-x-3 pt-4 border-t border-pf-border">
-                      <button
-                        type="button"
-                        onClick={onClose}
-                        className="px-4 py-2 border border-pf-border rounded-md text-sm font-medium text-pf-text-primary bg-pf-bg-1 hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleAddSelected}
-                        disabled={selectedPrinters.size === 0 || createPrinterMutation.isPending}
-                        className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {createPrinterMutation.isPending 
-                          ? 'Adding...' 
-                          : `Add ${selectedPrinters.size} Selected Printer${selectedPrinters.size !== 1 ? 's' : ''}`
-                        }
-                      </button>
-                    </div>
                   </div>
                 )}
 
-                {!isActive && foundPrinters.length === 0 && !startDiscoveryMutation.error && !sessionId && (
+                {/* Initial state - before any scan */}
+                {!isActive && foundPrinters.length === 0 && !isCompleted && (
                   <div className="text-center py-8 text-pf-text-secondary">
                     Click "Start Network Scan" to search for printers on your network
+                  </div>
+                )}
+
+                {/* Scan complete with 0 new printers found */}
+                {isCompleted && foundPrinters.length === 0 && completed && (
+                  <div className="text-center py-8">
+                    <div className="text-pf-text-primary font-medium mb-2">
+                      Scan Complete
+                    </div>
+                    <p className="text-sm text-pf-text-secondary mb-2">
+                      {completed.totalPrintersExcluded > 0
+                        ? `No new printers found. ${completed.totalPrintersExcluded} printer${completed.totalPrintersExcluded !== 1 ? 's' : ''} already registered.`
+                        : 'No printers were found on the network.'}
+                    </p>
+                    <p className="text-xs text-pf-text-tertiary">
+                      Scan duration: {(() => {
+                        const parts = String(completed.duration).split(':');
+                        if (parts.length === 3) {
+                          const seconds = parseFloat(parts[2]);
+                          return `${seconds.toFixed(1)}s`;
+                        }
+                        return completed.duration;
+                      })()}
+                    </p>
                   </div>
                 )}
               </div>
             </div>
           </div>
+
+          {/* Footer with action buttons - always at bottom, aligned right */}
+          <div className="flex items-center justify-end space-x-3 pt-4 mt-4 border-t border-pf-border">
+            {/* During scan: Cancel Scan button */}
+            {isActive && (
+              <button
+                type="button"
+                onClick={handleCancelDiscovery}
+                disabled={cancelDiscoveryMutation.isPending}
+                className="px-4 py-2 border border-pf-error text-sm font-medium rounded-md text-pf-error hover:bg-pf-error hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-error disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel Scan
+              </button>
+            )}
+
+            {/* Before scan or after scan: Close button */}
+            {!isActive && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 border border-pf-border rounded-md text-sm font-medium text-pf-text-primary bg-pf-bg-1 hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent"
+              >
+                Close
+              </button>
+            )}
+
+            {/* After scan with printers: Add Selected button */}
+            {foundPrinters.length > 0 && !isActive && (
+              <button
+                type="button"
+                onClick={handleAddSelected}
+                disabled={selectedPrinters.size === 0 || createPrinterMutation.isPending}
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {createPrinterMutation.isPending 
+                  ? 'Adding...' 
+                  : `Add ${selectedPrinters.size} Selected Printer${selectedPrinters.size !== 1 ? 's' : ''}`
+                }
+              </button>
+            )}
+
+            {/* Scan button - changes label based on state */}
+            {!isActive && (
+              <button
+                type="button"
+                onClick={handleStartDiscovery}
+                disabled={startDiscoveryMutation.isPending || selectedBackends.size === 0}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-pf-accent hover:bg-pf-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Search className="h-4 w-4 mr-2" />
+                {hasScanRun ? 'Scan Again' : 'Start Network Scan'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
-    </>
   );
 }
 
 // Separate component to avoid inline style lint for CSS variable usage
-// Updates progress synchronously during render instead of useEffect to prevent delays
 const ProgressFill: React.FC<{ pct: number; step: number }> = ({ pct }) => {
   const ref = React.useRef<HTMLDivElement | null>(null);
   
-  // Set CSS variable during render (before paint) for immediate updates
   React.useLayoutEffect(() => {
     if (ref.current) {
       ref.current.style.setProperty('--pf-progress', pct + '%');

@@ -372,7 +372,7 @@ export function useDiscoveryCompleted(
   return unsubscribe;
   }, [sessionId, onCompleted]);
 
-  return { completed };
+  return { completed, setCompleted };
 }
 
 export function useDiscoveryStream(sessionId?: string) {
@@ -392,19 +392,20 @@ export function useDiscoveryStream(sessionId?: string) {
 
   const { progress } = useDiscoveryProgress(sessionId);
   const { foundPrinters, setFoundPrinters } = useDiscoveryPrinterFound(sessionId);
-  const { completed } = useDiscoveryCompleted(sessionId);
+  const { completed, setCompleted } = useDiscoveryCompleted(sessionId);
 
   useEffect(() => {
     if (!sessionId) return;
-    if (!isConnected) return;
+    if (!isConnected) {
+      console.log('[Discovery] Waiting for SignalR connection before joining group', { sessionId, isConnected });
+      return;
+    }
     let cancelled = false;
+    console.log('[Discovery] Attempting to join SignalR discovery group', { sessionId, isConnected });
     (async () => {
       try {
-        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
-        if (win.PrintFarmerDebug?.discovery) {
-          console.debug('[Discovery] Joining SignalR discovery group', { sessionId });
-        }
         await printerSignalRService.joinDiscoveryGroup?.(sessionId);
+        console.log('[Discovery] Successfully joined SignalR discovery group', { sessionId });
       } catch (err) {
         if (!cancelled) {
           console.warn('[Discovery] Failed to join discovery group, will retry on next connection state change', err);
@@ -414,16 +415,17 @@ export function useDiscoveryStream(sessionId?: string) {
     return () => {
       cancelled = true;
       if (isConnected) {
-        console.debug('[Discovery] Leaving SignalR discovery group', { sessionId });
+        console.log('[Discovery] Leaving SignalR discovery group', { sessionId });
         printerSignalRService.leaveDiscoveryGroup?.(sessionId);
       }
     };
   }, [sessionId, isConnected, connectionState]);
 
-  // Reset found printers when starting a new session
+  // Reset all discovery state when starting a new session
   const resetDiscovery = useCallback(() => {
     setFoundPrinters([]);
-  }, [setFoundPrinters]);
+    setCompleted(null);
+  }, [setFoundPrinters, setCompleted]);
 
   return {
     progress,

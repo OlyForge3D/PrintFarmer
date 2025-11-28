@@ -43,6 +43,21 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     public int MaxRetries { get; set; } = 2; // Valid range: 0-10
 
     /// <summary>
+    /// Enable or disable the background periodic discovery service.
+    /// When enabled, the system will automatically scan for new printers at the configured interval.
+    /// </summary>
+    [SettingDisplay(Name = "Enable Background Scanning", Description = "Automatically scan for new printers in the background.", InputType = SettingInputType.Boolean)]
+    [JsonPropertyName("backgroundScanEnabled")]
+    public bool BackgroundScanEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Interval between background discovery scans in minutes.
+    /// </summary>
+    [SettingDisplay(Name = "Scan Interval (minutes)", MinValue = 1, MaxValue = 1440, Description = "How often to scan for new printers (in minutes).", InputType = SettingInputType.Number)]
+    [JsonPropertyName("backgroundScanIntervalMinutes")]
+    public int BackgroundScanIntervalMinutes { get; set; } = 30;
+
+    /// <summary>
     /// UTC timestamp of the last heartbeat from the discovery service.
     /// Used to determine if the discovery service is actively running.
     /// </summary>

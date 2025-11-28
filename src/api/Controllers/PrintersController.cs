@@ -31,7 +31,8 @@ public class PrintersController(
     Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     IDefaultCatalogService defaultCatalogService,
-    IValidator<CreatePrinterDto> validator)
+    IValidator<CreatePrinterDto> validator,
+    Services.Interfaces.IDiscoveryProxyService discoveryProxyService)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -39,6 +40,7 @@ public class PrintersController(
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IDefaultCatalogService defaultCatalog = defaultCatalogService;
     private readonly IValidator<CreatePrinterDto> _validator = validator;
+    private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -1744,5 +1746,79 @@ public class PrintersController(
             });
         }
     }
+
+    #region Discovery Stream Endpoints
+
+    /// <summary>
+    /// Start a network discovery stream to find printers on the local network.
+    /// Returns a session ID that can be used to receive discovery progress via SignalR.
+    /// </summary>
+    /// <param name="request">Optional request with backend filters</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Session ID for tracking discovery progress</returns>
+    /// <response code="200">Discovery started successfully</response>
+    /// <response code="500">Failed to start discovery</response>
+    [HttpPost("discover/stream")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> StartDiscoveryStreamAsync(
+        [FromBody] DiscoveryStreamRequest? request,
+        CancellationToken ct)
+    {
+        try
+        {
+            _logger.LogInformation("[DISCOVERY] Starting discovery stream via API endpoint");
+
+            IReadOnlyList<PrinterBackend>? backends = request?.Backends?.ToList();
+            Services.Interfaces.DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(backends, ct);
+
+            return Ok(new { sessionId = result.SessionId, message = result.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DISCOVERY] Failed to start discovery stream");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to start discovery",
+                error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Cancel an active discovery stream.
+    /// </summary>
+    /// <param name="sessionId">The session ID to cancel</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Cancellation confirmation</returns>
+    /// <response code="200">Discovery cancelled successfully</response>
+    /// <response code="500">Failed to cancel discovery</response>
+    [HttpPost("discover/{sessionId}/cancel")]
+    [ProducesResponseType(typeof(object), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> CancelDiscoveryStreamAsync(
+        [FromRoute] string sessionId,
+        CancellationToken ct)
+    {
+        try
+        {
+            _logger.LogInformation($"[DISCOVERY] Cancelling discovery stream {sessionId}");
+
+            Services.Interfaces.DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
+
+            return Ok(new { message = result.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[DISCOVERY] Failed to cancel discovery stream {sessionId}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Failed to cancel discovery",
+                error = ex.Message
+            });
+        }
+    }
+
+    #endregion
 
 }

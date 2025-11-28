@@ -191,6 +191,9 @@ public static class ServiceCollectionExtensions
 
         // Discovery progress cache for real-time updates
         _ = services.AddSingleton<Services.IDiscoveryProgressCache, Services.DiscoveryProgressCache>();
+
+        // Discovery proxy service for streaming discovery with SignalR progress updates
+        _ = services.AddScoped<Services.Interfaces.IDiscoveryProxyService, Services.DiscoveryProxyService>();
     }
 
     #endregion

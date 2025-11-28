@@ -6,7 +6,6 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Configuration
 string apiBaseUrl = builder.Configuration["Discovery:ApiBaseUrl"] ?? "http://api:5245";
-bool enablePeriodicDiscovery = builder.Configuration.GetValue("Discovery:EnablePeriodicDiscovery", true);
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -24,6 +23,15 @@ builder.Services.AddSingleton<ICoreNetworkDiscoveryService, CoreNetworkDiscovery
 // Network discovery service (uses the shared core service)
 builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 
+// Session manager for tracking active discovery sessions (singleton for cross-request cancellation)
+builder.Services.AddSingleton<IDiscoverySessionManager, DiscoverySessionManager>();
+
+// SignalR progress broadcaster for streaming discovery
+builder.Services.AddSingleton<IDiscoveryProgressBroadcaster, DiscoveryProgressBroadcaster>();
+
+// Streaming discovery service with progress updates (Scoped to match IApiClient dependency)
+builder.Services.AddScoped<IStreamingDiscoveryService, StreamingDiscoveryService>();
+
 // API client for registering discovered printers with central API
 builder.Services.AddHttpClient<ApiClient>(client =>
 {
@@ -32,11 +40,11 @@ builder.Services.AddHttpClient<ApiClient>(client =>
 });
 builder.Services.AddScoped<IApiClient>(sp => sp.GetRequiredService<ApiClient>());
 
-// Add periodic discovery background service (if enabled)
-if (enablePeriodicDiscovery)
-{
-    _ = builder.Services.AddHostedService<PeriodicDiscoveryBackgroundService>();
-}
+// Add IHttpClientFactory for background services
+builder.Services.AddHttpClient();
+
+// Add periodic discovery background service (checks settings dynamically from API)
+builder.Services.AddHostedService<PeriodicDiscoveryBackgroundService>();
 
 // Add heartbeat background service to notify API of service availability
 builder.Services.AddHostedService<HeartbeatBackgroundService>();
@@ -56,8 +64,7 @@ app.MapControllers();
 ILogger<Program> logger = app.Services.GetRequiredService<ILogger<Program>>();
 logger.LogInformation("=== Printer Discovery Service Starting ===");
 logger.LogInformation("API Base URL: {ApiBaseUrl}", apiBaseUrl);
-logger.LogInformation("Periodic Discovery: {Enabled}", enablePeriodicDiscovery ? "Enabled" : "Disabled");
-logger.LogInformation("Scan Interval: {Interval}s", builder.Configuration.GetValue("Discovery:ScanIntervalSeconds", 300));
+logger.LogInformation("Background scanning: Controlled by API settings (BackgroundScanEnabled)");
 logger.LogInformation("Manual scan endpoint: POST /api/discovery/scan");
 logger.LogInformation("Health check endpoint: GET /api/discovery/health");
 
