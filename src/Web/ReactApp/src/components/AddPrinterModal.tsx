@@ -1,9 +1,10 @@
 // ...existing code...
 import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { X, AlertCircle, Check } from 'lucide-react';
+import { X, AlertCircle, Check, Loader2 } from 'lucide-react';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { Button, Input, Select, Textarea, FormField, Alert } from '@/components/ui';
 
 interface ManufacturerDto {
   id: string;
@@ -213,22 +214,23 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">
               Add New Printer
             </h3>
-            <button
+            <Button
+              variant="subtle"
+              size="sm"
               onClick={handleClose}
-              className="text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
               aria-label="Close add printer dialog"
               title="Close"
+              className="!p-1 !h-auto"
             >
               <X className="w-6 h-6" />
-            </button>
+            </Button>
           </div>
 
           {/* Error Message */}
           {error && (
-            <div className="mb-4 p-3 bg-pf-error-bg border border-pf-error-border rounded-md flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-pf-error-text flex-shrink-0" />
-              <span className="text-pf-error-text text-sm">{error}</span>
-            </div>
+            <Alert type="error" className="mb-4">
+              {error}
+            </Alert>
           )}
 
           {/* Form */}
@@ -236,236 +238,205 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             {/* Basic Info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Printer Name */}
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                  Printer Name *
-                </label>
-                <input
+              <FormField
+                label="Printer Name"
+                required
+                error={validationErrors.name?.[0]}
+              >
+                <Input
                   type="text"
                   value={formData.name}
                   onChange={(e) => handleInputChange('name', e.target.value)}
-                  className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                   placeholder="My 3D Printer"
+                  aria-label="Printer name"
                 />
-                {validationErrors.name && (
-                  <p className="mt-1 text-sm text-pf-error-text">{validationErrors.name[0]}</p>
-                )}
-              </div>
+              </FormField>
 
               {/* Backend Type */}
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                  Backend Type *
-                </label>
-                <select
+              <FormField
+                label="Backend Type"
+                required
+              >
+                <Select
                   value={formData.backend}
                   onChange={(e) => handleInputChange('backend', parseInt(e.target.value))}
-                  className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                   aria-label="Backend type"
                 >
                   <option value={PrinterBackends.Moonraker}>Moonraker (Klipper)</option>
                   <option value={PrinterBackends.PrusaLink}>PrusaLink (Prusa)</option>
                   <option value={PrinterBackends.SDCP}>SDCP (Generic)</option>
                   <option value={PrinterBackends.OctoPrint}>OctoPrint</option>
-                </select>
-              </div>
+                </Select>
+              </FormField>
             </div>
 
             {/* Server URL */}
-            <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                Server URL *
-              </label>
-              <input
+            <FormField
+              label="Server URL"
+              required
+              error={validationErrors.serverUrl?.[0]}
+            >
+              <Input
                 type="url"
                 value={formData.serverUrl}
                 onChange={(e) => handleInputChange('serverUrl', e.target.value)}
-                className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                 placeholder="http://192.168.1.100 or http://printer.local"
+                aria-label="Server URL"
               />
-              {validationErrors.serverUrl && (
-                <p className="mt-1 text-sm text-pf-error-text">{validationErrors.serverUrl[0]}</p>
-              )}
-            </div>
+            </FormField>
 
             {/* API Key (for PrusaLink and OctoPrint) */}
             {(formData.backend === PrinterBackends.PrusaLink || formData.backend === PrinterBackends.OctoPrint) && (
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                  API Key *
-                </label>
-                <input
+              <FormField
+                label="API Key"
+                required
+                error={validationErrors.apiKey?.[0]}
+              >
+                <Input
                   type="text"
                   value={formData.apiKey || ''}
                   onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                  className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                   placeholder={formData.backend === PrinterBackends.OctoPrint ? "Enter OctoPrint API key" : "Enter PrusaLink API key"}
+                  aria-label="API Key"
                 />
-                {validationErrors.apiKey && (
-                  <p className="mt-1 text-sm text-pf-error-text">{validationErrors.apiKey[0]}</p>
-                )}
-              </div>
+              </FormField>
             )}
 
             {/* Show backend/frontend port fields for Moonraker */}
             {formData.backend === PrinterBackends.Moonraker && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                    Backend Port (API)
-                  </label>
-                  <input
+                <FormField label="Backend Port (API)">
+                  <Input
                     type="number"
                     value={formData.backendPort ?? 7125}
                     onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || 7125)}
-                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                     placeholder="7125"
                     min={1}
                     max={65535}
+                    aria-label="Backend port"
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                    Frontend Port (UI)
-                  </label>
-                  <input
+                </FormField>
+                <FormField label="Frontend Port (UI)">
+                  <Input
                     type="number"
                     value={formData.frontendPort ?? 80}
                     onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10) || 80)}
-                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                     placeholder="80"
                     min={1}
                     max={65535}
+                    aria-label="Frontend port"
                   />
-                </div>
+                </FormField>
               </div>
             )}
 
             {/* Camera URLs (for OctoPrint) */}
             {formData.backend === PrinterBackends.OctoPrint && (
               <>
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                    Camera Stream URL
-                  </label>
-                  <input
+                <FormField label="Camera Stream URL">
+                  <Input
                     type="url"
                     value={formData.cameraStreamUrl || ''}
                     onChange={(e) => handleInputChange('cameraStreamUrl', e.target.value)}
-                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                     placeholder="http://octoprint.local/webcam/?action=stream"
+                    aria-label="Camera stream URL"
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                    Camera Snapshot URL
-                  </label>
-                  <input
+                </FormField>
+                <FormField label="Camera Snapshot URL">
+                  <Input
                     type="url"
                     value={formData.cameraSnapshotUrl || ''}
                     onChange={(e) => handleInputChange('cameraSnapshotUrl', e.target.value)}
-                    className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                     placeholder="http://octoprint.local/webcam/?action=snapshot"
+                    aria-label="Camera snapshot URL"
                   />
-                </div>
+                </FormField>
               </>
             )}
             {/* Manufacturer & Model */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Manufacturer */}
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                  Manufacturer
-                </label>
-                <select
+              <FormField label="Manufacturer">
+                <Select
                   value={formData.manufacturerId || ''}
                   onChange={(e) => handleInputChange('manufacturerId', e.target.value)}
-                  className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent"
                   aria-label="Manufacturer"
                 >
                   <option value="">Select manufacturer...</option>
                   {manufacturers.map((mfg) => (
                     <option key={mfg.id} value={mfg.id}>{mfg.name}</option>
                   ))}
-                </select>
-              </div>
+                </Select>
+              </FormField>
 
               {/* Model */}
-              <div>
-                <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                  Model
-                </label>
-                <select
+              <FormField label="Model">
+                <Select
                   value={formData.modelId || ''}
                   onChange={(e) => handleInputChange('modelId', e.target.value)}
                   disabled={!formData.manufacturerId}
-                  className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent disabled:opacity-50"
                   aria-label="Printer model"
                 >
                   <option value="">Select model...</option>
                   {filteredModels.map((model) => (
                     <option key={model.id} value={model.id}>{model.name}</option>
                   ))}
-                </select>
-              </div>
+                </Select>
+              </FormField>
             </div>
 
             {/* Date Acquired */}
             <div className="relative z-20">
-              <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                Date Acquired (click the calendar icon →)
-              </label>
-              <div className="relative">
-                <input
+              <FormField
+                label="Date Acquired (click the calendar icon →)"
+                error={validationErrors.dateAcquired?.[0]}
+                helperText="Try clicking inside the input field or on the right edge"
+              >
+                <Input
                   type="date"
                   value={formData.dateAcquired ? (typeof formData.dateAcquired === 'string' ? formData.dateAcquired : formData.dateAcquired.toISOString().split('T')[0]) : ''}
                   onChange={(e) => handleInputChange('dateAcquired', e.target.value ? new Date(e.target.value) : undefined)}
-                  className={`w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent ${styles.dateInputDark}`}
                   max={new Date().toISOString().split('T')[0]}
                   title="Click to open date picker"
                   aria-label="Date acquired"
+                  className={styles.dateInputDark}
                 />
-              </div>
+              </FormField>
               {formData.dateAcquired && (
                 <p className="mt-1 text-xs text-pf-text-secondary">✅ Selected: {typeof formData.dateAcquired === 'string' ? formData.dateAcquired : formData.dateAcquired.toISOString().split('T')[0]}</p>
               )}
-              {validationErrors.dateAcquired && (
-                <p className="mt-1 text-sm text-pf-error-text">{validationErrors.dateAcquired[0]}</p>
-              )}
-              <p className="mt-1 text-xs text-pf-text-tertiary">Try clicking inside the input field or on the right edge</p>
             </div>
 
             {/* Notes */}
-            <div>
-              <label className="block text-sm font-medium text-pf-text-primary mb-1">
-                Notes
-              </label>
-              <textarea
+            <FormField label="Notes">
+              <Textarea
                 value={formData.notes || ''}
                 onChange={(e) => handleInputChange('notes', e.target.value)}
                 rows={3}
-                className="w-full px-3 py-2 bg-pf-panel border border-pf-border-medium rounded-md text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent-2 focus:border-transparent resize-none"
                 placeholder="Optional notes about this printer..."
+                aria-label="Printer notes"
               />
-            </div>
+            </FormField>
 
             {/* Form Actions */}
             <div className="flex gap-3 pt-4">
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={handleClose}
-                className="flex-1 px-4 py-2 border border-pf-border-light rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2 transition-colors"
+                className="flex-1"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
+                variant="success"
                 disabled={isLoading}
-                className="flex-1 inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md text-white bg-pf-success hover:bg-pf-success-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-success disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="flex-1"
               >
                 {isLoading ? (
                   <>
-                    <div className="pf-animate-spin -ml-1 mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Adding...
                   </>
                 ) : (
@@ -474,7 +445,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                     Add Printer
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </form>
         </div>

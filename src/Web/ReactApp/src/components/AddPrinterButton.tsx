@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { AddPrinterModal } from './AddPrinterModal';
 
 interface AddPrinterButtonProps {
@@ -24,14 +25,14 @@ export function AddPrinterButton({ onSuccess }: AddPrinterButtonProps) {
 
   return (
     <>
-      <button
-        type="button"
+      <Button
+        variant="success"
         onClick={handleAddPrinter}
-        className="inline-flex items-center px-4 py-2 bg-pf-success hover:bg-pf-success-hover text-white font-medium rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md"
+        className="inline-flex items-center"
       >
         <Plus className="w-4 h-4 mr-2" />
         Add Printer
-      </button>
+      </Button>
 
       <AddPrinterModal
         isOpen={isModalOpen}

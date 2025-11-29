@@ -1,6 +1,7 @@
 import { Component } from 'react';
 import type { ReactNode } from 'react';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { Button } from '@/components/ui';
 
 interface Props {
   children: ReactNode;
@@ -57,13 +58,13 @@ export class ErrorBoundary extends Component<Props, State> {
               )}
             </div>
             
-            <button
-              type="button"
+            <Button
+              variant="primary"
               onClick={() => window.location.reload()}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out"
+              className="w-full"
             >
               Refresh Page
-            </button>
+            </Button>
           </div>
         </div>
       );

@@ -1,6 +1,7 @@
 import React from 'react';
 import { PrinterBackend } from '@/types/api';
 import { getPrinterBackendOptions } from '@/utils/enumHelpers';
+import { Select, FormField } from '@/components/ui';
 
 interface BackendSelectorProps {
   value: PrinterBackend | undefined;
@@ -31,20 +32,21 @@ export function BackendSelector({
   };
 
   return (
-    <select
-      value={value ?? ''}
-      onChange={handleChange}
-      className={className}
-      title={title}
-      required={required}
-      disabled={disabled}
-    >
-      {!required && <option value="">{placeholder}</option>}
-      {getPrinterBackendOptions().map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <FormField label={title} className={className}>
+      <Select
+        value={value ?? ''}
+        onChange={handleChange}
+        title={title}
+        required={required}
+        disabled={disabled}
+      >
+        {!required && <option value="">{placeholder}</option>}
+        {getPrinterBackendOptions().map(option => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Select>
+    </FormField>
   );
 }

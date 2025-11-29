@@ -1,5 +1,6 @@
 import { Printer } from '@/types/api';
 import { AlertTriangle, X } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 interface DeleteConfirmationModalProps {
   isOpen: boolean;
@@ -28,12 +29,14 @@ export function DeleteConfirmationModal({
               Delete Printer{isMultiple ? 's' : ''}
             </h3>
           </div>
-          <button
+          <Button
+            variant="subtle"
+            size="sm"
             onClick={onCancel}
-            className="text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
+            className="p-1"
           >
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         <div className="p-6">
@@ -60,20 +63,18 @@ export function DeleteConfirmationModal({
           )}
 
           <div className="flex justify-end space-x-3">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={onCancel}
-              className="px-4 py-2 border border-pf-border rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent-2 transition-colors"
             >
               Cancel
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="danger"
               onClick={onConfirm}
-              className="px-4 py-2 border border-transparent rounded-md text-white bg-pf-error-bg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
             >
               Delete {isMultiple ? `${printers.length} Printers` : 'Printer'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

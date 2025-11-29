@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import { Mail, X, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 export function EmailConfirmationBanner() {
   const { user } = useAuth();
@@ -49,10 +50,11 @@ export function EmailConfirmationBanner() {
             </p>
           </div>
           <div className="order-3 mt-2 flex-shrink-0 w-full sm:order-2 sm:mt-0 sm:w-auto space-x-2 flex items-center">
-            <button
+            <Button
+              variant="subtle"
               onClick={handleResend}
               disabled={sending}
-              className="flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-yellow-900 bg-yellow-100 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center justify-center text-yellow-900 bg-yellow-100 hover:bg-yellow-200"
             >
               {sending ? (
                 <>
@@ -65,14 +67,16 @@ export function EmailConfirmationBanner() {
                   Resend Email
                 </>
               )}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
               onClick={() => setDismissed(true)}
-              className="flex items-center justify-center p-2 rounded-md hover:bg-yellow-500/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors"
               aria-label="Dismiss"
+              className="p-1"
             >
               <X className="h-5 w-5 text-yellow-600" />
-            </button>
+            </Button>
           </div>
         </div>
       </div>

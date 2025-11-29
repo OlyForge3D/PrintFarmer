@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Line, OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
+import { Button, Checkbox } from '@/components/ui';
 
 interface GCodePoint {
   x: number;
@@ -201,33 +202,29 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
           <h3 className="font-medium text-lg">G-code Preview</h3>
           
           <div className="flex items-center space-x-3">
-            <label className="flex items-center">
-              <input
-                type="checkbox"
-                checked={showMoves}
-                onChange={(e) => setShowMoves(e.target.checked)}
-                className="mr-2"
-              />
-              <span className="text-sm">Show travel moves</span>
-            </label>
+            <Checkbox
+              id="show-moves"
+              label="Show travel moves"
+              checked={showMoves}
+              onChange={(e) => setShowMoves(e.target.checked)}
+              className="text-sm"
+            />
             
-            <button
+            <Button
+              variant={playAnimation ? 'danger' : 'primary'}
+              size="sm"
               onClick={() => setPlayAnimation(!playAnimation)}
-              className={`px-3 py-1 rounded text-sm font-medium ${
-                playAnimation 
-                  ? 'bg-red-100 text-red-700 hover:bg-red-200' 
-                  : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-              }`}
             >
               {playAnimation ? 'Pause' : 'Play'} Animation
-            </button>
+            </Button>
             
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setCurrentLayer(layers.length - 1)}
-              className="px-3 py-1 rounded text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
             >
               Show All
-            </button>
+            </Button>
           </div>
         </div>
         
