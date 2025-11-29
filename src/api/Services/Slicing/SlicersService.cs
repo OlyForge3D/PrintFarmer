@@ -252,11 +252,13 @@ namespace Farm.Web.Api.Services.Slicing
                     worker.LastHeartbeat = DateTime.UtcNow;
                     worker.UpdatedAt = DateTime.UtcNow;
 
-                    // Calculate active jobs from free slots and total slots
-                    if (dto.FreeSlots.HasValue && worker.TotalSlots > 0)
-                    {
-                        worker.ActiveJobs = Math.Max(0, worker.TotalSlots - dto.FreeSlots.Value);
-                    }
+                    // NOTE: Do NOT recalculate ActiveJobs from TotalSlots - FreeSlots here.
+                    // Reason: If TotalSlots was recently updated in the UI but a stale heartbeat
+                    // arrives with the old FreeSlots value, recalculating will produce incorrect
+                    // ActiveJobs. For example: TotalSlots changed to 6, but heartbeat has FreeSlots=1
+                    // (from when TotalSlots was 5), recalculating would give ActiveJobs = 6-1 = 5 (wrong!).
+                    // ActiveJobs is tracked separately by the job dispatch service and should only be
+                    // updated when jobs actually start/complete, not from heartbeat data.
 
                     totalSlots = worker.TotalSlots;
                     await _repo.SaveChangesAsync(ct); // Worker entity tracked by same DbContext

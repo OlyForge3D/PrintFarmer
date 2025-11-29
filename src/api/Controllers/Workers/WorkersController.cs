@@ -217,7 +217,7 @@ public class WorkersController : ControllerBase
     /// Update worker total slots (admin operation)
     /// </summary>
     /// <param name="id">Worker ID</param>
-    /// <param name="totalSlots">New total slots value</param>
+    /// <param name="request">Request containing new total slots value</param>
     /// <returns>Updated worker details</returns>
     [HttpPut("{id}/slots")]
     [Authorize(Policy = "farm_admin")] // Admin-only: update slots

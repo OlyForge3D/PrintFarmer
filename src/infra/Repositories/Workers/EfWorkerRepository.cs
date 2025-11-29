@@ -261,7 +261,10 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.TotalSlots = totalSlots;
-            worker.FreeSlots = Math.Max(0, totalSlots - worker.ActiveJobs);
+            // NOTE: Do NOT recalculate ActiveJobs or FreeSlots here.
+            // ActiveJobs is managed exclusively by JobDispatcherService (increment on dispatch, decrement on complete).
+            // FreeSlots is maintained by the worker heartbeat.
+            // Simply update the total slots capacity.
             worker.UpdatedAt = DateTime.UtcNow;
         }
     }
