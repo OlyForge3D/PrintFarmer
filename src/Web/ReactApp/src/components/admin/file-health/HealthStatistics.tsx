@@ -1,4 +1,5 @@
 import React from 'react';
+import { Card } from '@/components/ui/Card';
 
 interface HealthStatisticsProps {
   totalModel3DFiles: number;
@@ -58,29 +59,33 @@ export function HealthStatistics({
   ];
 
   return (
-    <div className="bg-pf-panel rounded-lg border border-pf-border p-6">
-      <h3 className="text-lg font-semibold text-pf-text-primary mb-4">File Statistics</h3>
-      <div className="space-y-3">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className={`${stat.bgColor} border ${stat.borderColor} rounded-lg p-3 flex justify-between items-center`}
-          >
-            <span className={`${stat.textColor} font-medium`}>{stat.label}</span>
-            <span className={`${stat.textColor} text-lg font-bold`}>{stat.value}</span>
+    <Card>
+      <Card.Header>
+        <h3 className="text-lg font-semibold">File Statistics</h3>
+      </Card.Header>
+      <Card.Body>
+        <div className="space-y-3">
+          {stats.map((stat) => (
+            <div
+              key={stat.label}
+              className="bg-pf-bg-2 border border-pf-border rounded-lg p-3 flex justify-between items-center"
+            >
+              <span className={`${stat.textColor} font-medium`}>{stat.label}</span>
+              <span className={`${stat.textColor} text-lg font-bold`}>{stat.value}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 pt-6 border-t border-pf-border space-y-2 text-xs text-pf-text-secondary">
+          <div className="flex justify-between">
+            <span>Model3D Files:</span>
+            <span>{model3DHealthy}/{totalModel3DFiles} healthy</span>
           </div>
-        ))}
-      </div>
-      <div className="mt-6 pt-6 border-t border-pf-border space-y-2 text-xs text-pf-text-secondary">
-        <div className="flex justify-between">
-          <span>Model3D Files:</span>
-          <span>{model3DHealthy}/{totalModel3DFiles} healthy</span>
+          <div className="flex justify-between">
+            <span>G-code Files:</span>
+            <span>{gcodeHealthy}/{totalGcodeFiles} healthy</span>
+          </div>
         </div>
-        <div className="flex justify-between">
-          <span>G-code Files:</span>
-          <span>{gcodeHealthy}/{totalGcodeFiles} healthy</span>
-        </div>
-      </div>
-    </div>
+      </Card.Body>
+    </Card>
   );
 }

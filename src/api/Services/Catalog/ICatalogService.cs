@@ -13,4 +13,5 @@ public interface ICatalogService
     Task<PrinterModelDto?> GetModelByIdAsync(Guid id, CancellationToken ct);
     Task<PrinterModelDto> CreateModelAsync(Controllers.Requests.CreateModelRequest req, CancellationToken ct);
     Task<PrinterModelDto?> UpdateModelAsync(Guid id, Controllers.Requests.UpdateModelRequest req, CancellationToken ct);
+    Task DeleteModelAsync(Guid id, CancellationToken ct);
 }

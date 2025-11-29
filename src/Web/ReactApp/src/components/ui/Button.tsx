@@ -2,7 +2,7 @@ import React from 'react';
 import clsx from 'clsx';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success';
-export type ButtonSize = 'sm' | 'md';
+export type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -22,7 +22,8 @@ const variantClasses: Record<ButtonVariant, string> = {
 
 const sizeClasses: Record<ButtonSize, string> = {
   sm: 'text-xs px-2 py-1',
-  md: 'text-sm px-4 py-2'
+  md: 'text-sm px-4 py-2',
+  lg: 'text-base px-6 py-3'
 };
 
 export const Button: React.FC<ButtonProps> = ({

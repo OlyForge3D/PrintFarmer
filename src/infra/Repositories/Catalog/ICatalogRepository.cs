@@ -23,4 +23,5 @@ public interface ICatalogRepository
     Task<Domain.PrinterModel?> GetModelEntityAsync(Guid id, CancellationToken ct = default);
     Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default);
     Task<Guid?> GetUnknownModelIdAsync(CancellationToken ct = default);
+    Task RemoveModelAsync(Guid id, CancellationToken ct = default);
 }

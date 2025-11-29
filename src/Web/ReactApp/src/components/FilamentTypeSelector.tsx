@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, ChevronsRight, ChevronsLeft } from 'lucide-react';
+import { Button } from './ui/Button';
 import type { FilamentTypeDto } from '@/types/api';
 
 interface FilamentTypeSelectorProps {
@@ -97,21 +98,20 @@ export function FilamentTypeSelector({
   if (!showSelector) {
     return (
       <div className={className}>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2">
           <div className="flex-1">
-            <div className="px-3 py-2 rounded-lg bg-pf-panel border border-pf-border text-pf-text-primary min-h-[40px] flex items-center">
+            <div className="px-3 py-2 rounded-lg bg-pf-panel border border-pf-border text-pf-text-primary min-h-[40px] flex items-center text-sm">
               {displayText}
             </div>
           </div>
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={() => setShowSelector(true)}
-            className="px-3 py-2 rounded-lg bg-pf-accent hover:bg-pf-success-hover text-white flex items-center text-sm transition-colors"
             title="Configure supported materials"
+            iconLeft={<Settings className="w-4 h-4" />}
           >
-            <Settings className="w-4 h-4 mr-1" />
             Configure
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -122,31 +122,31 @@ export function FilamentTypeSelector({
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h5 className="text-sm font-medium text-pf-text-secondary">Configure Supported Materials</h5>
-          <button
-            type="button"
+          <Button
+            variant="subtle"
+            size="sm"
             onClick={() => setShowSelector(false)}
-            className="text-sm text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
           >
             Done
-          </button>
+          </Button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Available Materials */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h6 className="text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
                 Available Materials
               </h6>
-              <button
-                type="button"
+              <Button
+                variant="subtle"
+                size="sm"
                 onClick={handleMoveAllToSelected}
                 disabled={available.length === 0}
-                className="text-xs text-pf-accent hover:text-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 title="Add all materials"
               >
                 Add All
-              </button>
+              </Button>
             </div>
             <div className="border border-pf-border rounded-lg bg-pf-panel h-48 overflow-y-auto">
               {available.length === 0 ? (
@@ -161,14 +161,9 @@ export function FilamentTypeSelector({
                       type="button"
                       onClick={() => handleMoveToSelected(filamentType)}
                       className="w-full text-left px-3 py-2 rounded-lg hover:bg-pf-bg-2 text-pf-text-primary text-sm transition-colors border-l-2 border-transparent hover:border-pf-accent"
-                      title={`Add ${filamentType.name} (${filamentType.defaultTemperatures.hotend}°C / ${filamentType.defaultTemperatures.bed}°C)`}
+                      title={`Add ${filamentType.name}`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{filamentType.name}</span>
-                        <span className="text-xs text-pf-text-tertiary">
-                          {filamentType.defaultTemperatures.hotend}°C / {filamentType.defaultTemperatures.bed}°C
-                        </span>
-                      </div>
+                      {filamentType.name}
                     </button>
                   ))}
                 </div>
@@ -178,24 +173,24 @@ export function FilamentTypeSelector({
 
           {/* Transfer Controls */}
           <div className="flex flex-col justify-center items-center space-y-4">
-            <button
-              type="button"
+            <Button
               onClick={handleMoveAllToSelected}
               disabled={available.length === 0}
-              className="w-full px-3 py-2 bg-pf-accent hover:bg-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg flex items-center justify-center text-sm transition-colors"
+              size="sm"
               title="Add all materials"
+              iconLeft={<ChevronsRight className="w-5 h-5" />}
             >
-              <ChevronsRight className="w-5 h-5 stroke-[3.5] mr-2" />
-            </button>
-            <button
-              type="button"
+              Add All
+            </Button>
+            <Button
               onClick={handleMoveAllToAvailable}
               disabled={selected.length === 0}
-              className="w-full px-3 py-2 bg-pf-accent hover:bg-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg flex items-center justify-center text-sm transition-colors"
+              size="sm"
               title="Remove all materials"
+              iconLeft={<ChevronsLeft className="w-5 h-5" />}
             >
-              <ChevronsLeft className="w-5 h-5 stroke-[3.5] mr-2" />
-            </button>
+              Remove All
+            </Button>
           </div>
 
           {/* Selected Materials */}
@@ -204,15 +199,15 @@ export function FilamentTypeSelector({
               <h6 className="text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
                 Supported Materials
               </h6>
-              <button
-                type="button"
+              <Button
+                variant="subtle"
+                size="sm"
                 onClick={handleMoveAllToAvailable}
                 disabled={selected.length === 0}
-                className="text-xs text-pf-accent hover:text-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 title="Remove all materials"
               >
                 Remove All
-              </button>
+              </Button>
             </div>
             <div className="border border-pf-border rounded-lg bg-pf-panel h-48 overflow-y-auto">
               {selected.length === 0 ? (
@@ -227,14 +222,9 @@ export function FilamentTypeSelector({
                       type="button"
                       onClick={() => handleMoveToAvailable(filamentType)}
                       className="w-full text-left px-3 py-2 rounded-lg hover:bg-pf-bg-2 text-pf-text-primary text-sm transition-colors border-r-2 border-transparent hover:border-pf-accent"
-                      title={`Remove ${filamentType.name} (${filamentType.defaultTemperatures.hotend}°C / ${filamentType.defaultTemperatures.bed}°C)`}
+                      title={`Remove ${filamentType.name}`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{filamentType.name}</span>
-                        <span className="text-xs text-pf-text-tertiary">
-                          {filamentType.defaultTemperatures.hotend}°C / {filamentType.defaultTemperatures.bed}°C
-                        </span>
-                      </div>
+                      {filamentType.name}
                     </button>
                   ))}
                 </div>

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { FileIssuesSummaryDto } from '@/types/api';
+import { Card } from '@/components/ui/Card';
+import { Alert } from '@/components/ui/Alert';
 
 interface IssuesListProps {
   data: FileIssuesSummaryDto;
@@ -20,12 +22,16 @@ export function IssuesList({ data, isLoading }: IssuesListProps) {
 
   if (!hasAnyIssues) {
     return (
-      <div className="bg-pf-surface rounded-lg border border-pf-border p-6">
-        <h3 className="text-lg font-semibold text-pf-text mb-4">File Issues</h3>
-        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-          <p className="text-green-800 dark:text-green-200">No file issues detected! All files are in good standing.</p>
-        </div>
-      </div>
+      <Card>
+        <Card.Header>
+          <h3 className="text-lg font-semibold">File Issues</h3>
+        </Card.Header>
+        <Card.Body>
+          <Alert type="success">
+            No file issues detected! All files are in good standing.
+          </Alert>
+        </Card.Body>
+      </Card>
     );
   }
 
@@ -62,81 +68,84 @@ export function IssuesList({ data, isLoading }: IssuesListProps) {
   const activeTab = tabs.find((tab) => tab.id === selectedTab) || tabs[0];
 
   return (
-    <div className="bg-pf-surface rounded-lg border border-pf-border p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold text-pf-text">File Issues</h3>
-        <span className="text-sm text-pf-text-secondary">
-          Total Issues: <span className="font-bold text-pf-accent">{data.totalIssues}</span>
-        </span>
-      </div>
+    <Card>
+      <Card.Header>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">File Issues</h3>
+          <span className="text-sm text-pf-text-secondary">
+            Total Issues: <span className="font-bold text-pf-accent">{data.totalIssues}</span>
+          </span>
+        </div>
+      </Card.Header>
+      <Card.Body>
+        {/* Tab buttons */}
+        <div className="flex gap-2 mb-6 border-b border-pf-border">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setSelectedTab(tab.id)}
+              className={`px-4 py-2 font-medium text-sm transition-colors relative ${
+                selectedTab === tab.id
+                  ? `${tab.color} border-b-2 border-pf-accent`
+                  : 'text-pf-text-secondary hover:text-pf-text'
+              }`}
+            >
+              {tab.label}
+              {tab.count > 0 && (
+                <span className="ml-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
 
-      {/* Tab buttons */}
-      <div className="flex gap-2 mb-6 border-b border-pf-border">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setSelectedTab(tab.id)}
-            className={`px-4 py-2 font-medium text-sm transition-colors relative ${
-              selectedTab === tab.id
-                ? `${tab.color} border-b-2 border-pf-accent`
-                : 'text-pf-text-secondary hover:text-pf-text'
-            }`}
-          >
-            {tab.label}
-            {tab.count > 0 && (
-              <span className="ml-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      <div className={`${activeTab.bgColor} border ${activeTab.borderColor} rounded-lg p-4`}>
-        {activeTab.items.length === 0 ? (
-          <p className="text-pf-text-secondary">No {activeTab.label.toLowerCase()} found.</p>
-        ) : (
-          <div className="space-y-3">
-            {activeTab.items.map((item, idx) => (
-              <div key={idx} className="flex items-start gap-3 p-2 hover:bg-pf-hover rounded transition-colors">
-                <div className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${activeTab.color}`} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <p className={`font-medium ${activeTab.color} break-words`}>{item.fileName}</p>
-                      <p className="text-xs text-pf-text-secondary mt-1">{item.fileType} file</p>
-                      {selectedTab === 'missing' && 'lastHealthCheckDate' in item && item.lastHealthCheckDate && (
-                        <p className="text-xs text-pf-text-secondary mt-1">
-                          Last checked: {new Date(item.lastHealthCheckDate).toLocaleDateString()}
-                        </p>
-                      )}
-                      {selectedTab === 'corrupted' && 'lastVerificationResult' in item && item.lastVerificationResult && (
-                        <p className="text-xs text-pf-text-secondary mt-1">
-                          Details: {item.lastVerificationResult}
-                        </p>
-                      )}
-                      {selectedTab === 'inaccessible' && 'lastHealthCheckDate' in item && item.lastHealthCheckDate && (
-                        <p className="text-xs text-pf-text-secondary mt-1">
-                          Last checked: {new Date(item.lastHealthCheckDate).toLocaleDateString()}
-                        </p>
-                      )}
+        {/* Tab content */}
+        <div className={`${activeTab.bgColor} border ${activeTab.borderColor} rounded-lg p-4`}>
+          {activeTab.items.length === 0 ? (
+            <p className="text-pf-text-secondary">No {activeTab.label.toLowerCase()} found.</p>
+          ) : (
+            <div className="space-y-3">
+              {activeTab.items.map((item, idx) => (
+                <div key={idx} className="flex items-start gap-3 p-2 hover:bg-pf-hover rounded transition-colors">
+                  <div className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${activeTab.color}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <p className={`font-medium ${activeTab.color} break-words`}>{item.fileName}</p>
+                        <p className="text-xs text-pf-text-secondary mt-1">{item.fileType} file</p>
+                        {selectedTab === 'missing' && 'lastHealthCheckDate' in item && item.lastHealthCheckDate && (
+                          <p className="text-xs text-pf-text-secondary mt-1">
+                            Last checked: {new Date(item.lastHealthCheckDate).toLocaleDateString()}
+                          </p>
+                        )}
+                        {selectedTab === 'corrupted' && 'lastVerificationResult' in item && item.lastVerificationResult && (
+                          <p className="text-xs text-pf-text-secondary mt-1">
+                            Details: {item.lastVerificationResult}
+                          </p>
+                        )}
+                        {selectedTab === 'inaccessible' && 'lastHealthCheckDate' in item && item.lastHealthCheckDate && (
+                          <p className="text-xs text-pf-text-secondary mt-1">
+                            Last checked: {new Date(item.lastHealthCheckDate).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+          )}
+        </div>
+
+        {activeTab.items.length > 0 && (
+          <div className="mt-4">
+            <Alert type="warning">
+              <span className="font-semibold">Action Required:</span> Review and resolve these file issues to maintain data integrity.
+            </Alert>
           </div>
         )}
-      </div>
-
-      {activeTab.items.length > 0 && (
-        <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-          <p className="text-sm text-yellow-800 dark:text-yellow-200">
-            <span className="font-semibold">Action Required:</span> Review and resolve these file issues to maintain data integrity.
-          </p>
-        </div>
-      )}
-    </div>
+      </Card.Body>
+    </Card>
   );
 }

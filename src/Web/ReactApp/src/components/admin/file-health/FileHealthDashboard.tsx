@@ -11,6 +11,9 @@ import { AuditTimeline } from './AuditTimeline';
 import { IssuesList } from './IssuesList';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Skeleton } from '@/components/Skeleton';
+import { Alert } from '@/components/ui/Alert';
+import { Badge } from '@/components/ui/Badge';
+import { Card } from '@/components/ui/Card';
 
 export function FileHealthDashboard() {
   const healthSummary = useFileHealthSummary();
@@ -68,11 +71,9 @@ export function FileHealthDashboard() {
       <div className="space-y-6">
         {/* Error State */}
         {error && (
-          <div className="alert-base alert-error">
-            <p>
-              Error loading file health data: {error.message}
-            </p>
-          </div>
+          <Alert type="error">
+            Error loading file health data: {error.message}
+          </Alert>
         )}
 
         {/* Loading State */}
@@ -90,34 +91,37 @@ export function FileHealthDashboard() {
             {/* Health Overview Section */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Gauge and Status */}
-              <div className="lg:col-span-2 card flat">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-pf-text">Overall Health</h2>
-                  <div
-                    className={`status-badge ${statusInfo.status === 'healthy'
-                        ? 'success'
-                        : statusInfo.status === 'warning'
-                          ? 'loading'
-                          : 'error'
-                      }`}
-                  >
-                    {statusInfo.message}
+              <Card className="lg:col-span-2">
+                <Card.Body>
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-semibold text-pf-text">Overall Health</h2>
+                    <Badge
+                      variant={
+                        statusInfo.status === 'healthy'
+                          ? 'success'
+                          : statusInfo.status === 'warning'
+                            ? 'warning'
+                            : 'error'
+                      }
+                    >
+                      {statusInfo.message}
+                    </Badge>
                   </div>
-                </div>
-                {healthSummary.data && (
-                  <div className="flex items-center justify-between">
-                    <HealthGauge percentage={healthSummary.data.overallHealthPercentage} />
-                    <div className="text-right">
-                      <div className="text-4xl font-bold text-pf-accent">
-                        {Math.round(healthSummary.data.overallHealthPercentage)}%
+                  {healthSummary.data && (
+                    <div className="flex items-center justify-between">
+                      <HealthGauge percentage={healthSummary.data.overallHealthPercentage} />
+                      <div className="text-right">
+                        <div className="text-4xl font-bold text-pf-accent">
+                          {Math.round(healthSummary.data.overallHealthPercentage)}%
+                        </div>
+                        <p className="text-sm text-pf-text-secondary mt-1">
+                          {healthSummary.data.model3DHealthy + healthSummary.data.gcodeHealthy} of {healthSummary.data.totalModel3DFiles + healthSummary.data.totalGcodeFiles} files healthy
+                        </p>
                       </div>
-                      <p className="text-sm text-pf-text-secondary mt-1">
-                        {healthSummary.data.model3DHealthy + healthSummary.data.gcodeHealthy} of {healthSummary.data.totalModel3DFiles + healthSummary.data.totalGcodeFiles} files healthy
-                      </p>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </Card.Body>
+              </Card>
 
               {/* Statistics Cards */}
               {healthSummary.data && (

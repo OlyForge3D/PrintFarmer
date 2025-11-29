@@ -191,5 +191,27 @@ public class CatalogController(Farm.Infrastructure.Telemetry.IUnifiedLoggingServ
         }
     }
 
+    [HttpDelete("printer-models/{id:guid}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> DeleteModelAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _catalogService.DeleteModelAsync(id, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, $"[CatalogController] DeleteModelAsync failed: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete model" });
+        }
+    }
+
     // ETag computation moved into CatalogCache (IsUniqueConstraint and DB helpers moved to service layer)
 }
+

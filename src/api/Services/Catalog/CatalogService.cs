@@ -301,4 +301,19 @@ public class CatalogService : ICatalogService
         }
         return false;
     }
+
+    public async Task DeleteModelAsync(Guid id, CancellationToken ct)
+    {
+        PrinterModel? model = await _repo.GetModelEntityAsync(id, ct);
+        if (model is null)
+        {
+            throw new KeyNotFoundException($"Model with id '{id}' not found");
+        }
+
+        Guid manufacturerId = model.ManufacturerId;
+        await _repo.RemoveModelAsync(id, ct);
+        await _repo.SaveChangesAsync(ct);
+        _catalogCache.InvalidateModels(manufacturerId);
+    }
 }
+

@@ -149,5 +149,15 @@ namespace Farm.Infrastructure.Repositories.Catalog
                 .FirstOrDefaultAsync(m => m.ManufacturerId == unknownMfgId.Value && m.Name == "Unknown Model", ct);
             return unknownModel?.Id;
         }
+
+        public async Task RemoveModelAsync(Guid id, CancellationToken ct = default)
+        {
+            PrinterModel? model = await _db.Models.FirstOrDefaultAsync(m => m.Id == id, ct);
+            if (model is not null)
+            {
+                _ = _db.Models.Remove(model);
+            }
+        }
     }
 }
+
