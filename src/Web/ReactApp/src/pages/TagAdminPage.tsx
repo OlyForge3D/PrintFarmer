@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tag, Plus, Trash2, Edit2, X, Check, Loader, AlertCircle } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
+import { Button, Input, FormField, Alert, Label } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface TagOption {
@@ -196,25 +197,22 @@ export const TagAdminPage: React.FC = () => {
 
                     {showNewTagForm && (
                         <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-pf-text-secondary mb-1">
-                                    Tag Name *
-                                </label>
-                                <input
+                            <FormField
+                                label="Tag Name *"
+                                error={newTagName.trim() === '' ? 'Tag name is required' : undefined}
+                                helperText="e.g., Miniature, Character, Utility..."
+                            >
+                                <Input
                                     type="text"
                                     value={newTagName}
                                     onChange={(e) => setNewTagName(e.target.value)}
                                     placeholder="e.g., Miniature, Character, Utility..."
                                     disabled={createTagMutation.isPending}
-                                    className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-tertiary disabled:opacity-50"
                                 />
-                            </div>
+                            </FormField>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-pf-text-secondary mb-1">
-                                        Color
-                                    </label>
+                                <FormField label="Color">
                                     <div className="flex gap-2 items-center">
                                         <input
                                             type="color"
@@ -222,47 +220,44 @@ export const TagAdminPage: React.FC = () => {
                                             onChange={(e) => setNewTagColor(e.target.value)}
                                             disabled={createTagMutation.isPending}
                                             className="h-10 w-16 border border-pf-border rounded cursor-pointer disabled:opacity-50"
+                                            aria-label="Select tag color"
                                         />
                                         <span className="text-sm text-pf-text-tertiary">{newTagColor}</span>
                                     </div>
-                                </div>
+                                </FormField>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-pf-text-secondary mb-1">
-                                        Description (Optional)
-                                    </label>
-                                    <input
+                                <FormField label="Description (Optional)">
+                                    <Input
                                         type="text"
                                         value={newTagDescription}
                                         onChange={(e) => setNewTagDescription(e.target.value)}
                                         placeholder="Brief description of this tag..."
                                         disabled={createTagMutation.isPending}
-                                        className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-tertiary disabled:opacity-50"
                                     />
-                                </div>
+                                </FormField>
                             </div>
 
                             {createTagMutation.isError && (
-                                <div className="p-3 bg-pf-error bg-opacity-10 border border-pf-error text-pf-error rounded flex items-center gap-2">
-                                    <AlertCircle className="w-4 h-4" />
+                                <Alert type="error" title="Error">
                                     {createTagMutation.error instanceof Error
                                         ? createTagMutation.error.message
                                         : 'Failed to create tag'}
-                                </div>
+                                </Alert>
                             )}
 
                             <div className="flex gap-2">
-                                <button
+                                <Button
+                                    variant="primary"
                                     onClick={() => createTagMutation.mutate()}
                                     disabled={createTagMutation.isPending || !newTagName.trim()}
-                                    className="flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50"
                                 >
                                     {createTagMutation.isPending && (
-                                        <Loader className="w-4 h-4 animate-spin" />
+                                        <Loader className="w-4 h-4 animate-spin mr-2" />
                                     )}
                                     Create Tag
-                                </button>
-                                <button
+                                </Button>
+                                <Button
+                                    variant="secondary"
                                     onClick={() => {
                                         setShowNewTagForm(false);
                                         setNewTagName('');
@@ -270,21 +265,22 @@ export const TagAdminPage: React.FC = () => {
                                         setNewTagDescription('');
                                     }}
                                     disabled={createTagMutation.isPending}
-                                    className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded hover:bg-pf-bg-0 disabled:opacity-50"
                                 >
                                     Cancel
-                                </button>
+                                </Button>
                             </div>
                         </div>
                     )}
 
                     {!showNewTagForm && (
-                        <button
+                        <Button
+                            variant="secondary"
                             onClick={() => setShowNewTagForm(true)}
-                            className="w-full px-4 py-2 bg-pf-bg-2 border border-dashed border-pf-border rounded hover:bg-pf-bg-0 text-pf-text-secondary hover:text-pf-text-primary transition-colors"
+                            className="w-full"
                         >
-                            + Add New Tag
-                        </button>
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add New Tag
+                        </Button>
                     )}
                 </div>
 
@@ -326,7 +322,7 @@ export const TagAdminPage: React.FC = () => {
                                         </td>
                                         <td className="px-6 py-4">
                                             {editingTagId === tag.id && editingTag ? (
-                                                <input
+                                                <Input
                                                     type="text"
                                                     value={editingTag.name}
                                                     onChange={(e) =>
@@ -335,7 +331,6 @@ export const TagAdminPage: React.FC = () => {
                                                             name: e.target.value
                                                         })
                                                     }
-                                                    className="px-2 py-1 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary"
                                                 />
                                             ) : (
                                                 <span className="font-medium text-pf-text-primary">
@@ -345,7 +340,7 @@ export const TagAdminPage: React.FC = () => {
                                         </td>
                                         <td className="px-6 py-4 text-pf-text-secondary text-sm">
                                             {editingTagId === tag.id && editingTag ? (
-                                                <input
+                                                <Input
                                                     type="text"
                                                     value={editingTag.description || ''}
                                                     onChange={(e) =>
@@ -354,7 +349,6 @@ export const TagAdminPage: React.FC = () => {
                                                             description: e.target.value
                                                         })
                                                     }
-                                                    className="w-full px-2 py-1 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary"
                                                 />
                                             ) : (
                                                 tag.description || '-'

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Upload, Box, Trash2, Eye, Settings, Search, Tag, Grid3x3, List, X, FileText } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
+import { Button, Input, FileUpload } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
@@ -140,15 +141,6 @@ export const ModelsPage: React.FC = () => {
     setSelectedFiles(prev => [...prev, ...files]);
   }, []);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files).filter(file =>
-        ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
-      );
-      setSelectedFiles(prev => [...prev, ...files]);
-    }
-  };
-
   const uploadFiles = async () => {
     for (const file of selectedFiles) {
       try {
@@ -237,26 +229,31 @@ export const ModelsPage: React.FC = () => {
 
             <div>
               <label htmlFor="file-upload" className="cursor-pointer">
-                <span className="text-lg font-medium text-pf-text-primary">
-                  Drop 3D models here or click to select
-                </span>
-              </label>
-              <p className="text-pf-text-secondary mt-1">
-                Supports STL, 3MF, OBJ, and PLY files
-              </p>
-              <input
-                id="file-upload"
-                type="file"
-                multiple
-                accept=".stl,.3mf,.obj,.ply"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-            </div>
+              <span className="text-lg font-medium text-pf-text-primary">
+                Drop 3D models here or click to select
+              </span>
+            </label>
+            <p className="text-pf-text-secondary mt-1">
+              Supports STL, 3MF, OBJ, and PLY files
+            </p>
+            <FileUpload
+              id="file-upload"
+              multiple
+              accept=".stl,.3mf,.obj,.ply"
+              onChange={(files) => {
+                if (files) {
+                  const filesToAdd = Array.from(files).filter(file =>
+                    ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
+                  );
+                  setSelectedFiles(prev => [...prev, ...filesToAdd]);
+                }
+              }}
+              buttonText="Select Files or Drag and Drop"
+              buttonVariant="secondary"
+            />
           </div>
         </div>
-
-        {/* Selected files */}
+      </div>        {/* Selected files */}
         {selectedFiles.length > 0 && (
           <div className="border-t border-pf-border p-4">
             <h4 className="font-medium mb-3 text-pf-text-primary">Selected Files</h4>
@@ -293,25 +290,25 @@ export const ModelsPage: React.FC = () => {
                     )}
                     <button
                       onClick={() => removeFile(index)}
-                      className="p-1 hover:bg-pf-bg-1 rounded"
+                      className="p-1 hover:bg-pf-bg-1 rounded text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
                       aria-label="Remove file"
                       title="Remove file"
                     >
-                      <Trash2 className="w-4 h-4 text-pf-text-tertiary" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               ))}
             </div>
             <div className="mt-4 flex justify-end">
-              <button
+              <Button
+                variant="primary"
                 onClick={uploadFiles}
                 disabled={uploadMutation.isPending}
-                className="px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50"
               >
-                <Upload className="w-4 h-4 inline mr-2" />
+                <Upload className="w-4 h-4 mr-2" />
                 {uploadMutation.isPending ? 'Uploading...' : 'Upload Files'}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -322,60 +319,54 @@ export const ModelsPage: React.FC = () => {
         <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center">
           {/* Search box */}
           <div className="flex-1 relative">
-            <Search className="w-5 h-5 absolute left-3 top-3 text-pf-text-tertiary pointer-events-none" />
-            <input
+            <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary pointer-events-none" />
+            <Input
               type="text"
               placeholder="Search models by name or description..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent"
+              className="pl-10"
             />
           </div>
 
           {/* Tag filter button */}
-          <button
+          <Button
+            variant={selectedTags.length > 0 ? 'primary' : 'secondary'}
             onClick={() => setShowTagFilter(!showTagFilter)}
-            className={`px-4 py-2 rounded border flex items-center gap-2 transition-colors ${selectedTags.length > 0
-              ? 'bg-pf-accent-bg text-pf-accent border-pf-accent'
-              : 'bg-pf-bg-1 text-pf-text-primary border-pf-border hover:bg-pf-bg-2'
-              }`}
+            className="flex items-center gap-2"
           >
             <Tag className="w-4 h-4" />
             Tags {selectedTags.length > 0 && `(${selectedTags.length})`}
-          </button>
+          </Button>
 
           {/* Bulk tagging button */}
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setShowBulkTagModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-pf-bg-1 border border-pf-border rounded hover:bg-pf-bg-2 text-sm font-medium text-pf-text-primary"
             title="Assign tags to multiple models at once"
           >
-            <Tag className="w-4 h-4" />
+            <Tag className="w-4 h-4 mr-1" />
             Bulk Tag
-          </button>
+          </Button>
 
           {/* View mode toggle */}
-          <div className="flex gap-2 border border-pf-border rounded p-1 bg-pf-bg-1">
-            <button
+          <div className="flex gap-2">
+            <Button
               onClick={() => setViewMode('grid')}
-              className={`p-2 rounded transition-colors ${viewMode === 'grid'
-                ? 'bg-pf-accent text-white'
-                : 'text-pf-text-tertiary hover:bg-pf-bg-2'
-                }`}
+              variant={viewMode === 'grid' ? 'primary' : 'secondary'}
+              size="sm"
               title="Grid view"
             >
               <Grid3x3 className="w-4 h-4" />
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => setViewMode('list')}
-              className={`p-2 rounded transition-colors ${viewMode === 'list'
-                ? 'bg-pf-accent text-white'
-                : 'text-pf-text-tertiary hover:bg-pf-bg-2'
-                }`}
+              variant={viewMode === 'list' ? 'primary' : 'secondary'}
+              size="sm"
               title="List view"
             >
               <List className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -384,15 +375,16 @@ export const ModelsPage: React.FC = () => {
           <div className="bg-pf-bg-1 border border-pf-border rounded p-4">
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-medium text-pf-text-primary">Filter by Tags</h4>
-              <button
+              <Button
                 onClick={() => {
                   setShowTagFilter(false);
                   setSelectedTags([]);
                 }}
-                className="text-xs text-pf-text-tertiary hover:text-pf-text-primary"
+                variant="subtle"
+                size="sm"
               >
                 Clear All
-              </button>
+              </Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {allTags.length > 0 ? (
@@ -449,15 +441,16 @@ export const ModelsPage: React.FC = () => {
 
                 {/* Quick actions overlay */}
                 <div className="absolute top-2 right-2 flex space-x-1">
-                  <button
+                  <Button
                     onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
                     onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
                     onClick={() => setViewerModel(model)}
-                    className="p-2 bg-pf-bg-1 bg-opacity-80 hover:bg-pf-bg-1 rounded shadow border border-pf-border"
+                    variant="secondary"
+                    size="sm"
                     title="View 3D Model"
                   >
-                    <Eye className="w-4 h-4 text-pf-text-primary" />
-                  </button>
+                    <Eye className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
 
@@ -488,30 +481,35 @@ export const ModelsPage: React.FC = () => {
 
                 {/* Actions */}
                 <div className="flex space-x-2">
-                  <button
+                  <Button
                     onClick={() => navigate(`/models/${model.id}`)}
-                    className="flex-1 px-3 py-2 bg-pf-bg-2 text-pf-text-primary rounded hover:bg-pf-bg-1 text-sm font-medium border border-pf-border"
+                    variant="secondary"
+                    size="sm"
                     title="View Details"
+                    className="flex-1"
                   >
-                    <FileText className="w-4 h-4 inline mr-1" />
+                    <FileText className="w-4 h-4 mr-1" />
                     Details
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
-                    className="flex-1 px-3 py-2 bg-pf-accent-bg bg-opacity-20 text-pf-accent rounded hover:bg-pf-accent-bg hover:bg-opacity-30 text-sm font-medium border border-pf-accent"
+                    variant="primary"
+                    size="sm"
                     title="Slice this model"
+                    className="flex-1"
                   >
-                    <Settings className="w-4 h-4 inline mr-1" />
+                    <Settings className="w-4 h-4 mr-1" />
                     Slice
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => deleteMutation.mutate(model.id)}
                     disabled={deleteMutation.isPending}
-                    className="px-3 py-2 bg-pf-error-bg text-pf-error-text rounded hover:bg-pf-error border border-pf-error-border"
+                    variant="danger"
+                    size="sm"
                     title="Delete Model"
                   >
                     <Trash2 className="w-4 h-4" />
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -561,36 +559,40 @@ export const ModelsPage: React.FC = () => {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
-                      <button
+                      <Button
                         onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
                         onClick={() => setViewerModel(model)}
-                        className="p-2 hover:bg-pf-bg-2 rounded text-pf-text-primary"
+                        variant="subtle"
+                        size="sm"
                         title="View 3D Model"
                       >
                         <Eye className="w-4 h-4" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => navigate(`/models/${model.id}`)}
-                        className="p-2 hover:bg-pf-bg-2 rounded text-pf-text-primary"
+                        variant="subtle"
+                        size="sm"
                         title="View Details"
                       >
                         <FileText className="w-4 h-4" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
-                        className="p-2 hover:bg-pf-bg-2 rounded text-pf-accent"
+                        variant="subtle"
+                        size="sm"
                         title="Slice Model"
                       >
                         <Settings className="w-4 h-4" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => deleteMutation.mutate(model.id)}
                         disabled={deleteMutation.isPending}
-                        className="p-2 hover:bg-pf-error hover:bg-opacity-20 rounded text-pf-error"
+                        variant="danger"
+                        size="sm"
                         title="Delete Model"
                       >
                         <Trash2 className="w-4 h-4" />
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -606,12 +608,13 @@ export const ModelsPage: React.FC = () => {
           <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-pf-border">
             <div className="flex items-center justify-between p-4 border-b border-pf-border">
               <h3 className="font-medium text-lg text-pf-text-primary">{viewerModel.name}</h3>
-              <button
+              <Button
                 onClick={() => setViewerModel(null)}
-                className="p-1 hover:bg-pf-bg-2 rounded text-pf-text-primary"
+                variant="subtle"
+                size="sm"
               >
                 <X className="w-5 h-5" />
-              </button>
+              </Button>
             </div>
             <div className="p-4">
               <Suspense fallback={<ViewerSkeleton variant="model" />}>
@@ -634,12 +637,13 @@ export const ModelsPage: React.FC = () => {
           <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto border border-pf-border">
             <div className="flex items-center justify-between p-4 border-b border-pf-border">
               <h3 className="font-medium text-lg text-pf-text-primary">{gcodeViewer.name}</h3>
-              <button
+              <Button
                 onClick={() => setGcodeViewer(null)}
-                className="p-1 hover:bg-pf-bg-2 rounded text-pf-text-primary"
+                variant="subtle"
+                size="sm"
               >
                 <X className="w-5 h-5" />
-              </button>
+              </Button>
             </div>
             <div className="p-4">
               <Suspense fallback={<ViewerSkeleton variant="gcode" />}>

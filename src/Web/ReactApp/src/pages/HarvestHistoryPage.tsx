@@ -6,6 +6,7 @@ import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDe
 import { Link } from 'react-router-dom';
 import { PageTemplate } from '@/components/PageTemplate';
 import { History } from 'lucide-react';
+import { Select, Alert, Button, FormField } from '@/components/ui';
 
 
 export function HarvestHistoryPage() {
@@ -107,27 +108,14 @@ export function HarvestHistoryPage() {
         icon={History}
         maxWidth="max-w-7xl"
       >
-        <div className="bg-red-50 dark:bg-red-900/50 border border-red-200 dark:border-red-800 rounded-lg p-4">
-          <div className="flex">
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
-                Error Loading Harvest History
-              </h3>
-              <div className="mt-2 text-sm text-red-700 dark:text-red-300">
-                {error instanceof Error ? error.message : 'An unknown error occurred'}
-              </div>
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => refetch()}
-                  className="bg-red-100 hover:bg-red-200 dark:bg-red-800 dark:hover:bg-red-700 text-red-800 dark:text-red-200 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  Try Again
-                </button>
-              </div>
-            </div>
+        <Alert type="error" title="Error Loading Harvest History">
+          <div className="space-y-3">
+            <div>{error instanceof Error ? error.message : 'An unknown error occurred'}</div>
+            <Button variant="secondary" onClick={() => refetch()}>
+              Try Again
+            </Button>
           </div>
-        </div>
+        </Alert>
       </PageTemplate>
     );
   }
@@ -186,15 +174,11 @@ export function HarvestHistoryPage() {
 
       {/* Filters */}
       <div className="bg-pf-bg-1 rounded-lg p-4 border border-pf-border">
-        <div className="flex flex-wrap gap-4">
-          <div>
-            <label className="block text-sm font-medium text-pf-text-1 mb-1">
-              Status
-            </label>
-            <select
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField label="Status">
+            <Select
               value={statusFilter}
               onChange={(e) => handleStatusFilterChange(e.target.value)}
-              className="bg-pf-bg-0 border border-pf-border rounded-md px-3 py-2 text-pf-text-0 focus:outline-none focus:ring-2 focus:ring-pf-accent"
               aria-label="Filter by harvest status"
             >
               <option value="">All Status</option>
@@ -202,16 +186,12 @@ export function HarvestHistoryPage() {
               <option value="Completed">Completed</option>
               <option value="Failed">Failed</option>
               <option value="Cancelled">Cancelled</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-pf-text-1 mb-1">
-              Printer
-            </label>
-            <select
+            </Select>
+          </FormField>
+          <FormField label="Printer">
+            <Select
               value={printerFilter}
               onChange={(e) => handlePrinterFilterChange(e.target.value)}
-              className="bg-pf-bg-0 border border-pf-border rounded-md px-3 py-2 text-pf-text-0 focus:outline-none focus:ring-2 focus:ring-pf-accent"
               aria-label="Filter by printer"
             >
               <option value="">All Printers</option>
@@ -220,8 +200,8 @@ export function HarvestHistoryPage() {
                   {printer.name}
                 </option>
               ))}
-            </select>
-          </div>
+            </Select>
+          </FormField>
         </div>
       </div>
 
@@ -295,13 +275,12 @@ export function HarvestHistoryPage() {
                       {operation.filesAdded}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        type="button"
-                        className="text-pf-accent hover:text-pf-accent-dark font-medium underline"
+                      <Button
+                        variant="subtle"
                         onClick={() => setDetailsOperation(operation)}
                       >
                         View Details
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

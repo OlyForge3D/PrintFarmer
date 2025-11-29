@@ -7,6 +7,7 @@ import { AddPrinterButton } from '@/components/AddPrinterButton';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import type { Printer } from '@/types/api';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
+import { Button, Alert } from '@/components/ui';
 
 export function PrinterTableViewPage() {
   const { hasPermission } = useAuth();
@@ -87,26 +88,14 @@ export function PrinterTableViewPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <div className="flex">
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">
-                Failed to load printers
-              </h3>
-              <div className="mt-2 text-sm text-red-700">
-                <p>{error.message}</p>
-              </div>
-              <div className="mt-4">
-                <button
-                  onClick={() => refetch()}
-                  className="bg-red-100 hover:bg-red-200 text-red-800 font-medium py-2 px-4 rounded text-sm transition-colors"
-                >
-                  Try again
-                </button>
-              </div>
-            </div>
+        <Alert type="error" title="Failed to load printers">
+          <div className="space-y-3">
+            <p>{error.message}</p>
+            <Button variant="secondary" onClick={() => refetch()}>
+              Try again
+            </Button>
           </div>
-        </div>
+        </Alert>
       </div>
     );
   }

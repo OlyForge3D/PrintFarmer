@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { X, Eye, EyeOff, Key, CheckCircle } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
+import { Button, Input, FormField, Alert } from '@/components/ui';
 import { apiClient } from '@/services/api';
 
 export default function ResetPasswordPage() {
@@ -100,29 +101,30 @@ export default function ResetPasswordPage() {
                 Password Reset
               </span>
             </div>
-            <button
+            <Button
+              variant="subtle"
               onClick={handleClose}
-              className="text-pf-text-tertiary hover:text-pf-text-primary"
+              disabled={isLoading}
+              className="p-0"
               aria-label="Close"
               title="Close"
-              type="button"
             >
               <X className="h-5 w-5" />
-            </button>
+            </Button>
           </div>
 
           <div className="p-6 space-y-4">
-            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md text-sm">
-              Your password has been reset successfully! You can now sign in with your new password.
-            </div>
+            <Alert type="success" title="Password Reset Successful">
+              You can now sign in with your new password.
+            </Alert>
 
-            <button
+            <Button
+              variant="primary"
               onClick={handleClose}
-              className="w-full bg-pf-accent text-white py-2 px-4 rounded-md hover:bg-pf-accent-hover font-medium transition-colors"
-              type="button"
+              className="w-full"
             >
               Continue to Sign In
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -155,42 +157,38 @@ export default function ResetPasswordPage() {
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
+            <Alert type="error" title="Error">
               {error}
-            </div>
+            </Alert>
           )}
 
           <p className="text-pf-text-secondary text-sm">
             Enter your new password below. Make sure it's at least 8 characters long.
           </p>
 
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-1">
-              Email Address
-            </label>
-            <input
+          <FormField label="Email Address">
+            <Input
               type="email"
               id="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
               placeholder="your.email@example.com"
               required
               disabled={isLoading}
             />
-          </div>
+          </FormField>
 
-          <div>
-            <label htmlFor="newPassword" className="block text-sm font-medium text-pf-text-primary mb-1">
-              New Password
-            </label>
+          <FormField 
+            label="New Password"
+            helper="Minimum 8 characters"
+            error={newPassword && newPassword.length < 8 ? 'Password must be at least 8 characters' : undefined}
+          >
             <div className="relative">
-              <input
+              <Input
                 type={showNewPassword ? 'text' : 'password'}
                 id="newPassword"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
                 placeholder="Enter new password"
                 required
                 disabled={isLoading}
@@ -206,20 +204,15 @@ export default function ResetPasswordPage() {
                 {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-xs text-pf-text-tertiary mt-1">Minimum 8 characters</p>
-          </div>
+          </FormField>
 
-          <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-pf-text-primary mb-1">
-              Confirm New Password
-            </label>
+          <FormField label="Confirm New Password">
             <div className="relative">
-              <input
+              <Input
                 type={showConfirmPassword ? 'text' : 'password'}
                 id="confirmPassword"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
                 placeholder="Confirm new password"
                 required
                 disabled={isLoading}
@@ -235,31 +228,33 @@ export default function ResetPasswordPage() {
                 {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-          </div>
+          </FormField>
 
           <div className="flex gap-3 pt-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
               onClick={handleClose}
               disabled={isLoading}
-              className="flex-1 border border-pf-border text-pf-text-primary py-2 px-4 rounded-md hover:bg-pf-bg-2 font-medium transition-colors disabled:opacity-50"
+              className="flex-1"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
+              variant="primary"
               disabled={isLoading || !token || !email || !newPassword || !confirmPassword}
-              className="flex-1 bg-pf-accent text-white py-2 px-4 rounded-md hover:bg-pf-accent-hover font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1"
             >
               {isLoading ? (
                 <>Resetting...</>
               ) : (
                 <>
-                  <Key className="h-4 w-4" />
+                  <Key className="h-4 w-4 mr-2" />
                   Reset Password
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

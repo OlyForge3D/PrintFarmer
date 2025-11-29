@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, X, Tag, Plus, Edit2 } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { TagEditor } from '@/components/TagEditor';
+import { Button, Input, FormField } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface ModelDetail {
@@ -191,12 +192,9 @@ export const ModelDetailPage: React.FC = () => {
             >
                 <div className="text-center py-8">
                     <p className="text-pf-text-secondary mb-4">The model you're looking for doesn't exist.</p>
-                    <button
-                        onClick={() => navigate('/models')}
-                        className="px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover"
-                    >
+                    <Button variant="primary" onClick={() => navigate('/models')}>
                         Back to Models
-                    </button>
+                    </Button>
                 </div>
             </PageTemplate>
         );
@@ -228,13 +226,14 @@ export const ModelDetailPage: React.FC = () => {
         >
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
-                <button
+                <Button 
+                    variant="subtle" 
                     onClick={() => navigate('/models')}
-                    className="flex items-center gap-2 text-pf-accent hover:text-pf-accent-hover"
+                    className="flex items-center gap-2"
                 >
                     <ArrowLeft className="w-5 h-5" />
                     Back to Models
-                </button>
+                </Button>
             </div>
 
             {/* Model Preview and Info */}
@@ -261,50 +260,54 @@ export const ModelDetailPage: React.FC = () => {
                     <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-6 space-y-4">
                         {/* Model Name - Editable */}
                         <div>
-                            <label className="text-sm text-pf-text-tertiary">Model Name</label>
-                            {isEditingName ? (
-                                <div className="flex gap-2 mt-2">
-                                    <input
-                                        type="text"
-                                        value={editedName}
-                                        onChange={(e) => setEditedName(e.target.value)}
-                                        className="flex-1 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded outline-none text-pf-text-primary"
-                                        placeholder="Model name"
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            if (editedName.trim() && editedName !== model?.name) {
-                                                updateNameMutation.mutate(editedName.trim());
-                                            } else {
+                            <FormField label="Model Name">
+                                {isEditingName ? (
+                                    <div className="flex gap-2 mt-2">
+                                        <Input
+                                            type="text"
+                                            value={editedName}
+                                            onChange={(e) => setEditedName(e.target.value)}
+                                            placeholder="Model name"
+                                        />
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={() => {
+                                                if (editedName.trim() && editedName !== model?.name) {
+                                                    updateNameMutation.mutate(editedName.trim());
+                                                } else {
+                                                    setIsEditingName(false);
+                                                }
+                                            }}
+                                            disabled={updateNameMutation.isPending}
+                                        >
+                                            <Save className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => {
+                                                setEditedName(model?.name || '');
                                                 setIsEditingName(false);
-                                            }
-                                        }}
-                                        disabled={updateNameMutation.isPending}
-                                        className="px-3 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50"
-                                    >
-                                        <Save className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setEditedName(model?.name || '');
-                                            setIsEditingName(false);
-                                        }}
-                                        className="px-3 py-2 bg-pf-bg-2 border border-pf-border rounded hover:bg-pf-bg-0"
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex items-center justify-between">
-                                    <p className="text-pf-text-primary font-medium">{model.name}</p>
-                                    <button
-                                        onClick={() => setIsEditingName(true)}
-                                        className="p-1 text-pf-text-tertiary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded transition-colors"
-                                    >
-                                        <Edit2 className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            )}
+                                            }}
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-pf-text-primary font-medium">{model.name}</p>
+                                        <Button
+                                            variant="subtle"
+                                            size="sm"
+                                            onClick={() => setIsEditingName(true)}
+                                            className="p-1"
+                                        >
+                                            <Edit2 className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                )}
+                            </FormField>
                         </div>
 
                         <div>

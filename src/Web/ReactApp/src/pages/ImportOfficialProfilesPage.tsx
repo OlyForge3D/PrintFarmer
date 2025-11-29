@@ -2,10 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Download, Check, AlertCircle } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
-import { Button } from '@/components/ui/Button';
-import { Alert } from '@/components/ui/Alert';
-import { Select } from '@/components/ui/Select';
-import { FormField } from '@/components/ui/FormField';
+import { Button, Alert, Select, FormField, Checkbox } from '@/components/ui';
 import officialProfilesService from '@/services/officialProfilesService';
 import { PrinterBackend } from '@/types/api';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
@@ -232,14 +229,13 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                                     </div>
                                 </div>
 
-                                <label className="inline-flex items-center gap-2 mt-4 text-sm cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={makePublic}
-                                        onChange={e => setMakePublic(e.target.checked)}
-                                    />
-                                    <span>Make public</span>
-                                </label>
+                                <Checkbox
+                                    id="make-public"
+                                    label="Make public"
+                                    checked={makePublic}
+                                    onChange={e => setMakePublic(e.target.checked)}
+                                    className="mt-4"
+                                />
 
                                 <Button
                                     type="button"
@@ -292,15 +288,14 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                                     <div className="card-body p-3">
                                         <div className="space-y-2">
                                             {profiles.map(profile => (
-                                                <label
+                                                <div
                                                     key={profile.id}
                                                     className="flex items-center gap-3 p-2 hover:bg-pf-hover rounded cursor-pointer transition-colors"
                                                 >
-                                                    <input
-                                                        type="checkbox"
+                                                    <Checkbox
+                                                        id={`profile-${profile.id}`}
                                                         checked={selectedProfileIds.has(profile.id)}
                                                         onChange={() => toggleProfileSelection(profile.id)}
-                                                        className="w-4 h-4"
                                                     />
                                                     <div className="flex-1">
                                                         <p className="text-sm font-medium">{profile.name}</p>
@@ -311,7 +306,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                                                     {selectedProfileIds.has(profile.id) && (
                                                         <Check className="w-5 h-5 text-pf-success" />
                                                     )}
-                                                </label>
+                                                </div>
                                             ))}
                                         </div>
                                     </div>

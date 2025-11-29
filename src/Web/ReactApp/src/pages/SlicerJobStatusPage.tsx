@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { ClipboardList } from 'lucide-react';
+import { Button, Input, FormField, Alert, Card } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface JobStatus {
@@ -50,41 +51,65 @@ export const SlicerJobStatusPage: React.FC = () => {
             maxWidth="max-w-4xl"
         >
 
-            <div className="card">
-                <div className="form-group">
-                  <label className="form-label">Job ID</label>
-                  <div className="gap-md flex-row">
-                    <input 
-                        value={jobId} 
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJobId(e.target.value)} 
-                        placeholder="Enter job GUID" 
-                        className="input-base flex-1" 
-                    />
-                    <button 
-                        type="button"
-                        onClick={fetchStatus} 
-                        disabled={loading || !jobId} 
-                        className="btn-base btn-md btn-primary"
-                    >
-                        Fetch
-                    </button>
-                  </div>
-                </div>
+            <Card>
+                <Card.Body>
+                    <div className="space-y-4">
+                        <FormField label="Job ID" error={jobId === '' ? undefined : undefined}>
+                            <div className="flex gap-2">
+                                <Input
+                                    value={jobId}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJobId(e.target.value)}
+                                    placeholder="Enter job GUID"
+                                    onKeyPress={(e) => e.key === 'Enter' && fetchStatus()}
+                                />
+                                <Button
+                                    variant="primary"
+                                    onClick={fetchStatus}
+                                    disabled={loading || !jobId}
+                                >
+                                    Fetch
+                                </Button>
+                            </div>
+                        </FormField>
 
-                {loading && <div className="mt-3 text-sm text-pf-text-secondary">Loading...</div>}
-                {error && <div className="alert-base alert-error mt-3">{error}</div>}
+                        {loading && <div className="text-sm text-pf-text-secondary">Loading...</div>}
+                        {error && <Alert type="error" title="Error">{error}</Alert>}
 
-                {status && (
-                    <div className="card mt-4">
-                        <div><strong>Status:</strong> {status.status}</div>
-                        <div><strong>Progress:</strong> {status.progress}%</div>
-                        <div><strong>Retry Count:</strong> {status.retryCount}</div>
-                        <div><strong>Scheduled At:</strong> {status.scheduledAt ? new Date(status.scheduledAt).toLocaleString() : 'Not scheduled'}</div>
-                        <div><strong>Worker:</strong> {status.workerId ?? 'N/A'}</div>
-                        <div className="mt-3"><strong>Message:</strong> {status.errorMessage ?? 'None'}</div>
+                        {status && (
+                            <Card className="mt-4">
+                                <Card.Body className="space-y-3">
+                                    <div>
+                                        <strong className="text-pf-text-primary">Status:</strong>
+                                        <span className="ml-2 text-pf-text-secondary">{status.status}</span>
+                                    </div>
+                                    <div>
+                                        <strong className="text-pf-text-primary">Progress:</strong>
+                                        <span className="ml-2 text-pf-text-secondary">{status.progress}%</span>
+                                    </div>
+                                    <div>
+                                        <strong className="text-pf-text-primary">Retry Count:</strong>
+                                        <span className="ml-2 text-pf-text-secondary">{status.retryCount}</span>
+                                    </div>
+                                    <div>
+                                        <strong className="text-pf-text-primary">Scheduled At:</strong>
+                                        <span className="ml-2 text-pf-text-secondary">
+                                            {status.scheduledAt ? new Date(status.scheduledAt).toLocaleString() : 'Not scheduled'}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <strong className="text-pf-text-primary">Worker:</strong>
+                                        <span className="ml-2 text-pf-text-secondary">{status.workerId ?? 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <strong className="text-pf-text-primary">Message:</strong>
+                                        <span className="ml-2 text-pf-text-secondary">{status.errorMessage ?? 'None'}</span>
+                                    </div>
+                                </Card.Body>
+                            </Card>
+                        )}
                     </div>
-                )}
-            </div>
+                </Card.Body>
+            </Card>
         </PageTemplate>
     );
 };

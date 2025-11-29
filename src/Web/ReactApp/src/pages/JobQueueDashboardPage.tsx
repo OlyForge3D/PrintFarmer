@@ -76,26 +76,28 @@ export default function JobQueueDashboardPage() {
 
       {/* Filter tabs */}
       <div className="mb-4 flex flex-wrap gap-2 overflow-x-auto">
-        <button
+        <Button
+          variant={filter === 'all' && !showQueue ? 'primary' : 'secondary'}
           onClick={() => {
             setFilter('all');
             setShowQueue(false);
           }}
-          className={`px-4 py-2 rounded whitespace-nowrap text-sm ${filter === 'all' && !showQueue ? 'bg-pf-accent text-white' : 'bg-pf-bg-1 text-pf-text-primary'}`}
+          className="whitespace-nowrap"
         >
           My Jobs
-        </button>
+        </Button>
         {Object.values(SliceJobStatus).map(status => (
-          <button
+          <Button
             key={status}
+            variant={filter === status ? 'primary' : 'secondary'}
             onClick={() => {
               setFilter(status);
               setShowQueue(false);
             }}
-            className={`px-4 py-2 rounded whitespace-nowrap text-sm ${filter === status ? 'bg-pf-accent text-white' : 'bg-pf-bg-1 text-pf-text-primary'}`}
+            className="whitespace-nowrap"
           >
             {status}
-          </button>
+          </Button>
         ))}
       </div>
 

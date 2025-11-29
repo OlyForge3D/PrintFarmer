@@ -15,6 +15,13 @@ import {
 import { TableSkeleton } from '@/components/skeletons/TableSkeleton';
 import { useAuth } from '@/contexts/AuthHooks';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { FormField } from '@/components/ui/FormField';
+import { Alert } from '@/components/ui/Alert';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Modal } from '@/components/ui/Modal';
 
 interface User {
   id: string;
@@ -362,7 +369,8 @@ export function UserManagementPage() {
       icon={Users}
       maxWidth="max-w-7xl"
       actions={
-        <button
+        <Button
+          variant="primary"
           onClick={() => {
             const farmUserRole = roles.find(r => r.name === 'farm_user');
             setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
@@ -371,24 +379,24 @@ export function UserManagementPage() {
             setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
             setShowCreateModal(true);
           }}
-          className="btn-base btn-md btn-primary"
         >
           <Plus className="h-4 w-4 mr-2" />
           Add User
-        </button>
+        </Button>
       }
     >
       {/* Controls */}
       <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
-          <input
-            type="text"
-            placeholder="Search users..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 input-base"
-          />
+        <div className="relative flex-1 max-w-xs">
+          <FormField label="Search" hideLabel>
+            <Input
+              type="text"
+              placeholder="Search users..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              icon={<Search className="h-4 w-4" />}
+            />
+          </FormField>
         </div>
       </div>
       {/* Users Table */}
@@ -518,505 +526,502 @@ export function UserManagementPage() {
 
         {/* TODO: Modals for create/edit users */}
         {showCreateModal && (
-          <div className="modal-overlay">
-            <div className="modal modal-lg">
-              <div className="modal-header">
-                <h3 className="modal-header-title">Create New User</h3>
-              </div>
-              <div className="modal-body">
-                {createErrors.general && (
-                  <div className="alert-base alert-error mb-4" role="alert">
-                    {createErrors.general}
+          <Modal
+            isOpen={showCreateModal}
+            onClose={() => setShowCreateModal(false)}
+            title="Create New User"
+            size="lg"
+          >
+            <div className="space-y-4">
+              {createErrors.general && (
+                <Alert type="error">{createErrors.general}</Alert>
+              )}
+              <FormField 
+                label="Username" 
+                error={createErrors.username}
+                required
+              >
+                <Input
+                  type="text"
+                  value={newUser.username}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNewUser(u => ({ ...u, username: v }));
+                    setCreateErrors(errs => ({ ...errs, username: undefined }));
+                    setUsernameStatus('idle');
+                  }}
+                  placeholder="Enter username"
+                />
+                {!createErrors.username && newUser.username && (
+                  <div className="mt-2 text-xs flex items-center gap-1" aria-live="polite" aria-atomic="true">
+                    {usernameStatus === 'checking' && (
+                      <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                      </svg>
+                    )}
+                    {usernameStatus === 'available' && <span className="text-green-600">✓ Available</span>}
+                    {usernameStatus === 'taken' && <span className="text-red-500">✗ Already taken</span>}
+                    {usernameStatus === 'error' && <span className="text-orange-500">✗ Check failed</span>}
                   </div>
                 )}
-                <div className="gap-md flex-col" role="group" aria-label="Create user form">
-                  <div>
-                    <label htmlFor="create-username" className="block text-sm font-medium mb-1">Username</label>
-                    <input
-                      id="create-username"
-                      type="text"
-                      value={newUser.username}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setNewUser(u => ({ ...u, username: v }));
-                        setCreateErrors(errs => ({ ...errs, username: undefined }));
-                        setUsernameStatus('idle');
-                      }}
-                      className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                    />
-                    {createErrors.username && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.username}</p>}
-                    {!createErrors.username && newUser.username && (
-                      <p className="text-xs mt-1 flex items-center gap-1" aria-live="polite" aria-atomic="true">
-                        {usernameStatus === 'checking' && (
-                          <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
-                          </svg>
-                        )}
-                        {usernameStatus === 'available' && <span className="text-green-600">Username available</span>}
-                        {usernameStatus === 'taken' && <span className="text-red-500">Username already taken</span>}
-                        {usernameStatus === 'error' && <span className="text-orange-500">Username check failed</span>}
-                      </p>
+              </FormField>
+              
+              <FormField 
+                label="Email" 
+                error={createErrors.email}
+                required
+              >
+                <Input
+                  type="email"
+                  value={newUser.email}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setNewUser(u => ({ ...u, email: v }));
+                    setCreateErrors(errs => ({ ...errs, email: undefined }));
+                    setEmailStatus('idle');
+                  }}
+                  placeholder="Enter email address"
+                />
+                {!createErrors.email && newUser.email && (
+                  <div className="mt-2 text-xs flex items-center gap-1" aria-live="polite" aria-atomic="true">
+                    {emailStatus === 'checking' && (
+                      <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                      </svg>
                     )}
+                    {emailStatus === 'available' && <span className="text-green-600">✓ Available</span>}
+                    {emailStatus === 'taken' && <span className="text-red-500">✗ Already taken</span>}
+                    {emailStatus === 'error' && <span className="text-orange-500">✗ Check failed</span>}
                   </div>
-                  <div>
-                    <label htmlFor="create-email" className="block text-sm font-medium mb-1">Email</label>
-                    <input
-                      id="create-email"
-                      type="email"
-                      value={newUser.email}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setNewUser(u => ({ ...u, email: v }));
-                        setCreateErrors(errs => ({ ...errs, email: undefined }));
-                        setEmailStatus('idle');
-                      }}
-                      className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                    />
-                    {createErrors.email && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.email}</p>}
-                    {!createErrors.email && newUser.email && (
-                      <p className="text-xs mt-1 flex items-center gap-1" aria-live="polite" aria-atomic="true">
-                        {emailStatus === 'checking' && (
-                          <svg className="animate-spin h-3 w-3 text-pf-text-tertiary" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
-                          </svg>
-                        )}
-                        {emailStatus === 'available' && <span className="text-green-600">Email available</span>}
-                        {emailStatus === 'taken' && <span className="text-red-500">Email already taken</span>}
-                        {emailStatus === 'error' && <span className="text-orange-500">Email check failed</span>}
-                      </p>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label htmlFor="create-first-name" className="block text-sm font-medium mb-1">First Name <span className="text-xs text-pf-text-tertiary">(optional)</span></label>
-                      <input
-                        id="create-first-name"
-                        type="text"
-                        value={newUser.firstName}
-                        onChange={(e) => setNewUser(u => ({ ...u, firstName: e.target.value }))}
-                        className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="create-last-name" className="block text-sm font-medium mb-1">Last Name <span className="text-xs text-pf-text-tertiary">(optional)</span></label>
-                      <input
-                        id="create-last-name"
-                        type="text"
-                        value={newUser.lastName}
-                        onChange={(e) => setNewUser(u => ({ ...u, lastName: e.target.value }))}
-                        className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label htmlFor="create-password" className="block text-sm font-medium mb-1">Password</label>
-                    <input
-                      id="create-password"
-                      type="password"
-                      value={newUser.password}
-                      onChange={(e) => setNewUser(u => ({ ...u, password: e.target.value }))}
-                      className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                    />
-                    {createErrors.password && <p className="text-xs text-red-500 mt-1" role="alert">{createErrors.password}</p>}
-                    {passwordPolicy && (
-                      <ul className="mt-2 text-xs space-y-1 text-pf-text-secondary">
-                        <li className={newUser.password.length >= passwordPolicy.minLength ? 'text-green-500' : ''}>Min length: {passwordPolicy.minLength}</li>
-                        {passwordPolicy.requireUppercase && <li className={/[A-Z]/.test(newUser.password) ? 'text-green-500' : ''}>At least one uppercase letter</li>}
-                        {passwordPolicy.requireLowercase && <li className={/[a-z]/.test(newUser.password) ? 'text-green-500' : ''}>At least one lowercase letter</li>}
-                        {passwordPolicy.requireDigit && <li className={/[0-9]/.test(newUser.password) ? 'text-green-500' : ''}>At least one digit</li>}
-                        {passwordPolicy.requireSymbol && <li className={/[^A-Za-z0-9]/.test(newUser.password) ? 'text-green-500' : ''}>At least one symbol</li>}
-                      </ul>
-                    )}
-                  </div>
-                  <div>
-                    <label htmlFor="create-role" className="block text-sm font-medium mb-1">Role</label>
-                    <select
-                      id="create-role"
-                      value={selectedRoleId}
-                      onChange={(e) => {
-                        setSelectedRoleId(e.target.value);
-                        // Auto-select appropriate permissions based on role
-                        const selectedRole = roles.find(r => r.id === e.target.value);
-                        if (selectedRole?.name === 'farm_admin') {
-                          // Admins get access to everything
-                          setSelectedPermissions(applicationAreas.map(a => a.id));
-                        } else if (selectedRole?.name === 'farm_user') {
-                          // Regular users get basic access
-                          setSelectedPermissions(['printers', 'files', 'jobs', 'spools']);
-                        } else {
-                          setSelectedPermissions([]);
-                        }
-                      }}
-                      className="w-full input-base"
-                    >
-                      <option value="">Select a role...</option>
-                      {roles.map(role => (
-                        <option key={role.id} value={role.id}>
-                          {role.displayName}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-pf-text-tertiary mt-1">
-                      {selectedRoleId ? roles.find(r => r.id === selectedRoleId)?.description || '' : 'Choose a role to assign permissions'}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Application Access</label>
-                    <p className="text-xs text-pf-text-secondary mb-3">Select which areas of the application this user can access:</p>
-                    <div className="space-y-2">
-                      {applicationAreas.map(area => {
-                        const isAdmin = isAdminRole(roles.find(r => r.id === selectedRoleId)?.name);
-                        const isDisabled = isAdmin; // Admins always have full access
+                )}
+              </FormField>
 
-                        return (
-                          <label key={area.id} className="flex items-start gap-2 p-2 hover:bg-pf-bg-0 rounded cursor-pointer transition">
-                            <input
-                              type="checkbox"
-                              checked={selectedPermissions.includes(area.id)}
-                              onChange={() => {
-                                if (!isDisabled) {
-                                  setSelectedPermissions(prev =>
-                                    prev.includes(area.id)
-                                      ? prev.filter(id => id !== area.id)
-                                      : [...prev, area.id]
-                                  );
-                                }
-                              }}
-                              disabled={isDisabled}
-                              className="mt-0.5 cursor-pointer"
-                            />
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
-                              <div className="text-xs text-pf-text-secondary">{area.description}</div>
-                              {isDisabled && <div className="text-xs text-pf-warning-text mt-0.5">Included with admin role</div>}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-                <div className="modal-footer">
-                  <button
-                    onClick={() => setShowCreateModal(false)}
-                    className="btn-base btn-md btn-secondary"
-                  >Cancel</button>
-                  <button
-                    onClick={createUser}
-                    disabled={creating || !newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'}
-                    className="btn-base btn-md btn-primary"
-                  >{creating && (
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                    </svg>
-                  )}Create</button>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField label="First Name" required={false}>
+                  <Input
+                    type="text"
+                    value={newUser.firstName}
+                    onChange={(e) => setNewUser(u => ({ ...u, firstName: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </FormField>
+                <FormField label="Last Name" required={false}>
+                  <Input
+                    type="text"
+                    value={newUser.lastName}
+                    onChange={(e) => setNewUser(u => ({ ...u, lastName: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </FormField>
               </div>
-            </div>
-          </div>
-        )}
-        {showEditModal && selectedUser && (
-          <div className="modal-overlay">
-            <div className="modal modal-lg">
-              <div className="modal-header">
-                <h3 className="modal-header-title">Edit User: {selectedUser.username}</h3>
-              </div>
-              <div className="modal-body">
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    try {
-                      const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
-                        method: 'PUT',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          ...getAuthHeaders()
-                        },
-                        body: JSON.stringify({
-                          firstName: selectedUser.firstName,
-                          lastName: selectedUser.lastName,
-                          email: selectedUser.email,
-                          isActive: selectedUser.isActive,
-                          roles: selectedUser.roles,
-                          permissions: selectedUser.permissions
-                        })
-                      });
-                      if (response.ok) {
-                        toast.success('User updated successfully');
-                        setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
-                      } else {
-                        const err = await response.json().catch(() => ({}));
-                        toast.error(err.message || 'Failed to update user');
-                      }
-                    } catch {
-                      toast.error('Error updating user');
-                    } finally {
-                      setShowEditModal(false);
-                      setSelectedUser(null);
+
+              <FormField 
+                label="Password" 
+                error={createErrors.password}
+                required
+              >
+                <Input
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser(u => ({ ...u, password: e.target.value }))}
+                  placeholder="Enter password"
+                />
+                {passwordPolicy && (
+                  <ul className="mt-3 space-y-1 text-xs">
+                    <li className={newUser.password.length >= passwordPolicy.minLength ? 'text-green-600' : 'text-pf-text-secondary'}>
+                      ✓ Min length: {passwordPolicy.minLength}
+                    </li>
+                    {passwordPolicy.requireUppercase && (
+                      <li className={/[A-Z]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                        ✓ At least one uppercase letter
+                      </li>
+                    )}
+                    {passwordPolicy.requireLowercase && (
+                      <li className={/[a-z]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                        ✓ At least one lowercase letter
+                      </li>
+                    )}
+                    {passwordPolicy.requireDigit && (
+                      <li className={/[0-9]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                        ✓ At least one digit
+                      </li>
+                    )}
+                    {passwordPolicy.requireSymbol && (
+                      <li className={/[^A-Za-z0-9]/.test(newUser.password) ? 'text-green-600' : 'text-pf-text-secondary'}>
+                        ✓ At least one symbol
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </FormField>
+
+              <FormField 
+                label="Role" 
+                required
+              >
+                <Select
+                  value={selectedRoleId}
+                  onChange={(e) => {
+                    setSelectedRoleId(e.target.value);
+                    const selectedRole = roles.find(r => r.id === e.target.value);
+                    if (selectedRole?.name === 'farm_admin') {
+                      setSelectedPermissions(applicationAreas.map(a => a.id));
+                    } else if (selectedRole?.name === 'farm_user') {
+                      setSelectedPermissions(['printers', 'files', 'jobs', 'spools']);
+                    } else {
+                      setSelectedPermissions([]);
                     }
                   }}
-                  className="space-y-4"
                 >
-                  <div>
-                    <label className="block text-sm font-medium mb-1">First Name</label>
-                    <input
-                      type="text"
-                      value={selectedUser.firstName || ''}
-                      onChange={e => setSelectedUser(u => u ? { ...u, firstName: e.target.value } : u)}
-                      className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                      placeholder="First Name"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Last Name</label>
-                    <input
-                      type="text"
-                      value={selectedUser.lastName || ''}
-                      onChange={e => setSelectedUser(u => u ? { ...u, lastName: e.target.value } : u)}
-                      className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                      placeholder="Last Name"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Email</label>
-                    <input
-                      type="email"
-                      value={selectedUser.email}
-                      onChange={e => setSelectedUser(u => u ? { ...u, email: e.target.value } : u)}
-                      className="w-full px-3 py-2 bg-pf-bg-0 border border-pf-border rounded"
-                      placeholder="Email"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Active</label>
-                    <input
-                      type="checkbox"
-                      checked={selectedUser.isActive}
-                      onChange={e => setSelectedUser(u => u ? { ...u, isActive: e.target.checked } : u)}
-                      className="ml-2"
-                      title="Active"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="edit-role" className="block text-sm font-medium mb-1">Role</label>
-                    <select
-                      id="edit-role"
-                      value={selectedUser.roles[0] || ''}
-                      onChange={(e) => {
-                        setSelectedUser(u => {
-                          if (!u) return u;
-                          const newRole = e.target.value;
-                          // Auto-update permissions based on role
-                          let newPermissions = u.permissions;
-                          if (newRole === 'farm_admin') {
-                            // Admins get access to everything
-                            newPermissions = applicationAreas.map(a => a.id);
-                          } else if (newRole === 'farm_user' && !newPermissions.includes('printers')) {
-                            // Regular users get basic access
-                            newPermissions = ['printers', 'files', 'jobs', 'spools'];
-                          }
-                          return {
-                            ...u,
-                            roles: newRole ? [newRole] : [],
-                            permissions: newPermissions
-                          };
-                        });
-                      }}
-                      className="w-full input-base"
-                    >
-                      <option value="">Select a role...</option>
-                      {roles.map(role => (
-                        <option key={role.id} value={role.name}>
-                          {role.displayName}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-pf-text-tertiary mt-1">
-                      {selectedUser.roles[0] ? roles.find(r => r.name === selectedUser.roles[0])?.description || '' : 'Choose a role to assign permissions'}
-                    </p>
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium">Application Access</label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedUser(u => u ? { ...u } : u);
-                          setShowPermissionsModal(true);
-                        }}
-                        className="text-xs text-pf-accent hover:underline"
-                      >
-                        Edit Permissions →
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2 p-2 bg-pf-bg-0 rounded border border-pf-border">
-                      {selectedUser.permissions.length > 0 ? (
-                        selectedUser.permissions.map(p => {
-                          const area = applicationAreas.find(a => a.id === p);
-                          return (
-                            <span key={p} className="inline-block bg-pf-bg-2 px-2 py-1 rounded text-xs" title={area?.description}>
-                              {area?.name || p}
-                            </span>
-                          );
-                        })
-                      ) : (
-                        <span className="text-pf-text-tertiary text-xs">No accessible areas configured</span>
-                      )}
-                    </div>
-                  </div>
-                </form>
-                <div className="modal-footer">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowEditModal(false);
-                      setSelectedUser(null);
-                    }}
-                    className="btn-base btn-md btn-secondary"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
-                          method: 'PUT',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            ...getAuthHeaders()
-                          },
-                          body: JSON.stringify({
-                            firstName: selectedUser.firstName,
-                            lastName: selectedUser.lastName,
-                            email: selectedUser.email,
-                            isActive: selectedUser.isActive,
-                            roles: selectedUser.roles,
-                            permissions: selectedUser.permissions
-                          })
-                        });
-                        if (response.ok) {
-                          toast.success('User updated successfully');
-                          setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
-                          setShowEditModal(false);
-                          setSelectedUser(null);
-                        } else {
-                          const err = await response.json().catch(() => ({}));
-                          toast.error(err.message || 'Failed to update user');
-                        }
-                      } catch {
-                        toast.error('Error updating user');
-                      }
-                    }}
-                    className="btn-base btn-md btn-primary"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+                  <option value="">Select a role...</option>
+                  {roles.map(role => (
+                    <option key={role.id} value={role.id}>
+                      {role.displayName}
+                    </option>
+                  ))}
+                </Select>
+                {selectedRoleId && (
+                  <p className="mt-2 text-xs text-pf-text-secondary">
+                    {roles.find(r => r.id === selectedRoleId)?.description}
+                  </p>
+                )}
+              </FormField>
 
-        {/* Permissions Modal */}
-        {showPermissionsModal && selectedUser && (
-          <div className="modal-overlay" onClick={() => setShowPermissionsModal(false)}>
-            <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h2 className="text-lg font-semibold text-pf-text-primary">
-                  Manage Application Access for {selectedUser.username}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setShowPermissionsModal(false)}
-                  className="text-pf-text-secondary hover:text-pf-text-primary transition"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="modal-body space-y-4">
-                <p className="text-sm text-pf-text-secondary">
+              <div>
+                <label className="block text-sm font-medium text-pf-text-primary mb-3">
+                  Application Access
+                </label>
+                <p className="text-xs text-pf-text-secondary mb-3">
                   Select which areas of the application this user can access:
                 </p>
-                <div className="space-y-3 bg-pf-bg-0 p-3 rounded border border-pf-border">
+                <div className="space-y-3">
                   {applicationAreas.map(area => {
-                    const userRole = selectedUser.roles[0];
-                    const isAdmin = userRole === 'farm_admin';
-                    const isDisabled = isAdmin; // Admins always have full access
-                    const hasAccess = selectedUser.permissions?.includes(area.id) ?? false;
+                    const isAdmin = isAdminRole(roles.find(r => r.id === selectedRoleId)?.name);
+                    const isDisabled = isAdmin;
 
                     return (
-                      <label key={area.id} className="flex items-start gap-2 p-2 hover:bg-pf-bg-1 rounded cursor-pointer transition">
-                        <input
-                          type="checkbox"
-                          checked={hasAccess}
+                      <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-2 rounded cursor-pointer transition">
+                        <Checkbox
+                          checked={selectedPermissions.includes(area.id)}
                           onChange={() => {
                             if (!isDisabled) {
-                              const updatedPermissions = hasAccess
-                                ? selectedUser.permissions.filter(id => id !== area.id)
-                                : [...selectedUser.permissions, area.id];
-                              setSelectedUser({
-                                ...selectedUser,
-                                permissions: updatedPermissions
-                              });
+                              setSelectedPermissions(prev =>
+                                prev.includes(area.id)
+                                  ? prev.filter(id => id !== area.id)
+                                  : [...prev, area.id]
+                              );
                             }
                           }}
                           disabled={isDisabled}
-                          className="mt-0.5 cursor-pointer"
                         />
                         <div className="flex-1">
                           <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
                           <div className="text-xs text-pf-text-secondary">{area.description}</div>
-                          {isDisabled && <div className="text-xs text-pf-warning-text mt-0.5">Included with admin role</div>}
+                          {isDisabled && <div className="text-xs text-yellow-600 mt-1">Included with admin role</div>}
                         </div>
                       </label>
                     );
                   })}
                 </div>
               </div>
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setShowPermissionsModal(false)}
-                  className="btn-base btn-md btn-secondary"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const response = await fetch(
-                        `${getApiBaseUrl()}/users/${selectedUser.id}`,
-                        {
-                          method: 'PUT',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            ...getAuthHeaders()
-                          },
-                          body: JSON.stringify({
-                            accessibleAreas: selectedUser.permissions
-                          })
-                        }
-                      );
-                      if (!response.ok) throw new Error('Failed to update permissions');
-                      toast.success('Permissions updated');
-                      setShowPermissionsModal(false);
-                      loadUsers();
-                    } catch {
-                      toast.error('Failed to update permissions');
-                    }
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={createUser}
+                loading={creating}
+                disabled={!newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'}
+              >
+                Create User
+              </Button>
+            </div>
+          </Modal>
+        )}
+        {showEditModal && selectedUser && (
+          <Modal
+            isOpen={showEditModal}
+            onClose={() => {
+              setShowEditModal(false);
+              setSelectedUser(null);
+            }}
+            title={`Edit User: ${selectedUser.username}`}
+            size="lg"
+          >
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
+                    method: 'PUT',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({
+                      firstName: selectedUser.firstName,
+                      lastName: selectedUser.lastName,
+                      email: selectedUser.email,
+                      isActive: selectedUser.isActive,
+                      roles: selectedUser.roles,
+                      permissions: selectedUser.permissions
+                    })
+                  });
+                  if (response.ok) {
+                    toast.success('User updated successfully');
+                    setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
+                    setShowEditModal(false);
+                    setSelectedUser(null);
+                  } else {
+                    const err = await response.json().catch(() => ({}));
+                    toast.error(err.message || 'Failed to update user');
+                  }
+                } catch {
+                  toast.error('Error updating user');
+                }
+              }}
+              className="space-y-4"
+            >
+              <FormField label="First Name">
+                <Input
+                  type="text"
+                  value={selectedUser.firstName || ''}
+                  onChange={e => setSelectedUser(u => u ? { ...u, firstName: e.target.value } : u)}
+                  placeholder="First Name"
+                />
+              </FormField>
+
+              <FormField label="Last Name">
+                <Input
+                  type="text"
+                  value={selectedUser.lastName || ''}
+                  onChange={e => setSelectedUser(u => u ? { ...u, lastName: e.target.value } : u)}
+                  placeholder="Last Name"
+                />
+              </FormField>
+
+              <FormField label="Email" required>
+                <Input
+                  type="email"
+                  value={selectedUser.email}
+                  onChange={e => setSelectedUser(u => u ? { ...u, email: e.target.value } : u)}
+                  placeholder="Email"
+                />
+              </FormField>
+
+              <FormField label="Active">
+                <Checkbox
+                  checked={selectedUser.isActive}
+                  onChange={e => setSelectedUser(u => u ? { ...u, isActive: e.target.checked } : u)}
+                  label="User account is active"
+                />
+              </FormField>
+
+              <FormField label="Role" required>
+                <Select
+                  value={selectedUser.roles[0] || ''}
+                  onChange={(e) => {
+                    setSelectedUser(u => {
+                      if (!u) return u;
+                      const newRole = e.target.value;
+                      let newPermissions = u.permissions;
+                      if (newRole === 'farm_admin') {
+                        newPermissions = applicationAreas.map(a => a.id);
+                      } else if (newRole === 'farm_user' && !newPermissions.includes('printers')) {
+                        newPermissions = ['printers', 'files', 'jobs', 'spools'];
+                      }
+                      return {
+                        ...u,
+                        roles: newRole ? [newRole] : [],
+                        permissions: newPermissions
+                      };
+                    });
                   }}
-                  className="btn-base btn-md btn-primary"
                 >
-                  Save Permissions
-                </button>
+                  <option value="">Select a role...</option>
+                  {roles.map(role => (
+                    <option key={role.id} value={role.name}>
+                      {role.displayName}
+                    </option>
+                  ))}
+                </Select>
+                {selectedUser.roles[0] && (
+                  <p className="mt-2 text-xs text-pf-text-secondary">
+                    {roles.find(r => r.name === selectedUser.roles[0])?.description}
+                  </p>
+                )}
+              </FormField>
+
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-pf-text-primary">Application Access</label>
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedUser(u => u ? { ...u } : u);
+                      setShowPermissionsModal(true);
+                    }}
+                  >
+                    Edit Permissions →
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2 p-3 bg-pf-bg-0 rounded border border-pf-border">
+                  {selectedUser.permissions.length > 0 ? (
+                    selectedUser.permissions.map(p => {
+                      const area = applicationAreas.find(a => a.id === p);
+                      return (
+                        <span key={p} className="inline-block bg-pf-accent/20 text-pf-accent px-2 py-1 rounded text-xs font-medium" title={area?.description}>
+                          {area?.name || p}
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="text-pf-text-tertiary text-xs">No accessible areas configured</span>
+                  )}
+                </div>
+              </div>
+            </form>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setSelectedUser(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  try {
+                    const response = await fetch(`${getApiBaseUrl()}/users/${selectedUser.id}`, {
+                      method: 'PUT',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                      },
+                      body: JSON.stringify({
+                        firstName: selectedUser.firstName,
+                        lastName: selectedUser.lastName,
+                        email: selectedUser.email,
+                        isActive: selectedUser.isActive,
+                        roles: selectedUser.roles,
+                        permissions: selectedUser.permissions
+                      })
+                    });
+                    if (response.ok) {
+                      toast.success('User updated successfully');
+                      setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
+                      setShowEditModal(false);
+                      setSelectedUser(null);
+                    } else {
+                      const err = await response.json().catch(() => ({}));
+                      toast.error(err.message || 'Failed to update user');
+                    }
+                  } catch {
+                    toast.error('Error updating user');
+                  }
+                }}
+              >
+                Save Changes
+              </Button>
+            </div>
+          </Modal>
+        )}
+
+        {/* Permissions Modal */}
+        {showPermissionsModal && selectedUser && (
+          <Modal
+            isOpen={showPermissionsModal}
+            onClose={() => setShowPermissionsModal(false)}
+            title={`Manage Application Access for ${selectedUser.username}`}
+            size="lg"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-pf-text-secondary">
+                Select which areas of the application this user can access:
+              </p>
+              <div className="space-y-3 bg-pf-bg-0 p-4 rounded border border-pf-border">
+                {applicationAreas.map(area => {
+                  const userRole = selectedUser.roles[0];
+                  const isAdmin = userRole === 'farm_admin';
+                  const isDisabled = isAdmin;
+                  const hasAccess = selectedUser.permissions?.includes(area.id) ?? false;
+
+                  return (
+                    <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-1 rounded cursor-pointer transition">
+                      <Checkbox
+                        checked={hasAccess}
+                        onChange={() => {
+                          if (!isDisabled) {
+                            const updatedPermissions = hasAccess
+                              ? selectedUser.permissions.filter(id => id !== area.id)
+                              : [...selectedUser.permissions, area.id];
+                            setSelectedUser({
+                              ...selectedUser,
+                              permissions: updatedPermissions
+                            });
+                          }
+                        }}
+                        disabled={isDisabled}
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
+                        <div className="text-xs text-pf-text-secondary">{area.description}</div>
+                        {isDisabled && <div className="text-xs text-yellow-600 mt-1">Included with admin role</div>}
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
             </div>
-          </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="secondary"
+                onClick={() => setShowPermissionsModal(false)}
+              >
+                Close
+              </Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  try {
+                    const response = await fetch(
+                      `${getApiBaseUrl()}/users/${selectedUser.id}`,
+                      {
+                        method: 'PUT',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...getAuthHeaders()
+                        },
+                        body: JSON.stringify({
+                          accessibleAreas: selectedUser.permissions
+                        })
+                      }
+                    );
+                    if (!response.ok) throw new Error('Failed to update permissions');
+                    toast.success('Permissions updated');
+                    setShowPermissionsModal(false);
+                    loadUsers();
+                  } catch {
+                    toast.error('Failed to update permissions');
+                  }
+                }}
+              >
+                Save Permissions
+              </Button>
+            </div>
+          </Modal>
         )}
       </div>
     </PageTemplate>

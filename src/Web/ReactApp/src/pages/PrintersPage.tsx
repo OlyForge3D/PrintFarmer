@@ -9,6 +9,9 @@ import { AddPrinterButton } from '@/components/AddPrinterButton';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton';
 import { PageTemplate } from '@/components/PageTemplate';
+import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
+import { Alert } from '@/components/ui/Alert';
 import type { Printer } from '@/types/api';
 
 import { Printer as PrinterIcon, LayoutGrid, List } from 'lucide-react';
@@ -150,14 +153,10 @@ export function PrintersPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-pf-text-primary mb-4">Error Loading Printers</h2>
-            <p className="text-pf-text-secondary mb-4">{error.message}</p>
-            <button
-              type="button"
-              onClick={() => refetchPrinters()}
-              className="px-4 py-2 bg-pf-primary-500 text-white rounded-lg hover:bg-pf-primary-600 transition-colors"
-            >
+            <p className="text-pf-text-secondary mb-6">{error.message}</p>
+            <Button variant="primary" onClick={() => refetchPrinters()}>
               Retry
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -175,10 +174,9 @@ export function PrintersPage() {
         <div></div>
         <div className="flex flex-col md:flex-row md:items-center gap-3">
           {/* State Filter */}
-          <select
+          <Select
             value={stateFilter}
             onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
-            className="border border-pf-border rounded-lg px-3 py-1.5 text-sm bg-pf-bg-1 text-pf-text-primary"
             aria-label="Filter by printer state"
           >
             <option value="all">All States</option>
@@ -186,12 +184,11 @@ export function PrintersPage() {
             <option value="printing">Printing</option>
             <option value="paused">Paused</option>
             <option value="offline">Offline</option>
-          </select>
+          </Select>
           {/* Backend Filter */}
-          <select
+          <Select
             value={backendFilter}
             onChange={e => setBackendFilter(e.target.value as BackendFilter)}
-            className="border border-pf-border rounded-lg px-3 py-1.5 text-sm bg-pf-bg-1 text-pf-text-primary"
             aria-label="Filter by backend"
           >
             <option value="all">All Backends</option>
@@ -199,7 +196,7 @@ export function PrintersPage() {
             <option value="PrusaLink">PrusaLink</option>
             <option value="SDCP">SDCP</option>
             <option value="OctoPrint">OctoPrint</option>
-          </select>
+          </Select>
           {/* View Mode Toggle */}
           <div className="flex items-center bg-pf-bg-1 border border-pf-border rounded-lg p-1">
             <button

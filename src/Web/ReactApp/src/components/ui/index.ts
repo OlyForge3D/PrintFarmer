@@ -6,6 +6,7 @@ export { Badge, type BadgeProps, type BadgeVariant, type BadgeSize } from './Bad
 export { Button, type ButtonVariant, type ButtonSize } from './Button';
 export { Card, type CardProps, type CardHeaderProps, type CardBodyProps, type CardFooterProps } from './Card';
 export { Checkbox, type CheckboxProps } from './Checkbox';
+export { FileUpload, type FileUploadProps } from './FileUpload';
 export { FormField, type FormFieldProps } from './FormField';
 export { Input, type InputProps } from './Input';
 export { Label, type LabelProps } from './Label';
