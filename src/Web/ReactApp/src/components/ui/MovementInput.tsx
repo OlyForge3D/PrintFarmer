@@ -41,7 +41,7 @@ export function MovementInput({
         disabled={disabled}
         placeholder={`${deltaSymbol}${axis}`}
         aria-label={`${axis} movement amount`}
-        className={`w-24 h-8 pl-6 pr-2 text-xs ${className}`}
+        className={`w-24 h-8 pl-6 pr-2 text-xs [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className}`}
         {...props}
       />
     </div>

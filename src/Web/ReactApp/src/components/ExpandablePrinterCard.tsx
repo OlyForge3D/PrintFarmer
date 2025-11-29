@@ -41,7 +41,8 @@ import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { renderUnknown } from '@/utils/renderUnknown';
-import { Button, TemperatureInput, MovementInput } from '@/components/ui';
+import { Button, TemperatureInput, MovementInput, Select } from '@/components/ui';
+import { NozzleIcon, BedIcon } from '@/components/icons/TemperatureIcons';
 import { 
   ChevronDown, 
   ExternalLink,
@@ -287,6 +288,42 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     setStep(newStep);
   };
 
+  const handleHotendTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || hotendTemp === '') return;
+    
+    try {
+      const currentBedTemp = bedTemp === '' ? (status?.bedTarget ?? printer.bedTarget ?? 0) : bedTemp;
+      const result = await apiClient.setTemperatures(printer.id, { 
+        hotend: Number(hotendTemp),
+        bed: Number(currentBedTemp)
+      });
+      
+      if (!result.success) {
+        console.error('Failed to set hotend temperature:', result.error);
+      }
+    } catch (error) {
+      console.error('Error setting hotend temperature:', error);
+    }
+  };
+
+  const handleBedTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || bedTemp === '') return;
+    
+    try {
+      const currentHotendTemp = hotendTemp === '' ? (status?.hotendTarget ?? printer.hotendTarget ?? 0) : hotendTemp;
+      const result = await apiClient.setTemperatures(printer.id, { 
+        hotend: Number(currentHotendTemp),
+        bed: Number(bedTemp)
+      });
+      
+      if (!result.success) {
+        console.error('Failed to set bed temperature:', result.error);
+      }
+    } catch (error) {
+      console.error('Error setting bed temperature:', error);
+    }
+  };
+
   const handleApplyPreset = async (preset: string) => {
     try {
       let targets: TempTargets;
@@ -489,7 +526,6 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             disabled={!isPrinting}
           >
             <Pause className="h-3 w-3 mr-1" />
-            Pause
           </Button>
           <Button
             type="button"
@@ -499,7 +535,6 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             disabled={!isPaused}
           >
             <Play className="h-3 w-3 mr-1" />
-            Resume
           </Button>
           <Button
             type="button"
@@ -510,7 +545,6 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           >
             {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <AlertOctagon className="h-3 w-3 mr-1" />}
-            {isShutdown ? 'Restart' : 'Stop'}
           </Button>
         </div>
 
@@ -558,7 +592,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 </div>
               )}
         
-  {/* History Modal */}
+        {/* History Modal */}
         <PrinterHistoryModal
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
@@ -692,202 +726,210 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
       {/* Temps Section */}
       <div className="mb-2">
         <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Temps</div>
-        <div className="flex flex-row gap-6 items-start">
-          <div className="flex flex-col items-center relative">
-            <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-32 text-center">
+        <div className="grid grid-cols-3 gap-2 w-[24.5rem]">
+          {/* Row 1: Labels */}
+          <div className="flex items-center h-5 w-[7.75rem]">
+            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(status?.hotendTarget ?? printer.hotendTarget ?? 0) > 0} />
+            <span className="text-xs text-slate-400 ml-auto">
               {formatTempWithTarget(
                 status?.hotendTemp ?? printer.hotendTemp,
                 status?.hotendTarget ?? printer.hotendTarget,
                 lastKnownHotendTemp
               )}
             </span>
-            <TemperatureInput
-              value={hotendTemp}
-              onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            />
           </div>
           
-          <div className="flex flex-col items-center relative">
-            <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-32 text-center">
+          <div className="flex items-center h-5 w-[7.75rem]">
+            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(status?.bedTarget ?? printer.bedTarget ?? 0) > 0} />
+            <span className="text-xs text-slate-400 ml-auto">
               {formatTempWithTarget(
                 status?.bedTemp ?? printer.bedTemp,
                 status?.bedTarget ?? printer.bedTarget,
                 lastKnownBedTemp
               )}
             </span>
-            <TemperatureInput
-              value={bedTemp}
-              onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            />
           </div>
+
+          <div className="flex items-center h-5">
+            <span className="text-xs font-bold text-pf-text-secondary">PRESETS</span>
+          </div>
+
+          {/* Row 2: Inputs */}
+          <TemperatureInput
+            value={hotendTemp}
+            onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
+            onKeyDown={handleHotendTempKeyDown}
+          />
           
-          <div className="flex items-start mt-0">
+          <TemperatureInput
+            value={bedTemp}
+            onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
+            onKeyDown={handleBedTempKeyDown}
+          />
+          
+          <div className="flex gap-1 items-stretch h-9">
             <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={handleSetTemperatures}
-            >
-              SET
-            </Button>
-          </div>
-        </div>
-        
-        {/* Temperature Presets Row */}
-        <div className="flex flex-wrap gap-1 mt-3">
-          {[
-            { name: 'ABS', color: 'bg-gray-600' },
-            { name: 'ASA', color: 'bg-yellow-600' }, 
-            { name: 'PLA', color: 'bg-green-600' },
-            { name: 'PC', color: 'bg-purple-600' },
-            { name: 'PCTG', color: 'bg-cyan-600' },
-            { name: 'PETG', color: 'bg-red-600' }
-          ].map((preset) => (
-            <Button
-              key={preset.name}
               type="button"
               variant="secondary"
               size="sm"
               disabled={isPrinting}
-              onClick={() => handleApplyPreset(preset.name)}
-              className={preset.color}
+              onClick={() => handleApplyPreset('cooldown')}
+              title="Cooldown"
+              className="flex-shrink-0"
             >
-              {preset.name}
+              ❄
             </Button>
-          ))}
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={isPrinting}
-            title="Cooldown"
-            onClick={() => handleApplyPreset('cooldown')}
-          >
-            ❄
-          </Button>
+            <Select
+              value=""
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value) {
+                  handleApplyPreset(value);
+                }
+              }}
+              className="flex-1"
+            >
+              <option value="">---</option>
+              <option value="ABS">ABS</option>
+              <option value="ASA">ASA</option>
+              <option value="PLA">PLA</option>
+              <option value="PC">PC</option>
+              <option value="PCTG">PCTG</option>
+              <option value="PETG">PETG</option>
+            </Select>
+          </div>
         </div>
       </div>
 
-      {/* Move Section */}
+      {/* Move and Control Section - Side by Side */}
       <div className="mb-2">
-        <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-2 -ml-1">Move</div>
-        <div className="flex flex-col gap-2 items-start">
-          <div className="flex gap-4 items-start">
-            {/* XY Pad */}
-            <div className="grid grid-cols-3 grid-rows-3 gap-1 w-36 h-36">
-              {/* Top row */}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleHome()}
-                title="Home all axes"
-                className="w-full h-full !p-0"
-              >
-                <Home className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleMove('Y', step)}
-                className="w-full h-full !p-0"
-              >
-                ▲
-              </Button>
-              <div></div>
-              
-              {/* Middle row */}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleMove('X', -step)}
-                className="w-full h-full !p-0"
-              >
-                ◀
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleHome('xy')}
-                title="Home X/Y"
-                className="w-full h-full !p-0"
-              >
-                <Home className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleMove('X', step)}
-                className="w-full h-full !p-0"
-              >
-                ▶
-              </Button>
-              
-              {/* Bottom row */}
-              <div></div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleMove('Y', -step)}
-                className="w-full h-full !p-0"
-              >
-                ▼
-              </Button>
-              <div></div>
+        {/* Row 1: Labels and Pads side by side */}
+        <div className="flex gap-4 items-start">
+          {/* Left Column: Move */}
+          <div className="flex flex-col gap-2 items-start">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+              Move
             </div>
-
-            {/* Z Pad */}
-            <div className="flex flex-col gap-1">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleMove('Z', step)}
-                className="w-full !p-0"
-              >
-                Z+
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleHome('z')}
-                title="Home Z"
-                className="w-full !p-0"
-              >
-                <Home className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => handleMove('Z', -step)}
-                className="w-full !p-0"
-              >
-                Z-
-              </Button>
-            </div>
-
-            {/* Control Pad */}
-            <div className="flex flex-col gap-2 relative">
-              <div className="absolute -top-4 -left-1 text-xs uppercase text-pf-text-secondary font-bold tracking-wide">
-                Controls
+            <div className="flex gap-4 items-start">
+              {/* XY Pad */}
+              <div className="grid grid-cols-3 grid-rows-3 gap-1 w-40 h-36">
+                {/* Top row */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleHome()}
+                  title="Home all axes"
+                  className="w-full h-full !p-0"
+                >
+                  <Home className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleMove('Y', step)}
+                  className="w-full h-full !p-0"
+                >
+                  ▲
+                </Button>
+                <div></div>
+                
+                {/* Middle row */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleMove('X', -step)}
+                  className="w-full h-full !p-0"
+                >
+                  ◀
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleHome('xy')}
+                  title="Home X/Y"
+                  className="w-full h-full !p-0"
+                >
+                  <Home className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleMove('X', step)}
+                  className="w-full h-full !p-0"
+                >
+                  ▶
+                </Button>
+                
+                {/* Bottom row */}
+                <div></div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleMove('Y', -step)}
+                  className="w-full h-full !p-0"
+                >
+                  ▼
+                </Button>
+                <div></div>
               </div>
-              <div className="flex items-center gap-2 mt-2">
+
+              {/* Z Pad */}
+              <div className="flex flex-col gap-1 w-16 h-36">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleMove('Z', step)}
+                  className="flex-1 p-0"
+                >
+                  Z+
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleHome('z')}
+                  title="Home Z"
+                  className="flex-1 p-0"
+                >
+                  <Home className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isPrinting}
+                  onClick={() => handleMove('Z', -step)}
+                  className="flex-1 p-0"
+                >
+                  Z-
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Control */}
+          <div className="flex flex-col gap-2 items-start">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+              Control
+            </div>
+            <div className="flex flex-col gap-0 relative w-40 h-36">
+              {/* Control buttons row */}
+              <div className="flex items-stretch gap-1 flex-1">
                 <Button
                   type="button"
                   variant="secondary"
@@ -895,7 +937,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   disabled={!isPrinting}
                   onClick={() => handleControlAction('pause')}
                   title="Pause"
-                  className="!p-0"
+                  className="w-full h-full !p-0"
                 >
                   <Pause className="h-4 w-4" />
                 </Button>
@@ -906,7 +948,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   disabled={!isPaused}
                   onClick={() => handleControlAction('resume')}
                   title="Resume"
-                  className="!p-0"
+                  className="w-full h-full !p-0"
                 >
                   <Play className="h-4 w-4" />
                 </Button>
@@ -917,87 +959,91 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   disabled={!isOnline}
                   onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-                  className="!p-0"
+                  className="w-full h-full !p-0"
                 >
                   {isShutdown ? <RotateCcw className="h-4 w-4" /> : <AlertOctagon className="h-4 w-4" />}
                 </Button>
               </div>
               
-              {/* Step Block */}
-              <div className="flex flex-col gap-1">
-                <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Steps</div>
-                <div className="flex gap-1">
-                  {[1, 10, 50].map((stepValue) => (
-                    <Button
-                      key={stepValue}
-                      type="button"
-                      variant={step === stepValue ? 'primary' : 'secondary'}
-                      size="sm"
-                      onClick={() => handleStepChange(stepValue)}
-                    >
-                      {stepValue}
-                    </Button>
-                  ))}
+              {/* Steps label row - fixed h-12, aligned bottom */}
+              <div className="h-12 w-full flex items-end px-1">
+                <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+                  Steps
                 </div>
+              </div>
+              
+              {/* Step buttons row */}
+              <div className="flex items-stretch gap-1 flex-1">
+                {[1, 10, 50].map((stepValue) => (
+                  <Button
+                    key={stepValue}
+                    type="button"
+                    variant={step === stepValue ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => handleStepChange(stepValue)}
+                    className="w-full h-full !p-0"
+                  >
+                    {stepValue}
+                  </Button>
+                ))}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Axis Fields */}
-          <div className="flex flex-row gap-4 items-start mt-3">
-            <div className="flex flex-col items-center relative">
-              <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-20 text-center">
-                [ {formatPos(null, lastKnownX)} ]
-              </span>
-              <MovementInput
-                axis="X"
-                disabled={isPrinting}
-                value={moveX}
-                onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-              />
-            </div>
-            
-            <div className="flex flex-col items-center relative">
-              <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-20 text-center">
-                [ {formatPos(null, lastKnownY)} ]
-              </span>
-              <MovementInput
-                axis="Y"
-                disabled={isPrinting}
-                value={moveY}
-                onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-              />
-            </div>
-            
-            <div className="flex flex-col items-center relative">
-              <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-20 text-center">
-                [ {formatPos(null, lastKnownZ)} ]
-              </span>
-              <MovementInput
-                axis="Z"
-                disabled={isPrinting}
-                value={moveZ}
-                onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-              />
-            </div>
-            
-            <div className="flex items-start mt-0">
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                disabled={isPrinting}
-                onClick={() => {
-                  const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
-                  if (win.PrintFarmerDebug?.expandablePrinterCard) {
-                    console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
-                  }
-                }}
-              >
-                GO
-              </Button>
-            </div>
+        {/* Row 2: Axis Fields - 4 column grid, 2 rows, h-12 total, right-aligned labels */}
+        <div className="grid grid-cols-4 gap-2 mt-3 w-72 h-12">
+          {/* Row 1: Labels (right-aligned) */}
+          <div className="flex items-center justify-end pr-1">
+            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(null, lastKnownX)} ]</span>
           </div>
+          <div className="flex items-center justify-end pr-1">
+            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(null, lastKnownY)} ]</span>
+          </div>
+          <div className="flex items-center justify-end pr-1">
+            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(null, lastKnownZ)} ]</span>
+          </div>
+          <div className="flex items-center">
+            <span className="text-xs font-bold text-pf-text-secondary">GO</span>
+          </div>
+          
+          {/* Row 2: Inputs */}
+          <MovementInput
+            axis="X"
+            disabled={isPrinting}
+            value={moveX}
+            onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
+            className="!w-full"
+          />
+          <MovementInput
+            axis="Y"
+            disabled={isPrinting}
+            value={moveY}
+            onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
+            className="!w-full"
+          />
+          <MovementInput
+            axis="Z"
+            disabled={isPrinting}
+            value={moveZ}
+            onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
+            className="!w-full"
+          />
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={isPrinting}
+            onClick={() => {
+              const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+              if (win.PrintFarmerDebug?.expandablePrinterCard) {
+                console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
+              }
+            }}
+            className="w-full h-full !p-0"
+          >
+            GO
+          </Button>
         </div>
       </div>
 
