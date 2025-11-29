@@ -3,7 +3,7 @@
  * - Warns on unguarded console.log/debug/info in UI code unless surrounded by a PrintFarmerDebug check.
  * - Warns on JSX <pre>{...}</pre> with non-literal expression and JSON.stringify in JSX.
  */
-module.exports = {
+export default {
   meta: {
     type: 'problem',
     docs: {
@@ -17,7 +17,7 @@ module.exports = {
     schema: []
   },
   create(context) {
-    const sourceCode = context.getSourceCode();
+    const sourceCode = context.sourceCode;
 
     function isConsoleDebug(node) {
       return node && node.type === 'CallExpression' && node.callee && node.callee.type === 'MemberExpression' &&

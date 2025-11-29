@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Button } from '@/components/ui';
 import { apiClient } from '../services/api';
 
 export function ConfirmEmailPage() {
@@ -74,12 +75,13 @@ export function ConfirmEmailPage() {
               <p className="text-pf-text-muted mb-6">
                 {message}
               </p>
-              <button
+              <Button
+                variant="primary"
+                className="w-full"
                 onClick={() => navigate('/login')}
-                className="w-full bg-pf-accent hover:bg-pf-accent-hover text-white font-medium py-2.5 px-4 rounded transition-colors"
               >
                 Go to Login
-              </button>
+              </Button>
             </>
           )}
 
@@ -97,18 +99,20 @@ export function ConfirmEmailPage() {
                 {message}
               </p>
               <div className="space-y-3">
-                <button
+                <Button
+                  variant="primary"
+                  className="w-full"
                   onClick={() => navigate('/login')}
-                  className="w-full bg-pf-accent hover:bg-pf-accent-hover text-white font-medium py-2.5 px-4 rounded transition-colors"
                 >
                   Go to Login
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="w-full"
                   onClick={() => navigate('/')}
-                  className="w-full bg-pf-bg-2 hover:bg-pf-bg-3 text-pf-text font-medium py-2.5 px-4 rounded border border-pf-border transition-colors"
                 >
                   Go to Home
-                </button>
+                </Button>
               </div>
             </>
           )}

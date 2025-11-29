@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Filter, RefreshCw, ExternalLink, Package, Pencil, LayoutGrid, Table as TableIcon, Settings2 } from 'lucide-react';
 import { classifyColor, getRepresentativeHex } from '@/utils/colorFamilies';
 import { normalizeSpoolmanBaseUrl } from '@/utils/validation';
+import { Button, Checkbox } from '@/components/ui';
 import { ColorFamilySelect } from '@/components/ColorFamilySelect';
 import { ColorSwatch } from '@/components/ColorSwatch';
 import { SpoolUsageBar } from '@/components/SpoolUsageBar';
@@ -456,42 +457,43 @@ export function SpoolsPage() {
   <div className="flex gap-2 items-center">
           <div className="relative">
               {showColumnConfig ? (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="secondary"
                   aria-label="Configure columns"
                   title="Configure columns"
                   aria-haspopup="dialog"
                   aria-expanded="true"
                   aria-controls="column-config-panel"
                   onClick={() => setShowColumnConfig(false)}
-      className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 text-sm flex items-center justify-center transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <Settings2 className="h-4 w-4" />
-                </button>
+                </Button>
               ) : (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="secondary"
                   aria-label="Configure columns"
                   title="Configure columns"
                   aria-haspopup="dialog"
                   aria-expanded="false"
                   aria-controls="column-config-panel"
                   onClick={() => setShowColumnConfig(true)}
-      className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 text-sm flex items-center justify-center transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <Settings2 className="h-4 w-4" />
-                </button>
+                </Button>
               )}
               {showColumnConfig && (
                 <div id="column-config-panel" className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
                   <div className="flex justify-between items-center mb-1">
                     <div className="text-xs font-medium text-pf-text-secondary">Visible Columns</div>
-                    <button
-                      type="button"
-          className="text-xs text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 rounded px-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    <Button
+                      size="sm"
+                      variant="subtle"
                       onClick={() => setShowColumnConfig(false)}
                       aria-label="Close column configuration"
-                    >✕</button>
+                      className="text-xs px-1"
+                    >✕</Button>
                   </div>
                   <ul className="space-y-1 max-h-64 overflow-auto" aria-label="Column list">
                     {tableColumns.map((c, i) => (
@@ -506,29 +508,30 @@ export function SpoolsPage() {
                         data-dragging={dragColId === c.id ? 'true' : 'false'}
                         role="listitem"
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          id={`col-${c.id}`}
                           checked={c.visible}
                           onChange={() => toggleColumnVisibility(c.id)}
                           aria-label={`Toggle column ${c.label}`}
-                          className="rounded border-pf-border bg-pf-bg-0"
                         />
                         <span className="text-xs flex-1 truncate">{c.label}</span>
                         <div className="flex gap-1">
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
+                            variant="subtle"
                             onClick={() => moveColumn(c.id, -1)}
                             disabled={i === 0}
                             aria-label={`Move ${c.label} up`}
-                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2 active:bg-pf-bg-3 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          >▲</button>
-                          <button
-                            type="button"
+                            className="text-[10px] px-1 py-0.5"
+                          >▲</Button>
+                          <Button
+                            size="sm"
+                            variant="subtle"
                             onClick={() => moveColumn(c.id, 1)}
                             disabled={i === tableColumns.length - 1}
                             aria-label={`Move ${c.label} down`}
-                            className="text-[10px] px-1 py-0.5 border border-pf-border rounded disabled:opacity-30 hover:bg-pf-bg-2 active:bg-pf-bg-3 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          >▼</button>
+                            className="text-[10px] px-1 py-0.5"
+                          >▼</Button>
                         </div>
                       </li>
                     ))}
@@ -538,35 +541,37 @@ export function SpoolsPage() {
               )}
             </div>
           <div className="flex rounded overflow-hidden border border-pf-border">
-            <button
-              type="button"
+            <Button
+              variant={viewMode === 'cards' ? 'primary' : 'secondary'}
+              size="sm"
               aria-label="Card view"
               title="Card view"
-              className={`px-3 py-2 text-sm flex items-center gap-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500 ${viewMode === 'cards' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2'}`}
               onClick={() => setViewMode('cards')}
+              className="flex items-center gap-1"
             >
               <LayoutGrid className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant={viewMode === 'table' ? 'primary' : 'secondary'}
+              size="sm"
               aria-label="Table view"
               title="Table view"
-              className={`px-3 py-2 text-sm flex items-center gap-1 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500 ${viewMode === 'table' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2'}`}
               onClick={() => setViewMode('table')}
+              className="flex items-center gap-1"
             >
               <TableIcon className="h-4 w-4" />
-            </button>
+            </Button>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={loadSpools}
             disabled={loading || !spoolmanBaseUrl}
             aria-label="Refresh spools"
             title="Refresh spools"
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 flex items-center gap-2 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="flex items-center gap-2"
           >
             <RefreshCw className="h-4 w-4" />
-          </button>
+          </Button>
           {spoolmanBaseUrl && (
             <a
               href={spoolmanBaseUrl}
@@ -705,17 +710,19 @@ export function SpoolsPage() {
                   <option value="name">Name</option>
                   <option value="archived">Archived</option>
                 </select>
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="subtle"
                   aria-label="Toggle sort direction"
                   onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className="px-2 py-1 text-xs bg-pf-bg-0 border border-pf-border rounded hover:bg-pf-bg-2 active:bg-pf-bg-3 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >{sortDir === 'asc' ? '▲' : '▼'}</button>
-                <button
-                  type="button"
+                  className="text-xs px-2 py-1"
+                >{sortDir === 'asc' ? '▲' : '▼'}</Button>
+                <Button
+                  size="sm"
+                  variant="success"
                   onClick={handleExportCsv}
-                  className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 active:bg-green-800 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-green-500"
-                >Export CSV</button>
+                  className="text-xs px-2 py-1"
+                >Export CSV</Button>
               </div>
             </div>
           </div>

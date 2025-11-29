@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
 import { GcodeFile } from '@/types/api';
 import { PageTemplate } from '@/components/PageTemplate';
+import { Input, Select, FormField, Alert } from '@/components/ui';
 import { FolderOpen } from 'lucide-react';
 
 export const HarvestedFilesLibrary: React.FC = () => {
@@ -37,31 +38,34 @@ export const HarvestedFilesLibrary: React.FC = () => {
       maxWidth="max-w-7xl"
     >
       <div className="flex flex-wrap gap-4 mb-4 items-end">
-        <input
-          type="text"
-          placeholder="Search files..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="border px-3 py-2 rounded-md min-w-[200px]"
-        />
-        <label className="text-sm">Sort by:
-        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'name' | 'size' | 'date')} className="ml-2 border rounded-md px-2 py-1">
+        <FormField label="Search" className="flex-1">
+          <Input
+            type="text"
+            placeholder="Search files..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </FormField>
+        <FormField label="Sort by">
+          <Select value={sortBy} onChange={e => setSortBy(e.target.value as 'name' | 'size' | 'date')}>
             <option value="name">Name</option>
             <option value="size">Size</option>
             <option value="date">Date</option>
-          </select>
-        </label>
-        <label className="text-sm">Order:
-        <select value={sortOrder} onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')} className="ml-2 border rounded-md px-2 py-1">
+          </Select>
+        </FormField>
+        <FormField label="Order">
+          <Select value={sortOrder} onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}>
             <option value="desc">Newest</option>
             <option value="asc">Oldest</option>
-          </select>
-        </label>
+          </Select>
+        </FormField>
       </div>
       {loading ? (
         <div>Loading files...</div>
       ) : error ? (
-        <div className="text-red-500">{error}</div>
+        <Alert type="error" title="Error">
+          {error}
+        </Alert>
       ) : files.length === 0 ? (
         <div>No harvested files found.</div>
       ) : (
