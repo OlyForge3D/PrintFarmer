@@ -38,9 +38,9 @@ public class Worker
     public string Status { get; set; } = WorkerStatus.Offline;
 
     /// <summary>
-    /// Number of available job slots
+    /// Number of available job slots (calculated as TotalSlots - ActiveJobs)
     /// </summary>
-    public int FreeSlots { get; set; }
+    public int FreeSlots => Math.Max(0, TotalSlots - ActiveJobs);
 
     /// <summary>
     /// Total job capacity

@@ -137,7 +137,6 @@ namespace Farm.Web.Api.Services.Slicing
                     EndpointUrl = svc.Host ?? string.Empty,
                     CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
                     Status = WorkerStatus.Online,
-                    FreeSlots = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)),
                     TotalSlots = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)),
                     ActiveJobs = 0,
                     CompletedJobs = 0,
@@ -248,17 +247,12 @@ namespace Farm.Web.Api.Services.Slicing
                 {
                     // Update existing worker
                     worker.Status = MapStatus(dto.Status ?? svc.Status ?? "Online");
-                    worker.FreeSlots = dto.FreeSlots ?? worker.FreeSlots;
                     worker.LastHeartbeat = DateTime.UtcNow;
                     worker.UpdatedAt = DateTime.UtcNow;
 
-                    // NOTE: Do NOT recalculate ActiveJobs from TotalSlots - FreeSlots here.
-                    // Reason: If TotalSlots was recently updated in the UI but a stale heartbeat
-                    // arrives with the old FreeSlots value, recalculating will produce incorrect
-                    // ActiveJobs. For example: TotalSlots changed to 6, but heartbeat has FreeSlots=1
-                    // (from when TotalSlots was 5), recalculating would give ActiveJobs = 6-1 = 5 (wrong!).
-                    // ActiveJobs is tracked separately by the job dispatch service and should only be
-                    // updated when jobs actually start/complete, not from heartbeat data.
+                    // NOTE: FreeSlots is now calculated as TotalSlots - ActiveJobs
+                    // ActiveJobs is managed exclusively by JobDispatcherService (increment on dispatch, decrement on complete).
+                    // Do not update ActiveJobs from heartbeat data.
 
                     totalSlots = worker.TotalSlots;
                     await _repo.SaveChangesAsync(ct); // Worker entity tracked by same DbContext

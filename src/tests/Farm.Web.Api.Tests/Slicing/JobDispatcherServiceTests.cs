@@ -212,7 +212,7 @@ public class JobDispatcherServiceTests
             Id = Guid.NewGuid(),
             Name = "Worker-Orca",
             Status = WorkerStatus.Online,
-            FreeSlots = 2,
+            ActiveJobs = 2,
             TotalSlots = 4,
             CapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer", "gcode-generation" })
         };
@@ -221,7 +221,7 @@ public class JobDispatcherServiceTests
             Id = Guid.NewGuid(),
             Name = "Worker-Generic",
             Status = WorkerStatus.Online,
-            FreeSlots = 2,
+            ActiveJobs = 2,
             TotalSlots = 4,
             CapabilitiesJson = JsonSerializer.Serialize(new[] { "gcode-generation" })
         };

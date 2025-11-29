@@ -151,7 +151,8 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.LastHeartbeat = DateTime.UtcNow;
-            worker.FreeSlots = freeSlots;
+            // FreeSlots is now calculated as TotalSlots - ActiveJobs
+            // Calculate ActiveJobs from the reported freeSlots
             worker.TotalSlots = totalSlots;
             worker.ActiveJobs = totalSlots - freeSlots;
             worker.UpdatedAt = DateTime.UtcNow;
@@ -174,7 +175,7 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.ActiveJobs++;
-            worker.FreeSlots = Math.Max(0, worker.TotalSlots - worker.ActiveJobs);
+            // FreeSlots is calculated as TotalSlots - ActiveJobs
             worker.UpdatedAt = DateTime.UtcNow;
 
             if (worker.FreeSlots == 0)
@@ -190,7 +191,7 @@ public class EfWorkerRepository : IWorkerRepository
         if (worker != null)
         {
             worker.ActiveJobs = Math.Max(0, worker.ActiveJobs - 1);
-            worker.FreeSlots = Math.Max(0, worker.TotalSlots - worker.ActiveJobs);
+            // FreeSlots is calculated as TotalSlots - ActiveJobs
             worker.UpdatedAt = DateTime.UtcNow;
 
             if (success)

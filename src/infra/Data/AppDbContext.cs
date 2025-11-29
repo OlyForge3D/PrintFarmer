@@ -834,7 +834,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(w => w.EndpointUrl).IsRequired().HasMaxLength(2048);
             _ = b.Property(w => w.CapabilitiesJson).HasColumnType("TEXT");
             _ = b.Property(w => w.Status).IsRequired().HasMaxLength(50);
-            _ = b.Property(w => w.FreeSlots).IsRequired();
+            _ = b.Ignore(w => w.FreeSlots); // FreeSlots is calculated property
             _ = b.Property(w => w.TotalSlots).IsRequired();
             _ = b.Property(w => w.RegisteredAt).IsRequired();
             _ = b.Property(w => w.ApiKey).HasMaxLength(512);
@@ -848,7 +848,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(w => w.ServiceId).IsUnique();
             _ = b.HasIndex(w => w.Status);
             _ = b.HasIndex(w => w.LastHeartbeat);
-            _ = b.HasIndex(w => new { w.Status, w.FreeSlots }); // For worker selection
         });
 
         _ = modelBuilder.Entity<PasswordPolicyEntity>(b =>

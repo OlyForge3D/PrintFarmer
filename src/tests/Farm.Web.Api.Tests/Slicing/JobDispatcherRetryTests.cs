@@ -218,7 +218,7 @@ public class JobDispatcherRetryTests
             Id = Guid.NewGuid(),
             Name = "FlakyWorker",
             Status = WorkerStatus.Online,
-            FreeSlots = 1,
+            ActiveJobs = 0,
             TotalSlots = 1,
             CapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer" }),
             EndpointUrl = "http://localhost:5000"
