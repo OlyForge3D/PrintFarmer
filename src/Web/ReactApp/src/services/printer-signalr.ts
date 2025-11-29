@@ -69,7 +69,9 @@ export class PrinterSignalRService {
                 "Critical",
                 "None",
               ][logLevel] || "Unknown";
-            console.log(`[SignalR ${logLevelName}] ${message}`);
+            if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
+              console.log(`[SignalR ${logLevelName}] ${message}`);
+            }
           }
         },
       })
@@ -169,7 +171,9 @@ export class PrinterSignalRService {
     });
     // Discovery events - register only lowercase names for consistency
     const handleDiscoveryProgress = (progress: DiscoveryProgressDto) => {
-      console.log("[printerSignalR] DiscoveryProgress event received", progress);
+      if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
+        console.log("[printerSignalR] DiscoveryProgress event received", progress);
+      }
       this.discoveryProgressCallbacks.forEach((cb) => {
         try {
           cb(progress);
@@ -179,7 +183,9 @@ export class PrinterSignalRService {
       });
     };
     const handleDiscoveryPrinterFound = (found: DiscoveryPrinterFoundDto) => {
-      console.log("[printerSignalR] DiscoveryPrinterFound event received", found);
+      if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
+        console.log("[printerSignalR] DiscoveryPrinterFound event received", found);
+      }
       this.discoveryPrinterFoundCallbacks.forEach((cb) => {
         try {
           cb(found);
@@ -189,7 +195,9 @@ export class PrinterSignalRService {
       });
     };
     const handleDiscoveryCompleted = (completed: DiscoveryCompletedDto) => {
-      console.log("[printerSignalR] DiscoveryCompleted event received", completed);
+      if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
+        console.log("[printerSignalR] DiscoveryCompleted event received", completed);
+      }
       this.discoveryCompletedCallbacks.forEach((cb) => {
         try {
           cb(completed);
@@ -580,15 +588,19 @@ try {
     }
     try {
       await printerSignalRService.connect();
-      console.debug(
-        "[printerSignalR.debug] manual joinDiscoveryGroup",
-        sessionId
-      );
+      if (window.PrintFarmerDebug?.discovery) {
+        console.debug(
+          "[printerSignalR.debug] manual joinDiscoveryGroup",
+          sessionId
+        );
+      }
       await printerSignalRService.joinDiscoveryGroup(sessionId);
-      console.debug(
-        "[printerSignalR.debug] joinDiscoveryGroup complete",
-        sessionId
-      );
+      if (window.PrintFarmerDebug?.discovery) {
+        console.debug(
+          "[printerSignalR.debug] joinDiscoveryGroup complete",
+          sessionId
+        );
+      }
     } catch (err) {
       console.error("[printerSignalR.debug] joinDiscoveryGroup failed", err);
       throw err;
@@ -607,15 +619,19 @@ try {
       return;
     }
     try {
-      console.debug(
-        "[printerSignalR.debug] manual leaveDiscoveryGroup",
-        sessionId
-      );
+      if (window.PrintFarmerDebug?.discovery) {
+        console.debug(
+          "[printerSignalR.debug] manual leaveDiscoveryGroup",
+          sessionId
+        );
+      }
       await printerSignalRService.leaveDiscoveryGroup(sessionId);
-      console.debug(
-        "[printerSignalR.debug] leaveDiscoveryGroup complete",
-        sessionId
-      );
+      if (window.PrintFarmerDebug?.discovery) {
+        console.debug(
+          "[printerSignalR.debug] leaveDiscoveryGroup complete",
+          sessionId
+        );
+      }
     } catch (err) {
       console.error("[printerSignalR.debug] leaveDiscoveryGroup failed", err);
       throw err;

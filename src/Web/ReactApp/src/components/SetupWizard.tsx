@@ -1,7 +1,9 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useEffect } from 'react';
 import { User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info, Search, Wifi } from 'lucide-react';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/contexts/AuthHooks';
+import { Button } from '@/components/ui';
 import { useHealthStatus } from '@/hooks/useApi';
 import { useSpoolmanNetworkScan } from '@/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/utils/validation';
@@ -506,7 +508,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-2"><Lock className="inline h-4 w-4 mr-1"/>Password *</label>
         <div className="relative">
           <input id="password" type={showPassword ? 'text':'password'} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10" disabled={submitting} />
-          <button type="button" onClick={() => setShowPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary" disabled={submitting}>{showPassword ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}</button>
+          <Button
+            type="button"
+            onClick={() => setShowPassword(p => !p)}
+            variant="subtle"
+            size="sm"
+            className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+            disabled={submitting}
+            title={showPassword ? 'Hide password' : 'Show password'}
+          >
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </Button>
         </div>
         <ul className="mt-2 text-xs space-y-0.5">
           <li className={formData.password.length >= passwordPolicy.minLength ? 'text-green-500':'text-pf-text-tertiary'}>Min {passwordPolicy.minLength} characters</li>
@@ -523,7 +535,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         {fieldErrors.confirmPassword && <p className="text-xs text-red-500" role="alert">{fieldErrors.confirmPassword}</p>}
       </div>
       <div className="flex justify-end">
-        <button type="button" onClick={nextFromAccount} disabled={submitting} className="px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-accent-dark flex items-center gap-2"><CheckCircle className="h-4 w-4"/>Next</button>
+        <Button
+          type="button"
+          onClick={nextFromAccount}
+          disabled={submitting}
+          variant="primary"
+          className="flex items-center gap-2"
+        >
+          <CheckCircle className="h-4 w-4" />
+          Next
+        </Button>
       </div>
     </div>
   );
@@ -539,10 +560,25 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         {networkDiscoverySettings?.discoverySubnets.map((r: string, i: number) => (
           <div key={i} className="flex gap-2">
             <input value={r} onChange={e => updateNetworkRange(i, e.target.value)} placeholder="192.168.1.0/24" className="flex-1 px-3 py-2 bg-pf-bg-2 border border-pf-border rounded" />
-            <button type="button" onClick={() => removeNetworkRange(i)} className="px-3 py-2 text-red-400" aria-label="Remove range">×</button>
+            <Button
+              type="button"
+              onClick={() => removeNetworkRange(i)}
+              variant="danger"
+              size="sm"
+              aria-label="Remove range"
+            >
+              ×
+            </Button>
           </div>
         ))}
-        <button type="button" onClick={addNetworkRange} className="px-3 py-2 bg-pf-bg-2 border border-pf-border rounded text-sm">Add Range</button>
+        <Button
+          type="button"
+          onClick={addNetworkRange}
+          variant="secondary"
+          size="sm"
+        >
+          Add Range
+        </Button>
         {networkErrors && <p className="text-xs text-red-500" role="alert">{networkErrors}</p>}
       </div>
       {/* Advanced network scan settings */}
@@ -597,8 +633,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       </div>
       <div className="flex justify-between">
-        <button type="button" onClick={goBack} className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded">Back</button>
-        <button type="button" onClick={nextFromNetwork} className="px-4 py-2 bg-pf-accent text-white rounded">Next</button>
+        <Button type="button" onClick={goBack} variant="secondary">
+          Back
+        </Button>
+        <Button
+          type="button"
+          onClick={nextFromNetwork}
+          variant="primary"
+        >
+          Next
+        </Button>
       </div>
     </div>
   );
@@ -718,8 +762,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
       <div className="flex justify-between">
-        <button type="button" onClick={goBack} className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded">Back</button>
-        <button type="button" onClick={nextFromSpoolman} className="px-4 py-2 bg-pf-accent text-white rounded">Next</button>
+        <Button type="button" onClick={goBack} variant="secondary">
+          Back
+        </Button>
+        <Button
+          type="button"
+          onClick={nextFromSpoolman}
+          variant="primary"
+        >
+          Next
+        </Button>
       </div>
     </div>
   );
@@ -764,8 +816,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         )}
       </div>
       <div className="flex justify-between">
-        <button type="button" onClick={goBack} className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded">Back</button>
-        <button type="button" onClick={nextFromPresets} className="px-4 py-2 bg-pf-accent text-white rounded">Next</button>
+        <Button type="button" onClick={goBack} variant="secondary">
+          Back
+        </Button>
+        <Button
+          type="button"
+          onClick={nextFromPresets}
+          variant="primary"
+        >
+          Next
+        </Button>
       </div>
     </div>
   );
@@ -802,8 +862,33 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
         {globalError && <div className="text-sm text-red-500" role="alert">{globalError}</div>}
         <div className="flex justify-between">
-          <button type="button" onClick={goBack} className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded" disabled={submitting}>Back</button>
-          <button type="button" onClick={finalizeSetup} disabled={submitting} className="px-4 py-2 bg-green-600 text-white rounded flex items-center gap-2">{submitting ? (<><div className="pf-animate-spin h-4 w-4 border-b-2 border-white rounded-full"></div>Finishing...</>) : (<><CheckCircle className="h-4 w-4"/>Finish Setup</> )}</button>
+          <Button
+            type="button"
+            onClick={goBack}
+            variant="secondary"
+            disabled={submitting}
+          >
+            Back
+          </Button>
+          <Button
+            type="button"
+            onClick={finalizeSetup}
+            disabled={submitting}
+            variant="success"
+            className="flex items-center gap-2"
+          >
+            {submitting ? (
+              <>
+                <div className="pf-animate-spin h-4 w-4 border-b-2 border-white rounded-full"></div>
+                Finishing...
+              </>
+            ) : (
+              <>
+                <CheckCircle className="h-4 w-4" />
+                Finish Setup
+              </>
+            )}
+          </Button>
         </div>
       </div>
     );

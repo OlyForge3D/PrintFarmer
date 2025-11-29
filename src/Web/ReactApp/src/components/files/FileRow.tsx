@@ -12,6 +12,7 @@ import { GcodeFile } from '@/types/api';
 import { useAuth } from '@/contexts/AuthHooks';
 import { toast } from 'sonner';
 import { useFileHash } from '@/hooks/useFileHash';
+import { Button, Checkbox, Input } from '@/components/ui';
 
 interface FileRowProps {
   file: GcodeFile;
@@ -76,14 +77,12 @@ export const FileRow: React.FC<FileRowProps> = ({
 
   return (
   <div className="px-4 py-3 hover:bg-pf-hover flex items-center" onContextMenu={onContextMenu}>
-      <input
-        type="checkbox"
-        aria-label={`Select ${file.name}`}
-        title={`Select ${file.name}`}
+      <Checkbox
         checked={selected}
         onChange={(e) => onSelect(e.target.checked)}
-  className="mr-4 accent-pf-accent"
-        onClick={(e) => e.stopPropagation()}
+        className="mr-4"
+        title={`Select ${file.name}`}
+        aria-label={`Select ${file.name}`}
       />
       <div
   className="flex-1 grid grid-cols-12 gap-4 text-sm cursor-pointer"
@@ -109,27 +108,30 @@ export const FileRow: React.FC<FileRowProps> = ({
                 }}
                 className="flex items-center gap-2"
               >
-                <input
+                <Input
+                  type="text"
                   aria-label="Rename folder"
                   title="Rename folder"
                   value={nameInput}
                   onChange={e => setNameInput(e.target.value)}
                   autoFocus
                   onKeyDown={e => { if (e.key === 'Escape') { setRenaming(false); setNameInput(file.name); } }}
-                  className="px-1 py-0.5 border border-pf-border rounded text-sm bg-pf-bg-0 text-pf-text-primary"
+                  className="text-sm"
                 />
-                <button type="submit" className="text-xs px-2 py-0.5 bg-pf-accent text-white rounded hover:bg-pf-accent-dark">Save</button>
-                <button type="button" onClick={() => { setRenaming(false); setNameInput(file.name); }} className="text-xs px-2 py-0.5 border border-pf-border rounded bg-pf-bg-1 hover:bg-pf-hover">Cancel</button>
+                <Button type="submit" variant="primary" size="sm" className="text-xs">Save</Button>
+                <Button type="button" variant="secondary" size="sm" className="text-xs" onClick={() => { setRenaming(false); setNameInput(file.name); }}>Cancel</Button>
               </form>
             ) : (
               <div className="font-medium text-pf-text-primary truncate flex items-center gap-2">
                 <span>{file.name}</span>
                 {file.isDirectory && hasPermission('gcode_harvest', 'update') && onRename && (
-                  <button
+                  <Button
                     type="button"
-                    className="text-xs text-pf-accent hover:underline"
+                    variant="subtle"
+                    size="sm"
+                    className="text-xs"
                     onClick={(e) => { e.stopPropagation(); setRenaming(true); }}
-                  >Rename</button>
+                  >Rename</Button>
                 )}
               </div>
             )}
@@ -148,19 +150,23 @@ export const FileRow: React.FC<FileRowProps> = ({
         {/* Actions */}
   <div className="col-span-2 flex items-center space-x-2">
           {!file.isDirectory && onDownload && hasPermission('gcode_harvest', 'read') && (
-            <button
+            <Button
               onClick={(e) => { e.stopPropagation(); onDownload(); }}
-              className="p-1 text-pf-text-tertiary hover:text-pf-accent"
+              variant="subtle"
+              size="sm"
               title="Download file"
+              className="!p-1"
             >
               <ArrowDownTrayIcon className="w-4 h-4" />
-            </button>
+            </Button>
           )}
           {!file.isDirectory && hasPermission('gcode_harvest', 'read') && (
-            <button
+            <Button
               onClick={fetchHash}
-              className="p-1 text-pf-text-tertiary hover:text-pf-success relative"
-              title={hashValue ? `Hash: ${hashValue}` : (hashing ? 'Computing hash…' : `Compute & copy ${hashAlgo.toUpperCase()} hash`)}
+              variant="subtle"
+              size="sm"
+              title={hashValue ? `Hash: ${hashValue}` : (hashing ? 'Computing hash...' : `Compute & copy ${hashAlgo.toUpperCase()} hash`)}
+              className="!p-1 relative"
             >
               <ClipboardIcon className={`w-4 h-4 ${hashing ? 'opacity-40' : ''}`} />
               {hashing && (
@@ -171,16 +177,18 @@ export const FileRow: React.FC<FileRowProps> = ({
                   </svg>
                 </span>
               )}
-            </button>
+            </Button>
           )}
           {onDelete && hasPermission('gcode_harvest', 'delete') && (
-            <button
+            <Button
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="p-1 text-pf-text-tertiary hover:text-pf-error"
+              variant="subtle"
+              size="sm"
               title="Delete file"
+              className="!p-1 hover:text-pf-error"
             >
               <TrashIcon className="w-4 h-4" />
-            </button>
+            </Button>
           )}
         </div>
       </div>

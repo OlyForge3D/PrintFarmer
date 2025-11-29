@@ -11,12 +11,7 @@ import { PageTemplate } from '@/components/PageTemplate';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { toast } from 'sonner';
 import { Trash2, Edit, CheckSquare, Square } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Select } from '@/components/ui/Select';
-import { Checkbox } from '@/components/ui/Checkbox';
-import { Alert } from '@/components/ui/Alert';
-import { Tooltip } from '@/components/ui/Tooltip';
-import { Label } from '@/components/ui/Label';
+import { Alert, Button, Checkbox, FileUpload, Label, Select, Tooltip } from '@/components/ui';
 import type { Printer } from '@/types/api';
 
 export function PrintersAdminPage() {
@@ -62,7 +57,9 @@ export function PrintersAdminPage() {
       try {
         // Fetch network discovery settings
         const settings = await apiClient.getSettings<import('@/types/NetworkDiscoverySettings').NetworkDiscoverySettings>('NetworkDiscovery');
-        console.log('Discovery settings:', settings);
+        if (window.PrintFarmerDebug?.discovery) {
+          console.log('Discovery settings:', settings);
+        }
         
         // Discovery is available if:
         // 1. EnableDiscovery is true AND
@@ -72,7 +69,9 @@ export function PrintersAdminPage() {
           ? new Date().getTime() - new Date(settings.lastHeartbeat).getTime() < 60000 // 60 seconds
           : false;
         
-        console.log('Discovery check:', { isEnabled, lastHeartbeat: settings?.lastHeartbeat, hasRecentHeartbeat });
+        if (window.PrintFarmerDebug?.discovery) {
+          console.log('Discovery check:', { isEnabled, lastHeartbeat: settings?.lastHeartbeat, hasRecentHeartbeat });
+        }
         setDiscoveryAvailable(isEnabled && hasRecentHeartbeat);
         
         if (isEnabled && !hasRecentHeartbeat) {
@@ -499,7 +498,7 @@ export function PrintersAdminPage() {
               ) : 'Export printers'}
             </Button>
             <Button variant="primary" aria-label="Open file picker to import printers" onClick={handleImportClick}>Import printers</Button>
-            <input aria-label="Import printers CSV or JSON file" ref={fileInputRef} type="file" accept=".csv,.json,text/csv,application/json" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+            <FileUpload aria-label="Import printers CSV or JSON file" ref={fileInputRef} accept=".csv,.json,text/csv,application/json" onChange={(files) => handleFile(files?.[0])} className="hidden" />
           </div>
 
           {showExportOptions && (

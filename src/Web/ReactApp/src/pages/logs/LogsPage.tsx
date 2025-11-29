@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { Button, Input, FormField } from '@/components/ui';
 
 interface SystemLog {
   id: number;
@@ -65,15 +66,25 @@ export default function LogsPage() {
     <div className="p-6 max-w-6xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">System Logs</h1>
       <div className="mb-4 grid grid-cols-1 md:grid-cols-5 gap-2">
-        <input className="border p-2" placeholder="CorrelationId" value={filters.correlationId} onChange={e => setFilters(f => ({ ...f, correlationId: e.target.value }))} />
-        <input className="border p-2" placeholder="Level" value={filters.level} onChange={e => setFilters(f => ({ ...f, level: e.target.value }))} />
-        <input className="border p-2" type="date" placeholder="From" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
-        <input className="border p-2" type="date" placeholder="To" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
-        <input className="border p-2" placeholder="Metadata" value={filters.metadata} onChange={e => setFilters(f => ({ ...f, metadata: e.target.value }))} />
+        <FormField label="CorrelationId" inline>
+          <Input placeholder="CorrelationId" value={filters.correlationId} onChange={e => setFilters(f => ({ ...f, correlationId: e.target.value }))} />
+        </FormField>
+        <FormField label="Level" inline>
+          <Input placeholder="Level" value={filters.level} onChange={e => setFilters(f => ({ ...f, level: e.target.value }))} />
+        </FormField>
+        <FormField label="From" inline>
+          <Input type="date" placeholder="From" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
+        </FormField>
+        <FormField label="To" inline>
+          <Input type="date" placeholder="To" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
+        </FormField>
+        <FormField label="Metadata" inline>
+          <Input placeholder="Metadata" value={filters.metadata} onChange={e => setFilters(f => ({ ...f, metadata: e.target.value }))} />
+        </FormField>
       </div>
       <div className="mb-4 flex gap-2">
-        <button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={fetchLogs} disabled={loading}>Search</button>
-        <button className="bg-green-600 text-white px-4 py-2 rounded" onClick={exportLogs}>Export</button>
+        <Button variant="primary" onClick={fetchLogs} disabled={loading}>Search</Button>
+        <Button variant="success" onClick={exportLogs}>Export</Button>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full border">

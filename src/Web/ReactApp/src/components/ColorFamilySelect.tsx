@@ -73,7 +73,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
   return (
     <div className="relative" aria-label={label} id={id ? id + '-wrapper' : undefined}>
       <Button
-        ref={btnRef as any}
+        ref={btnRef as React.RefObject<HTMLButtonElement>}
         variant="secondary"
         size="sm"
         aria-haspopup="listbox"

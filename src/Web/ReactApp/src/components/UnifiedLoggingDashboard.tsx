@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useUnifiedLogging } from '../hooks/useUnifiedLogging';
 import { LogEntry } from '../services/unifiedLogging';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { Button, Select } from '@/components/ui';
 
 export interface UnifiedLoggingDashboardProps {
   maxEntries?: number;
@@ -85,39 +86,48 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
       <div className="px-4 py-3 border-b border-pf-border">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <button
+            <Button
+              type="button"
               onClick={() => setIsExpanded(!isExpanded)}
-              className="flex items-center space-x-2 text-pf-text-primary hover:text-pf-accent"
+              variant="subtle"
+              size="sm"
+              className="!p-0 !h-auto"
             >
               <span className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
                 ►
               </span>
-              <h3 className="text-lg font-semibold">Unified Logging Dashboard</h3>
-            </button>
+              <h3 className="text-lg font-semibold ml-2">Unified Logging Dashboard</h3>
+            </Button>
             <span className="bg-pf-bg-2 text-pf-accent text-xs font-medium px-2.5 py-0.5 rounded">
               {filteredLogs.length} / {logs.length} logs
             </span>
           </div>
           
           <div className="flex items-center space-x-2">
-            <button
+            <Button
+              type="button"
               onClick={handleTestLogs}
-              className="px-3 py-1 text-xs font-medium text-pf-accent bg-pf-bg-2 rounded hover:bg-pf-accent hover:text-white transition-colors"
+              variant="secondary"
+              size="sm"
             >
               Test Logs
-            </button>
-            <button
+            </Button>
+            <Button
+              type="button"
               onClick={handleDownloadLogs}
-              className="px-3 py-1 text-xs font-medium text-pf-success bg-pf-bg-2 rounded hover:bg-pf-success hover:text-white transition-colors"
+              variant="secondary"
+              size="sm"
             >
               Download
-            </button>
-            <button
+            </Button>
+            <Button
+              type="button"
               onClick={handleClearLogs}
-              className="px-3 py-1 text-xs font-medium text-pf-error bg-pf-bg-2 rounded hover:bg-pf-error hover:text-white transition-colors"
+              variant="danger"
+              size="sm"
             >
               Clear
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -131,24 +141,24 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
               <label htmlFor="level-filter" className="text-sm font-medium text-pf-text-primary">
                 Level:
               </label>
-              <select
+              <Select
                 id="level-filter"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as typeof filter)}
-                className="text-sm border border-pf-border rounded px-2 py-1 bg-pf-bg-0 text-pf-text-primary focus:ring-2 focus:ring-pf-accent focus:border-transparent"
               >
                 <option value="all">All</option>
                 <option value="error">Error</option>
                 <option value="warn">Warning</option>
                 <option value="info">Info</option>
                 <option value="debug">Debug</option>
-              </select>
+              </Select>
             </div>
             
             <div className="flex items-center space-x-2">
               <label htmlFor="search-logs" className="text-sm font-medium text-pf-text-primary">
                 Search:
               </label>
+              {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
               <input
                 id="search-logs"
                 type="text"

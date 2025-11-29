@@ -4,6 +4,7 @@ import { SettingsPagelet, SettingMetadata, SettingValue } from '../components/Se
 import { SettingInputType } from '../types/SettingInputType';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Settings } from 'lucide-react';
+import { Button } from '@/components/ui';
 import {
   fetchSettingsMetadata,
   saveAllSettings,
@@ -190,9 +191,13 @@ export function SettingsPage() {
             />
           ))}
           {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
-          <button type="submit" className="px-5 py-2 bg-pf-accent text-white rounded-lg font-semibold shadow hover:bg-pf-accent-dark disabled:opacity-50 transition mt-6" disabled={saving}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={saving}
+          >
             {saving ? 'Saving...' : 'Save All'}
-          </button>
+          </Button>
         </form>
       )}
     </PageTemplate>

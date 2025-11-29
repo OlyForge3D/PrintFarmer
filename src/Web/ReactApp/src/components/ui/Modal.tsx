@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useEffect, useCallback } from 'react';
 import clsx from 'clsx';
 import { X } from 'lucide-react';

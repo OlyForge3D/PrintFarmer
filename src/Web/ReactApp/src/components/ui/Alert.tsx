@@ -1,9 +1,10 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
 import clsx from 'clsx';
 
 export type AlertType = 'success' | 'error' | 'info' | 'warning';
 
-interface AlertProps {
+export interface AlertProps {
   type?: AlertType;
   title?: string;
   children: React.ReactNode;

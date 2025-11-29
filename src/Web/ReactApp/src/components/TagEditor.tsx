@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 interface Tag {
     id: string;
@@ -94,17 +95,21 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                         style={{ backgroundColor: tag.color || '#6366f1' }}
                     >
                         <span>{tag.name}</span>
-                        <button
+                        <Button
+                            type="button"
+                            variant="subtle"
+                            size="sm"
                             onClick={() => removeTag(tag.id)}
-                            className="hover:opacity-80 transition-opacity"
+                            className="!p-0 !h-auto hover:opacity-80"
                             title="Remove tag"
                         >
                             <X className="w-3 h-3" />
-                        </button>
+                        </Button>
                     </div>
                 ))}
 
                 {/* Input field */}
+                {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
                 <input
                     ref={inputRef}
                     type="text"
@@ -181,10 +186,12 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                     <div className="p-2 space-y-1">
                         {/* Existing matching tags */}
                         {filteredSuggestions.map(tag => (
-                            <button
-                                key={tag.id}
+                            <Button
+                                type="button"
+                                variant="subtle"
+                                size="sm"
                                 onClick={() => selectTag(tag.id)}
-                                className="w-full flex items-center gap-3 p-2 rounded hover:bg-pf-bg-1 transition-colors text-left"
+                                className="w-full flex items-center gap-3 p-2 rounded text-left !justify-start"
                             >
                                 <div
                                     className="w-3 h-3 rounded-full flex-shrink-0"
@@ -196,7 +203,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                                         <div className="text-pf-text-tertiary text-xs truncate">{tag.description}</div>
                                     )}
                                 </div>
-                            </button>
+                            </Button>
                         ))}
                     </div>
                 </div>

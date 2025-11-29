@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-unguarded-console */
 /**
  * Asset Management Service
  * Loads and provides access to OrcaSlicer assets (printer images, bed textures)

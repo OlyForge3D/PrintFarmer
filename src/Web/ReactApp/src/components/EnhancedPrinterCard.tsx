@@ -11,6 +11,7 @@ import {
   ChevronDown, ChevronUp, Cog, Play, Pause, Square as StopIcon, Home, Upload, RefreshCw,
   Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, Move, FileText
 } from 'lucide-react';
+import { Button, Input, FileUpload } from '@/components/ui';
 
 interface EnhancedPrinterCardProps { printer: Printer; }
 interface TempPresets { [k: string]: { hotend: number; bed: number }; }
@@ -101,11 +102,50 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
           </div>
           <div className="flex items-center space-x-2">
             {hasPermission('printers', 'execute') && currentStatus.isOnline && <>
-              <button type="button" onClick={handlePause} disabled={!isPrinting} className="p-2 text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed" title="Pause"><Pause className="h-4 w-4" /></button>
-              <button type="button" onClick={handleResume} disabled={!isPaused} className="p-2 text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed" title="Resume"><Play className="h-4 w-4" /></button>
-              <button type="button" onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop} className={`p-2 ${isShutdown ? 'text-amber-600 hover:text-amber-700' : 'text-red-500 hover:text-red-700'}`} title={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}>{isShutdown ? <RotateCcw className="h-4 w-4" /> : <StopIcon className="h-4 w-4" />}</button>
-            </>}
-            <button type="button" onClick={() => setIsExpanded(true)} className="p-2 text-gray-500 hover:text-gray-700" title="Expand"><ChevronDown className="h-4 w-4" /></button>
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={handlePause}
+                disabled={!isPrinting}
+                title="Pause"
+                className="!p-2 !h-auto"
+              >
+                <Pause className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={handleResume}
+                disabled={!isPaused}
+                title="Resume"
+                className="!p-2 !h-auto"
+              >
+                <Play className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant={isShutdown ? 'secondary' : 'danger'}
+                size="sm"
+                onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop}
+                title={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}
+                className="!p-2 !h-auto"
+              >
+                {isShutdown ? <RotateCcw className="h-4 w-4" /> : <StopIcon className="h-4 w-4" />}
+              </Button>
+            </>
+            }
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={() => setIsExpanded(true)}
+              title="Expand"
+              className="!p-2 !h-auto"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </Button>
           </div>
         </div>
         {progressNow > 0 && (
@@ -138,17 +178,49 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
                 <span>{printer.serverUrl}</span>
                 <a href={`${printer.serverUrl}${printer.frontendPort && printer.frontendPort !== 80 && printer.frontendPort !== 443 ? ':' + printer.frontendPort : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700" aria-label="Open printer server URL in new tab" title="Open printer server URL in new tab"><ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
                 {(currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl) && (
-                  <button type="button" onClick={() => setIsCameraVisible(!isCameraVisible)} className="text-blue-500 hover:text-blue-700" title={isCameraVisible ? 'Hide camera' : 'Show camera'}>
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    onClick={() => setIsCameraVisible(!isCameraVisible)}
+                    title={isCameraVisible ? 'Hide camera' : 'Show camera'}
+                    className="!p-0 !h-auto text-blue-500 hover:text-blue-700"
+                  >
                     {isCameraVisible ? <CameraOff className="h-3 w-3" /> : <Camera className="h-3 w-3" />}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <button type="button" onClick={() => setIsExpanded(false)} className="p-2 text-gray-500 hover:text-gray-700" title="Collapse"><ChevronUp className="h-4 w-4" /></button>
-            <button type="button" className="p-2 text-gray-500 hover:text-gray-700" title="History"><History className="h-4 w-4" /></button>
-            <button type="button" className="p-2 text-gray-500 hover:text-gray-700" title="Settings"><Cog className="h-4 w-4" /></button>
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={() => setIsExpanded(false)}
+              title="Collapse"
+              className="!p-2 !h-auto"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              title="History"
+              className="!p-2 !h-auto"
+            >
+              <History className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              title="Settings"
+              className="!p-2 !h-auto"
+            >
+              <Cog className="h-4 w-4" />
+            </Button>
           </div>
         </div>
         {isCameraVisible && (currentStatus.cameraSnapshotUrl || currentStatus.cameraStreamUrl) && (
@@ -169,21 +241,139 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
       <div className="p-4 border-b border-gray-200">
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><Thermometer className="h-4 w-4 mr-2" />Temperatures</h4>
         <div className="grid grid-cols-3 gap-4 mb-3">
-          <div><label className="block text-xs text-gray-500 mb-1" htmlFor={`hotend-${printer.id}`}>Hotend</label><div className="relative"><input id={`hotend-${printer.id}`} type="number" value={tempInputs.hotend} onChange={(e) => setTempInputs(p => ({ ...p, hotend: Number(e.target.value) }))} className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500" disabled={isPrinting} aria-label="Hotend target temperature" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">°C</span></div><div className="text-xs text-gray-500 mt-1">[{formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}]</div></div>
-          <div><label className="block text-xs text-gray-500 mb-1" htmlFor={`bed-${printer.id}`}>Bed</label><div className="relative"><input id={`bed-${printer.id}`} type="number" value={tempInputs.bed} onChange={(e) => setTempInputs(p => ({ ...p, bed: Number(e.target.value) }))} className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500" disabled={isPrinting} aria-label="Bed target temperature" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">°C</span></div><div className="text-xs text-gray-500 mt-1">[{formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}]</div></div>
-          <div className="flex items-end"><button type="button" onClick={handleSetTemperatures} disabled={isPrinting} className="w-full px-3 py-1 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded">SET</button></div>
+          <div><label className="block text-xs text-gray-500 mb-1" htmlFor={`hotend-${printer.id}`}>Hotend</label><div className="relative"><Input id={`hotend-${printer.id}`} type="number" value={tempInputs.hotend} onChange={(e) => setTempInputs(p => ({ ...p, hotend: Number(e.target.value) }))} disabled={isPrinting} aria-label="Hotend target temperature" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">°C</span></div><div className="text-xs text-gray-500 mt-1">[{formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}]</div></div>
+          <div><label className="block text-xs text-gray-500 mb-1" htmlFor={`bed-${printer.id}`}>Bed</label><div className="relative"><Input id={`bed-${printer.id}`} type="number" value={tempInputs.bed} onChange={(e) => setTempInputs(p => ({ ...p, bed: Number(e.target.value) }))} disabled={isPrinting} aria-label="Bed target temperature" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">°C</span></div><div className="text-xs text-gray-500 mt-1">[{formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}]</div></div>
+          <div className="flex items-end"><Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={handleSetTemperatures}
+                disabled={isPrinting}
+                className="w-full"
+              >
+                SET
+              </Button></div>
         </div>
-  <div className="flex flex-wrap gap-2">{Object.keys(DEFAULT_PRESETS).map(m => <button type="button" key={m} onClick={() => handleApplyPreset(m as keyof TempPresets)} disabled={isPrinting} className="px-3 py-1 text-xs font-medium text-white bg-gray-600 hover:bg-gray-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded" title={`${DEFAULT_PRESETS[m].hotend}°/${DEFAULT_PRESETS[m].bed}°`}>{m.toUpperCase()}</button>)}<button type="button" onClick={() => handleApplyPreset('pla')} disabled={isPrinting} className="px-3 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded" title="Cooldown (0°/0°)">❄</button></div>
+  <div className="flex flex-wrap gap-2">{Object.keys(DEFAULT_PRESETS).map(m => <Button
+              type="button"
+              key={m}
+              variant="secondary"
+              size="sm"
+              onClick={() => handleApplyPreset(m as keyof TempPresets)}
+              disabled={isPrinting}
+              title={`${DEFAULT_PRESETS[m].hotend}°/${DEFAULT_PRESETS[m].bed}°`}
+            >
+              {m.toUpperCase()}
+            </Button>)}<Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={() => handleApplyPreset('pla')}
+            disabled={isPrinting}
+            title="Cooldown (0°/0°)"
+          >
+            ❄
+          </Button></div>
       </div>
       <div className="p-4 border-b border-gray-200">
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><Move className="h-4 w-4 mr-2" />Movement</h4>
         <div className="grid grid-cols-2 gap-4">
-          <div><div className="grid grid-cols-3 gap-1 mb-2 text-center"><div /><button type="button" onClick={() => handleMove(null, moveStep, null)} disabled={isPrinting} className="p-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:cursor-not-allowed rounded">▲</button><div /><button type="button" onClick={() => handleMove(-moveStep, null, null)} disabled={isPrinting} className="p-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:cursor-not-allowed rounded">◀</button><button type="button" onClick={handleHomeXY} disabled={isPrinting} className="p-2 text-sm bg-gray-200 hover:bg-gray-300 disabled:bg-gray-50 disabled:cursor-not-allowed rounded" title="Home XY"><Home className="h-3 w-3 mx-auto" /></button><button type="button" onClick={() => handleMove(moveStep, null, null)} disabled={isPrinting} className="p-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:cursor-not-allowed rounded">▶</button><div /><button type="button" onClick={() => handleMove(null, -moveStep, null)} disabled={isPrinting} className="p-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:cursor-not-allowed rounded">▼</button><div /></div><div className="text-center text-xs text-gray-500">X: {formatPosition(currentStatus.x)} Y: {formatPosition(currentStatus.y)}</div></div>
-          <div className="text-center"><div className="space-y-1 mb-2"><button type="button" onClick={() => handleMove(null, null, moveStep)} disabled={isPrinting} className="w-full p-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:cursor-not-allowed rounded">Z+</button><button type="button" onClick={handleHomeZ} disabled={isPrinting} className="w-full p-2 text-sm bg-gray-200 hover:bg-gray-300 disabled:bg-gray-50 disabled:cursor-not-allowed rounded" title="Home Z"><Home className="h-3 w-3 mx-auto" /></button><button type="button" onClick={() => handleMove(null, null, -moveStep)} disabled={isPrinting} className="w-full p-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:cursor-not-allowed rounded">Z-</button></div><div className="text-xs text-gray-500">Z: {formatPosition(currentStatus.z)}</div></div>
+          <div><div className="grid grid-cols-3 gap-1 mb-2 text-center"><div /><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleMove(null, moveStep, null)}
+                disabled={isPrinting}
+                className="p-2"
+              >
+                ▲
+              </Button><div /><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleMove(-moveStep, null, null)}
+                disabled={isPrinting}
+                className="p-2"
+              >
+                ◀
+              </Button><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={handleHomeXY}
+                disabled={isPrinting}
+                title="Home XY"
+                className="p-2"
+              >
+                <Home className="h-3 w-3 mx-auto" />
+              </Button><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleMove(moveStep, null, null)}
+                disabled={isPrinting}
+                className="p-2"
+              >
+                ▶
+              </Button><div /><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleMove(null, -moveStep, null)}
+                disabled={isPrinting}
+                className="p-2"
+              >
+                ▼
+              </Button><div /></div><div className="text-center text-xs text-gray-500">X: {formatPosition(currentStatus.x)} Y: {formatPosition(currentStatus.y)}</div></div>
+          <div className="text-center"><div className="space-y-1 mb-2"><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleMove(null, null, moveStep)}
+                disabled={isPrinting}
+                className="w-full"
+              >
+                Z+
+              </Button><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={handleHomeZ}
+                disabled={isPrinting}
+                title="Home Z"
+                className="w-full"
+              >
+                <Home className="h-3 w-3 mx-auto" />
+              </Button><Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleMove(null, null, -moveStep)}
+                disabled={isPrinting}
+                className="w-full"
+              >
+                Z-
+              </Button></div><div className="text-xs text-gray-500">Z: {formatPosition(currentStatus.z)}</div></div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-4">
-          <div><label className="block text-xs text-gray-500 mb-1">Step Size</label><div className="flex space-x-1">{[1, 10, 50].map(step => <button type="button" key={step} onClick={() => setMoveStep(step)} className={`px-2 py-1 text-xs rounded ${moveStep === step ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>{step}</button>)}</div></div>
-          <div><label className="block text-xs text-gray-500 mb-1">Go To</label><div className="flex space-x-1"><input type="number" placeholder="X" value={moveInputs.x} onChange={(e) => setMoveInputs(p => ({ ...p, x: Number(e.target.value) }))} className="w-12 px-1 py-1 text-xs border border-gray-300 rounded" disabled={isPrinting} aria-label="Go to X" /><input type="number" placeholder="Y" value={moveInputs.y} onChange={(e) => setMoveInputs(p => ({ ...p, y: Number(e.target.value) }))} className="w-12 px-1 py-1 text-xs border border-gray-300 rounded" disabled={isPrinting} aria-label="Go to Y" /><input type="number" placeholder="Z" value={moveInputs.z} onChange={(e) => setMoveInputs(p => ({ ...p, z: Number(e.target.value) }))} className="w-12 px-1 py-1 text-xs border border-gray-300 rounded" disabled={isPrinting} aria-label="Go to Z" /><button type="button" onClick={handleMoveTo} disabled={isPrinting} className="px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded">GO</button></div></div>
+          <div><label className="block text-xs text-gray-500 mb-1">Step Size</label><div className="flex space-x-1">{[1, 10, 50].map(step => <Button
+                type="button"
+                key={step}
+                variant={moveStep === step ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => setMoveStep(step)}
+              >
+                {step}
+              </Button>)}</div></div>
+          <div><label className="block text-xs text-gray-500 mb-1">Go To</label><div className="flex space-x-1"><Input type="number" placeholder="X" value={moveInputs.x} onChange={(e) => setMoveInputs(p => ({ ...p, x: Number(e.target.value) }))} disabled={isPrinting} aria-label="Go to X" className="w-12" /><Input type="number" placeholder="Y" value={moveInputs.y} onChange={(e) => setMoveInputs(p => ({ ...p, y: Number(e.target.value) }))} disabled={isPrinting} aria-label="Go to Y" className="w-12" /><Input type="number" placeholder="Z" value={moveInputs.z} onChange={(e) => setMoveInputs(p => ({ ...p, z: Number(e.target.value) }))} disabled={isPrinting} aria-label="Go to Z" className="w-12" /><Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={handleMoveTo}
+              disabled={isPrinting}
+            >
+              GO
+            </Button></div></div>
         </div>
       </div>
       <div className="p-4 border-b border-gray-200">
@@ -193,11 +383,35 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
             {/* Only show Pause/Resume for supported backends */}
             {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (
               <>
-                <button type="button" onClick={handlePause} disabled={!isPrinting} className="px-3 py-1 text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center"><Pause className="h-3 w-3 mr-1" />Pause</button>
-                <button type="button" onClick={handleResume} disabled={!isPaused} className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center"><Play className="h-3 w-3 mr-1" />Resume</button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handlePause}
+                  disabled={!isPrinting}
+                >
+                  <Pause className="h-3 w-3 mr-1" />Pause
+                </Button>
+                <Button
+                  type="button"
+                  variant="success"
+                  size="sm"
+                  onClick={handleResume}
+                  disabled={!isPaused}
+                >
+                  <Play className="h-3 w-3 mr-1" />Resume
+                </Button>
               </>
             )}
-            <button type="button" onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop} disabled={!currentStatus.isOnline} className={`px-3 py-1 text-sm font-medium text-white rounded flex items-center disabled:bg-gray-300 disabled:cursor-not-allowed ${isShutdown ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}>{isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <StopIcon className="h-3 w-3 mr-1" />}{isShutdown ? 'Restart' : 'Stop'}</button>
+            <Button
+              type="button"
+              variant={isShutdown ? 'secondary' : 'danger'}
+              size="sm"
+              onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop}
+              disabled={!currentStatus.isOnline}
+            >
+              {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <StopIcon className="h-3 w-3 mr-1" />}{isShutdown ? 'Restart' : 'Stop'}
+            </Button>
           </div>
         </div>
         {progressNow > 0 && (
@@ -216,7 +430,15 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
       </div>
       <div className="p-4">
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><FileText className="h-4 w-4 mr-2" />Files</h4>
-          <div className="flex items-center space-x-2"><div className="flex-1"><input type="file" accept=".gcode" aria-label="Upload GCode file" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} disabled={isPrinting || isUploading} className="block w-full text-sm text-gray-500 file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50" /></div><button type="button" onClick={handleFileUpload} disabled={!selectedFile || isPrinting || isUploading} className="px-3 py-1 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded flex items-center">{isUploading ? <RefreshCw className="h-3 w-3 mr-1 pf-animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}Upload</button></div>
+          <div className="flex items-center space-x-2"><div className="flex-1"><FileUpload accept=".gcode" aria-label="Upload GCode file" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} disabled={isPrinting || isUploading} /></div><Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={handleFileUpload}
+            disabled={!selectedFile || isPrinting || isUploading}
+          >
+            {isUploading ? <RefreshCw className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}Upload
+          </Button></div>
       </div>
     </div>
   );

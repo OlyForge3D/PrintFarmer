@@ -3,6 +3,7 @@ import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import { IndexedFilesList } from './IndexedFilesList';
 import { getHarvestErrorInfo, getPhaseDisplay } from '@/utils/harvestErrorHelper';
 import { ErrorIcon } from './ErrorIcon';
+import { Button } from '@/components/ui/Button';
 
 interface HarvestOperationDetailsProps {
   operation: GcodeHarvestOperation;
@@ -76,13 +77,15 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
       className={`bg-pf-bg-0 rounded-lg w-full h-full flex flex-col p-6 relative ${inline ? 'border border-pf-border' : 'shadow-lg'} ${className}`}
     >
       {!hideCloseButton && onClose && (
-        <button
-          className="absolute top-2 right-2 text-pf-text-1 hover:text-pf-accent"
+        <Button
+          variant="subtle"
+          size="sm"
           onClick={onClose}
+          className="absolute top-2 right-2 !p-1 !h-auto"
           aria-label="Close details"
         >
           ×
-        </button>
+        </Button>
       )}
       <h2 className="text-xl font-bold mb-3 text-pf-text-0 flex-shrink-0">Harvest Operation Details</h2>
       <div className="mb-3 flex-shrink-0">

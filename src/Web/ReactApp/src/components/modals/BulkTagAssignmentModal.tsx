@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, Check, Loader } from 'lucide-react';
+import { X, Check } from 'lucide-react';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { Button, Checkbox } from '@/components/ui';
 
 interface BulkTagAssignmentModalProps {
     isOpen: boolean;
@@ -134,13 +135,15 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                 {/* Header */}
                 <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between">
                     <h2 className="text-xl font-semibold text-pf-text-primary">Bulk Tag Assignment</h2>
-                    <button
+                    <Button
                         onClick={onClose}
                         disabled={isLoading}
-                        className="text-pf-text-tertiary hover:text-pf-text-primary disabled:opacity-50"
+                        variant="subtle"
+                        size="sm"
+                        className="!p-0 !h-auto"
                     >
                         <X className="w-6 h-6" />
-                    </button>
+                    </Button>
                 </div>
 
                 {/* Content */}
@@ -152,11 +155,10 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                                 Select Models ({selectedModelIds.length} selected)
                             </h3>
                             <label className="flex items-center gap-2 text-sm text-pf-text-secondary cursor-pointer hover:text-pf-text-primary">
-                                <input
-                                    type="checkbox"
-                                    checked={selectAllModels}
-                                    onChange={(e) => handleSelectAllModels(e.target.checked)}
-                                    disabled={isLoading}
+                            <Checkbox
+                                checked={selectAllModels}
+                                onChange={(e) => handleSelectAllModels(e.target.checked)}
+                                disabled={isLoading}
                                     className="rounded"
                                 />
                                 Select All
@@ -169,8 +171,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                                         key={model.id}
                                         className="flex items-center gap-3 p-2 hover:bg-pf-bg-1 rounded cursor-pointer"
                                     >
-                                        <input
-                                            type="checkbox"
+                                        <Checkbox
                                             checked={selectedModelIds.includes(model.id)}
                                             onChange={(e) => {
                                                 if (e.target.checked) {
@@ -202,11 +203,10 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                                 Select Tags ({selectedTagIds.length} selected)
                             </h3>
                             <label className="flex items-center gap-2 text-sm text-pf-text-secondary cursor-pointer hover:text-pf-text-primary">
-                                <input
-                                    type="checkbox"
-                                    checked={selectAllTags}
-                                    onChange={(e) => handleSelectAllTags(e.target.checked)}
-                                    disabled={isLoading}
+                            <Checkbox
+                                checked={selectAllTags}
+                                onChange={(e) => handleSelectAllTags(e.target.checked)}
+                                disabled={isLoading}
                                     className="rounded"
                                 />
                                 Select All
@@ -219,8 +219,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                                         key={tag.id}
                                         className="flex items-center gap-3 p-2 hover:bg-pf-bg-1 rounded cursor-pointer"
                                     >
-                                        <input
-                                            type="checkbox"
+                                        <Checkbox
                                             checked={selectedTagIds.includes(tag.id)}
                                             onChange={(e) => {
                                                 if (e.target.checked) {
@@ -231,7 +230,6 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                                                 }
                                             }}
                                             disabled={isLoading}
-                                            className="rounded"
                                         />
                                         <div className="flex items-center gap-2 flex-1">
                                             {tag.color && (
@@ -275,21 +273,21 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
 
                 {/* Footer */}
                 <div className="sticky bottom-0 bg-pf-bg-1 border-t border-pf-border px-6 py-4 flex items-center justify-end gap-3">
-                    <button
+                    <Button
                         onClick={onClose}
                         disabled={isLoading}
-                        className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded hover:bg-pf-bg-0 disabled:opacity-50"
+                        variant="secondary"
                     >
                         Cancel
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                         onClick={() => assignTagsMutation.mutate()}
                         disabled={!canSubmit}
-                        className="flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50"
+                        variant="primary"
+                        loading={isLoading}
                     >
-                        {isLoading && <Loader className="w-4 h-4 animate-spin" />}
                         Assign Tags ({selectedModelIds.length} models, {selectedTagIds.length} tags)
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>

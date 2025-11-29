@@ -1,8 +1,10 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState } from 'react';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, UserPlus } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { useAuth } from '@/contexts/AuthHooks';
+import { Button } from '@/components/ui';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -121,21 +123,20 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               <UserPlus className="h-5 w-5 mr-2" />Create Account
             </span>
           </div>
-          <button
+          <Button
             onClick={handleClose}
             disabled={isLoading}
-            className="text-pf-text-tertiary hover:text-pf-text-primary disabled:opacity-50"
+            variant="subtle"
             aria-label="Close registration modal"
             title="Close"
-            type="button"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
         {isLoading && (
           <div className="p-6"><FormSkeleton fields={6} /></div>
         )}
-  <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="sr-only" role="status" aria-live="polite">
             {isLoading ? 'Creating account...' : 'Form ready'}
           </div>
@@ -225,14 +226,14 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 required
                 disabled={isLoading}
               />
-              <button
-                type="button"
+              <Button
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-pf-text-tertiary hover:text-pf-text-primary"
+                variant="subtle"
                 disabled={isLoading}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2"
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -251,30 +252,31 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 required
                 disabled={isLoading}
               />
-              <button
-                type="button"
+              <Button
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-pf-text-tertiary hover:text-pf-text-primary"
+                variant="subtle"
                 disabled={isLoading}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2"
               >
                 {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              </Button>
             </div>
           </div>
 
           <div className="flex items-center justify-between pt-4">
-            <button
-              type="button"
+            <Button
               onClick={onSwitchToLogin}
+              variant="subtle"
               className="text-pf-accent hover:text-pf-accent-dark text-sm"
               disabled={isLoading}
             >
               Already have an account? Sign In
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={isLoading || !formData.username || !formData.email || !formData.password}
-              className="px-4 py-2 bg-pf-accent text-white rounded-md hover:bg-pf-accent-dark focus:outline-none focus:ring-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              variant="primary"
+              className="flex items-center"
             >
               {isLoading ? (
                 <>
@@ -287,7 +289,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                   Create Account
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

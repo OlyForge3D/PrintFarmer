@@ -1,6 +1,7 @@
 import axios from 'axios';
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
+import { FileUpload } from '@/components/ui/FileUpload';
 
 const ProgressBar: React.FC<{ percent: number }> = ({ percent }) => {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -69,8 +70,17 @@ export default function ModelUpload({ onUploaded }: { onUploaded?: (id: string) 
         className={`border-2 rounded-md p-6 text-center ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-dashed'}`}>
         <p className="mb-2">Drag & drop model file here (.stl, .3mf, .obj, .ply, .step)</p>
         <p className="text-sm text-gray-500">Or click to select a file</p>
-  <label className="sr-only" htmlFor="model-upload-input">Upload model file</label>
-  <input id="model-upload-input" type="file" accept=".stl,.3mf,.obj,.ply,.step" onChange={onSelect} className="mt-4" />
+        <FileUpload
+          id="model-upload-input"
+          accept=".stl,.3mf,.obj,.ply,.step"
+          onChange={(files) => {
+            if (files) {
+              const event = { target: { files } } as unknown as React.ChangeEvent<HTMLInputElement>;
+              onSelect(event);
+            }
+          }}
+          className="mt-4"
+        />
         {progress !== null && (
           <div className="mt-4">
             <div className="text-sm">Uploading: {progress}%</div>

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Filter, RefreshCw, ExternalLink, Package, Pencil, LayoutGrid, Table as TableIcon, Settings2 } from 'lucide-react';
 import { classifyColor, getRepresentativeHex } from '@/utils/colorFamilies';
 import { normalizeSpoolmanBaseUrl } from '@/utils/validation';
-import { Button, Checkbox } from '@/components/ui';
+import { Button, Checkbox, Select } from '@/components/ui';
 import { ColorFamilySelect } from '@/components/ColorFamilySelect';
 import { ColorSwatch } from '@/components/ColorSwatch';
 import { SpoolUsageBar } from '@/components/SpoolUsageBar';
@@ -614,29 +614,27 @@ export function SpoolsPage() {
                 <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
               </div>
               
-              <select
+              <Select
                 aria-label="Filter by material"
                 value={filters.material}
                 onChange={(e) => setFilters(prev => ({ ...prev, material: e.target.value }))}
-                className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm"
               >
                 <option value="">All Materials</option>
                 {getMaterialOptions().map(material => (
                   <option key={material} value={material}>{material}</option>
                 ))}
-              </select>
+              </Select>
               
-              <select
+              <Select
                 aria-label="Filter by vendor"
                 value={filters.vendor}
                 onChange={(e) => setFilters(prev => ({ ...prev, vendor: e.target.value }))}
-                className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm"
               >
                 <option value="">All Vendors</option>
                 {getVendorOptions().map(vendor => (
                   <option key={vendor} value={vendor}>{vendor}</option>
                 ))}
-              </select>
+              </Select>
 
               <ColorFamilySelect
                 value={filters.color}
@@ -645,60 +643,54 @@ export function SpoolsPage() {
                 placeholder="All Colors"
               />
 
-              <select
+              <Select
                 aria-label="Select page size"
                 value={filters.pageSize}
                 onChange={(e) => setFilters(prev => ({ ...prev, pageSize: e.target.value }))}
-                className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm"
               >
                 <option value="10">10 per page</option>
                 <option value="50">50 per page</option>
                 <option value="100">100 per page</option>
                 <option value="All">Show All</option>
-              </select>
+              </Select>
 
-              <select
+              <Select
                 aria-label="Filter by location"
                 value={filters.location}
                 onChange={(e) => setFilters(prev => ({ ...prev, location: e.target.value }))}
-                className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm"
               >
                 <option value="">All Locations</option>
                 {getLocationOptions().map(loc => (
                   <option key={loc} value={loc}>{loc}</option>
                 ))}
-              </select>
+              </Select>
 
-              <select
+              <Select
                 aria-label="Filter archived"
                 value={filters.showArchived}
                 onChange={(e) => setFilters(prev => ({ ...prev, showArchived: e.target.value }))}
-                className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary text-sm"
               >
                 <option value="active">Active Only</option>
                 <option value="all">All</option>
                 <option value="archived">Archived Only</option>
-              </select>
+              </Select>
 
               <div className="ml-auto flex items-center gap-2 text-sm text-pf-text-secondary">
                 <span>Showing {getDisplayedSpools().length} of {getFilteredSpools().length} spools</span>
                 <label className="flex items-center gap-1 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     aria-label="Show empty spools"
                     checked={filters.showEmpty}
                     onChange={e => setFilters(prev => ({ ...prev, showEmpty: e.target.checked }))}
-                    className="rounded border-pf-border bg-pf-bg-0"
                   />
                   Show empty
                 </label>
                 <label className="text-xs" htmlFor="sort-field">Sort:</label>
-                <select
+                <Select
                   id="sort-field"
                   aria-label="Sort field"
                   value={sortField}
                   onChange={e => setSortField(e.target.value)}
-                  className="px-2 py-1 bg-pf-bg-0 border border-pf-border rounded text-xs"
                 >
                   <option value="id">ID</option>
                   <option value="vendor">Vendor</option>
@@ -709,7 +701,7 @@ export function SpoolsPage() {
                   <option value="location">Location</option>
                   <option value="name">Name</option>
                   <option value="archived">Archived</option>
-                </select>
+                </Select>
                 <Button
                   size="sm"
                   variant="subtle"

@@ -3,6 +3,7 @@ import { RegisterModal } from '@/components/auth/RegisterModal';
 import { EmailConfirmationBanner } from '@/components/EmailConfirmationBanner';
 import { BuildInfo } from '@/components/BuildInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { Button } from '@/components/ui';
 import { useAuth } from '@/contexts/AuthHooks';
 import { useSignalRConnection } from '@/hooks/useSignalR';
 import {
@@ -292,15 +293,17 @@ export function Layout() {
           {/* Left side - App branding */}
           <div className="flex items-center space-x-4">
             {/* Mobile menu button */}
-            <button
+            <Button
               type="button"
               aria-label="Open navigation menu"
               title="Open navigation menu"
-              className="lg:hidden p-2 rounded-md text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent"
+              variant="subtle"
+              size="sm"
+              className="lg:hidden"
               onClick={() => setSidebarOpen(true)}
             >
               <Menu className="h-5 w-5" />
-            </button>
+            </Button>
 
             {/* App logo and name */}
             <div className="flex items-center space-x-3">
@@ -329,9 +332,11 @@ export function Layout() {
 
             {/* User menu */}
             <div className="relative">
-              <button
+              <Button
                 type="button"
-                className="flex items-center space-x-2 p-2 rounded-md text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent"
+                variant="subtle"
+                size="sm"
+                className="flex items-center space-x-2"
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
               >
                 {isAuthenticated && user ? (
@@ -347,7 +352,7 @@ export function Layout() {
                     <span className="hidden sm:block text-sm">Guest</span>
                   </>
                 )}
-              </button>
+              </Button>
 
               {/* User dropdown menu */}
               {userMenuOpen && (
@@ -358,46 +363,54 @@ export function Layout() {
                           <div className="px-4 py-2 text-sm text-pf-text-secondary border-b border-pf-border">
                           Signed in as <strong>{user.username}</strong>
                         </div>
-                        <button
+                        <Button
                           type="button"
                           onClick={() => setUserMenuOpen(false)}
-                          className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
+                          variant="subtle"
+                          size="sm"
+                          className="flex items-center w-full !justify-start"
                         >
                           <Settings className="h-4 w-4 mr-2" />
                           Profile
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
                           onClick={handleLogout}
-                          className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
+                          variant="subtle"
+                          size="sm"
+                          className="flex items-center w-full !justify-start"
                         >
                           <LogOut className="h-4 w-4 mr-2" />
                           Sign out
-                        </button>
+                        </Button>
                       </>
                     ) : (
                       <>
-                        <button
+                        <Button
                           type="button"
                           onClick={() => {
                             setShowLoginModal(true);
                             setUserMenuOpen(false);
                           }}
-                          className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
+                          variant="subtle"
+                          size="sm"
+                          className="flex items-center w-full !justify-start"
                         >
                           <LogIn className="h-4 w-4 mr-2" />
                           Sign In
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
                           onClick={() => {
                             setShowRegisterModal(true);
                             setUserMenuOpen(false);
                           }}
-                          className="flex items-center w-full px-4 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-2"
+                          variant="subtle"
+                          size="sm"
+                          className="flex items-center w-full !justify-start"
                         >
                           Register
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -415,15 +428,17 @@ export function Layout() {
             <div className="fixed inset-0 bg-black bg-opacity-75" onClick={() => setSidebarOpen(false)} />
             <div className="relative flex w-full max-w-xs flex-1 flex-col bg-pf-bg-1 border-r border-pf-border h-full">
               <div className="absolute top-0 right-0 -mr-12 pt-2">
-                <button
+                <Button
                   type="button"
                   aria-label="Close navigation menu"
                   title="Close navigation menu"
-                  className="ml-1 flex h-10 w-10 items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-pf-accent"
+                  variant="subtle"
+                  size="sm"
+                  className="ml-1 !p-2 h-10 w-10"
                   onClick={() => setSidebarOpen(false)}
                 >
-                  <X className="h-6 w-6 text-pf-text-primary" />
-                </button>
+                  <X className="h-6 w-6" />
+                </Button>
               </div>
 
               <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">

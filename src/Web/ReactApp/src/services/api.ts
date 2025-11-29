@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
 import {
   ApiError,

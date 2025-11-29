@@ -5,6 +5,7 @@ import { ChartBarIcon, ClockIcon, ServerIcon, CpuChipIcon } from '@heroicons/rea
 import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Activity } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 interface TelemetryStats {
   operationsCount: number;
@@ -101,12 +102,14 @@ export function ObservabilityDashboard() {
       icon={Activity}
       maxWidth="max-w-7xl"
       actions={
-        <button
+        <Button
+          type="button"
+          variant="primary"
+          size="md"
           onClick={handleRefresh}
-          className="btn-base btn-md btn-primary"
         >
           Refresh Data
-        </button>
+        </Button>
       }
     >
       {/* Stats Cards */}

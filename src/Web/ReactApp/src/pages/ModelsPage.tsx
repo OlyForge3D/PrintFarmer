@@ -288,14 +288,14 @@ export const ModelsPage: React.FC = () => {
                         </div>
                       </div>
                     )}
-                    <button
+                    <Button
                       onClick={() => removeFile(index)}
-                      className="p-1 hover:bg-pf-bg-1 rounded text-pf-text-tertiary hover:text-pf-text-primary transition-colors"
+                      variant="subtle"
                       aria-label="Remove file"
                       title="Remove file"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -389,13 +389,12 @@ export const ModelsPage: React.FC = () => {
             <div className="flex flex-wrap gap-2">
               {allTags.length > 0 ? (
                 allTags.map(tag => (
-                  <button
+                  <Button
                     key={tag.id}
                     onClick={() => toggleTag(tag.id)}
-                    className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${selectedTags.includes(tag.id)
-                      ? 'ring-2 ring-offset-2 ring-offset-pf-bg-0 ring-pf-accent'
-                      : ''
-                      }`}
+                    variant={selectedTags.includes(tag.id) ? 'primary' : 'secondary'}
+                    size="sm"
+                    className="rounded-full"
                     style={{
                       backgroundColor: tag.color || '#6366f1',
                       color: 'white',
@@ -404,7 +403,7 @@ export const ModelsPage: React.FC = () => {
                     title={tag.description}
                   >
                     {tag.name}
-                  </button>
+                  </Button>
                 ))
               ) : (
                 <p className="text-pf-text-secondary text-sm">No tags available</p>

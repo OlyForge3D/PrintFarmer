@@ -143,16 +143,18 @@ export default function ResetPasswordPage() {
               Reset Password
             </span>
           </div>
-          <button
+          <Button
+            type="button"
             onClick={handleClose}
             disabled={isLoading}
-            className="text-pf-text-tertiary hover:text-pf-text-primary disabled:opacity-50"
+            variant="subtle"
+            size="sm"
+            className="!p-0 !h-auto"
             aria-label="Close reset password"
             title="Close"
-            type="button"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -194,15 +196,17 @@ export default function ResetPasswordPage() {
                 disabled={isLoading}
                 minLength={8}
               />
-              <button
+              <Button
                 type="button"
                 onClick={() => setShowNewPassword(!showNewPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary hover:text-pf-text-primary"
+                variant="subtle"
+                size="sm"
+                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
                 aria-label={showNewPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >
                 {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              </Button>
             </div>
           </FormField>
 
@@ -218,15 +222,17 @@ export default function ResetPasswordPage() {
                 disabled={isLoading}
                 minLength={8}
               />
-              <button
+              <Button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary hover:text-pf-text-primary"
+                variant="subtle"
+                size="sm"
+                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
                 aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >
                 {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              </Button>
             </div>
           </FormField>
 

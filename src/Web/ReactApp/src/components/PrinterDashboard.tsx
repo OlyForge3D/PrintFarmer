@@ -9,6 +9,7 @@ import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { DetailedSystemHealth } from '@/components/SystemHealth';
 import { PageTemplate } from '@/components/PageTemplate';
+import { Button } from '@/components/ui';
 
 interface StatsCardProps {
   title: string;
@@ -197,24 +198,22 @@ export const PrinterDashboard: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <button
+                          <Button
                             aria-label={`Edit ${p.name}`}
                             title="Edit"
-                            type="button"
-                            className="p-1 rounded hover:bg-pf-bg-2"
+                            variant="subtle"
                             onClick={() => handleEditPrinter(p.id)}
                           >
                             <Edit className="w-5 h-5 text-pf-text-secondary" />
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             aria-label={`Delete ${p.name}`}
                             title="Delete"
-                            type="button"
-                            className="p-1 rounded hover:bg-pf-bg-2"
+                            variant="subtle"
                             onClick={() => handleDeleteSinglePrinter(p)}
                           >
                             <Trash2 className="w-5 h-5 text-pf-text-secondary" />
-                          </button>
+                          </Button>
                         </div>
                       </li>
                     );

@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useRef, ReactNode } from 'react';
 import { Label } from './Label';
 

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useState, useMemo } from 'react';
 import { PageTemplate } from '@/components/PageTemplate';
+import { Button, FormField, Input, Checkbox } from '@/components/ui';
 import { Settings } from 'lucide-react';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { slicerRegistry } from '@/services/slicerRegistry';
@@ -147,12 +148,10 @@ export const SlicerSettingsPage: React.FC = () => {
         <div className="card-body">
           <div className="form-group inline">
             <label className="form-label" htmlFor="enable-worker">
-              <input
+              <Checkbox
                 id="enable-worker"
-                type="checkbox"
                 checked={local.enabled}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocal({ ...local, enabled: e.target.checked })}
-                className="mr-2"
               />
               Enable local slicer worker (process jobs locally)
             </label>
@@ -177,67 +176,67 @@ export const SlicerSettingsPage: React.FC = () => {
 
                 <div className="gap-md flex flex-col">
                   {/* Path Input */}
-                  <div className="form-group">
-                    <label className="form-label" htmlFor={`path-${engine}`}>
-                      Executable Path
-                    </label>
-                    <input
+                  <FormField
+                    label="Executable Path"
+                    helper="Path to slicer executable (leave empty to attempt PATH discovery)"
+                    inline={false}
+                  >
+                    <Input
                       id={`path-${engine}`}
                       type="text"
                       value={local.perEngine[engine]?.path ?? ''}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'path', e.target.value)}
                       placeholder="Path to binary"
-                      className="input-base w-full"
                     />
-                    <div className="form-helper">Path to slicer executable (leave empty to attempt PATH discovery)</div>
-                  </div>
+                  </FormField>
 
                   {/* Args Template Input */}
-                  <div className="form-group">
-                    <label className="form-label" htmlFor={`args-${engine}`}>
-                      Arguments Template
-                    </label>
-                    <input
+                  <FormField
+                    label="Arguments Template"
+                    helper="Args template — use {'{input}'} and {'{output}'} placeholders"
+                    inline={false}
+                  >
+                    <Input
                       id={`args-${engine}`}
                       type="text"
                       value={local.perEngine[engine]?.argsTemplate ?? ''}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateEngineField(engine, 'argsTemplate', e.target.value)}
                       placeholder="Args template"
-                      className="input-base w-full"
                     />
-                    <div className="form-helper">
-                      Args template — use <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{input}'}</code> and <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{output}'}</code> placeholders
-                    </div>
-                  </div>
+                  </FormField>
 
                   {/* OrcaSlicer Examples */}
                   {engine === 'OrcaSlicer' && (
                     <div className="mt-2 border-t border-pf-border pt-3">
-                      <button
+                      <Button
                         type="button"
-                        className="btn-link text-sm"
+                        variant="subtle"
+                        size="sm"
                         onClick={() => setOpenExamplesEngine(openExamplesEngine === engine ? null : engine)}
+                        className="!justify-start"
                       >
                         {openExamplesEngine === engine ? '▼ Hide examples' : '▶ Show Orca examples'}
-                      </button>
+                      </Button>
                       {openExamplesEngine === engine && (
                         <div className="panel mt-3 gap-md flex flex-col">
                           <div className="form-helper">Recommended Orca templates (you can edit after inserting):</div>
                           <div className="flex gap-2 flex-wrap">
-                            <button
+                            <Button
                               type="button"
-                              className="btn-base btn-sm btn-secondary"
+                              variant="secondary"
+                              size="sm"
                               onClick={() => updateEngineField(engine, 'argsTemplate', '--config "{config}" --output "{output}" {input}')}
                             >
                               Insert config example
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
-                              className="btn-base btn-sm btn-secondary"
+                              variant="secondary"
+                              size="sm"
                               onClick={() => updateEngineField(engine, 'argsTemplate', '--export-gcode -o {output} {input}')}
                             >
                               Insert simple export
-                            </button>
+                            </Button>
                           </div>
                           <div className="form-helper text-xs">
                             Placeholders: <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{input}'}</code> – model file; <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{output}'}</code> – gcode output; <code className="bg-pf-bg-0 px-1 rounded">{'{'}{'{config}'}</code> – generated config path
@@ -256,10 +255,13 @@ export const SlicerSettingsPage: React.FC = () => {
       {/* Jitter Percent Card */}
       <div className="card">
         <div className="card-body">
-          <div className="form-group">
-            <label className="form-label" htmlFor="jitter-percent">Retry Jitter Percent</label>
-            <div className="form-helper">Percentage +/- applied to retry backoff delays (e.g. 15 = +/-15%)</div>
-            <input
+          <FormField
+            label="Retry Jitter Percent"
+            helper="Percentage +/- applied to retry backoff delays (e.g. 15 = +/-15%)"
+            error={validationError}
+            inline={false}
+          >
+            <Input
               id="jitter-percent"
               type="number"
               step="0.1"
@@ -267,22 +269,22 @@ export const SlicerSettingsPage: React.FC = () => {
               max={100}
               value={local.jitterPercent ?? 15}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => onJitterChange(e.target.value)}
-              className="input-base mt-2 w-32"
             />
-            {validationError && <div className="form-error mt-1">{validationError}</div>}
-          </div>
+          </FormField>
         </div>
       </div>
 
       {/* Action Footer */}
       <div className="card-footer">
-        <button
+        <Button
+          type="button"
+          variant="primary"
+          size="md"
           onClick={() => local && saveMutation.mutate(local)}
           disabled={!!validationError || !local || saveMutation.status === 'pending'}
-          className="btn-base btn-md btn-primary"
         >
           {saveMutation.status === 'pending' ? 'Saving...' : 'Save Settings'}
-        </button>
+        </Button>
       </div>
 
       {/* Error Alert */}

@@ -9,7 +9,8 @@
  * and developed independently while being included in the build.
  */
 
-import type { ISlicerUIRegistry, SlicerUIExports } from "./SlicerUIRegistry";
+/* eslint-disable local/pf-no-unguarded-console */
+import type { ISlicerUIRegistry, SlicerUIExports } from './SlicerUIRegistry';
 
 /**
  * Register OrcaSlicer UI

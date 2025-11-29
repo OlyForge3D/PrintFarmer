@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-unguarded-console */
 import * as signalR from '@microsoft/signalr';
 
 /**

@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeHooks';

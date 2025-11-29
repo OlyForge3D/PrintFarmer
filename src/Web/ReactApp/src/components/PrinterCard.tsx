@@ -8,6 +8,7 @@ import type { Printer } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
+import { Button } from '@/components/ui';
 import { Cog, Play, Pause, Square as StopIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
@@ -70,19 +71,14 @@ export function PrinterCard({
   }, [realtimeStatus, printer.id]);
 
   const renderDebugBadge = (): React.ReactNode => {
-    const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
-    if (pf?.printerCard) {
-      // Guarded debug - emit to console for developers
-      if (pf.printerCard === true) {
-        console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
-      }
+    // Guarded debug - emit to console for developers
+    if (window.PrintFarmerDebug?.printerCard) {
+      console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
     }
 
     // Render-time debug (enable by setting window.PrintFarmerDebug.printerCardRender = true)
-    if (pf?.printerCardRender) {
-      if (pf.printerCardRender === true) {
-        console.debug('[PrintFarmer] PrinterCard render', { printerId: printer.id });
-      }
+    if (window.PrintFarmerDebug?.printerCardRender) {
+      console.debug('[PrintFarmer] PrinterCard render', { printerId: printer.id });
     }
 
     // Optionally render a small debug badge in the UI
@@ -98,15 +94,8 @@ export function PrinterCard({
   };
 
   // Keep a single guarded console log point to avoid spam; prefer the render badge for payloads
-  try {
-    const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
-    if (pf?.printerCard) {
-      if (pf.printerCard === true) {
-        console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
-      }
-    }
-  } catch {
-    // ignore debug guard failures
+  if (window.PrintFarmerDebug?.printerCard) {
+    console.log('[PrintFarmer] PrinterCard:', { printerId: printer.id, printerName: printer.name });
   }
 
   // State for print job status (Moonraker only)
@@ -281,25 +270,53 @@ export function PrinterCard({
             {hasPermission('printers', 'execute') && currentStatus.isOnline && (
               <>
                 {currentStatus.state === 'printing' && (
-                  <button type="button" aria-label="Pause print" title="Pause print" className="p-2 text-pf-text-secondary hover:text-pf-warning bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                  <Button
+                    type="button"
+                    aria-label="Pause print"
+                    title="Pause print"
+                    variant="subtle"
+                    size="sm"
+                    className="!p-2 !h-auto text-pf-warning"
+                  >
                     <Pause className="h-4 w-4" />
-                  </button>
+                  </Button>
                 )}
                 {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                  <button type="button" aria-label="Resume print" title="Resume print" className="p-2 text-pf-text-secondary hover:text-pf-success bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                  <Button
+                    type="button"
+                    aria-label="Resume print"
+                    title="Resume print"
+                    variant="subtle"
+                    size="sm"
+                    className="!p-2 !h-auto text-pf-success"
+                  >
                     <Play className="h-4 w-4" />
-                  </button>
+                  </Button>
                 )}
-                <button type="button" aria-label="Stop print" title="Stop print" className="p-2 text-pf-text-secondary hover:text-pf-error bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+                <Button
+                  type="button"
+                  aria-label="Stop print"
+                  title="Stop print"
+                  variant="subtle"
+                  size="sm"
+                  className="!p-2 !h-auto text-pf-error"
+                >
                   <StopIcon className="h-4 w-4" />
-                </button>
+                </Button>
               </>
             )}
 
             {hasPermission('printers', 'update') && (
-              <button type="button" aria-label="Manage printer" title="Manage printer" className="p-2 text-pf-text-secondary hover:text-pf-accent bg-pf-panel hover:bg-pf-bg-2 border border-pf-border-light rounded-md transition-colors">
+              <Button
+                type="button"
+                aria-label="Manage printer"
+                title="Manage printer"
+                variant="subtle"
+                size="sm"
+                className="!p-2 !h-auto text-pf-accent"
+              >
                 <Cog className="h-4 w-4" />
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -455,30 +472,32 @@ export function PrinterCard({
 
         {/* Action buttons */}
         <div className="flex space-x-2">
-          <button
+          <Button
             type="button"
             onClick={() => onManage(printer)}
-            className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-pf-border-light shadow-sm text-sm leading-4 font-medium rounded-md text-pf-text-primary bg-pf-panel hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent-2 transition-colors"
+            variant="secondary"
+            size="sm"
+            className="flex-1 justify-center"
           >
             <Cog className="h-4 w-4 mr-1.5" />
             Manage
-          </button>
+          </Button>
           {/* OctoPrint/Moonraker/PrusaLink: Only show controls if supported */}
           {hasPermission('printers', 'execute') && currentStatus.isOnline && (
             <>
               {/* Only show Pause if printer is printing and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && currentStatus.state === 'printing' && (
-                <button type="button" className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-warning hover:bg-pf-warning focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-warning transition-colors">
+                <Button variant="danger" size="sm">
                   <Pause className="h-4 w-4 mr-1.5" />
                   Pause
-                </button>
+                </Button>
               )}
               {/* Only show Resume/Start if printer is paused or ready and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                <button type="button" className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pf-success hover:bg-pf-success-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-success transition-colors">
+                <Button variant="success" size="sm">
                   <Play className="h-4 w-4 mr-1.5" />
                   {currentStatus.state === 'paused' ? 'Resume' : 'Start'}
-                </button>
+                </Button>
               )}
             </>
           )}

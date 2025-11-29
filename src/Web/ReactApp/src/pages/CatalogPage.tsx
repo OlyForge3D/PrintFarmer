@@ -113,7 +113,7 @@ export function CatalogPage() {
 
     // Create a temporary model object for adding a new model
     const tempModel: PrinterModelDto = {
-      id: `temp-${Date.now()}` as any, // Temporary ID for add mode
+      id: `temp-${Date.now()}` as string, // Temporary ID for add mode
       name: '',
       manufacturerId: selectedManufacturer.id,
       motionType: undefined,

@@ -4,6 +4,7 @@ import { DiscoveredGcodeFileDto, HarvestFileStatus } from '@/types/api';
 import type { HarvestFileDiscoveredEvent, HarvestFileProgress } from '@/services/harvest-signalr';
 import { toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
+import { Button } from '@/components/ui/Button';
 
 
 
@@ -195,7 +196,10 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-30">
             <tr>
-              <th className="p-2 border-b border-pf-border"><input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" /></th>
+              <th className="p-2 border-b border-pf-border">
+                {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
+                <input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" />
+              </th>
               <th className="p-2 border-b border-pf-border text-left">File</th>
               <th className="p-2 border-b border-pf-border text-right">Size</th>
               <th className="p-2 border-b border-pf-border text-left">Slicer</th>
@@ -223,6 +227,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                   aria-label={`File ${file.fileName}, status: ${status}${error ? ', error: ' + error : ''}`}
                 >
                   <td className="p-2 border-b border-pf-border text-center">
+                    {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
                     <input type="checkbox" checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.fileName}`} aria-label={`Select file ${file.fileName}`} />
                   </td>
                   <td className="p-2 border-b border-pf-border font-mono text-pf-primary" title={file.filePath}>
@@ -295,6 +300,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                     )}
                     {error && (
                       <>
+                        {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
                         <button
                           className="inline-flex items-center px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted hover:bg-pf-accent-bg hover:text-pf-accent focus:outline-none focus:ring-2 focus:ring-pf-accent mr-1"
                           title="Skip this file"
@@ -303,6 +309,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
+                        {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
                         <button
                           className="inline-flex items-center px-2 py-0.5 rounded bg-pf-accent-bg text-pf-accent hover:bg-pf-accent-dark hover:text-white focus:outline-none focus:ring-2 focus:ring-pf-accent"
                           title="Retry this file"
@@ -322,13 +329,12 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         </table>
       </div>
       <div className="px-4 py-3 border-t border-pf-border flex items-center gap-3 bg-pf-surface">
-        <button
-          className={`btn btn-primary bg-pf-accent text-white hover:bg-pf-accent-dark focus:ring-2 focus:ring-pf-accent focus:outline-none px-4 py-2 rounded shadow disabled:opacity-50 disabled:cursor-not-allowed`}
-          disabled={selected.size === 0}
+        <Button
           onClick={handleImportSelected}
+          disabled={selected.size === 0}
         >
-          <>Import Selected <span className="ml-1 font-bold">({selected.size})</span></>
-        </button>
+          Import Selected <span className="ml-1 font-bold">({selected.size})</span>
+        </Button>
         <span className="text-pf-muted text-xs">Tip: Use checkboxes to select files to import.</span>
       </div>
     </div>

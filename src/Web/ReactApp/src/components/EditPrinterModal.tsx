@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, Check, Loader2 } from 'lucide-react';
+import { X, Check, Loader2 } from 'lucide-react';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from './FilamentTypeSelector';
 import { BackendSelector } from './BackendSelector';
+import { Button, Input, Select, Textarea, FormField, Alert, Checkbox } from '@/components/ui';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -150,135 +151,129 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">Edit Printer</h3>
-            <button onClick={handleClose} className="text-pf-text-tertiary hover:text-pf-text-primary" aria-label="Close edit printer modal" title="Close">
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={handleClose}
+              aria-label="Close edit printer modal"
+              title="Close"
+              className="!p-1 !h-auto"
+            >
               <X className="w-6 h-6" />
-            </button>
+            </Button>
           </div>
 
             {error && (
-              <div className="mb-4 p-3 rounded bg-pf-error-bg text-pf-error-text flex items-start">
-                <AlertCircle className="w-5 h-5 mr-2 mt-0.5" />
-                <div>
-                  <p className="font-medium">Update Failed</p>
-                  <p className="text-sm opacity-90">{error}</p>
-                </div>
-              </div>
+              <Alert type="error" title="Update Failed" className="mb-4">
+                {error}
+              </Alert>
             )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-pf-text-secondary mb-1">Name</label>
-              <input
+            <FormField
+              label="Name"
+              required
+              error={validationErrors.name?.[0]}
+            >
+              <Input
                 type="text"
                 value={formData.name}
                 onChange={e => handleInputChange('name', e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                 placeholder="Printer name"
                 title="Printer name"
               />
-              {validationErrors.name && <p className="text-xs text-pf-error-text mt-1">{validationErrors.name[0]}</p>}
-            </div>
+            </FormField>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-pf-text-secondary mb-1">Server URL</label>
-                <input
+              <FormField
+                label="Server URL"
+                required
+                error={validationErrors.serverUrl?.[0]}
+              >
+                <Input
                   type="text"
                   value={formData.serverUrl}
                   onChange={e => handleInputChange('serverUrl', e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                   placeholder="https://printer.local"
                   title="Printer server URL"
                 />
-                {validationErrors.serverUrl && <p className="text-xs text-pf-error-text mt-1">{validationErrors.serverUrl[0]}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-pf-text-secondary mb-1">Backend</label>
+              </FormField>
+              <FormField label="Backend">
                 <BackendSelector
                   value={formData.backend}
                   onChange={(backend) => handleInputChange('backend', backend)}
                   className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                   title="Printer backend"
                 />
-              </div>
+              </FormField>
             {/* Moonraker/PrusaLink port/API key fields */}
             {formData.backend === PrinterBackend.Moonraker && (
               <div className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Backend Port (API)</label>
-                  <input
+                <FormField label="Backend Port (API)">
+                  <Input
                     type="number"
                     value={formData.backendPort ?? ''}
                     onChange={e => handleInputChange('backendPort', e.target.value ? parseInt(e.target.value, 10) : undefined)}
-                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                     placeholder="7125"
                     min={1}
                     max={65535}
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Frontend Port (UI)</label>
-                  <input
+                </FormField>
+                <FormField label="Frontend Port (UI)">
+                  <Input
                     type="number"
                     value={formData.frontendPort ?? ''}
                     onChange={e => handleInputChange('frontendPort', e.target.value ? parseInt(e.target.value, 10) : undefined)}
-                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                     placeholder="80"
                     min={1}
                     max={65535}
                   />
-                </div>
+                </FormField>
               </div>
             )}
             {formData.backend === PrinterBackend.PrusaLink && (
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-pf-text-secondary mb-1">API Key (PrusaLink)</label>
-                <input
-                  type="text"
-                  value={formData.apiKey || ''}
-                  onChange={e => handleInputChange('apiKey', e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
-                  placeholder="Enter PrusaLink API Key"
-                  title="PrusaLink API Key"
-                />
+                <FormField label="API Key (PrusaLink)">
+                  <Input
+                    type="text"
+                    value={formData.apiKey || ''}
+                    onChange={e => handleInputChange('apiKey', e.target.value)}
+                    placeholder="Enter PrusaLink API Key"
+                    title="PrusaLink API Key"
+                  />
+                </FormField>
               </div>
             )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-pf-text-secondary mb-1">Notes</label>
-              <textarea
+            <FormField label="Notes">
+              <Textarea
                 value={formData.notes || ''}
                 onChange={e => handleInputChange('notes', e.target.value)}
                 rows={3}
-                className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                 placeholder="Optional notes"
                 title="Printer notes"
               />
-            </div>
+            </FormField>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-pf-text-secondary mb-1">Manufacturer</label>
-                <select
+              <FormField label="Manufacturer">
+                <Select
                   value={formData.manufacturerId || ''}
                   onChange={e => { const val = e.target.value || undefined; handleInputChange('manufacturerId', val); setSelectedManufacturer(val); }}
-                  className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                   title="Manufacturer"
                 >
                   <option value="">(none)</option>
                   {manufacturers?.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-pf-text-secondary mb-1">Model</label>
-                <select
+                </Select>
+              </FormField>
+              <FormField label="Model">
+                <Select
                   value={formData.modelId || ''}
                   onChange={e => handleInputChange('modelId', e.target.value || undefined)}
-                  className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                   title="Model"
                 >
                   <option value="">(none)</option>
                   {filteredModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
-              </div>
+                </Select>
+              </FormField>
             </div>
 
             {/* Printer Type & Build Volume Section */}
@@ -307,39 +302,36 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max X (mm)</label>
-                    <input
+                  <FormField label="Max X (mm)">
+                    <Input
                       type="number"
                       value={formData.maxBuildVolumeX || ''}
                       onChange={e => handleInputChange('maxBuildVolumeX', parseFloat(e.target.value) || undefined)}
-                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder={printerDetails?.modelMaxX?.toString() || '220'}
                       title="Maximum X axis travel"
+                      className="text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Y (mm)</label>
-                    <input
+                  </FormField>
+                  <FormField label="Max Y (mm)">
+                    <Input
                       type="number"
                       value={formData.maxBuildVolumeY || ''}
                       onChange={e => handleInputChange('maxBuildVolumeY', parseFloat(e.target.value) || undefined)}
-                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder={printerDetails?.modelMaxY?.toString() || '220'}
                       title="Maximum Y axis travel"
+                      className="text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Z (mm)</label>
-                    <input
+                  </FormField>
+                  <FormField label="Max Z (mm)">
+                    <Input
                       type="number"
                       value={formData.maxBuildVolumeZ || ''}
                       onChange={e => handleInputChange('maxBuildVolumeZ', parseFloat(e.target.value) || undefined)}
-                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder={printerDetails?.modelMaxZ?.toString() || '250'}
                       title="Maximum Z axis travel"
+                      className="text-sm"
                     />
-                  </div>
+                  </FormField>
                 </div>
               </div>
             </div>
@@ -357,9 +349,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               </div>
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-pf-text-secondary mb-1">Nozzle Diameter (mm)</label>
-                    <input
+                  <FormField label="Nozzle Diameter (mm)" htmlFor="nozzle-diameter">
+                    <Input
+                      id="nozzle-diameter"
                       type="number"
                       step="0.1"
                       value={formData.nozzleDiameter?.toString() || ''}
@@ -367,23 +359,21 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                         const value = e.target.value;
                         handleInputChange('nozzleDiameter', value ? parseFloat(value) : undefined);
                       }}
-                      className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder="0.4"
                       title="Nozzle diameter"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-pf-text-secondary mb-1">Number of Extruders</label>
-                    <input
+                  </FormField>
+                  <FormField label="Number of Extruders" htmlFor="num-extruders">
+                    <Input
+                      id="num-extruders"
                       type="number"
                       min="1"
                       max="8"
                       value={formData.numberOfExtruders || 1}
                       onChange={e => handleInputChange('numberOfExtruders', parseInt(e.target.value, 10) || 1)}
-                      className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       title="Number of extruders"
                     />
-                  </div>
+                  </FormField>
                 </div>
 
                 <div>
@@ -396,118 +386,106 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Min Hotend °C</label>
-                    <input
+                  <FormField label="Min Hotend °C">
+                    <Input
                       type="number"
                       value={formData.minHotendTemp || ''}
                       onChange={e => handleInputChange('minHotendTemp', parseInt(e.target.value, 10) || undefined)}
-                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder="180"
                       title="Minimum hotend temperature"
+                      className="text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Hotend °C</label>
-                    <input
+                  </FormField>
+                  <FormField label="Max Hotend °C">
+                    <Input
                       type="number"
                       value={formData.maxHotendTemp || ''}
                       onChange={e => handleInputChange('maxHotendTemp', parseInt(e.target.value, 10) || undefined)}
-                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder="300"
                       title="Maximum hotend temperature"
+                      className="text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Min Bed °C</label>
-                    <input
+                  </FormField>
+                  <FormField label="Min Bed °C">
+                    <Input
                       type="number"
                       value={formData.minBedTemp || ''}
                       onChange={e => handleInputChange('minBedTemp', parseInt(e.target.value, 10) || undefined)}
-                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder="0"
                       title="Minimum bed temperature"
+                      className="text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-pf-text-secondary mb-1">Max Bed °C</label>
-                    <input
+                  </FormField>
+                  <FormField label="Max Bed °C">
+                    <Input
                       type="number"
                       value={formData.maxBedTemp || ''}
                       onChange={e => handleInputChange('maxBedTemp', parseInt(e.target.value, 10) || undefined)}
-                      className="w-full px-2 py-2 text-sm rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                       placeholder="120"
                       title="Maximum bed temperature"
+                      className="text-sm"
                     />
-                  </div>
+                  </FormField>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-3">
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id="hasHeatedBed"
-                        checked={formData.hasHeatedBed ?? true}
-                        onChange={e => handleInputChange('hasHeatedBed', e.target.checked)}
-                        className="mr-2"
-                      />
-                      <label htmlFor="hasHeatedBed" className="text-sm text-pf-text-primary">Heated bed</label>
-                    </div>
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id="hasEnclosure"
-                        checked={formData.hasEnclosure ?? false}
-                        onChange={e => handleInputChange('hasEnclosure', e.target.checked)}
-                        className="mr-2"
-                      />
-                      <label htmlFor="hasEnclosure" className="text-sm text-pf-text-primary">Enclosure</label>
-                    </div>
+                    <Checkbox
+                      id="hasHeatedBed"
+                      label="Heated bed"
+                      checked={formData.hasHeatedBed ?? true}
+                      onChange={e => handleInputChange('hasHeatedBed', e.target.checked)}
+                    />
+                    <Checkbox
+                      id="hasEnclosure"
+                      label="Enclosure"
+                      checked={formData.hasEnclosure ?? false}
+                      onChange={e => handleInputChange('hasEnclosure', e.target.checked)}
+                    />
                   </div>
                   <div className="space-y-3">
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id="multiMaterial"
-                        checked={formData.multiMaterial ?? false}
-                        onChange={e => handleInputChange('multiMaterial', e.target.checked)}
-                        className="mr-2"
-                      />
-                      <label htmlFor="multiMaterial" className="text-sm text-pf-text-primary">Multi-material</label>
-                    </div>
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id="supportsAutoLeveling"
-                        checked={formData.supportsAutoLeveling ?? false}
-                        onChange={e => handleInputChange('supportsAutoLeveling', e.target.checked)}
-                        className="mr-2"
-                      />
-                      <label htmlFor="supportsAutoLeveling" className="text-sm text-pf-text-primary">Auto-leveling</label>
-                    </div>
+                    <Checkbox
+                      id="multiMaterial"
+                      label="Multi-material"
+                      checked={formData.multiMaterial ?? false}
+                      onChange={e => handleInputChange('multiMaterial', e.target.checked)}
+                    />
+                    <Checkbox
+                      id="supportsAutoLeveling"
+                      label="Auto-leveling"
+                      checked={formData.supportsAutoLeveling ?? false}
+                      onChange={e => handleInputChange('supportsAutoLeveling', e.target.checked)}
+                    />
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-pf-text-secondary mb-1">Max Print Speed (mm/s)</label>
-                  <input
+                <FormField label="Max Print Speed (mm/s)">
+                  <Input
                     type="number"
                     value={formData.maxPrintSpeed || ''}
                     onChange={e => handleInputChange('maxPrintSpeed', parseInt(e.target.value, 10) || undefined)}
-                    className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
                     placeholder="150"
                     title="Maximum print speed"
                   />
-                </div>
+                </FormField>
               </div>
             </div>
             <div className="flex items-center justify-end space-x-3 pt-2">
-              <button type="button" onClick={handleClose} className="px-4 py-2 text-sm rounded-lg bg-pf-text-tertiary hover:bg-pf-text-secondary text-white transition-colors">Cancel</button>
-              <button type="submit" disabled={updateMutation.status === 'pending'} className="px-4 py-2 text-sm rounded-lg bg-pf-accent hover:bg-pf-accent-hover text-white flex items-center transition-colors disabled:opacity-50">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleClose}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={updateMutation.status === 'pending'}
+              >
                 <Check className="w-4 h-4 mr-1" />
                 {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
-              </button>
+              </Button>
             </div>
           </form>
         </div>

@@ -1,7 +1,7 @@
 // ...existing code...
 import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { X, AlertCircle, Check, Loader2 } from 'lucide-react';
+import { X, Check, Loader2 } from 'lucide-react';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/components/ui';
@@ -390,7 +390,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               <FormField
                 label="Date Acquired (click the calendar icon →)"
                 error={validationErrors.dateAcquired?.[0]}
-                helperText="Try clicking inside the input field or on the right edge"
+                helper="Try clicking inside the input field or on the right edge"
               >
                 <Input
                   type="date"

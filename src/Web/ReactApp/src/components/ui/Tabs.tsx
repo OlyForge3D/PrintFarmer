@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { createContext, useContext, useState } from 'react';
 import clsx from 'clsx';
 

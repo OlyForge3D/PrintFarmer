@@ -41,6 +41,7 @@ import { apiClient } from '@/services/api';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { Button, TemperatureInput, MovementInput } from '@/components/ui';
 import { 
   ChevronDown, 
   ExternalLink,
@@ -228,32 +229,6 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
       // Fallback for unknown states
       default:
         return 'bg-slate-700 text-white'; // Dark slate background (8.32:1 ratio)
-    }
-  };
-
-  // Function to check if an axis is homed based on the homedAxes string from Moonraker
-  const isAxisHomed = (axis: string): boolean => {
-    const homedAxes = status?.homedAxes || '';
-    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
-    if (win.PrintFarmerDebug?.expandablePrinterCard) {
-      console.log(`[PrintFarmer] ExpandablePrinterCard: Checking axis ${axis}, homedAxes from status:`, homedAxes);
-    }
-    return homedAxes.includes(axis.toLowerCase());
-  };
-
-  const getHomeButtonClasses = (axes: string[]): string => {
-    const baseClasses = "w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded disabled:opacity-50";
-    
-    // Check if all specified axes are homed using real data from Moonraker
-    const allAxesHomed = axes.every(axis => isAxisHomed(axis));
-    
-    // Accessible colors: dark backgrounds with white text for sufficient contrast (7.5:1+)
-    if (allAxesHomed) {
-      // Homed state: dark blue background with white text (8.59:1 ratio)
-      return `${baseClasses} bg-blue-700 text-white hover:bg-blue-600 border-blue-700`;
-    } else {
-      // Unhomed state: dark amber background with white text (7.77:1 ratio)
-      return `${baseClasses} bg-amber-700 text-white hover:bg-amber-600 border-amber-700`;
     }
   };
 
@@ -449,16 +424,18 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   <ExternalLink className="h-4 w-4" />
                 </a>
                 {/* Camera button - always visible, enabled/disabled based on camera URLs */}
-                <button
+                <Button
                   type="button"
+                  variant="subtle"
+                  size="sm"
                   onClick={() => setShowCamera(!showCamera)}
                   disabled={!hasCameraUrls}
-                  className="text-pf-text-secondary hover:text-pf-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="!p-1 !h-auto"
                   aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                   title={hasCameraUrls ? `Camera available` : 'No camera configured'}
                 >
                   <Camera className="h-4 w-4" />
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -469,67 +446,72 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           </div>
           
           <div className="flex items-center gap-1">
-            <button
+            <Button
               type="button"
+              variant="subtle"
+              size="sm"
               onClick={handleToggleExpand}
-              className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
+              className="!p-1 !h-auto"
               title="Expand card"
             >
               <ChevronDown className="h-4 w-4" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="subtle"
+              size="sm"
               onClick={handleViewHistory}
-              className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
+              className="!p-1 !h-auto"
               title="View print history"
             >
               <History className="h-4 w-4" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="subtle"
+              size="sm"
               onClick={() => onEdit?.(printer)}
-              className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
+              className="!p-1 !h-auto"
               title="Edit details"
             >
               <Edit className="h-4 w-4" />
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* Control buttons in collapsed view */}
         <div className="flex items-center gap-2">
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => handleControlAction('pause')}
             disabled={!isPrinting}
-            className="inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Pause className="h-3 w-3 mr-1" />
             Pause
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="success"
+            size="sm"
             onClick={() => handleControlAction('resume')}
             disabled={!isPaused}
-            className="inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border border-pf-border rounded hover:bg-pf-bg-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Play className="h-3 w-3 mr-1" />
             Resume
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant={isShutdown ? 'secondary' : 'danger'}
+            size="sm"
             onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
             disabled={!isOnline}
-            className={`inline-flex items-center justify-center w-20 py-1.5 text-xs font-medium border rounded disabled:opacity-50 disabled:cursor-not-allowed ${
-              isShutdown 
-                ? 'border-amber-700 text-white bg-amber-700 hover:bg-amber-600 hover:border-amber-600'
-                : 'border-red-700 text-white bg-red-700 hover:bg-red-600 hover:border-red-600'
-            }`}
             title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           >
-            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <AlertOctagon className="h-3 w-3 mr-1 text-white stroke-2" />}
+            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <AlertOctagon className="h-3 w-3 mr-1" />}
             {isShutdown ? 'Restart' : 'Stop'}
-          </button>
+          </Button>
         </div>
 
         {/* Progress bar for active prints */}
@@ -616,16 +598,18 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 <ExternalLink className="h-4 w-4" />
               </a>
               {/* Camera button - always visible, enabled/disabled based on camera URLs */}
-              <button
+              <Button
                 type="button"
+                variant="subtle"
+                size="sm"
                 onClick={() => setShowCamera(!showCamera)}
                 disabled={!hasCameraUrls}
-                className="text-pf-text-secondary hover:text-pf-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                className="!p-1 !h-auto"
                 aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                 title={hasCameraUrls ? `Camera available` : 'No camera configured'}
               >
                 <Camera className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
             {showCamera && (
               <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
@@ -654,30 +638,36 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         </div>
         
         <div className="flex items-center gap-1">
-          <button
+          <Button
             type="button"
+            variant="subtle"
+            size="sm"
             onClick={handleToggleExpand}
-            className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
+            className="!p-1 !h-auto"
             title="Collapse card"
           >
             <Minus className="h-4 w-4" />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="subtle"
+            size="sm"
             onClick={handleViewHistory}
-            className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
+            className="!p-1 !h-auto"
             title="View print history"
           >
             <History className="h-4 w-4" />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="subtle"
+            size="sm"
             onClick={() => onEdit?.(printer)}
-            className="p-1 text-pf-text-secondary hover:text-pf-text-primary"
+            className="!p-1 !h-auto"
             title="Edit details"
           >
             <Edit className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -711,22 +701,10 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 lastKnownHotendTemp
               )}
             </span>
-            <div className="flex items-center">
-              <span className="absolute left-2 text-slate-500 text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
-                Hotend
-              </span>
-              <div className="relative inline-block">
-                <input 
-                  aria-label="Hotend temperature target"
-                  placeholder="Temp"
-                  type="number" 
-                  className="w-28 h-9 pl-14 pr-8 border border-pf-border rounded-md text-sm bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  value={hotendTemp}
-                  onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
-                />
-                <span className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-500 pointer-events-none text-sm">°C</span>
-              </div>
-            </div>
+            <TemperatureInput
+              value={hotendTemp}
+              onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
+            />
           </div>
           
           <div className="flex flex-col items-center relative">
@@ -737,38 +715,27 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 lastKnownBedTemp
               )}
             </span>
-            <div className="flex items-center">
-              <span className="absolute left-2 text-slate-500 text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
-                Bed
-              </span>
-              <div className="relative inline-block">
-                <input 
-                  aria-label="Bed temperature target"
-                  placeholder="Temp"
-                  type="number" 
-                  className="w-28 h-9 pl-10 pr-8 border border-pf-border rounded-md text-sm bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  value={bedTemp}
-                  onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
-                />
-                <span className="absolute right-2 top-1/2 transform -translate-y-1/2 text-slate-500 pointer-events-none text-sm">°C</span>
-              </div>
-            </div>
+            <TemperatureInput
+              value={bedTemp}
+              onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
+            />
           </div>
           
           <div className="flex items-start mt-0">
-            <button 
+            <Button
               type="button"
-              className="min-w-12 h-9 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors"
+              variant="primary"
+              size="sm"
               onClick={handleSetTemperatures}
             >
               SET
-            </button>
+            </Button>
           </div>
         </div>
         
         {/* Temperature Presets Row */}
         <div className="flex flex-wrap gap-1 mt-3">
-            {[
+          {[
             { name: 'ABS', color: 'bg-gray-600' },
             { name: 'ASA', color: 'bg-yellow-600' }, 
             { name: 'PLA', color: 'bg-green-600' },
@@ -776,25 +743,28 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             { name: 'PCTG', color: 'bg-cyan-600' },
             { name: 'PETG', color: 'bg-red-600' }
           ].map((preset) => (
-            <button
+            <Button
               key={preset.name}
               type="button"
-              className={`w-14 py-1 text-xs font-medium text-white rounded ${preset.color} hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed`}
+              variant="secondary"
+              size="sm"
               disabled={isPrinting}
               onClick={() => handleApplyPreset(preset.name)}
+              className={preset.color}
             >
               {preset.name}
-            </button>
+            </Button>
           ))}
-          <button
+          <Button
             type="button"
-            className="w-14 py-1 text-xs font-medium text-white rounded bg-blue-600 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+            variant="secondary"
+            size="sm"
             disabled={isPrinting}
             title="Cooldown"
             onClick={() => handleApplyPreset('cooldown')}
           >
             ❄
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -806,92 +776,110 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             {/* XY Pad */}
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-36 h-36">
               {/* Top row */}
-              <button 
+              <Button
                 type="button"
-                className={getHomeButtonClasses(['x', 'y', 'z'])}
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleHome()}
                 title="Home all axes"
+                className="w-full h-full !p-0"
               >
                 <Home className="h-4 w-4" />
-              </button>
-              <button 
+              </Button>
+              <Button
                 type="button"
-                className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', step)}
+                className="w-full h-full !p-0"
               >
                 ▲
-              </button>
+              </Button>
               <div></div>
               
               {/* Middle row */}
-              <button 
+              <Button
                 type="button"
-                className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', -step)}
+                className="w-full h-full !p-0"
               >
                 ◀
-              </button>
-              <button 
+              </Button>
+              <Button
                 type="button"
-                className={getHomeButtonClasses(['x', 'y'])}
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
+                className="w-full h-full !p-0"
               >
                 <Home className="h-4 w-4" />
-              </button>
-              <button 
+              </Button>
+              <Button
                 type="button"
-                className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('X', step)}
+                className="w-full h-full !p-0"
               >
                 ▶
-              </button>
+              </Button>
               
               {/* Bottom row */}
               <div></div>
-              <button 
+              <Button
                 type="button"
-                className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', -step)}
+                className="w-full h-full !p-0"
               >
                 ▼
-              </button>
+              </Button>
               <div></div>
             </div>
 
             {/* Z Pad */}
             <div className="flex flex-col gap-1">
-              <button 
+              <Button
                 type="button"
-                className="w-11 h-11 p-0 flex items-center justify-center text-xs border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', step)}
+                className="w-full !p-0"
               >
                 Z+
-              </button>
-              <button 
+              </Button>
+              <Button
                 type="button"
-                className={getHomeButtonClasses(['z'])}
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
                 title="Home Z"
+                className="w-full !p-0"
               >
                 <Home className="h-4 w-4" />
-              </button>
-              <button 
+              </Button>
+              <Button
                 type="button"
-                className="w-11 h-11 p-0 flex items-center justify-center text-xs border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                variant="secondary"
+                size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', -step)}
+                className="w-full !p-0"
               >
                 Z-
-              </button>
+              </Button>
             </div>
 
             {/* Control Pad */}
@@ -900,37 +888,39 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 Controls
               </div>
               <div className="flex items-center gap-2 mt-2">
-                <button 
+                <Button
                   type="button"
-                  className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                  variant="secondary"
+                  size="sm"
                   disabled={!isPrinting}
                   onClick={() => handleControlAction('pause')}
                   title="Pause"
+                  className="!p-0"
                 >
                   <Pause className="h-4 w-4" />
-                </button>
-                <button 
+                </Button>
+                <Button
                   type="button"
-                  className="w-11 h-11 p-0 flex items-center justify-center border border-pf-border rounded bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 disabled:opacity-50"
+                  variant="success"
+                  size="sm"
                   disabled={!isPaused}
                   onClick={() => handleControlAction('resume')}
                   title="Resume"
+                  className="!p-0"
                 >
                   <Play className="h-4 w-4" />
-                </button>
-                <button 
+                </Button>
+                <Button
                   type="button"
-                  className={`w-11 h-11 p-0 flex items-center justify-center border rounded disabled:opacity-50 ${
-                    isShutdown 
-                      ? 'border-amber-700 text-white bg-amber-700 hover:bg-amber-600 hover:border-amber-600'
-                      : 'border-red-700 text-white bg-red-700 hover:bg-red-600 hover:border-red-600'
-                  }`}
+                  variant={isShutdown ? 'secondary' : 'danger'}
+                  size="sm"
                   disabled={!isOnline}
                   onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
+                  className="!p-0"
                 >
-                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <AlertOctagon className="h-4 w-4 text-white stroke-2" />}
-                </button>
+                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <AlertOctagon className="h-4 w-4" />}
+                </Button>
               </div>
               
               {/* Step Block */}
@@ -938,18 +928,15 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Steps</div>
                 <div className="flex gap-1">
                   {[1, 10, 50].map((stepValue) => (
-                    <button
+                    <Button
                       key={stepValue}
                       type="button"
-                      className={`w-8 h-6 text-xs font-medium rounded border transition-colors ${
-                        step === stepValue 
-                          ? 'bg-blue-600 text-white border-blue-600' 
-                          : 'border-pf-border hover:bg-pf-bg-2'
-                      }`}
+                      variant={step === stepValue ? 'primary' : 'secondary'}
+                      size="sm"
                       onClick={() => handleStepChange(stepValue)}
                     >
                       {stepValue}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -962,76 +949,53 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-20 text-center">
                 [ {formatPos(null, lastKnownX)} ]
               </span>
-              <div className="relative inline-block">
-                <span className="absolute left-2 text-slate-500 text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
-                  X
-                </span>
-                <input 
-                  aria-label="X movement amount"
-                  placeholder="ΔX"
-                  type="number" 
-                  className="w-24 h-8 pl-6 pr-2 border border-pf-border rounded text-xs bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  disabled={isPrinting}
-                  value={moveX}
-                  onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-                />
-              </div>
+              <MovementInput
+                axis="X"
+                disabled={isPrinting}
+                value={moveX}
+                onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
+              />
             </div>
             
             <div className="flex flex-col items-center relative">
               <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-20 text-center">
                 [ {formatPos(null, lastKnownY)} ]
               </span>
-              <div className="relative inline-block">
-                <span className="absolute left-2 text-slate-500 text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
-                  Y
-                </span>
-                <input 
-                  aria-label="Y movement amount"
-                  placeholder="ΔY"
-                  type="number" 
-                  className="w-24 h-8 pl-6 pr-2 border border-pf-border rounded text-xs bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  disabled={isPrinting}
-                  value={moveY}
-                  onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-                />
-              </div>
+              <MovementInput
+                axis="Y"
+                disabled={isPrinting}
+                value={moveY}
+                onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
+              />
             </div>
             
             <div className="flex flex-col items-center relative">
               <span className="mb-1 text-xs text-slate-400 bg-pf-bg-0 px-2 py-0.5 rounded w-20 text-center">
                 [ {formatPos(null, lastKnownZ)} ]
               </span>
-              <div className="relative inline-block">
-                <span className="absolute left-2 text-slate-500 text-xs pointer-events-none z-10 top-1/2 transform -translate-y-1/2">
-                  Z
-                </span>
-                <input 
-                  aria-label="Z movement amount"
-                  placeholder="ΔZ"
-                  type="number" 
-                  className="w-24 h-8 pl-6 pr-2 border border-pf-border rounded text-xs bg-pf-bg-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  disabled={isPrinting}
-                  value={moveZ}
-                  onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-                />
-              </div>
+              <MovementInput
+                axis="Z"
+                disabled={isPrinting}
+                value={moveZ}
+                onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
+              />
             </div>
             
             <div className="flex items-start mt-0">
-                <button
-                  type="button"
-                  className="min-w-12 h-8 px-2 text-xs font-bold uppercase bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border border-pf-border rounded hover:from-pf-bg-2 hover:to-pf-bg-1 hover:border-blue-500 transition-colors disabled:opacity-50"
-                  disabled={isPrinting}
-                  onClick={() => {
-                    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
-                    if (win.PrintFarmerDebug?.expandablePrinterCard) {
-                      console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
-                    }
-                  }}
-                >
-                  GO
-                </button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={isPrinting}
+                onClick={() => {
+                  const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
+                  if (win.PrintFarmerDebug?.expandablePrinterCard) {
+                    console.log('[PrintFarmer] ExpandablePrinterCard: Moving to', moveX, moveY, moveZ);
+                  }
+                }}
+              >
+                GO
+              </Button>
             </div>
           </div>
         </div>

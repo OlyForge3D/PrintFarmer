@@ -21,6 +21,7 @@ import {
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { Button, Select } from '@/components/ui';
 
 interface PrinterHistoryModalProps {
   isOpen: boolean;
@@ -96,15 +97,8 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   const [order, setOrder] = useState<string>('desc');
   
   // Conditional debug logging for PrinterHistoryModal (guarded)
-  try {
-    const pf = (window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug;
-    if (pf?.printerHistory) {
-      if (pf.printerHistory === true) {
-        console.log('[PrintFarmer] PrinterHistoryModal render:', { isOpen, printerName: printer.name, printerId: printer.id });
-      }
-    }
-  } catch {
-    // ignore debug guard failures
+  if (window.PrintFarmerDebug?.printerHistory) {
+    console.log('[PrintFarmer] PrinterHistoryModal render:', { isOpen, printerName: printer.name, printerId: printer.id });
   }
 
   const { 
@@ -145,38 +139,39 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
               {/* Controls */}
               <div className="flex items-center space-x-2">
                 <label htmlFor="history-limit" className="text-sm text-pf-text-secondary">Show:</label>
-                <select
+                <Select
                   id="history-limit"
-                  value={limit}
+                  value={limit.toString()}
                   onChange={(e) => setLimit(Number(e.target.value))}
-                  className="px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
-                  title="Number of jobs to show"
+                  className="text-sm"
                 >
-                  <option value={25}>25 jobs</option>
-                  <option value={50}>50 jobs</option>
-                  <option value={100}>100 jobs</option>
-                </select>
+                  <option value="25">25 jobs</option>
+                  <option value="50">50 jobs</option>
+                  <option value="100">100 jobs</option>
+                </Select>
                 
-                <select
+                <Select
                   id="history-order"
                   value={order}
                   onChange={(e) => setOrder(e.target.value)}
-                  className="px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary ml-2"
-                  title="Sort order"
+                  className="text-sm ml-2"
                   aria-label="Sort order"
                 >
                   <option value="desc">Newest first</option>
                   <option value="asc">Oldest first</option>
-                </select>
+                </Select>
               </div>
               
-              <button
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
                 onClick={onClose}
-                className="p-2 hover:bg-pf-bg-2 rounded-full transition-colors"
+                className="!p-2 !h-auto"
                 title="Close"
               >
-                <X className="h-5 w-5 text-pf-text-secondary" />
-              </button>
+                <X className="h-5 w-5" />
+              </Button>
             </div>
           </div>
 
@@ -192,12 +187,13 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                 <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-pf-text-primary mb-2">Failed to Load History</h3>
                 <p className="text-pf-text-secondary mb-4">{error.message}</p>
-                <button
+                <Button
+                  type="button"
+                  variant="primary"
                   onClick={() => refetch()}
-                  className="px-4 py-2 bg-pf-accent text-white rounded-lg hover:bg-pf-accent-dark transition-colors"
                 >
                   Try Again
-                </button>
+                </Button>
               </div>
             ) : !historyData || historyData.jobs.length === 0 ? (
               <div className="text-center py-8">

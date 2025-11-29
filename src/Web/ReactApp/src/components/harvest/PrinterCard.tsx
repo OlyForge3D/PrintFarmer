@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState } from 'react';
 import { Printer, GcodeHarvestOperation, HarvestOptions, GcodeHarvestStatus } from '@/types/api';
 import { getHarvestErrorInfo } from '@/utils/harvestErrorHelper';

@@ -1,6 +1,8 @@
+/* eslint-disable local/pf-no-unguarded-console */
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { Button, Select, Textarea, FormField } from '@/components/ui';
 import { PageTemplate } from '@/components/PageTemplate';
 import { TestTube } from 'lucide-react';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
@@ -73,21 +75,19 @@ export const SlicerDryRunPage: React.FC = () => {
         >
 
             <div className="card">
-                <div className="form-group">
-                    <label className="form-label">Engine</label>
-                    <select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)} className="input-base">
+                <FormField label="Engine" inline={false}>
+                    <Select aria-label="Slicer engine" value={engine} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngine(e.target.value)}>
                         {slicerTypes.map(s => <option key={s}>{s}</option>)}
-                    </select>
-                </div>
+                    </Select>
+                </FormField>
 
-                <div className="form-group">
-                    <label className="form-label">Args Template</label>
-                    <textarea value={template} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplate(e.target.value)} rows={6} className="input-base w-full" placeholder={'e.g. --config "{config}" --output "{output}" {input}'} />
-                </div>
+                <FormField label="Args Template" inline={false}>
+                    <Textarea value={template} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplate(e.target.value)} rows={6} placeholder={'e.g. --config "{config}" --output "{output}" {input}'} />
+                </FormField>
 
                 <div className="gap-md flex-row">
-                    <button onClick={doDryRun} disabled={loading} className="btn-base btn-md btn-primary">Validate Template</button>
-                    <button onClick={() => { setTemplate('--export-gcode -o {output} {input}'); }} className="btn-base btn-md btn-secondary">Insert Example</button>
+                    <Button onClick={doDryRun} disabled={loading} variant="primary">Validate Template</Button>
+                    <Button onClick={() => { setTemplate('--export-gcode -o {output} {input}'); }} variant="secondary">Insert Example</Button>
                 </div>
 
                 {loading && <div className="mt-3 text-sm text-pf-text-secondary">Validating...</div>}

@@ -11,6 +11,8 @@ declare global {
     setupWizard?: boolean;
     userManagementPage?: boolean;
     fileBrowser?: boolean;
+    toolsCodemodTest?: boolean;
+    main?: boolean;
     // Add others as you adopt them
     [key: string]: boolean | undefined;
   }

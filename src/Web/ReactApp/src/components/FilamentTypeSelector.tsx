@@ -156,15 +156,17 @@ export function FilamentTypeSelector({
               ) : (
                 <div className="p-2">
                   {available.map((filamentType) => (
-                    <button
+                    <Button
                       key={filamentType.id}
                       type="button"
                       onClick={() => handleMoveToSelected(filamentType)}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-pf-bg-2 text-pf-text-primary text-sm transition-colors border-l-2 border-transparent hover:border-pf-accent"
+                      variant="subtle"
+                      size="sm"
+                      className="w-full justify-start border-l-2 border-transparent hover:border-pf-accent"
                       title={`Add ${filamentType.name}`}
                     >
                       {filamentType.name}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               )}
@@ -217,15 +219,17 @@ export function FilamentTypeSelector({
               ) : (
                 <div className="p-2">
                   {selected.map((filamentType) => (
-                    <button
+                    <Button
                       key={filamentType.id}
                       type="button"
                       onClick={() => handleMoveToAvailable(filamentType)}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-pf-bg-2 text-pf-text-primary text-sm transition-colors border-r-2 border-transparent hover:border-pf-accent"
+                      variant="subtle"
+                      size="sm"
+                      className="w-full justify-start border-r-2 border-transparent hover:border-pf-accent"
                       title={`Remove ${filamentType.name}`}
                     >
                       {filamentType.name}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               )}

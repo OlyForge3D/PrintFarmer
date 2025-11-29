@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Printer } from '@/types/api';
+import { Button } from '@/components/ui';
 import { MoreVertical, Edit, Trash2 } from 'lucide-react';
 
 interface PrinterActionsDropdownProps {
@@ -22,13 +23,16 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
 
   return (
     <div className="relative">
-      <button
+      <Button
+        type="button"
+        variant="subtle"
+        size="sm"
         onClick={toggleDropdown}
-        className="flex-shrink-0 p-2 text-pf-text-tertiary hover:text-pf-accent transition-colors rounded-md hover:bg-pf-bg-2"
+        className="!p-2 !h-auto flex-shrink-0"
         aria-label="Printer actions"
       >
         <MoreVertical className="w-5 h-5" />
-      </button>
+      </Button>
 
       {isOpen && (
         <>
@@ -42,23 +46,29 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
           <div className="absolute right-0 top-full mt-1 w-48 bg-pf-panel border border-pf-border rounded-lg shadow-lg z-20">
             <div className="py-1">
               
-              <button
-                onClick={() => handleAction(() => onEdit(printer))}
-                className="w-full px-4 py-2 text-left text-sm text-pf-text-primary hover:bg-pf-bg-2 flex items-center transition-colors"
-              >
-                <Edit className="w-4 h-4 mr-3" />
-                Edit Settings
-              </button>
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={() => handleAction(() => onEdit(printer))}
+              className="w-full text-left !justify-start"
+            >
+              <Edit className="w-4 h-4 mr-3" />
+              Edit Settings
+            </Button>
               
               <div className="border-t border-pf-border my-1" />
               
-              <button
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
                 onClick={() => handleAction(() => onDelete(printer))}
-                className="w-full px-4 py-2 text-left text-sm text-pf-error-text hover:bg-pf-error-bg hover:text-pf-error-text flex items-center transition-colors"
+                className="w-full text-left !justify-start hover:text-pf-error hover:bg-pf-error-bg"
               >
                 <Trash2 className="w-4 h-4 mr-3" />
                 Delete Printer
-              </button>
+              </Button>
             </div>
           </div>
         </>

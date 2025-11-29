@@ -11,7 +11,6 @@ import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton'
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import { Alert } from '@/components/ui/Alert';
 import type { Printer } from '@/types/api';
 
 import { Printer as PrinterIcon, LayoutGrid, List } from 'lucide-react';
@@ -199,32 +198,28 @@ export function PrintersPage() {
           </Select>
           {/* View Mode Toggle */}
           <div className="flex items-center bg-pf-bg-1 border border-pf-border rounded-lg p-1">
-            <button
+            <Button
               type="button"
               onClick={() => setViewMode('cards')}
-              className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'cards'
-                  ? 'bg-pf-accent text-white shadow-sm'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-              }`}
+              variant={viewMode === 'cards' ? 'primary' : 'subtle'}
+              size="sm"
+              className="flex items-center space-x-2"
               title="Card View"
             >
               <LayoutGrid className="h-4 w-4" />
               <span className="hidden sm:inline">Cards</span>
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => setViewMode('table')}
-              className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'table'
-                  ? 'bg-pf-accent text-white shadow-sm'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-              }`}
+              variant={viewMode === 'table' ? 'primary' : 'subtle'}
+              size="sm"
+              className="flex items-center space-x-2"
               title="Table View"
             >
               <List className="h-4 w-4" />
               <span className="hidden sm:inline">Table</span>
-            </button>
+            </Button>
           </div>
           {hasPermission('printers', 'create') && (
             <AddPrinterButton onSuccess={refetchPrinters} />

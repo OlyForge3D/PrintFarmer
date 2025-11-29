@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Tag, Plus, Trash2, Edit2, X, Check, Loader, AlertCircle } from 'lucide-react';
+import { Tag, Plus, Trash2, Edit2, X, Check, Loader } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
-import { Button, Input, FormField, Alert, Label } from '@/components/ui';
+import { Button, Input, FormField, Alert } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
 interface TagOption {
@@ -180,7 +180,8 @@ export const TagAdminPage: React.FC = () => {
                             <Plus className="w-5 h-5" />
                             Create New Tag
                         </h2>
-                        <button
+                        <Button
+                            type="button"
                             onClick={() => {
                                 setShowNewTagForm(!showNewTagForm);
                                 if (showNewTagForm) {
@@ -189,10 +190,12 @@ export const TagAdminPage: React.FC = () => {
                                     setNewTagDescription('');
                                 }
                             }}
-                            className="text-pf-text-tertiary hover:text-pf-text-primary"
+                            variant="subtle"
+                            size="sm"
+                            className="!p-0 !h-auto"
                         >
                             <X className="w-5 h-5" />
-                        </button>
+                        </Button>
                     </div>
 
                     {showNewTagForm && (
@@ -362,34 +365,46 @@ export const TagAdminPage: React.FC = () => {
                                         <td className="px-6 py-4 text-right">
                                             {editingTagId === tag.id ? (
                                                 <div className="flex justify-end gap-2">
-                                                    <button
+                                                    <Button
+                                                        type="button"
                                                         onClick={handleSaveEdit}
-                                                        className="p-2 hover:bg-pf-success hover:bg-opacity-20 rounded text-pf-success"
+                                                        variant="success"
+                                                        size="sm"
+                                                        className="!p-2 !h-auto"
                                                         title="Save changes"
                                                     >
                                                         <Check className="w-4 h-4" />
-                                                    </button>
-                                                    <button
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
                                                         onClick={handleCancelEdit}
-                                                        className="p-2 hover:bg-pf-error hover:bg-opacity-20 rounded text-pf-error"
+                                                        variant="danger"
+                                                        size="sm"
+                                                        className="!p-2 !h-auto"
                                                         title="Cancel editing"
                                                     >
                                                         <X className="w-4 h-4" />
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             ) : (
                                                 <div className="flex justify-end gap-2">
-                                                    <button
+                                                    <Button
+                                                        type="button"
                                                         onClick={() => handleStartEdit(tag)}
-                                                        className="p-2 hover:bg-pf-bg-2 rounded text-pf-text-secondary hover:text-pf-text-primary"
+                                                        variant="subtle"
+                                                        size="sm"
+                                                        className="!p-2 !h-auto"
                                                         title="Edit tag"
                                                         disabled={deleteTagMutation.isPending}
                                                     >
                                                         <Edit2 className="w-4 h-4" />
-                                                    </button>
-                                                    <button
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
                                                         onClick={() => deleteTagMutation.mutate(tag.id)}
-                                                        className="p-2 hover:bg-pf-error hover:bg-opacity-20 rounded text-pf-error disabled:opacity-50"
+                                                        variant="danger"
+                                                        size="sm"
+                                                        className="!p-2 !h-auto"
                                                         title="Delete tag"
                                                         disabled={deleteTagMutation.isPending || (tag.usageCount || 0) > 0}
                                                     >
@@ -398,7 +413,7 @@ export const TagAdminPage: React.FC = () => {
                                                         ) : (
                                                             <Trash2 className="w-4 h-4" />
                                                         )}
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             )}
                                         </td>

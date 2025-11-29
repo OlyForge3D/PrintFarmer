@@ -4,6 +4,7 @@ import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, LogIn } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { useAuth } from '@/contexts/AuthHooks';
+import { Button, Input } from '@/components/ui';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -56,16 +57,17 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
               <LogIn className="h-5 w-5 mr-2" />Sign In
             </span>
           </div>
-          <button
+          <Button
             onClick={handleClose}
             disabled={isLoading}
-            className="text-pf-text-tertiary hover:text-pf-text-primary disabled:opacity-50"
+            variant="subtle"
+            size="sm"
             aria-label="Close sign in modal"
             title="Close"
-            type="button"
+            className="!p-0 !h-auto"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
         {isLoading && (
           <div className="p-6"><FormSkeleton fields={2} /></div>
@@ -81,12 +83,11 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-1">
               Username or Email
             </label>
-            <input
+            <Input
               type="text"
               id="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
               placeholder="Enter your username or email"
               required
               disabled={isLoading}
@@ -98,24 +99,24 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
               Password
             </label>
             <div className="relative">
-              <input
+              <Input
                 type={showPassword ? 'text' : 'password'}
                 id="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10"
                 placeholder="Enter your password"
                 required
                 disabled={isLoading}
               />
-              <button
-                type="button"
+              <Button
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-pf-text-tertiary hover:text-pf-text-primary"
+                variant="subtle"
+                size="sm"
                 disabled={isLoading}
+                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -130,18 +131,18 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
           </div>
 
           <div className="flex items-center justify-between pt-4">
-            <button
+            <Button
               type="button"
               onClick={onSwitchToRegister}
-              className="text-pf-accent hover:text-pf-accent-dark text-sm"
+              variant="subtle"
               disabled={isLoading}
             >
               Need an account? Register
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={isLoading || !username || !password}
-              className="px-4 py-2 bg-pf-accent text-white rounded-md hover:bg-pf-accent-dark focus:outline-none focus:ring-2 focus:ring-pf-accent disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              variant="primary"
             >
               {isLoading ? (
                 <>
@@ -154,7 +155,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
                   Sign In
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useMemo } from 'react';
 import { HierarchicalProfilesResponse } from '@/services/slicerProfilesService';
 

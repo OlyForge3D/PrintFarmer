@@ -9,6 +9,7 @@ import {
   MoreHorizontal, 
   AlertCircle 
 } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { PrintJob, queueService } from '@/services/queueService';
 
 interface JobCardProps {
@@ -118,67 +119,79 @@ export const JobCard: React.FC<JobCardProps> = ({
           
           {canModify && (
             <div className="relative">
-              <button
-                onClick={() => setShowActions(!showActions)}
-                className="p-1 hover:bg-gray-100 rounded"
-                disabled={removeMutation.isPending || priorityMutation.isPending}
-                aria-label="Toggle job actions menu"
-                title="Job actions"
-              >
-                <MoreHorizontal className="w-4 h-4 text-gray-400" />
-              </button>
+            <Button
+              onClick={() => setShowActions(!showActions)}
+              variant="subtle"
+              size="sm"
+              disabled={removeMutation.isPending || priorityMutation.isPending}
+              aria-label="Toggle job actions menu"
+              title="Job actions"
+              className="!p-1"
+            >
+              <MoreHorizontal className="w-4 h-4 text-gray-400" />
+            </Button>
 
               {showActions && (
                 <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10 min-w-32">
-                  <button
+                  <Button
                     onClick={() => handleChangePriority(3)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
+                    variant="subtle"
+                    size="sm"
                     disabled={job.priority === 3}
                     aria-label="Set priority to Urgent"
                     title="Set priority to Urgent"
+                    className="w-full text-left flex items-center"
                   >
                     <ArrowUp className="w-4 h-4 mr-2 text-red-500" />
                     Urgent
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => handleChangePriority(2)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
+                    variant="subtle"
+                    size="sm"
                     disabled={job.priority === 2}
                     aria-label="Set priority to High"
                     title="Set priority to High"
+                    className="w-full text-left flex items-center"
                   >
                     <ArrowUp className="w-4 h-4 mr-2 text-orange-500" />
                     High
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => handleChangePriority(1)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
+                    variant="subtle"
+                    size="sm"
                     disabled={job.priority === 1}
                     aria-label="Set priority to Normal"
                     title="Set priority to Normal"
+                    className="w-full text-left flex items-center"
                   >
                     Normal
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => handleChangePriority(0)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center"
+                    variant="subtle"
+                    size="sm"
                     disabled={job.priority === 0}
                     aria-label="Set priority to Low"
                     title="Set priority to Low"
+                    className="w-full text-left flex items-center"
                   >
                     <ArrowDown className="w-4 h-4 mr-2 text-gray-500" />
                     Low
-                  </button>
+                  </Button>
                   <hr className="my-1" />
-                  <button
+                  <Button
                     onClick={handleRemoveJob}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-red-600 flex items-center"
+                    variant="danger"
+                    size="sm"
                     aria-label="Remove job from queue"
                     title="Remove job"
+                    className="w-full text-left flex items-center"
                   >
                     <Trash2 className="w-4 h-4 mr-2" />
                     Remove
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>

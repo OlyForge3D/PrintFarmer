@@ -6,6 +6,8 @@ import { Trash2, Server } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui';
+import { renderUnknown } from '@/utils/renderUnknown';
 
 function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregister?: (s: SlicerDto) => void }) {
   const queryClient = useQueryClient();
@@ -36,32 +38,34 @@ function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregist
             <div className="flex gap-2 items-center flex-wrap justify-end">
               <div className="text-sm text-pf-text-secondary">{s.status || 'unknown'}</div>
               {s.uiManifestUrl && (
-                <button
-                  className="btn-base btn-sm btn-secondary"
+                <Button
+                  size="sm"
+                  variant="secondary"
                   onClick={() => window.open(s.uiManifestUrl, '_blank', 'noopener')}
-                  aria-label={`Open UI ${s.name}`}
                   title="Open UI"
                 >
                   Open UI
-                </button>
+                </Button>
               )}
-              <button
-                className="btn-base btn-sm btn-secondary"
+              <Button
+                size="sm"
+                variant="secondary"
                 onClick={() => setShowDetails(v => !v)}
                 aria-expanded={showDetails}
                 aria-controls={`slicer-details-${s.id}`}
               >
                 {showDetails ? 'Hide' : 'Details'}
-              </button>
-              <button
-                className="btn-base btn-sm btn-danger flex items-center gap-2"
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
                 onClick={() => onRequestDeregister ? onRequestDeregister(s) : mutation.mutate(s.id)}
                 disabled={mutation.status === 'pending'}
-                aria-label={`Deregister ${s.name}`}
+                className="flex items-center gap-2"
               >
                 <Trash2 className="w-4 h-4" />
                 {mutation.status === 'pending' ? '...' : 'Deregister'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -95,9 +99,9 @@ function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregist
                   (() => {
                     try {
                       const parsed = JSON.parse(s.capabilitiesJson as unknown as string);
-                      return <pre className="text-xs">{JSON.stringify(parsed, null, 2)}</pre>;
+                      return renderUnknown(parsed);
                     } catch {
-                      return <pre className="text-xs">{s.capabilitiesJson}</pre>;
+                      return renderUnknown(s.capabilitiesJson);
                     }
                   })()
                 ) : (

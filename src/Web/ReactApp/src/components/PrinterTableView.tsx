@@ -1,6 +1,4 @@
-if (!window.PrintFarmerDebug) {
-  window.PrintFarmerDebug = {};
-}
+/* eslint-disable local/pf-no-raw-html-controls */
 import { useState, useCallback } from 'react';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
@@ -10,6 +8,7 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Trash2, Edit, CheckCircle2, Circle, AlertTriangle, Wrench, Check, X } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
+import { Button } from '@/components/ui';
 
 interface PrinterTableViewProps {
   printers: Printer[];
@@ -141,24 +140,28 @@ export function PrinterTableView({
           </div>
           
           <div className="flex items-center space-x-2">
-            <button
+            <Button
               type="button"
               onClick={handleBulkAction}
               disabled={bulkAction === 'none'}
-              className="px-3 py-1 bg-pf-success text-white text-sm rounded hover:bg-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed flex items-center transition-colors"
+              variant="success"
+              size="sm"
+              className="flex items-center gap-1"
             >
-              <Check className="w-4 h-4 mr-1" />
+              <Check className="w-4 h-4" />
               Apply
-            </button>
+            </Button>
             
-            <button
+            <Button
               type="button"
               onClick={() => setSelectedPrinters(new Set())}
-              className="px-3 py-1 bg-pf-text-tertiary text-white text-sm rounded hover:bg-pf-text-secondary flex items-center transition-colors"
+              variant="secondary"
+              size="sm"
+              className="flex items-center gap-1"
             >
-              <X className="w-4 h-4 mr-1" />
+              <X className="w-4 h-4" />
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -169,10 +172,12 @@ export function PrinterTableView({
           <thead className="bg-pf-panel border-b border-pf-border">
             <tr>
               <th className="w-12 px-4 py-3">
-                <button
+                <Button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="text-pf-text-primary hover:text-pf-accent transition-colors"
+                  variant="subtle"
+                  size="sm"
+                  className="!p-0 !h-auto"
                 >
                   {selectedPrinters.size === printers.length ? (
                     <CheckCircle2 className="w-5 h-5" />
@@ -181,7 +186,7 @@ export function PrinterTableView({
                   ) : (
                     <Circle className="w-5 h-5" />
                   )}
-                </button>
+                </Button>
               </th>
               <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Printer
@@ -239,17 +244,19 @@ export function PrinterTableView({
                 >
                   {/* Selection Checkbox */}
                   <td className="px-4 py-4">
-                    <button
+                    <Button
                       type="button"
                       onClick={() => toggleSelectPrinter(printer.id)}
-                      className="text-pf-text-primary hover:text-pf-accent transition-colors"
+                      variant="subtle"
+                      size="sm"
+                      className="!p-0 !h-auto"
                     >
                       {selectedPrinters.has(printer.id) ? (
                         <CheckCircle2 className="w-5 h-5" />
                       ) : (
                         <Circle className="w-5 h-5" />
                       )}
-                    </button>
+                    </Button>
                   </td>
 
                   {/* Printer Info */}
@@ -321,39 +328,42 @@ export function PrinterTableView({
                   {/* Actions */}
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
-                      <button
+                      <Button
                         type="button"
                         onClick={() => onBulkSetMaintenance([printer], !printer.inMaintenance)}
-                        className={`p-2 transition-colors rounded-md ${printer.inMaintenance ? 'text-pf-warning hover:text-pf-success hover:bg-pf-bg-2' : 'text-pf-text-tertiary hover:text-pf-warning hover:bg-pf-bg-2'}`}
+                        variant={printer.inMaintenance ? 'success' : 'secondary'}
+                        size="sm"
+                        className="!p-2 !h-auto flex items-center gap-1"
                         title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
                       >
-                        {printer.inMaintenance ? (
-                          <span className="flex items-center"><Wrench className="w-4 h-4 mr-1" />Exit Maintenance</span>
-                        ) : (
-                          <span className="flex items-center"><Wrench className="w-4 h-4 mr-1" />Maintenance</span>
-                        )}
-                      </button>
+                        <Wrench className="w-4 h-4" />
+                        {printer.inMaintenance ? 'Exit Maintenance' : 'Maintenance'}
+                      </Button>
                       
                       {hasPermission('printers', 'update') && (
-                        <button
+                        <Button
                           type="button"
                           onClick={() => onEdit(printer)}
-                          className="p-2 text-pf-text-tertiary hover:text-pf-accent transition-colors rounded-md hover:bg-pf-bg-2"
+                          variant="subtle"
+                          size="sm"
+                          className="!p-2 !h-auto"
                           title="Edit printer"
                         >
                           <Edit className="w-4 h-4" />
-                        </button>
+                        </Button>
                       )}
                       
                       {hasPermission('printers', 'delete') && (
-                        <button
+                        <Button
                           type="button"
                           onClick={() => onDelete([printer])}
-                          className="p-2 text-pf-text-tertiary hover:text-pf-error-text transition-colors rounded-md hover:bg-pf-error-bg"
+                          variant="danger"
+                          size="sm"
+                          className="!p-2 !h-auto"
                           title="Delete printer"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </td>

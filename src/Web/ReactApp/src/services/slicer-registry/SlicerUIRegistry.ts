@@ -9,7 +9,8 @@
  * slicer-specific UI as needed.
  */
 
-import React from "react";
+/* eslint-disable local/pf-no-unguarded-console */
+import type React from 'react';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ComponentType = React.ComponentType<any>;

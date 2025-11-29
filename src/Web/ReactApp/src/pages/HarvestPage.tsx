@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/components/PageTemplate';
+import { Button } from '@/components/ui';
 import { Sparkles } from 'lucide-react';
 import { 
   Printer, 
@@ -149,26 +150,22 @@ export const HarvestPage: React.FC = () => {
       {/* Tab-like switcher between wizard and active operations */}
       {activeOperations.length > 0 && (
         <div className="mb-6 flex gap-2 border-b border-pf-border">
-          <button
+          <Button
+            type="button"
+            variant={wizardStep === 'wizard' ? 'primary' : 'subtle'}
             onClick={() => setWizardStep('wizard')}
-            className={`px-4 py-2 font-medium transition-colors ${
-              wizardStep === 'wizard'
-                ? 'text-pf-accent border-b-2 border-pf-accent'
-                : 'text-pf-text-secondary hover:text-pf-text-primary'
-            }`}
+            className="px-4 py-2 !justify-start"
           >
             Start New Harvest
-          </button>
-          <button
+          </Button>
+          <Button
+            type="button"
+            variant={wizardStep === 'operations' ? 'primary' : 'subtle'}
             onClick={() => setWizardStep('operations')}
-            className={`px-4 py-2 font-medium transition-colors ${
-              wizardStep === 'operations'
-                ? 'text-pf-accent border-b-2 border-pf-accent'
-                : 'text-pf-text-secondary hover:text-pf-text-primary'
-            }`}
+            className="px-4 py-2 !justify-start"
           >
             Active Operations ({activeOperations.length})
-          </button>
+          </Button>
         </div>
       )}
 
@@ -209,8 +206,10 @@ export const HarvestPage: React.FC = () => {
               Active Operations ({activeOperations.length})
             </h2>
             {activeOperations.length > 0 && (
-              <button
+              <Button
                 type="button"
+                variant="danger"
+                size="sm"
                 onClick={async () => {
                   let successCount = 0;
                   let errorCount = 0;
@@ -233,11 +232,10 @@ export const HarvestPage: React.FC = () => {
                     toast.error('Failed to cancel operations');
                   }
                 }}
-                className="btn-base btn-sm btn-danger"
                 disabled={cancelHarvestMutation.isPending}
               >
                 {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel All'}
-              </button>
+              </Button>
             )}
           </div>
 
@@ -269,7 +267,10 @@ export const HarvestPage: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
-                    <button
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={async (e) => {
                         e.stopPropagation();
                         try {
@@ -281,13 +282,15 @@ export const HarvestPage: React.FC = () => {
                           toast.error(`Failed to restart discovery: ${op.printerName}`);
                         }
                       }}
-                      className="btn-base btn-xs btn-secondary flex-shrink-0"
                       disabled={restartHarvestDiscoveryMutation.isPending}
                       title="Restart file discovery for this harvest"
                     >
                       {restartHarvestDiscoveryMutation.isPending ? 'Restarting...' : 'Restart Discovery'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
                       onClick={async (e) => {
                         e.stopPropagation();
                         try {
@@ -299,11 +302,10 @@ export const HarvestPage: React.FC = () => {
                           toast.error(`Failed to cancel: ${op.printerName}`);
                         }
                       }}
-                      className="btn-base btn-xs btn-danger flex-shrink-0"
                       disabled={cancelHarvestMutation.isPending}
                     >
                       {cancelHarvestMutation.isPending ? 'Cancelling...' : 'Cancel'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>

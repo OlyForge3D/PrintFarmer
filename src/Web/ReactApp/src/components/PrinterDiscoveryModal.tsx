@@ -61,14 +61,16 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   // Debug logging for state changes
   React.useEffect(() => {
-    console.log('[PrinterDiscoveryModal] State changed:', {
-      sessionId,
-      isActive,
-      isCompleted,
-      foundPrintersCount: foundPrinters.length,
-      progressStatus: progress?.status,
-      completedPrinters: completed?.totalPrintersFound,
-    });
+    if (window.PrintFarmerDebug?.discovery) {
+      console.log('[PrinterDiscoveryModal] State changed:', {
+        sessionId,
+        isActive,
+        isCompleted,
+        foundPrintersCount: foundPrinters.length,
+        progressStatus: progress?.status,
+        completedPrinters: completed?.totalPrintersFound,
+      });
+    }
   }, [sessionId, isActive, isCompleted, foundPrinters.length, progress?.status, completed?.totalPrintersFound]);
 
   // When modal is being closed, reset session so a new discovery can start fresh next open

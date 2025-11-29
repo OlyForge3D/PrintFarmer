@@ -397,15 +397,15 @@ export function useDiscoveryStream(sessionId?: string) {
   useEffect(() => {
     if (!sessionId) return;
     if (!isConnected) {
-      console.log('[Discovery] Waiting for SignalR connection before joining group', { sessionId, isConnected });
+      if (window.PrintFarmerDebug?.discovery) { console.log('[Discovery] Waiting for SignalR connection before joining group', { sessionId, isConnected }); }
       return;
     }
     let cancelled = false;
-    console.log('[Discovery] Attempting to join SignalR discovery group', { sessionId, isConnected });
+    if (window.PrintFarmerDebug?.discovery) { console.log('[Discovery] Attempting to join SignalR discovery group', { sessionId, isConnected }); }
     (async () => {
       try {
         await printerSignalRService.joinDiscoveryGroup?.(sessionId);
-        console.log('[Discovery] Successfully joined SignalR discovery group', { sessionId });
+        if (window.PrintFarmerDebug?.discovery) { console.log('[Discovery] Successfully joined SignalR discovery group', { sessionId }); }
       } catch (err) {
         if (!cancelled) {
           console.warn('[Discovery] Failed to join discovery group, will retry on next connection state change', err);
@@ -415,7 +415,7 @@ export function useDiscoveryStream(sessionId?: string) {
     return () => {
       cancelled = true;
       if (isConnected) {
-        console.log('[Discovery] Leaving SignalR discovery group', { sessionId });
+        if (window.PrintFarmerDebug?.discovery) { console.log('[Discovery] Leaving SignalR discovery group', { sessionId }); }
         printerSignalRService.leaveDiscoveryGroup?.(sessionId);
       }
     };

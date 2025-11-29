@@ -1,7 +1,8 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
 import clsx from 'clsx';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -17,7 +18,8 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary: 'bg-gradient-to-b from-pf-gradient-gray-start to-pf-gradient-gray-end text-white border border-pf-border-medium hover:from-pf-gradient-gray-dark-start hover:to-pf-gradient-gray-dark-end',
   danger: 'bg-pf-error hover:bg-pf-error text-white border border-pf-error-border',
   subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
-  success: 'bg-gradient-to-b from-pf-gradient-success-start to-pf-gradient-success-end text-white border border-pf-success hover:bg-pf-success-hover'
+  success: 'bg-gradient-to-b from-pf-gradient-success-start to-pf-gradient-success-end text-white border border-pf-success hover:bg-pf-success-hover',
+  tab: 'bg-transparent text-pf-text-muted border-b-2 border-transparent hover:text-pf-text-primary focus:ring-0'
 };
 
 const sizeClasses: Record<ButtonSize, string> = {

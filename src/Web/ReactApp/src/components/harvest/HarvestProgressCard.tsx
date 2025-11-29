@@ -16,6 +16,7 @@ import { renderUnknown } from '@/utils/renderUnknown';
 import { useCancelHarvestOperation } from '@/hooks/useApi';
 import { toast } from 'sonner';
 import { parseApiDateTimeValue, formatDuration } from '@/utils/datetime';
+import { Button } from '@/components/ui/Button';
 
 interface FileProgress {
   fileName: string;
@@ -109,10 +110,11 @@ export const HarvestProgressCard: React.FC<HarvestProgressCardProps> = ({
           </div>
         </div>
         {operation.status === GcodeHarvestStatus.Running && hasPermission('gcode_harvest', 'execute') && (
-          <button
+          <Button
             onClick={handleCancel}
             disabled={cancelMutation.isPending}
-            className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            variant="danger"
+            size="sm"
           >
             {cancelMutation.isPending ? (
               <>
@@ -125,7 +127,7 @@ export const HarvestProgressCard: React.FC<HarvestProgressCardProps> = ({
                 Cancel
               </>
             )}
-          </button>
+          </Button>
         )}
       </div>
       <div className="p-4 space-y-4">

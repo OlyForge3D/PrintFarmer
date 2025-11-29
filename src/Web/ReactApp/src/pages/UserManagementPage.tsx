@@ -1,27 +1,22 @@
+/* eslint-disable local/pf-no-unguarded-console */
 import React, { useState, useEffect } from 'react';
 import { usePasswordPolicy } from '@/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/components/PageTemplate';
 import {
-  Users,
   Plus,
   Edit,
   Trash2,
   Shield,
-  Search,
+  Users,
+  UserCheck,
   UserX,
-  UserCheck
+  Search
 } from 'lucide-react';
+import { Button, Input, Select, FormField, Alert, Checkbox, Modal } from '@/components/ui';
 import { TableSkeleton } from '@/components/skeletons/TableSkeleton';
 import { useAuth } from '@/contexts/AuthHooks';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { FormField } from '@/components/ui/FormField';
-import { Alert } from '@/components/ui/Alert';
-import { Checkbox } from '@/components/ui/Checkbox';
-import { Modal } from '@/components/ui/Modal';
 
 interface User {
   id: string;
@@ -388,15 +383,14 @@ export function UserManagementPage() {
       {/* Controls */}
       <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
         <div className="relative flex-1 max-w-xs">
-          <FormField label="Search" hideLabel>
-            <Input
-              type="text"
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              icon={<Search className="h-4 w-4" />}
-            />
-          </FormField>
+          <Input
+            type="text"
+            placeholder="Search users..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+          <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-pf-text-tertiary" />
         </div>
       </div>
       {/* Users Table */}
@@ -463,27 +457,36 @@ export function UserManagementPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end space-x-2">
-                      <button
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
                         onClick={() => {
                           setSelectedUser(user);
                           setShowPermissionsModal(true);
                         }}
-                        className="p-2 text-pf-text-secondary hover:text-pf-accent rounded-md hover:bg-pf-bg-2"
+                        className="!p-2 !h-auto"
                         title="Manage permissions"
                       >
                         <Shield className="h-4 w-4" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
                         onClick={() => {
                           setSelectedUser(user);
                           setShowEditModal(true);
                         }}
-                        className="p-2 text-pf-text-secondary hover:text-pf-accent rounded-md hover:bg-pf-bg-2"
+                        className="!p-2 !h-auto"
                         title="Edit user"
                       >
                         <Edit className="h-4 w-4" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
                         onClick={() => {
                           if (confirm(`Are you sure you want to delete user "${user.username}"?`)) {
                             // TODO: Implement delete user
@@ -494,11 +497,11 @@ export function UserManagementPage() {
                             }
                           }
                         }}
-                        className="p-2 text-pf-text-secondary hover:text-red-500 rounded-md hover:bg-pf-bg-2"
+                        className="!p-2 !h-auto hover:text-red-500"
                         title="Delete user"
                       >
                         <Trash2 className="h-4 w-4" />
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>

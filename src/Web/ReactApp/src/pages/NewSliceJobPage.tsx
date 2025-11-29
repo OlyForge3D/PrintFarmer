@@ -2,7 +2,7 @@ import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
-import slicerProfilesService, { SlicerProfileListItem, HierarchicalProfilesResponse } from '@/services/slicerProfilesService';
+import slicerProfilesService, { HierarchicalProfilesResponse, ExtendedProfilesResponse } from '@/services/slicerProfilesService';
 import workersService from '@/services/workersService';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
@@ -30,11 +30,7 @@ interface ModelListItem {
 }
 
 import { PageTemplate } from '@/components/PageTemplate';
-import { Button } from '@/components/ui/Button';
-import { Alert } from '@/components/ui/Alert';
-import { FormField } from '@/components/ui/FormField';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
+import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea, Toggle } from '@/components/ui';
 import { Layers } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthHooks';
 
@@ -228,7 +224,7 @@ export const NewSliceJobPage: React.FC = () => {
   });
 
   // Fetch flat process profiles for backward compatibility
-  const { data: profiles = [] } = useQuery<SlicerProfileListItem[], Error>({
+  const { data: extendedProfiles } = useQuery<ExtendedProfilesResponse, Error>({
     queryKey: ['slicerProfilesExtended'],
     queryFn: () => slicerProfilesService.listExtended(),
     staleTime: 15_000
@@ -236,9 +232,14 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Filter profiles for the selected printer
   const printerProcessProfiles = useMemo(() => {
-    // Return all profiles - filtering can be done based on availability
-    return profiles;
-  }, [profiles]);
+    // Return all process profiles from the extended response
+    return extendedProfiles?.processProfiles ?? [];
+  }, [extendedProfiles]);
+
+  // Machine profiles for profile selection
+  const machineProfiles = useMemo(() => {
+    return extendedProfiles?.machineProfiles ?? [];
+  }, [extendedProfiles]);
 
   // Filament profiles - combination of slicer profiles + custom for printer
   const filamentProfiles = useMemo(() => {
@@ -500,22 +501,26 @@ export const NewSliceJobPage: React.FC = () => {
                     </p>
                   )}
                 </div>
-                <button
+                <Button
                   type="button"
                   onClick={() => setIsPrinterSelectorOpen(true)}
-                  className="w-full px-3 py-2 bg-pf-bg-1 border border-pf-border hover:border-pf-accent rounded text-pf-text text-sm transition-colors"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full"
                 >
                   Change Printer
-                </button>
+                </Button>
               </div>
             ) : (
-              <button
+              <Button
                 type="button"
                 onClick={() => setIsPrinterSelectorOpen(true)}
-                className="w-full px-3 py-2 bg-pf-accent text-pf-bg-0 border border-pf-accent hover:bg-pf-accent/90 rounded text-sm font-medium transition-colors"
+                variant="primary"
+                size="sm"
+                className="w-full"
               >
                 Select Printer
-              </button>
+              </Button>
             )}
           </div>
 
@@ -542,24 +547,13 @@ export const NewSliceJobPage: React.FC = () => {
               <label className="block text-sm font-semibold text-pf-text">Process</label>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium text-pf-text">Advanced</span>
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                  className={`w-10 h-6 rounded-full transition-colors flex items-center ${showAdvancedSettings
-                    ? 'bg-pf-accent'
-                    : 'bg-pf-border'
-                    }`}
+                <Toggle
+                  checked={showAdvancedSettings}
+                  onChange={() => setShowAdvancedSettings(!showAdvancedSettings)}
                   title="Toggle advanced settings"
-                >
-                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${showAdvancedSettings
-                    ? 'translate-x-4'
-                    : 'translate-x-0.5'
-                    }`} />
-                </button>
+                />
               </div>
             </div>
-
-            {/* Process Presets Dropdown - Organized by Manufacturer/Model Hierarchy */}
             {hierarchyProfiles ? (
               <ProfileSelector
                 hierarchyData={hierarchyProfiles}
@@ -586,17 +580,16 @@ export const NewSliceJobPage: React.FC = () => {
                 {/* Settings Tabs */}
                 <div className="flex gap-1 border-b border-pf-border mb-3 text-xs">
                   {(['quality', 'strength', 'speed', 'support', 'material', 'other'] as const).map(tab => (
-                    <button
+                    <Button
                       key={tab}
                       type="button"
                       onClick={() => setActiveSettingsTab(tab)}
-                      className={`pb-2 px-2 transition-colors capitalize ${activeSettingsTab === tab
-                        ? 'border-b-2 border-pf-accent text-pf-accent font-medium'
-                        : 'text-pf-text-muted hover:text-pf-text'
-                        }`}
+                      variant={activeSettingsTab === tab ? 'primary' : 'subtle'}
+                      size="sm"
+                      className="pb-2 px-2 capitalize"
                     >
                       {tab}
-                    </button>
+                    </Button>
                   ))}
                 </div>
 
@@ -695,8 +688,7 @@ export const NewSliceJobPage: React.FC = () => {
                   {activeSettingsTab === 'support' && (
                     <>
                       <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={customSettings.enableSupports}
                           onChange={e => setCustomSettings(prev => ({ ...prev, enableSupports: e.target.checked }))}
                           title="Enable Supports"
@@ -825,9 +817,8 @@ export const NewSliceJobPage: React.FC = () => {
               helper={useModelPicker ? 'Select from uploaded models' : 'Enter URL manually'}
               inline
             >
-              <input
+              <Checkbox
                 id="useModelPicker"
-                type="checkbox"
                 checked={useModelPicker}
                 onChange={() => {
                   setUseModelPicker(v => !v);
@@ -881,21 +872,31 @@ export const NewSliceJobPage: React.FC = () => {
             <div className="border-t border-pf-border pt-3">
               <div className="flex gap-3 mb-2">
                 <label className="inline-flex items-center gap-2 text-sm">
-                  <input type="radio" name="mode" checked={useProfile} onChange={() => setUseProfile(true)} title="Use Profile Mode" />
+                  <Radio
+                    name="mode"
+                    checked={useProfile}
+                    onChange={() => setUseProfile(true)}
+                    title="Use Profile Mode"
+                  />
                   <span>Profile</span>
                 </label>
                 <label className="inline-flex items-center gap-2 text-sm">
-                  <input type="radio" name="mode" checked={!useProfile} onChange={() => setUseProfile(false)} title="Use JSON Mode" />
+                  <Radio
+                    name="mode"
+                    checked={!useProfile}
+                    onChange={() => setUseProfile(false)}
+                    title="Use JSON Mode"
+                  />
                   <span>JSON</span>
                 </label>
               </div>
 
               {useProfile ? (
                 <FormField label="Profile">
-                  {profiles && profiles.length > 0 ? (
+                  {machineProfiles && machineProfiles.length > 0 ? (
                     <Select value={selectedProfileId} onChange={e => setSelectedProfileId(e.target.value)}>
                       <option value="">-- Select --</option>
-                      {profiles.map(p => (
+                      {machineProfiles.map(p => (
                         <option key={p.id} value={p.id}>{p.name} ({p.slicerType})</option>
                       ))}
                     </Select>
@@ -907,11 +908,10 @@ export const NewSliceJobPage: React.FC = () => {
                 </FormField>
               ) : (
                 <FormField label="Raw JSON">
-                  <textarea
+                  <Textarea
                     value={rawProfileJson}
                     onChange={e => setRawProfileJson(e.target.value)}
                     rows={4}
-                    className="border rounded p-2 font-mono text-xs w-full bg-pf-panel text-pf-text"
                     placeholder='{"layer_height": 0.2}'
                   />
                 </FormField>
@@ -927,11 +927,10 @@ export const NewSliceJobPage: React.FC = () => {
               </FormField>
 
               <FormField label="Capabilities" error={capabilitiesError || undefined}>
-                <textarea
+                <Textarea
                   value={requiredCapabilitiesJson}
                   onChange={e => setRequiredCapabilitiesJson(e.target.value)}
                   rows={3}
-                  className="border rounded p-2 font-mono text-xs w-full bg-pf-panel text-pf-text"
                   placeholder='["orcaslicer"]'
                 />
               </FormField>

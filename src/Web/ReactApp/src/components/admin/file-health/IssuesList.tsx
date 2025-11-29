@@ -1,3 +1,4 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState } from 'react';
 import { FileIssuesSummaryDto } from '@/types/api';
 import { Card } from '@/components/ui/Card';

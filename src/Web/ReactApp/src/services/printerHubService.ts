@@ -56,24 +56,24 @@ export class PrinterHubService {
       .build();
 
     this.connection.onclose((error) => {
-      console.log("PrinterHub connection closed", error);
+      if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub connection closed", error); }
       if (error && this.reconnectAttempts < this.maxReconnectAttempts) {
         setTimeout(() => this.reconnect(), this.reconnectDelay);
       }
     });
 
     this.connection.onreconnecting((error) => {
-      console.log("PrinterHub reconnecting...", error);
+      if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub reconnecting...", error); }
     });
 
     this.connection.onreconnected((connectionId) => {
-      console.log("PrinterHub reconnected:", connectionId);
+      if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub reconnected:", connectionId); }
       this.reconnectAttempts = 0;
     });
 
     try {
       await this.connection.start();
-      console.log("PrinterHub connected successfully");
+      if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub connected successfully"); }
       this.reconnectAttempts = 0;
     } catch (error) {
       console.error("Failed to connect to PrinterHub:", error);
@@ -92,7 +92,7 @@ export class PrinterHubService {
       try {
         await this.connection.stop();
         this.connection = null;
-        console.log("PrinterHub connection stopped");
+        if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub connection stopped"); }
       } catch (error) {
         console.error("Error stopping PrinterHub connection:", error);
       }
@@ -109,7 +109,7 @@ export class PrinterHubService {
     ) {
       try {
         await this.connection.start();
-        console.log("PrinterHub reconnected");
+        if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub reconnected"); }
         this.reconnectAttempts = 0;
       } catch (error) {
         console.error("Reconnection failed:", error);

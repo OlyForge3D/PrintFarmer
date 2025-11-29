@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Clock, Printer, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import { QueueCardSkeleton } from '@/components/skeletons/QueueCardSkeleton';
 import { queueService } from '@/services/queueService';
+import { Button } from '@/components/ui';
 
 interface QueueOverview {
   printerId: string;
@@ -97,15 +98,16 @@ const QueueCard: React.FC<{ queue: QueueOverview }> = ({ queue }) => {
       </div>
 
       <div className="mt-4 pt-4 border-t border-gray-200">
-        <button 
-          className="w-full bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium py-2 px-4 rounded-md transition-colors text-sm"
+        <Button
           onClick={() => {
             // Navigate to printer queue detail
             window.location.href = `/queue/printer/${queue.printerId}`;
           }}
+          variant="secondary"
+          className="w-full"
         >
           View Queue Details
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -104,6 +104,7 @@ export function HarvestWizardStep3FileSelection({
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 bg-pf-surface border border-pf-border rounded-lg">
             <label htmlFor="selectAll" className="flex items-center gap-3 cursor-pointer">
+              {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
               <input
                 id="selectAll"
                 type="checkbox"
@@ -124,6 +125,7 @@ export function HarvestWizardStep3FileSelection({
                 key={file.id}
                 className="flex items-start gap-3 p-3 hover:bg-pf-hover rounded cursor-pointer transition-colors"
               >
+                {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
                 <input
                   type="checkbox"
                   checked={selectedFileIds.has(file.id)}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Download } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { useImportFilamentTypesFromSpoolman } from '@/hooks/useApi';
 import { toast } from 'sonner';
 
@@ -42,11 +43,12 @@ export function SpoolmanFilamentImportButton({
   };
 
   return (
-    <button
+    <Button
       type="button"
+      variant="primary"
       onClick={handleImport}
       disabled={importMutation.status === 'pending'}
-      className={`inline-flex items-center px-3 py-2 text-sm rounded-lg bg-pf-accent hover:bg-pf-success-hover text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={className}
       title="Import unique filament types from Spoolman to maintain parity between applications"
     >
       {importMutation.status === 'pending' ? (
@@ -60,6 +62,6 @@ export function SpoolmanFilamentImportButton({
           Import from Spoolman
         </>
       )}
-    </button>
+    </Button>
   );
 }

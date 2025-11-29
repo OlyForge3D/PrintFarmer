@@ -79,13 +79,17 @@ export default function WorkerManagementPage() {
   };
 
   const handleWorkerRegistered = (event: SlicerRegisteredEvent) => {
-    console.log('Worker registered:', event);
+    if (window.PrintFarmerDebug?.slicing) {
+      console.log('Worker registered:', event);
+    }
     // Reload workers to get the new worker
     loadWorkers();
   };
 
   const handleWorkerHeartbeat = (event: SlicerHeartbeatEvent) => {
-    console.log('Worker heartbeat:', event);
+    if (window.PrintFarmerDebug?.slicing) {
+      console.log('Worker heartbeat:', event);
+    }
     // Update worker status in real-time
     // NOTE: Don't recalculate activeJobs from totalSlots - freeSlots because:
     // - totalSlots might have been recently updated in the UI
@@ -105,7 +109,9 @@ export default function WorkerManagementPage() {
   };
 
   const handleWorkerDeregistered = (event: SlicerDeregisteredEvent) => {
-    console.log('Worker deregistered:', event);
+    if (window.PrintFarmerDebug?.slicing) {
+      console.log('Worker deregistered:', event);
+    }
     // Remove worker from list
     setWorkers(prev => prev.filter(worker => worker.id !== event.id));
   };
@@ -316,16 +322,16 @@ export default function WorkerManagementPage() {
                 <tr key={worker.id} className="hover:bg-pf-bg-2 transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-start gap-2">
-                      <button
+                      <Button
                         onClick={() => handleToggleExpanded(worker.id)}
-                        className="flex-shrink-0 text-pf-text-secondary hover:text-pf-text-primary transition-colors"
+                        variant="subtle"
                       >
                         {expandedWorker === worker.id ? (
                           <ChevronDown size={18} />
                         ) : (
                           <ChevronRight size={18} />
                         )}
-                      </button>
+                      </Button>
                       <div className="flex flex-col">
                         <div className="text-sm font-medium text-pf-text-primary">{worker.name}</div>
                         <div className="text-xs text-pf-text-secondary">{worker.endpointUrl}</div>

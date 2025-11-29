@@ -245,11 +245,15 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
       signalRService.onHarvestFileProgress((evt) => {
         if (evt.operationId === state.operationId) {
           // Progress update - in future this can be used to track file-level progress
-          console.debug(`File progress: ${evt.fileName} - ${evt.percent}%`);
+          if (window.PrintFarmerDebug?.harvest) {
+            console.debug(`File progress: ${evt.fileName} - ${evt.percent}%`);
+          }
         }
       });
     } catch (error) {
-      console.error('Failed to start import:', error);
+      if (window.PrintFarmerDebug?.harvest) {
+        console.error('Failed to start import:', error);
+      }
     }
   };
 

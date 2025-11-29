@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useTelemetry } from '../telemetry/useTelemetry';
 import { isTelemetryInitialized } from '../telemetry/config';
 import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
+import { Button, Checkbox, Input } from '@/components/ui';
 import { 
   CogIcon, 
   EyeIcon, 
@@ -119,12 +120,10 @@ export function TelemetrySettingsPage() {
               <label htmlFor="enable-telemetry" className="text-sm font-medium text-gray-700">Enable Telemetry</label>
               <p className="text-sm text-gray-500">Master switch for all telemetry collection</p>
             </div>
-            <input
+            <Checkbox
               id="enable-telemetry"
-              type="checkbox"
               checked={settings.enabled}
               onChange={(e) => handleSettingChange('enabled', e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
             />
           </div>
 
@@ -134,12 +133,10 @@ export function TelemetrySettingsPage() {
               <label htmlFor="console-logging" className="text-sm font-medium text-gray-700">Console Logging</label>
               <p className="text-sm text-gray-500">Output traces to browser console</p>
             </div>
-            <input
+            <Checkbox
               id="console-logging"
-              type="checkbox"
               checked={settings.consoleLogging}
               onChange={(e) => handleSettingChange('consoleLogging', e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
             />
           </div>
 
@@ -149,18 +146,18 @@ export function TelemetrySettingsPage() {
               OTLP Endpoint
             </label>
             <div className="flex space-x-2">
-              <input
+              <Input
                 id="otlp-endpoint"
                 type={showEndpoint ? 'text' : 'password'}
                 value={settings.otlpEndpoint}
                 onChange={(e) => handleSettingChange('otlpEndpoint', e.target.value)}
                 placeholder="https://otel-collector.example.com/v1/traces"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               />
-              <button
+              <Button
                 type="button"
                 onClick={() => setShowEndpoint(!showEndpoint)}
-                className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                variant="secondary"
+                size="sm"
                 aria-label={showEndpoint ? 'Hide endpoint' : 'Show endpoint'}
               >
                 {showEndpoint ? (
@@ -168,7 +165,7 @@ export function TelemetrySettingsPage() {
                 ) : (
                   <EyeIcon className="h-4 w-4" />
                 )}
-              </button>
+              </Button>
             </div>
             <p className="text-sm text-gray-500 mt-1">
               External collector endpoint for trace export
@@ -209,12 +206,10 @@ export function TelemetrySettingsPage() {
               <label htmlFor="track-interactions" className="text-sm font-medium text-gray-700">Track User Interactions</label>
               <p className="text-sm text-gray-500">Monitor clicks, form submissions, etc.</p>
             </div>
-            <input
+            <Checkbox
               id="track-interactions"
-              type="checkbox"
               checked={settings.trackUserInteractions}
               onChange={(e) => handleSettingChange('trackUserInteractions', e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
             />
           </div>
 
@@ -223,12 +218,10 @@ export function TelemetrySettingsPage() {
               <label htmlFor="track-api-calls" className="text-sm font-medium text-gray-700">Track API Calls</label>
               <p className="text-sm text-gray-500">Monitor HTTP requests and responses</p>
             </div>
-            <input
+            <Checkbox
               id="track-api-calls"
-              type="checkbox"
               checked={settings.trackApiCalls}
               onChange={(e) => handleSettingChange('trackApiCalls', e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
             />
           </div>
 
@@ -237,12 +230,10 @@ export function TelemetrySettingsPage() {
               <label htmlFor="track-components" className="text-sm font-medium text-gray-700">Track Component Lifecycle</label>
               <p className="text-sm text-gray-500">Monitor React component mount/unmount</p>
             </div>
-            <input
+            <Checkbox
               id="track-components"
-              type="checkbox"
               checked={settings.trackComponentLifecycle}
               onChange={(e) => handleSettingChange('trackComponentLifecycle', e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
             />
           </div>
         </div>
@@ -250,12 +241,14 @@ export function TelemetrySettingsPage() {
 
       {/* Save Button */}
       <div className="flex justify-end">
-        <button
+        <Button
+          type="button"
           onClick={handleSave}
-          className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          variant="primary"
+          className="flex items-center justify-center"
         >
           Save Settings
-        </button>
+        </Button>
       </div>
 
       {/* Unified Logging Dashboard */}

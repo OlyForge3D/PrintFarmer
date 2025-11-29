@@ -12,6 +12,7 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { FormField } from './ui/FormField';
 import { Alert } from './ui/Alert';
+import { Select, Checkbox } from '@/components/ui';
 
 interface EditModelModalProps {
   model: PrinterModelDto | null;
@@ -163,13 +164,12 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
     try {
       if (isAddMode) {
         // For add mode, use create mutation and exclude the temp ID
-        const createData: any = {
-          ...updateData,
-          manufacturerId: model.manufacturerId,
-          // Don't include the temp ID
-        };
+        const createData = updateData as unknown as Record<string, unknown>;
+        if (model.manufacturerId) {
+          createData.manufacturerId = model.manufacturerId;
+        }
         delete createData.id;
-        await createMutation.mutateAsync(createData);
+        await createMutation.mutateAsync(createData as unknown as UpdateModelRequest);
       } else {
         // For edit mode, use update mutation
         await updateMutation.mutateAsync({ id: model.id, data: updateData });
@@ -240,17 +240,16 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
               />
             </FormField>
             <FormField label="Printer Type">
-              <select
+              <Select
                 value={formData.motionType || ''}
                 onChange={e => handleInputChange('motionType', e.target.value ? e.target.value as MotionTypeString : undefined)}
-                className="w-full px-3 py-2 rounded-lg bg-pf-bg-0 border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary text-sm"
               >
                 {!formData.motionType && <option value="">Select type...</option>}
                 <option value="Cartesian">Cartesian</option>
                 <option value="CoreXY">CoreXY</option>
                 <option value="Delta">Delta</option>
                 <option value="Unknown">Unknown</option>
-              </select>
+              </Select>
             </FormField>
           </div>
         </div>
@@ -326,46 +325,30 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
 
           {/* Capability Checkboxes */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="hasHeatedBed"
-                checked={formData.hasHeatedBed ?? true}
-                onChange={e => handleInputChange('hasHeatedBed', e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="hasHeatedBed" className="text-sm text-pf-text-primary cursor-pointer">Heated Bed</label>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="hasEnclosure"
-                checked={formData.hasEnclosure ?? false}
-                onChange={e => handleInputChange('hasEnclosure', e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="hasEnclosure" className="text-sm text-pf-text-primary cursor-pointer">Enclosure</label>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="multiMaterial"
-                checked={formData.multiMaterial ?? false}
-                onChange={e => handleInputChange('multiMaterial', e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="multiMaterial" className="text-sm text-pf-text-primary cursor-pointer">Multi-Material</label>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="supportsAutoLeveling"
-                checked={formData.supportsAutoLeveling ?? false}
-                onChange={e => handleInputChange('supportsAutoLeveling', e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="supportsAutoLeveling" className="text-sm text-pf-text-primary cursor-pointer">Auto-Leveling</label>
-            </div>
+            <Checkbox
+              id="hasHeatedBed"
+              label="Heated Bed"
+              checked={formData.hasHeatedBed ?? true}
+              onChange={e => handleInputChange('hasHeatedBed', e.target.checked)}
+            />
+            <Checkbox
+              id="hasEnclosure"
+              label="Enclosure"
+              checked={formData.hasEnclosure ?? false}
+              onChange={e => handleInputChange('hasEnclosure', e.target.checked)}
+            />
+            <Checkbox
+              id="multiMaterial"
+              label="Multi-Material"
+              checked={formData.multiMaterial ?? false}
+              onChange={e => handleInputChange('multiMaterial', e.target.checked)}
+            />
+            <Checkbox
+              id="supportsAutoLeveling"
+              label="Auto-Leveling"
+              checked={formData.supportsAutoLeveling ?? false}
+              onChange={e => handleInputChange('supportsAutoLeveling', e.target.checked)}
+            />
           </div>
 
           {/* Supported Materials */}

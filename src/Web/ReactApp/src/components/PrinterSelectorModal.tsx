@@ -1,5 +1,7 @@
+/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useMemo } from 'react';
 import { X, Search } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { assetService } from '@/services/assetService';
 
 interface PrinterItem {
@@ -50,13 +52,16 @@ export function PrinterSelectorModal({
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-pf-border">
                     <h2 className="text-2xl font-bold text-pf-text">Select Printer</h2>
-                    <button
+                    <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
                         onClick={onClose}
-                        className="p-2 hover:bg-pf-bg-1 rounded-lg transition-colors"
+                        className="!p-2 !h-auto"
                         title="Close"
                     >
-                        <X className="w-6 h-6 text-pf-text" />
-                    </button>
+                        <X className="w-6 h-6" />
+                    </Button>
                 </div>
 
                 {/* Search */}
@@ -89,13 +94,11 @@ export function PrinterSelectorModal({
                                 const isSelected = printer.id === selectedPrinterId;
 
                                 return (
-                                    <button
-                                        key={printer.id}
+                                    <Button
+                                        type="button"
+                                        variant={isSelected ? 'primary' : 'secondary'}
                                         onClick={() => handleSelect(printer.id)}
-                                        className={`group relative overflow-hidden rounded-lg border-2 transition-all duration-200 ${isSelected
-                                                ? 'border-pf-accent bg-pf-accent/10'
-                                                : 'border-pf-border hover:border-pf-accent/50 bg-pf-bg-1'
-                                            }`}
+                                        className="group relative overflow-hidden h-auto p-0 !rounded-lg !justify-start"
                                     >
                                         {/* Cover Image */}
                                         {coverImageUrl && (
@@ -141,8 +144,7 @@ export function PrinterSelectorModal({
                                                     </span>
                                                 )}
                                             </div>
-                                        </div>
-                                    </button>
+                                                                                </div>\n                                    </Button>
                                 );
                             })}
                         </div>

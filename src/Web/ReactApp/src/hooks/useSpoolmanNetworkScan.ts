@@ -16,9 +16,9 @@ export function useSpoolmanNetworkScan() {
     setResults([]);
 
     try {
-      console.debug('[useSpoolmanNetworkScan] starting scanNetwork');
+      if (window.PrintFarmerDebug?.spoolman) { console.debug('[useSpoolmanNetworkScan] starting scanNetwork'); }
       const discoveredInstances = await apiClient.scanNetworkForSpoolman();
-      console.debug('[useSpoolmanNetworkScan] scanNetwork result:', discoveredInstances);
+      if (window.PrintFarmerDebug?.spoolman) { console.debug('[useSpoolmanNetworkScan] scanNetwork result:', discoveredInstances); }
       setResults(discoveredInstances);
       if (!discoveredInstances || discoveredInstances.length === 0) {
         const msg = 'No Spoolman instances found on the configured network ranges';

@@ -174,6 +174,7 @@ export function HarvestWizardStep2Options({
 
       <div className="space-y-3">
         <label htmlFor="includeSubdirs" className="flex items-center gap-3 cursor-pointer">
+          {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
           <input
             id="includeSubdirs"
             type="checkbox"

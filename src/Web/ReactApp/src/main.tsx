@@ -26,7 +26,9 @@ if ('serviceWorker' in navigator) {
           .then(keys => Promise.all(keys.map(k => caches.delete(k))))
           .catch(() => { /* ignore */ });
       }
-      console.info('[SW] Unregistered service workers and cleared caches (dev/localhost)');
+      if (window.PrintFarmerDebug?.main) {
+        try { console.info('[SW] Unregistered service workers and cleared caches (dev/localhost)'); } catch { /* ignore debug stringify errors */ }
+      }
     });
   }
 }

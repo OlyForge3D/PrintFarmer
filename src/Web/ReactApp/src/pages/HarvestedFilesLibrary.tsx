@@ -47,17 +47,25 @@ export const HarvestedFilesLibrary: React.FC = () => {
           />
         </FormField>
         <FormField label="Sort by">
-          <Select value={sortBy} onChange={e => setSortBy(e.target.value as 'name' | 'size' | 'date')}>
-            <option value="name">Name</option>
-            <option value="size">Size</option>
-            <option value="date">Date</option>
-          </Select>
+          <Select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as 'name' | 'size' | 'date')}
+            options={[
+              { value: 'name', label: 'Name' },
+              { value: 'size', label: 'Size' },
+              { value: 'date', label: 'Date' }
+            ]}
+          />
         </FormField>
         <FormField label="Order">
-          <Select value={sortOrder} onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}>
-            <option value="desc">Newest</option>
-            <option value="asc">Oldest</option>
-          </Select>
+          <Select
+            value={sortOrder}
+            onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}
+            options={[
+              { value: 'desc', label: 'Newest' },
+              { value: 'asc', label: 'Oldest' }
+            ]}
+          />
         </FormField>
       </div>
       {loading ? (

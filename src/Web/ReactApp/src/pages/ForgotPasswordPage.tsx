@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Mail, ArrowLeft } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
+import { Button, Input, FormField  } from '@/components/ui';
 import { apiClient } from '@/services/api';
 
 export default function ForgotPasswordPage() {
@@ -53,15 +54,17 @@ export default function ForgotPasswordPage() {
                 Reset Email Sent
               </span>
             </div>
-            <button
+            <Button
+              type="button"
               onClick={handleClose}
-              className="text-pf-text-tertiary hover:text-pf-text-primary"
+              variant="subtle"
+              size="sm"
+              className="!p-0 !h-auto"
               aria-label="Close"
               title="Close"
-              type="button"
             >
               <X className="h-5 w-5" />
-            </button>
+            </Button>
           </div>
 
           <div className="p-6 space-y-4">
@@ -75,14 +78,15 @@ export default function ForgotPasswordPage() {
               please check your spam folder.
             </p>
 
-            <button
-              onClick={handleClose}
-              className="w-full bg-pf-accent text-white py-2 px-4 rounded-md hover:bg-pf-accent-hover font-medium transition-colors flex items-center justify-center gap-2"
+            <Button
               type="button"
+              onClick={handleClose}
+              variant="primary"
+              className="w-full justify-center flex items-center gap-2"
             >
               <ArrowLeft className="h-4 w-4" />
               Back to Sign In
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -101,16 +105,18 @@ export default function ForgotPasswordPage() {
               Forgot Password
             </span>
           </div>
-          <button
+          <Button
+            type="button"
             onClick={handleClose}
             disabled={isLoading}
-            className="text-pf-text-tertiary hover:text-pf-text-primary disabled:opacity-50"
+            variant="subtle"
+            size="sm"
+            className="!p-0 !h-auto"
             aria-label="Close forgot password"
             title="Close"
-            type="button"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -124,36 +130,37 @@ export default function ForgotPasswordPage() {
             Enter your email address and we'll send you instructions to reset your password.
           </p>
 
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-1">
-              Email Address
-            </label>
-            <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
-              placeholder="your.email@example.com"
-              required
-              disabled={isLoading}
-              autoFocus
-            />
-          </div>
+            <FormField
+              label="Email Address"
+              inline={false}
+            >
+              <Input
+                type="email"
+                id="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="your.email@example.com"
+                required
+                disabled={isLoading}
+                autoFocus
+              />
+            </FormField>
 
           <div className="flex gap-3">
-            <button
+            <Button
               type="button"
               onClick={handleClose}
               disabled={isLoading}
-              className="flex-1 border border-pf-border text-pf-text-primary py-2 px-4 rounded-md hover:bg-pf-bg-2 font-medium transition-colors disabled:opacity-50"
+              variant="secondary"
+              className="flex-1"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={isLoading || !email}
-              className="flex-1 bg-pf-accent text-white py-2 px-4 rounded-md hover:bg-pf-accent-hover font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              variant="primary"
+              className="flex-1 flex items-center justify-center gap-2"
             >
               {isLoading ? (
                 <>Processing...</>
@@ -163,18 +170,19 @@ export default function ForgotPasswordPage() {
                   Send Reset Link
                 </>
               )}
-            </button>
+            </Button>
           </div>
 
           <div className="text-center pt-2">
-            <button
+            <Button
               type="button"
               onClick={handleClose}
-              className="text-pf-accent hover:text-pf-accent-hover text-sm font-medium"
+              variant="subtle"
+              size="sm"
               disabled={isLoading}
             >
               Back to Sign In
-            </button>
+            </Button>
           </div>
         </form>
       </div>

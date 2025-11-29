@@ -379,26 +379,28 @@ export const ModelDetailPage: React.FC = () => {
 
                         {/* Save Button */}
                         <div className="flex gap-2">
-                            <button
+                            <Button
+                                type="button"
                                 onClick={() =>
                                     updateTagsMutation.mutate({ tagIds: selectedTagIds, newTags })
                                 }
                                 disabled={updateTagsMutation.isPending || !hasUnsavedChanges}
-                                className="flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                                variant="primary"
+                                iconLeft={<Save className="w-4 h-4" />}
                             >
-                                <Save className="w-4 h-4" />
                                 {updateTagsMutation.isPending ? 'Saving...' : 'Save Tags'}
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                                type="button"
                                 onClick={() => {
                                     setSelectedTagIds(currentTags.map(t => t.id));
                                     setNewTags([]);
                                     setIsEditingTags(false);
                                 }}
-                                className="px-4 py-2 bg-pf-bg-2 border border-pf-border rounded hover:bg-pf-bg-0"
+                                variant="secondary"
                             >
                                 Cancel
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 ) : (
@@ -412,36 +414,45 @@ export const ModelDetailPage: React.FC = () => {
                                         style={{ backgroundColor: tag.color || '#6366f1' }}
                                     >
                                         <span>{tag.name}</span>
-                                        <button
+                                        <Button
+                                            type="button"
                                             onClick={() => {
                                                 setSelectedTagIds(selectedTagIds.filter(id => id !== tag.id));
                                                 setIsEditingTags(true);
                                             }}
-                                            className="hover:opacity-80 transition-opacity ml-1"
+                                            variant="subtle"
+                                            size="sm"
+                                            className="!p-0 !h-auto ml-1"
                                             title="Remove tag"
                                         >
                                             <X className="w-3 h-3" />
-                                        </button>
+                                        </Button>
                                     </div>
                                 ))}
-                                <button
+                                <Button
+                                    type="button"
                                     onClick={() => setIsEditingTags(true)}
-                                    className="p-1 text-pf-text-tertiary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded transition-colors"
+                                    variant="subtle"
+                                    size="sm"
+                                    className="!p-1 !h-auto"
                                     title="Add a new tag"
                                 >
                                     <Plus className="w-4 h-4" />
-                                </button>
+                                </Button>
                             </div>
                         ) : (
                             <div className="flex items-center gap-2">
                                 <p className="text-pf-text-secondary">No tags assigned to this model.</p>
-                                <button
+                                <Button
+                                    type="button"
                                     onClick={() => setIsEditingTags(true)}
-                                    className="p-1 text-pf-text-tertiary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded transition-colors"
+                                    variant="subtle"
+                                    size="sm"
+                                    className="!p-1 !h-auto"
                                     title="Add a new tag"
                                 >
                                     <Plus className="w-4 h-4" />
-                                </button>
+                                </Button>
                             </div>
                         )}
                     </div>
