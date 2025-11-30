@@ -1888,6 +1888,66 @@ tear_down_deployment() {
         print_info "No configuration files to remove"
     fi
     
+    # Remove external storage paths (data persistence directories)
+    print_info "Step 8/8: Removing external storage directories..."
+    local external_paths_removed=0
+    
+    # Load current config to find external paths
+    if [ -f ".deploy-config" ]; then
+        # Source the config file to get EXTERNAL_* variables
+        set +a
+        # shellcheck source=/dev/null
+        source ./.deploy-config 2>/dev/null || true
+        set -a
+    fi
+    
+    # List of external storage path variables to remove
+    local external_vars=(EXTERNAL_MODELS_PATH EXTERNAL_GCODE_PATH EXTERNAL_PROFILES_PATH EXTERNAL_DATABASE_PATH)
+    
+    if [ "$NON_INTERACTIVE" = "false" ]; then
+        echo
+        print_warning "External storage directories found:"
+        for var in "${external_vars[@]}"; do
+            local path_var="${!var:-}"
+            if [ -n "$path_var" ] && [ -d "$path_var" ]; then
+                echo "  • $var: $path_var"
+            fi
+        done
+        echo
+        read -p "Do you want to remove all external storage data? (y/n) [n]: " remove_storage
+        if [ "$remove_storage" != "y" ] && [ "$remove_storage" != "Y" ]; then
+            print_info "Kept external storage directories (data preserved)"
+            external_paths_removed=0
+        else
+            for var in "${external_vars[@]}"; do
+                local path_var="${!var:-}"
+                if [ -n "$path_var" ] && [ -d "$path_var" ]; then
+                    rm -rf "$path_var"
+                    echo "  • Removed $path_var"
+                    ((external_paths_removed++))
+                    audit_log "remove" "teardown: removed external storage: $path_var"
+                fi
+            done
+            print_success "External storage directories removed"
+        fi
+    else
+        # In non-interactive mode with --tear-down, prompt is already done above, so remove all
+        for var in "${external_vars[@]}"; do
+            local path_var="${!var:-}"
+            if [ -n "$path_var" ] && [ -d "$path_var" ]; then
+                rm -rf "$path_var"
+                echo "  • Removed $path_var"
+                ((external_paths_removed++))
+                audit_log "remove" "teardown: removed external storage: $path_var"
+            fi
+        done
+        if [ $external_paths_removed -gt 0 ]; then
+            print_success "External storage directories removed"
+        else
+            print_info "No external storage directories to remove"
+        fi
+    fi
+    
     echo
     print_success "✨ Tear-down complete!"
     echo
@@ -2320,6 +2380,7 @@ USE_EXTERNAL_STORAGE=${USE_EXTERNAL_STORAGE:-no}
 EXTERNAL_MODELS_PATH=${EXTERNAL_MODELS_PATH:-}
 EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
 EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
+EXTERNAL_DATABASE_PATH=${EXTERNAL_DATABASE_PATH:-}
 EOF
 
     cat >> "$CONFIG_FILE" << EOF
@@ -3401,16 +3462,28 @@ configure_external_storage() {
         fi
         print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
         
+        # Database storage directory (defaults to user's home directory)
+        local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
+        prompt_with_default "Host directory for database storage:" "$default_database_path" "EXTERNAL_DATABASE_PATH"
+        
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
+            print_error "Failed to create database directory: $EXTERNAL_DATABASE_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
+        fi
+        print_success "Database directory ready: $EXTERNAL_DATABASE_PATH"
+        
         print_success "External storage directories configured:"
-        echo "  • Models:  $EXTERNAL_MODELS_PATH"
-        echo "  • G-code:  $EXTERNAL_GCODE_PATH"
-        echo "  • Profiles: $EXTERNAL_PROFILES_PATH"
+        echo "  • Models:    $EXTERNAL_MODELS_PATH"
+        echo "  • G-code:    $EXTERNAL_GCODE_PATH"
+        echo "  • Profiles:  $EXTERNAL_PROFILES_PATH"
+        echo "  • Database:  $EXTERNAL_DATABASE_PATH"
         echo
         print_info "⚠️  Data Persistence Guarantee:"
         echo "  • Data survives container recreation (docker-compose down/up)"
         echo "  • Data survives image rebuild"
-        echo "  • Data only deleted if you explicitly remove: $EXTERNAL_MODELS_PATH"
-        echo "  • Database deletion does NOT affect these directories"
+        echo "  • Data only deleted if you explicitly remove these directories"
         
     else
         print_warning "Docker-managed volumes will be used - data may be lost if volumes are removed"
@@ -3986,6 +4059,7 @@ USE_EXTERNAL_STORAGE=${USE_EXTERNAL_STORAGE:-no}
 EXTERNAL_MODELS_PATH=${EXTERNAL_MODELS_PATH:-}
 EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
 EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
+EXTERNAL_DATABASE_PATH=${EXTERNAL_DATABASE_PATH:-}
 EOF
 
     # Small summary for generated environment file: show which sensitive values were included

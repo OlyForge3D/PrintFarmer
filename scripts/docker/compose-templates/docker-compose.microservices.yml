@@ -29,7 +29,7 @@ services:
         aliases:
           - postgres
     volumes:
-      - printfarmer-database:/var/lib/postgresql/data  # Default path, override in production
+      - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/postgresql/data  # Database persistence (maps to host directory or docker volume)
     healthcheck:
       test: ${DATABASE_HEALTH_CHECK:-["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printfarmer} -d ${POSTGRES_DB:-printfarmer}"]}
       interval: 10s
@@ -68,6 +68,8 @@ services:
       - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
+      - GCODE_STORAGE_PATH=/app/gcode
+      - MODEL_UPLOAD_PATH=/app/models
     volumes:
       - printfarmer-app-data:/data
       - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
@@ -155,7 +157,6 @@ networks:
   printfarmer-network: *printfarmer-network
 
 volumes:
-  printfarmer-database:  # Generic database volume (PostgreSQL, SQL Server, MySQL)
   printfarmer-app-data:
   printfarmer-gcode-storage:
   printfarmer-slicer-profiles:
