@@ -235,6 +235,41 @@ public record PrinterStatusUpdate(
     PrinterSpoolInfoDto? SpoolInfo);
 
 /// <summary>
+/// SignalR event for toolhead updates (position, homed_axes)
+/// </summary>
+public record PrinterToolheadUpdate(
+    Guid PrinterId,
+    double? X,
+    double? Y,
+    double? Z,
+    string? HomedAxes);
+
+/// <summary>
+/// SignalR event for extruder temperature updates
+/// </summary>
+public record PrinterExtruderUpdate(
+    Guid PrinterId,
+    double? Temperature,
+    double? Target);
+
+/// <summary>
+/// SignalR event for heater bed temperature updates
+/// </summary>
+public record PrinterHeaterBedUpdate(
+    Guid PrinterId,
+    double? Temperature,
+    double? Target);
+
+/// <summary>
+/// SignalR event for print state and progress updates
+/// </summary>
+public record PrinterStateUpdate(
+    Guid PrinterId,
+    string? State,
+    double? Progress,
+    string? JobName);
+
+/// <summary>
 /// Request payload for creating a new printer entry.
 /// </summary>
 public class CreatePrinterDto : PrinterInfoDto

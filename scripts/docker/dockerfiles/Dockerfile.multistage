@@ -251,19 +251,17 @@ RUN set -e; \
     chmod +x /usr/local/bin/orcaslicer && \
     test -f /usr/local/bin/orcaslicer && \
     test -s ./Farm.OrcaSlicer.Worker.dll && \
-    echo "OrcaSlicer worker binaries verified" && \
+    echo "✓ OrcaSlicer worker binaries verified" && \
     # Verify profile directories exist \
     PROFILES_DIR="/opt/orcaslicer/resources/profiles"; \
     if [ -d "$PROFILES_DIR" ]; then \
-        echo "Profile directory structure:"; \
-        find "$PROFILES_DIR" -maxdepth 2 -type d | sort | head -15; \
         profile_count=$(find "$PROFILES_DIR" -name "*.json" 2>/dev/null | wc -l); \
-        echo "Total JSON profiles: $profile_count"; \
+        echo "✓ Profile directory verified with $profile_count JSON profiles"; \
     else \
         echo "ERROR: Profile directory not found at $PROFILES_DIR"; \
         exit 1; \
     fi && \
-    echo "OrcaSlicer worker setup completed successfully"
+    echo "✓ OrcaSlicer worker setup completed"
 
 # Run as non-root user
 USER appuser

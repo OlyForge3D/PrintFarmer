@@ -26,7 +26,6 @@ export function MovementInput({
   className = '',
   ...props
 }: MovementInputProps) {
-  const deltaSymbol = '∆';
 
   return (
     <div className="relative inline-block">
@@ -39,9 +38,8 @@ export function MovementInput({
         value={value}
         onChange={onChange}
         disabled={disabled}
-        placeholder={`${deltaSymbol}${axis}`}
         aria-label={`${axis} movement amount`}
-        className={`w-24 h-8 pl-6 pr-2 text-xs [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className}`}
+        className={`w-24 h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className}`}
         {...props}
       />
     </div>

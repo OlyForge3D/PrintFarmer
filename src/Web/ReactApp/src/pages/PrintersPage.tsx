@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { useAuth } from '@/contexts/AuthHooks';
-import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
+import { CollapsedPrinterCard } from '@/components/CollapsedPrinterCard';
+import { PrinterDetailsSidebar } from '@/components/PrinterDetailsSidebar';
 import { PrinterTableView } from '@/components/PrinterTableView';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
@@ -35,6 +36,7 @@ export function PrintersPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [expandedPrinterId, setExpandedPrinterId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
     printers: Printer[];
@@ -243,15 +245,24 @@ export function PrintersPage() {
               </div>
             </div>
           ) : viewMode === 'cards' ? (
-            <div className="grid grid-cols-[repeat(auto-fit,26rem)] gap-6 justify-start">
-              {userPrinters.map((printer) => (
-                <ExpandablePrinterCard
-                  key={printer.id}
-                  printer={printer}
-                  onDelete={() => handleDeleteSinglePrinter(printer)}
-                  onEdit={() => handleEditPrinter(printer)}
+            <div className="flex gap-6">
+              <div className="grid grid-cols-[repeat(auto-fit,26rem)] gap-6 justify-start flex-1">
+                {userPrinters.map((printer) => (
+                  <CollapsedPrinterCard
+                    key={printer.id}
+                    printer={printer}
+                    onExpand={() => setExpandedPrinterId(printer.id)}
+                    onDelete={() => handleDeleteSinglePrinter(printer)}
+                    onEdit={() => handleEditPrinter(printer)}
+                  />
+                ))}
+              </div>
+              {expandedPrinterId && (
+                <PrinterDetailsSidebar
+                  printerId={expandedPrinterId}
+                  onClose={() => setExpandedPrinterId(null)}
                 />
-              ))}
+              )}
             </div>
           ) : (
             <PrinterTableView

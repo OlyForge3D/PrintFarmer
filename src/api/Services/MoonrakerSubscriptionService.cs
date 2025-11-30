@@ -32,9 +32,11 @@ internal sealed class PrinterState
 public sealed class MoonrakerSubscriptionService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger) : IHostedService, IDisposable
+    IUnifiedLoggingService logger,
+    IHttpClientFactory httpClientFactory) : IHostedService, IDisposable
 {
     private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, Task> _loops = new();
     private readonly ConcurrentDictionary<Guid, ConnectionMetrics> _connectionMetrics = new();
@@ -277,6 +279,18 @@ public sealed class MoonrakerSubscriptionService(
 
                 // Step 2: Subscribe to printer objects
                 await SendObjectSubscriptionAsync(ws, ct);
+
+                // Step 2b: Query initial toolhead data (especially homed_axes) since Moonraker only sends incremental updates
+                try
+                {
+                    _logger.LogDebug("Querying initial toolhead data for printer {PrinterName} to get homed_axes", printer.Name);
+                    await QueryAndCacheToolheadDataAsync(printer.Id, printer.ServerUrl, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to query initial toolhead data for printer {PrinterName}", printer.Name);
+                    // Don't fail startup over this - we'll query on-demand later
+                }
 
                 // Step 3: Start heartbeat mechanism
                 heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -671,11 +685,8 @@ public sealed class MoonrakerSubscriptionService(
         string? homedAxes = null;
         if (statusObj.TryGetProperty("toolhead", out JsonElement th))
         {
-            // Only log toolhead structure occasionally for debugging
-            if (DateTime.UtcNow.Millisecond % 1000 < 100) // Log roughly 10% of the time
-            {
-                _logger.LogInformation($"Sample toolhead object for printer {printerId}: {th}");
-            }
+            // Always log toolhead structure for debugging  
+            _logger.LogInformation($"Full toolhead object for printer {printerId}: {th}");
 
             // Extract position
             if (th.TryGetProperty("position", out JsonElement pos) &&
@@ -698,44 +709,35 @@ public sealed class MoonrakerSubscriptionService(
                 _logger.LogDebug($"No toolhead.position found in status update for printer {printerId}");
             }
 
-            // Extract homed axes
-            if (th.TryGetProperty("homed_axes", out JsonElement ha))
+            // Try to extract homed_axes from subscription if available
+            if (th.TryGetProperty("homed_axes", out JsonElement ha) && ha.ValueKind == JsonValueKind.String)
             {
-                try
-                {
-                    homedAxes = ha.GetString();
-                    _logger.LogInformation($"Extracted homed axes for printer {printerId}: '{homedAxes ?? "null"}'");
-                }
-                catch { }
-            }
-            else
-            {
-                // Only log this occasionally to reduce noise
-                if (DateTime.UtcNow.Millisecond % 5000 < 100)
-                {
-                    _logger.LogInformation($"No toolhead.homed_axes property found for printer {printerId}");
-                }
+                homedAxes = ha.GetString();
+                _logger.LogDebug($"Extracted homed_axes from subscription for printer {printerId}: '{homedAxes}'");
             }
         }
 
-        // TEMPORARY: For testing frontend, hardcode some homed axes data
+        // If homed_axes wasn't in subscription, query via HTTP periodically (every 10 seconds)
         if (homedAxes == null)
         {
-            // Simulate some printers being homed and others not
-            if (printerId.ToString().Contains("63a2c1bb")) // micron1
+            _logger.LogInformation($"homedAxes is null for printer {printerId}, will attempt HTTP query");
+            var lastQueryTime = _lastStatusUpdateTimes.GetOrAdd(printerId, DateTime.MinValue);
+            if ((DateTime.UtcNow - lastQueryTime).TotalSeconds >= 10)
             {
-                homedAxes = "xyz"; // All axes homed
+                homedAxes = await QueryHomedAxesAsync(serverUrl, ct);
+                if (homedAxes != null)
+                {
+                    _logger.LogInformation($"Queried homed axes via HTTP for printer {printerId}: '{homedAxes}'");
+                }
             }
-            else if (printerId.ToString().Contains("d43b28ee")) // vt01  
-            {
-                homedAxes = "xy"; // Only X and Y homed
-            }
-            else
-            {
-                homedAxes = ""; // No axes homed
-            }
-            _logger.LogDebug($"TEMP: Using hardcoded homed axes for printer {printerId}: '{homedAxes}'");
         }
+        else
+        {
+            _logger.LogInformation($"homedAxes already set from subscription for printer {printerId}: '{homedAxes}'");
+        }
+
+        // Fallback: Use empty string if homed_axes couldn't be obtained
+        homedAxes ??= "";
 
         // Display status (progress)
         if (statusObj.TryGetProperty("display_status", out JsonElement ds) &&
@@ -890,7 +892,11 @@ public sealed class MoonrakerSubscriptionService(
             state.JobName = jobName;
         }
 
-        state.HomedAxes = homedAxes;
+        // Only update HomedAxes if we actually received a value (not empty string fallback)
+        if (!string.IsNullOrEmpty(homedAxes))
+        {
+            state.HomedAxes = homedAxes;
+        }
 
         // Create and send status update using persistent state (never null out good values)
         PrinterStatusUpdate update = new(
@@ -1032,6 +1038,73 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     // Removed unused GetPollingMode (CA S1144)
+
+    // Query and cache initial toolhead data (especially homed_axes) since Moonraker sends incremental updates
+    private async Task QueryAndCacheToolheadDataAsync(Guid printerId, string serverUrl, CancellationToken ct)
+    {
+        try
+        {
+            var toolheadData = await QueryHomedAxesAsync(serverUrl, ct);
+            if (!string.IsNullOrEmpty(toolheadData))
+            {
+                var state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+                state.HomedAxes = toolheadData;
+                _logger.LogInformation("Cached initial homed_axes for printer {PrinterId}: '{HomedAxes}'", printerId, toolheadData);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to cache initial toolhead data for printer {PrinterId}", printerId);
+        }
+    }
+
+    // Helper method to query homed axes via HTTP since Moonraker doesn't send it in subscriptions
+    private async Task<string?> QueryHomedAxesAsync(string serverUrl, CancellationToken ct)
+    {
+        try
+        {
+            // Build HTTP query URL
+            string normalized = serverUrl.TrimEnd('/');
+            if (!normalized.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = "http://" + normalized;
+            }
+            UriBuilder ub = new(normalized);
+            if (ub.Port == -1)
+            {
+                ub.Port = 7125;
+            }
+
+            Uri queryUri = new(ub.Uri, "/printer/objects/query?toolhead=homed_axes");
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            using HttpClient httpClient = _httpClientFactory.CreateClient();
+            using HttpResponseMessage resp = await httpClient.GetAsync(queryUri, cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+                using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+                JsonElement root = doc.RootElement;
+
+                if (root.TryGetProperty("result", out JsonElement result) &&
+                    result.TryGetProperty("status", out JsonElement statusNode) &&
+                    statusNode.TryGetProperty("toolhead", out JsonElement th) &&
+                    th.TryGetProperty("homed_axes", out JsonElement homedAxes))
+                {
+                    return homedAxes.GetString();
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to query homed axes for {ServerUrl}", serverUrl);
+            return null;
+        }
+    }
 
     // Helper method to get spool information for Moonraker printers
     private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
