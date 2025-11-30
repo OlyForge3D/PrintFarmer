@@ -474,23 +474,117 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     /// <summary>
-    /// Sends subscription request to Moonraker for specific printer objects (toolhead, extruder, heater_bed, etc.).
+    /// Sends subscription request to Moonraker for all available printer objects (like Mainsail does).
+    /// Queries the actual list of available objects and subscribes to all of them (minus blocklist),
+    /// ensuring full state coverage for any Moonraker configuration without hardcoding object names.
     /// </summary>
     /// <param name="ws">The WebSocket connection.</param>
     /// <param name="ct">Cancellation token.</param>
     private async Task SendObjectSubscriptionAsync(ClientWebSocket ws, CancellationToken ct)
     {
+        // Step 1: Query the list of all available objects from Moonraker
+        JsonRpcRequest listRequest = new()
+        {
+            Method = "printer.objects.list",
+            Params = new { },
+            Id = 102
+        };
+
+        string listJson = JsonSerializer.Serialize(listRequest);
+        byte[] listBytes = Encoding.UTF8.GetBytes(listJson);
+        await ws.SendAsync(listBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
+
+        _logger.LogDebug("Sent printer.objects.list request to Moonraker to discover available objects");
+
+        // Step 2: Read the response to get the list of available objects
+        byte[] buffer = new byte[64 * 1024];
+        string? objectsListJson = null;
+
+        // Simple receive loop to get the objects.list response (ID 102)
+        var receiveTimeout = TimeSpan.FromSeconds(5);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(receiveTimeout);
+
+        try
+        {
+            StringBuilder sb = new();
+            while (ws.State == WebSocketState.Open && !cts.Token.IsCancellationRequested)
+            {
+                var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
+                if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
+                    if (result.EndOfMessage)
+                    {
+                        string message = sb.ToString();
+                        sb.Clear();
+
+                        // Check if this is the objects.list response (ID 102)
+                        using var doc = JsonDocument.Parse(message);
+                        if (doc.RootElement.TryGetProperty("id", out var idElem) && idElem.GetInt32() == 102)
+                        {
+                            objectsListJson = message;
+                            _logger.LogDebug("Received objects.list response from Moonraker");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Timeout waiting for objects.list response");
+            throw;
+        }
+
+        // Step 3: Parse the objects list and build subscription params
+        var subscriptionObjects = new Dictionary<string, string[]?>();
+
+        if (!string.IsNullOrEmpty(objectsListJson))
+        {
+            using var doc = JsonDocument.Parse(objectsListJson);
+            if (doc.RootElement.TryGetProperty("result", out var resultElem) &&
+                resultElem.TryGetProperty("objects", out var objectsElem) &&
+                objectsElem.ValueKind == JsonValueKind.Array)
+            {
+                var blocklist = new[] { "menu" }; // Objects to skip (same as Mainsail)
+                var subscribedObjects = new List<string>();
+                var skippedObjects = new List<string>();
+
+                foreach (var objElem in objectsElem.EnumerateArray())
+                {
+                    if (objElem.ValueKind == JsonValueKind.String)
+                    {
+                        string objectName = objElem.GetString() ?? "";
+                        string objectType = objectName.Split(' ')[0]; // Get base type (e.g., "extruder" from "extruder 0")
+
+                        // Skip blocklisted object types
+                        if (!blocklist.Contains(objectType))
+                        {
+                            subscriptionObjects[objectName] = null; // null = subscribe to all properties
+                            subscribedObjects.Add(objectName);
+                        }
+                        else
+                        {
+                            skippedObjects.Add(objectName);
+                        }
+                    }
+                }
+
+                _logger.LogInformation("Discovered {ObjectCount} objects from Moonraker, subscribing to {SubscriptionCount}",
+                    objectsElem.GetArrayLength().ToString(), subscribedObjects.Count.ToString());
+                _logger.LogDebug("Subscribing to objects: {SubscribedObjects}", string.Join(", ", subscribedObjects));
+                if (skippedObjects.Count > 0)
+                {
+                    _logger.LogDebug("Skipped blocklisted objects: {SkippedObjects}", string.Join(", ", skippedObjects));
+                }
+            }
+        }
+
+        // Step 4: Send the subscription request with discovered objects
         ObjectSubscriptionRequest subscriptionParams = new()
         {
-            Objects = new Dictionary<string, string[]?>
-            {
-                ["toolhead"] = ["position", "homed_axes"],
-                ["display_status"] = ["progress"],
-                ["print_stats"] = ["state", "filename"],
-                ["webhooks"] = ["state", "state_message"],
-                ["extruder"] = ["temperature", "target"],
-                ["heater_bed"] = ["temperature", "target"],
-            }
+            Objects = subscriptionObjects
         };
 
         JsonRpcRequest subscriptionRequest = new()
@@ -504,7 +598,8 @@ public sealed class MoonrakerSubscriptionService(
         byte[] subBytes = Encoding.UTF8.GetBytes(subJson);
         await ws.SendAsync(subBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
 
-        _logger.LogDebug("Sent object subscription request to Moonraker");
+        _logger.LogInformation("Sent subscription request for {ObjectCount} objects to Moonraker: {ObjectList}",
+            subscriptionObjects.Count.ToString(), string.Join(", ", subscriptionObjects.Keys));
     }
 
     /// <summary>

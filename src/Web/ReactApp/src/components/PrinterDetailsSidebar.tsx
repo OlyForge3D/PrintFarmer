@@ -18,6 +18,46 @@ import {
   AlertOctagon
 } from 'lucide-react';
 
+// Animation styles
+const sidebarAnimationStyles = `
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideOutRight {
+    from {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+  }
+
+  .sidebar-enter {
+    animation: slideInRight 0.3s ease-out;
+  }
+
+  .sidebar-exit {
+    animation: slideOutRight 0.3s ease-in;
+  }
+`;
+
+// Inject animation styles
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.textContent = sidebarAnimationStyles;
+  document.head.appendChild(style);
+}
+
 interface PrinterDetailsSidebarProps {
   printerId: string | null;
   onClose: () => void;
@@ -116,11 +156,23 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const isXYHomed = isXHomed && isYHomed;
 
   // Get button class based on homed state
-  const getHomeButtonClass = (isHomed: boolean): string => {
+  const getHomeButtonStyle = (isHomed: boolean): { className: string; style?: React.CSSProperties } => {
     if (isHomed) {
-      return '!bg-blue-300 !from-blue-300 !to-blue-300 hover:!bg-blue-400 hover:!from-blue-400 hover:!to-blue-400 !text-blue-900';
+      return {
+        className: '!text-white',
+        style: {
+          backgroundColor: '#2096f3',
+          backgroundImage: 'linear-gradient(to bottom, #2096f3, #2096f3)',
+        },
+      };
     }
-    return '!bg-yellow-400 !from-yellow-400 !to-yellow-400 hover:!bg-yellow-500 hover:!from-yellow-500 hover:!to-yellow-500 !text-yellow-900';
+    return {
+      className: '!text-white',
+      style: {
+        backgroundColor: '#fb8c00',
+        backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
+      },
+    };
   };
 
   const handleHome = async (axis?: string) => {
@@ -243,7 +295,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   };
 
   return (
-    <div className="fixed right-0 top-16 h-[calc(100vh-4rem)] w-96 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col">
+    <div className="fixed right-0 top-16 h-[calc(100vh-4rem)] w-96 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col sidebar-enter">
       {/* Header */}
       <div className="flex justify-between items-start p-4 border-b border-pf-border flex-shrink-0 gap-3">
         <div className="flex-1 min-w-0">
@@ -362,7 +414,8 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleHome()}
                 title="Home all axes"
-                className={`w-full h-full !p-0 ${getHomeButtonClass(isAllHomed)}`}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isAllHomed).className}`}
+                style={getHomeButtonStyle(isAllHomed).style}
               >
                 <Home className="h-4 w-4" />
               </Button>
@@ -396,9 +449,10 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleHome('xy')}
                 title="Home XY"
-                className={`w-full h-full !p-0 ${getHomeButtonClass(isXYHomed)}`}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isXYHomed).className}`}
+                style={getHomeButtonStyle(isXYHomed).style}
               >
-                <Home className="h-3 w-3" />
+                <Home className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -445,7 +499,8 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`flex-1 p-0 ${getHomeButtonClass(isZHomed)}`}
+                className={`flex-1 p-0 ${getHomeButtonStyle(isZHomed).className}`}
+                style={getHomeButtonStyle(isZHomed).style}
               >
                 <Home className="h-4 w-4" />
               </Button>
