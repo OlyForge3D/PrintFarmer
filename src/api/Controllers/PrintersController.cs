@@ -1782,8 +1782,8 @@ public class PrintersController(
 
             IReadOnlyList<PrinterBackend>? backends = request?.Backends?.ToList();
             Services.Interfaces.DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
-                backends: backends, 
-                autoRegister: autoRegister, 
+                backends: backends,
+                autoRegister: autoRegister,
                 cancellationToken: ct);
 
             return Ok(new { sessionId = result.SessionId, message = result.Message });

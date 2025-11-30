@@ -1,11 +1,11 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.SignalR;
-using Farm.Web.Api.Hubs;
 
 namespace Farm.Web.Api.Services;
 
@@ -54,7 +54,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         {
             // Get network discovery settings from database
             NetworkDiscoverySettings settings = _settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
-            
+
             _logger.LogInformation($"[DISCOVERY] Using settings - Subnets: {string.Join(", ", settings.DiscoverySubnets)}, Timeout: {settings.ClientTimeoutMs}ms, MaxConcurrent: {settings.MaxConcurrentRequests}");
 
             // Forward to the printer-discovery microservice's streaming endpoint
@@ -82,9 +82,9 @@ public class DiscoveryProxyService : IDiscoveryProxyService
                 // Parse the response to get the session ID
                 string content = await response.Content.ReadAsStringAsync(cancellationToken);
                 JsonDocument doc = JsonDocument.Parse(content);
-                
+
                 string sessionId = doc.RootElement.GetProperty("sessionId").GetString() ?? Guid.NewGuid().ToString("N");
-                string message = doc.RootElement.TryGetProperty("message", out JsonElement msgElem) 
+                string message = doc.RootElement.TryGetProperty("message", out JsonElement msgElem)
                     ? msgElem.GetString() ?? "Discovery started"
                     : "Discovery started";
 

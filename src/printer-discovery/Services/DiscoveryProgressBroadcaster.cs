@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace PrinterDiscovery.Services;
@@ -40,7 +40,7 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
     public DiscoveryProgressBroadcaster(IConfiguration config, ILogger<DiscoveryProgressBroadcaster> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        
+
         string apiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245";
         _hubUrl = $"{apiBaseUrl.TrimEnd('/')}/hubs/printers";
     }
@@ -107,7 +107,7 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
             {
                 // Invoke the hub method to broadcast to the discovery group
                 await _hubConnection.InvokeAsync("BroadcastDiscoveryProgressAsync", progress, cancellationToken);
-                _logger.LogDebug("[DISCOVERY-BROADCASTER] Broadcasted progress for session {SessionId}: {Percentage}%", 
+                _logger.LogDebug("[DISCOVERY-BROADCASTER] Broadcasted progress for session {SessionId}: {Percentage}%",
                     progress.SessionId, progress.ProgressPercentage);
             }
             else
@@ -130,7 +130,7 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
             if (_hubConnection?.State == HubConnectionState.Connected)
             {
                 await _hubConnection.InvokeAsync("BroadcastDiscoveryPrinterFoundAsync", found, cancellationToken);
-                _logger.LogInformation("[DISCOVERY-BROADCASTER] Broadcasted printer found for session {SessionId}: {Name} at {Ip}", 
+                _logger.LogInformation("[DISCOVERY-BROADCASTER] Broadcasted printer found for session {SessionId}: {Name} at {Ip}",
                     found.SessionId, found.Printer.Name, found.Printer.ServerUrl);
             }
             else
@@ -153,7 +153,7 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
             if (_hubConnection?.State == HubConnectionState.Connected)
             {
                 await _hubConnection.InvokeAsync("BroadcastDiscoveryCompletedAsync", completed, cancellationToken);
-                _logger.LogInformation("[DISCOVERY-BROADCASTER] Broadcasted completion for session {SessionId}: {Found} printers found", 
+                _logger.LogInformation("[DISCOVERY-BROADCASTER] Broadcasted completion for session {SessionId}: {Found} printers found",
                     completed.SessionId, completed.TotalPrintersFound);
             }
             else

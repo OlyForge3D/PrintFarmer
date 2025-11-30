@@ -235,7 +235,7 @@ public class ApiClient : IApiClient
         try
         {
             using HttpResponseMessage response = await _httpClient.GetAsync(new Uri("/api/printers", UriKind.Relative), cancellationToken).ConfigureAwait(false);
-            
+
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to get registered printers: {StatusCode}", response.StatusCode);
@@ -243,11 +243,11 @@ public class ApiClient : IApiClient
             }
 
             string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            
+
             // Parse JSON array and extract serverUrl from each printer
             using JsonDocument doc = JsonDocument.Parse(json);
             HashSet<string> urls = new(StringComparer.OrdinalIgnoreCase);
-            
+
             foreach (JsonElement printer in doc.RootElement.EnumerateArray())
             {
                 if (printer.TryGetProperty("serverUrl", out JsonElement urlElement))
@@ -259,7 +259,7 @@ public class ApiClient : IApiClient
                     }
                 }
             }
-            
+
             _logger.LogDebug("Found {Count} registered printers", urls.Count);
             return urls;
         }

@@ -53,7 +53,7 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService, IDisposable
             {
                 // Fetch current settings from API
                 NetworkDiscoverySettings? settings = await FetchSettingsAsync(stoppingToken);
-                
+
                 if (settings == null || !settings.BackgroundScanEnabled)
                 {
                     _logger.LogDebug("Background scanning is disabled. Checking again in {Interval}", _settingsRefreshInterval);
@@ -138,10 +138,10 @@ public class PeriodicDiscoveryBackgroundService : BackgroundService, IDisposable
         {
             using IServiceScope scope = _serviceScopeFactory.CreateScope();
             INetworkDiscoveryService discoveryService = scope.ServiceProvider.GetRequiredService<INetworkDiscoveryService>();
-            
+
             IReadOnlyList<Farm.Infrastructure.DiscoveredPrinterDto> printers = await discoveryService.ScanOnceAsync(stoppingToken);
             _logger.LogInformation("Periodic discovery scan found {Count} printers", printers.Count);
-            
+
             if (printers.Count > 0)
             {
                 await discoveryService.RegisterPrintersAsync(printers, stoppingToken);

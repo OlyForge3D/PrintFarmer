@@ -71,6 +71,11 @@ public sealed class MoonrakerSubscriptionService(
     private const string ClientName = "PrintFarmer";
     private const string ClientVersion = "1.0.0";
 
+    /// <summary>
+    /// Starts the Moonraker subscription service background tasks.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token (unused in this implementation).</param>
+    /// <returns>A completed task.</returns>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("MoonrakerSubscriptionService starting");
@@ -78,6 +83,11 @@ public sealed class MoonrakerSubscriptionService(
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Stops the Moonraker subscription service and cancels all background tasks.
+    /// Handles cleanup of running subscription loops and resource disposal.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token (unused in this implementation).</param>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         // Signal cancellation to background loops (ignore if already disposed)
@@ -114,6 +124,9 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Disposes the service and releases the cancellation token source.
+    /// </summary>
     public void Dispose()
     {
         try
@@ -128,6 +141,10 @@ public sealed class MoonrakerSubscriptionService(
         _cts.Dispose();
     }
 
+    /// <summary>
+    /// Main background loop that continuously enumerates printers and checks for stale connections.
+    /// </summary>
+    /// <param name="ct">Cancellation token to stop the loop.</param>
     private async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -160,6 +177,10 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Enumerates all enabled Moonraker-backed printers from the database and starts subscription loops for each.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
     private async Task EnumerateAndStartSubscriptionsAsync(CancellationToken ct)
     {
         // Using an async scope while awaiting EF Core ToListAsync is intentional here.
@@ -181,6 +202,11 @@ public sealed class MoonrakerSubscriptionService(
 #pragma warning restore IDISP013
     }
 
+    /// <summary>
+    /// Checks for stale WebSocket connections that haven't received updates within the threshold.
+    /// Triggers HTTP polling fallback for stale connections.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
     private async Task CheckForStaleConnectionsAsync(CancellationToken ct)
     {
         DateTime now = DateTime.UtcNow;
@@ -205,6 +231,13 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Converts an HTTP base URL to a WebSocket URI for Moonraker connection.
+    /// Handles URL normalization, port assignment (default 7125), and scheme conversion (http/https to ws/wss).
+    /// </summary>
+    /// <param name="httpBase">The HTTP base URL of the Moonraker server.</param>
+    /// <returns>The WebSocket URI to connect to.</returns>
+    /// <exception cref="ArgumentException">Thrown when httpBase is null or whitespace.</exception>
     private static Uri BuildWsUri(string httpBase)
     {
         if (string.IsNullOrWhiteSpace(httpBase))
@@ -229,6 +262,13 @@ public sealed class MoonrakerSubscriptionService(
         return ub.Uri;
     }
 
+    /// <summary>
+    /// Main WebSocket subscription loop for a single printer.
+    /// Handles connection establishment, identification, object subscription, heartbeat, and message processing.
+    /// Implements exponential backoff and automatic reconnection on failure.
+    /// </summary>
+    /// <param name="printer">The printer to subscribe to.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task SubscribePrinterLoopAsync(Printer printer, CancellationToken ct)
     {
         Guid id = printer.Id;
@@ -364,6 +404,12 @@ public sealed class MoonrakerSubscriptionService(
 
     // Helper methods for improved connection management
 
+    /// <summary>
+    /// Validates that a printer still exists in the database and uses the Moonraker backend.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer to validate.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True if the printer exists and uses Moonraker backend; otherwise false.</returns>
     private async Task<bool> ValidatePrinterBackendAsync(Guid printerId, CancellationToken ct)
     {
         try
@@ -393,6 +439,11 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Sends connection identification to Moonraker to identify this client.
+    /// </summary>
+    /// <param name="ws">The WebSocket connection.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task SendConnectionIdentificationAsync(ClientWebSocket ws, CancellationToken ct)
     {
         try
@@ -422,6 +473,11 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Sends subscription request to Moonraker for specific printer objects (toolhead, extruder, heater_bed, etc.).
+    /// </summary>
+    /// <param name="ws">The WebSocket connection.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task SendObjectSubscriptionAsync(ClientWebSocket ws, CancellationToken ct)
     {
         ObjectSubscriptionRequest subscriptionParams = new()
@@ -451,6 +507,14 @@ public sealed class MoonrakerSubscriptionService(
         _logger.LogDebug("Sent object subscription request to Moonraker");
     }
 
+    /// <summary>
+    /// Starts a heartbeat mechanism that sends ping frames to the WebSocket at regular intervals.
+    /// Keeps the connection alive and detects broken connections.
+    /// </summary>
+    /// <param name="ws">The WebSocket connection.</param>
+    /// <param name="printer">The printer being monitored (for logging).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A task representing the heartbeat loop.</returns>
     private Task StartHeartbeatAsync(ClientWebSocket ws, Printer printer, CancellationToken ct)
     {
         return Task.Run(async () =>
@@ -493,6 +557,13 @@ public sealed class MoonrakerSubscriptionService(
         }, ct);
     }
 
+    /// <summary>
+    /// Main message processing loop for a WebSocket connection.
+    /// Receives JSON-RPC messages and dispatches them to appropriate handlers.
+    /// </summary>
+    /// <param name="ws">The WebSocket connection.</param>
+    /// <param name="printer">The printer being monitored.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ProcessWebSocketMessagesAsync(ClientWebSocket ws, Printer printer, CancellationToken ct)
     {
         byte[] buffer = new byte[64 * 1024];
@@ -544,6 +615,13 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Parses a JSON-RPC message and determines whether it's a response or notification.
+    /// Dispatches to appropriate handler methods.
+    /// </summary>
+    /// <param name="message">The JSON-RPC message string.</param>
+    /// <param name="printer">The printer being monitored.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ProcessJsonRpcMessageAsync(string message, Printer printer, CancellationToken ct)
     {
         try
@@ -581,7 +659,15 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
-    // Extracted handler for JSON-RPC responses (was inlined in ProcessJsonRpcMessageAsync)
+    /// <summary>
+    /// Handles JSON-RPC response messages from Moonraker.
+    /// Processes subscription acknowledgements and handles JSON-RPC errors.
+    /// Triggers HTTP polling fallback on repeated parse errors.
+    /// </summary>
+    /// <param name="root">The parsed JSON root element.</param>
+    /// <param name="message">The original JSON-RPC message string.</param>
+    /// <param name="printer">The printer being monitored.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task HandleJsonRpcResponseAsync(JsonElement root, string message, Printer printer, CancellationToken ct)
     {
         try
@@ -612,7 +698,7 @@ public sealed class MoonrakerSubscriptionService(
                 res.TryGetProperty("status", out JsonElement statusObj))
             {
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
-                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, printer.CameraStreamUrl, printer.ThumbnailUrl, ct);
+                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, printer.CameraStreamUrl, null, ct);
             }
         }
         catch (JsonException ex)
@@ -631,7 +717,14 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
-    // Extracted handler for JSON-RPC notifications (was inlined in ProcessJsonRpcMessageAsync)
+    /// <summary>
+    /// Handles JSON-RPC notification messages from Moonraker.
+    /// Processes status updates, Klippy state changes (ready, disconnected, shutdown).
+    /// </summary>
+    /// <param name="methodProp">The JSON element containing the method name.</param>
+    /// <param name="root">The parsed JSON root element.</param>
+    /// <param name="printer">The printer being monitored.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task HandleJsonRpcNotificationAsync(JsonElement methodProp, JsonElement root, Printer printer, CancellationToken ct)
     {
         string? method = methodProp.GetString();
@@ -644,7 +737,7 @@ public sealed class MoonrakerSubscriptionService(
                 {
                     _logger.LogDebug("Processing notify_status_update for printer {PrinterName}. Status data: {StatusData}",
                         printer.Name, p[0].GetRawText());
-                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, printer.CameraStreamUrl, printer.ThumbnailUrl, ct);
+                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, printer.CameraStreamUrl, null, ct);
                 }
                 break;
 
@@ -671,14 +764,32 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Processes a status update from Moonraker containing incremental printer state changes.
+    /// Dispatches to specific handlers for toolhead, extruder, bed, and state updates.
+    /// Sends individual focused events and a consolidated status update via SignalR.
+    /// </summary>
+    /// <param name="statusObj">The status JSON element from Moonraker.</param>
+    /// <param name="printerId">The ID of the printer being updated.</param>
+    /// <param name="serverUrl">The Moonraker server URL (for fetching additional data).</param>
+    /// <param name="cameraStreamUrl">The camera stream URL from printer configuration.</param>
+    /// <param name="thumbnailUrl">The thumbnail URL from printer configuration.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task ProcessStatusUpdateAsync(JsonElement statusObj, Guid printerId, string serverUrl, string? cameraStreamUrl, string? thumbnailUrl, CancellationToken ct)
     {
         // Get or create persistent state for this printer
         PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
-        
+
         // Store camera and thumbnail URLs if provided
-        if (!string.IsNullOrEmpty(cameraStreamUrl)) state.CameraStreamUrl = cameraStreamUrl;
-        if (!string.IsNullOrEmpty(thumbnailUrl)) state.ThumbnailUrl = thumbnailUrl;
+        if (!string.IsNullOrEmpty(cameraStreamUrl))
+        {
+            state.CameraStreamUrl = cameraStreamUrl;
+        }
+
+        if (!string.IsNullOrEmpty(thumbnailUrl))
+        {
+            state.ThumbnailUrl = thumbnailUrl;
+        }
 
         _logger.LogDebug($"Processing status update for printer {printerId}. Raw status: {statusObj.GetRawText()}");
 
@@ -719,6 +830,14 @@ public sealed class MoonrakerSubscriptionService(
         _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
     }
 
+    /// <summary>
+    /// Handles toolhead position and homed axes updates.
+    /// Extracts X, Y, Z coordinates and homed_axes state, updates persistent state, and emits a toolhead update event.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="state">The persistent printer state to update.</param>
+    /// <param name="th">The toolhead JSON element from the status update.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task HandleToolheadUpdateAsync(Guid printerId, PrinterState state, JsonElement th, CancellationToken ct)
     {
         double? x = null, y = null, z = null;
@@ -728,9 +847,15 @@ public sealed class MoonrakerSubscriptionService(
         if (th.TryGetProperty("position", out JsonElement pos) &&
             pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
         {
-            try { x = pos[0].GetDouble(); } catch { }
-            try { y = pos[1].GetDouble(); } catch { }
-            try { z = pos[2].GetDouble(); } catch { }
+            try
+            { x = pos[0].GetDouble(); }
+            catch { }
+            try
+            { y = pos[1].GetDouble(); }
+            catch { }
+            try
+            { z = pos[2].GetDouble(); }
+            catch { }
         }
 
         // Extract homed_axes
@@ -740,10 +865,25 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         // Update persistent state
-        if (x.HasValue) state.X = x;
-        if (y.HasValue) state.Y = y;
-        if (z.HasValue) state.Z = z;
-        if (!string.IsNullOrEmpty(homedAxes)) state.HomedAxes = homedAxes;
+        if (x.HasValue)
+        {
+            state.X = x;
+        }
+
+        if (y.HasValue)
+        {
+            state.Y = y;
+        }
+
+        if (z.HasValue)
+        {
+            state.Z = z;
+        }
+
+        if (!string.IsNullOrEmpty(homedAxes))
+        {
+            state.HomedAxes = homedAxes;
+        }
 
         // Emit separate toolhead event
         try
@@ -758,19 +898,42 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Handles extruder temperature and target updates.
+    /// Extracts temperature and target values, updates persistent state, and emits an extruder update event.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="state">The persistent printer state to update.</param>
+    /// <param name="ex">The extruder JSON element from the status update.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task HandleExtruderUpdateAsync(Guid printerId, PrinterState state, JsonElement ex, CancellationToken ct)
     {
         double? temperature = null, target = null;
 
         if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-            try { temperature = t.GetDouble(); } catch { }
-        
+        {
+            try
+            { temperature = t.GetDouble(); }
+            catch { }
+        }
+
         if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-            try { target = tt.GetDouble(); } catch { }
+        {
+            try
+            { target = tt.GetDouble(); }
+            catch { }
+        }
 
         // Update persistent state
-        if (temperature.HasValue) state.HotendTemp = temperature;
-        if (target.HasValue) state.HotendTarget = target;
+        if (temperature.HasValue)
+        {
+            state.HotendTemp = temperature;
+        }
+
+        if (target.HasValue)
+        {
+            state.HotendTarget = target;
+        }
 
         // Emit separate extruder event
         try
@@ -779,25 +942,48 @@ public sealed class MoonrakerSubscriptionService(
             _logger.LogDebug($"Emitting extruder update for printer {printerId}: Temp={temperature}, Target={target}");
             await hub!.Clients.All.SendAsync("extruderupdate", update, ct);
         }
-        catch (Exception ex)
+        catch (Exception extruderEx)
         {
-            _logger.LogError(ex, $"Failed to emit extruder update for printer {printerId}");
+            _logger.LogError(extruderEx, $"Failed to emit extruder update for printer {printerId}");
         }
     }
 
+    /// <summary>
+    /// Handles heated bed temperature and target updates.
+    /// Extracts temperature and target values, updates persistent state, and emits a heater bed update event.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="state">The persistent printer state to update.</param>
+    /// <param name="hb">The heater_bed JSON element from the status update.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task HandleHeaterBedUpdateAsync(Guid printerId, PrinterState state, JsonElement hb, CancellationToken ct)
     {
         double? temperature = null, target = null;
 
         if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-            try { temperature = t.GetDouble(); } catch { }
-        
+        {
+            try
+            { temperature = t.GetDouble(); }
+            catch { }
+        }
+
         if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-            try { target = tt.GetDouble(); } catch { }
+        {
+            try
+            { target = tt.GetDouble(); }
+            catch { }
+        }
 
         // Update persistent state
-        if (temperature.HasValue) state.BedTemp = temperature;
-        if (target.HasValue) state.BedTarget = target;
+        if (temperature.HasValue)
+        {
+            state.BedTemp = temperature;
+        }
+
+        if (target.HasValue)
+        {
+            state.BedTarget = target;
+        }
 
         // Emit separate heater bed event
         try
@@ -812,6 +998,14 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Handles print state, progress, and job name updates from multiple sources.
+    /// Prioritizes print_stats over webhooks state, updates persistent state, and emits a state update event.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="state">The persistent printer state to update.</param>
+    /// <param name="statusObj">The complete status JSON element containing display_status, print_stats, and webhooks.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task HandleStateUpdateAsync(Guid printerId, PrinterState state, JsonElement statusObj, CancellationToken ct)
     {
         string? stateValue = null;
@@ -835,28 +1029,49 @@ public sealed class MoonrakerSubscriptionService(
         if (statusObj.TryGetProperty("print_stats", out JsonElement ps))
         {
             if (ps.TryGetProperty("state", out JsonElement st) && st.ValueKind == JsonValueKind.String)
+            {
                 printStatsState = st.GetString();
+            }
 
             if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+            {
                 jobName = fn.GetString();
+            }
         }
 
         // Webhooks state (Klipper system state)
         string? webhooksState = null;
         if (statusObj.TryGetProperty("webhooks", out JsonElement wh) &&
             wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
+        {
             webhooksState = ws.GetString();
+        }
 
         // Determine final state: print_stats takes precedence
         if (!string.IsNullOrEmpty(printStatsState))
+        {
             stateValue = printStatsState;
+        }
         else if (!string.IsNullOrEmpty(webhooksState))
+        {
             stateValue = webhooksState;
+        }
 
         // Update persistent state
-        if (stateValue != null) state.State = stateValue;
-        if (progress.HasValue) state.Progress = progress;
-        if (jobName != null) state.JobName = jobName;
+        if (stateValue != null)
+        {
+            state.State = stateValue;
+        }
+
+        if (progress.HasValue)
+        {
+            state.Progress = progress;
+        }
+
+        if (jobName != null)
+        {
+            state.JobName = jobName;
+        }
 
         // Emit state update event if any state/progress/jobName changed
         if (stateValue != null || progress.HasValue || jobName != null)
@@ -874,6 +1089,15 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Emits a consolidated printer status update containing all accumulated state.
+    /// Includes position, temperatures, state, progress, homed axes, and spool information.
+    /// Broadcasts via SignalR "printerupdated" event with IsOnline=true.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="state">The persistent printer state containing all accumulated values.</param>
+    /// <param name="spoolInfo">Optional spool information from Spoolman service.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task EmitConsolidatedStatusAsync(Guid printerId, PrinterState state, PrinterSpoolInfoDto? spoolInfo, CancellationToken ct)
     {
         try
@@ -897,7 +1121,7 @@ public sealed class MoonrakerSubscriptionService(
             );
 
             _logger.LogDebug($"Emitting consolidated status for printer {printerId}: X={state.X}, Y={state.Y}, Z={state.Z}, HotendTemp={state.HotendTemp}, HotendTarget={state.HotendTarget}, BedTemp={state.BedTemp}, BedTarget={state.BedTarget}, HomedAxes={state.HomedAxes}");
-            
+
             await hub!.Clients.All.SendAsync("printerupdated", update, ct);
         }
         catch (OperationCanceledException)
@@ -910,6 +1134,12 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Sends an offline status update for a printer.
+    /// Broadcasts via SignalR "printerupdated" event with IsOnline=false.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task SendOfflineStatusAsync(Guid printerId, CancellationToken ct)
     {
         try
@@ -944,6 +1174,12 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
+    /// <summary>
+    /// Sends a shutdown status update for a printer when Klippy shuts down.
+    /// Broadcasts via SignalR "printerupdated" event with State="Shutdown" and IsOnline=false.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task SendShutdownStatusAsync(Guid printerId, CancellationToken ct)
     {
         try
@@ -979,11 +1215,12 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     /// <summary>
-    /// Sets the polling mode for a specific printer based on Klippy state changes
+    /// Sets the polling mode for a printer based on Klippy state changes.
+    /// Tracks whether WebSocket real-time updates or HTTP polling fallback should be used.
     /// </summary>
-    /// <param name="printerId">The printer ID</param>
-    /// <param name="mode">The polling mode to set</param>
-    /// <param name="reason">The reason for the polling mode change</param>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="mode">The polling mode to set.</param>
+    /// <param name="reason">The reason for the mode change (for logging).</param>
     private void SetPollingMode(Guid printerId, PollingMode mode, string reason)
     {
         try
@@ -1006,7 +1243,13 @@ public sealed class MoonrakerSubscriptionService(
 
     // Removed unused GetPollingMode (CA S1144)
 
-    // Query and cache initial toolhead data (especially homed_axes) since Moonraker sends incremental updates
+    /// <summary>
+    /// Queries and caches initial toolhead data from Moonraker, particularly homed_axes.
+    /// Called during subscription startup since Moonraker only sends incremental updates thereafter.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="serverUrl">The Moonraker server URL.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task QueryAndCacheToolheadDataAsync(Guid printerId, string serverUrl, CancellationToken ct)
     {
         try
@@ -1016,16 +1259,22 @@ public sealed class MoonrakerSubscriptionService(
             {
                 var state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
                 state.HomedAxes = toolheadData;
-                _logger.LogInformation("Cached initial homed_axes for printer {PrinterId}: '{HomedAxes}'", printerId, toolheadData);
+                _logger.LogInformation("Cached initial homed_axes for printer {PrinterId}: '{HomedAxes}'", printerId.ToString(), toolheadData);
             }
         }
-        catch (Exception ex)
+        catch (Exception toolheadEx)
         {
-            _logger.LogDebug(ex, "Failed to cache initial toolhead data for printer {PrinterId}", printerId);
+            _logger.LogDebug(toolheadEx, "Failed to cache initial toolhead data for printer {PrinterId}", printerId.ToString());
         }
     }
 
-    // Helper method to query homed axes via HTTP since Moonraker doesn't send it in subscriptions
+    /// <summary>
+    /// Queries homed axes state via HTTP from Moonraker.
+    /// Used because Moonraker doesn't send homed_axes in WebSocket subscriptions.
+    /// </summary>
+    /// <param name="serverUrl">The Moonraker server URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A string representing the homed axes (e.g., "xyz"), or null if unavailable.</returns>
     private async Task<string?> QueryHomedAxesAsync(string serverUrl, CancellationToken ct)
     {
         try
@@ -1073,7 +1322,13 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
-    // Helper method to get spool information for Moonraker printers
+    /// <summary>
+    /// Fetches active spool information from the Spoolman service for a Moonraker printer.
+    /// Gets the active spool ID from Moonraker, then retrieves detailed spool information.
+    /// </summary>
+    /// <param name="serverUrl">The Moonraker server URL.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Printer spool information, or null if no active spool or on error.</returns>
     private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
     {
         try
@@ -1123,8 +1378,11 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     /// <summary>
-    /// Triggers HTTP polling fallback when WebSocket parse errors exceed threshold
+    /// Triggers HTTP polling fallback when WebSocket parse errors exceed threshold or connection is stale.
+    /// Uses the existing MoonrakerClient to fetch comprehensive status via HTTP.
     /// </summary>
+    /// <param name="printer">The printer to poll.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task TriggerHttpPollingFallbackAsync(Printer printer, CancellationToken ct)
     {
         try

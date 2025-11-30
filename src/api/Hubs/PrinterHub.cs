@@ -12,7 +12,7 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
     // Group management for discovery sessions
     public async Task JoinDiscoveryGroupAsync(string sessionId)
     {
-        logger.LogInformation("[PrinterHub] Client {ConnectionId} joining discovery group for session {SessionId}", 
+        logger.LogInformation("[PrinterHub] Client {ConnectionId} joining discovery group for session {SessionId}",
             Context.ConnectionId, sessionId);
         await Groups.AddToGroupAsync(Context.ConnectionId, $"discovery-{sessionId}");
         // After joining, replay latest cached progress if available. There is a narrow race where the
@@ -36,7 +36,7 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
 
     public async Task LeaveDiscoveryGroupAsync(string sessionId)
     {
-        logger.LogInformation("[PrinterHub] Client {ConnectionId} leaving discovery group for session {SessionId}", 
+        logger.LogInformation("[PrinterHub] Client {ConnectionId} leaving discovery group for session {SessionId}",
             Context.ConnectionId, sessionId);
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"discovery-{sessionId}");
     }
@@ -46,11 +46,11 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
     /// </summary>
     public async Task BroadcastDiscoveryProgressAsync(DiscoveryProgressDto progress)
     {
-        logger.LogDebug("[PrinterHub] Broadcasting progress for session {SessionId}: {Percentage}%", 
+        logger.LogDebug("[PrinterHub] Broadcasting progress for session {SessionId}: {Percentage}%",
             progress.SessionId, progress.ProgressPercentage);
         // Cache the progress for late-joining clients
         progressCache.Set(progress.SessionId, progress);
-        
+
         // Broadcast to all clients in the discovery session group
         await Clients.Group($"discovery-{progress.SessionId}").SendAsync("discoveryprogress", progress);
     }
@@ -60,7 +60,7 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
     /// </summary>
     public async Task BroadcastDiscoveryPrinterFoundAsync(DiscoveryPrinterFoundDto found)
     {
-        logger.LogInformation("[PrinterHub] Broadcasting printer found for session {SessionId}: {Name}", 
+        logger.LogInformation("[PrinterHub] Broadcasting printer found for session {SessionId}: {Name}",
             found.SessionId, found.Printer.Name);
         // Broadcast to all clients in the discovery session group
         await Clients.Group($"discovery-{found.SessionId}").SendAsync("discoveryprinterfound", found);
@@ -71,7 +71,7 @@ public class PrinterHub(IDiscoveryProgressCache progressCache, ILogger<PrinterHu
     /// </summary>
     public async Task BroadcastDiscoveryCompletedAsync(DiscoveryCompletedDto completed)
     {
-        logger.LogInformation("[PrinterHub] Broadcasting completion for session {SessionId}: {Found} printers found", 
+        logger.LogInformation("[PrinterHub] Broadcasting completion for session {SessionId}: {Found} printers found",
             completed.SessionId, completed.TotalPrintersFound);
         // Broadcast to all clients in the discovery session group
         await Clients.Group($"discovery-{completed.SessionId}").SendAsync("discoverycompleted", completed);

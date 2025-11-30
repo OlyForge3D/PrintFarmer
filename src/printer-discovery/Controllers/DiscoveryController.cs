@@ -56,7 +56,7 @@ public class DiscoveryController : ControllerBase
                 {
                     // Wait for frontend to join the SignalR group
                     await Task.Delay(500);
-                    
+
                     await _streamingDiscoveryService.ScanWithProgressAsync(
                         sessionId,
                         request?.Backends,

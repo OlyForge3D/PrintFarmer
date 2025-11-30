@@ -1,4 +1,4 @@
-namespace PrinterDiscovery.Services;
+﻿namespace PrinterDiscovery.Services;
 
 /// <summary>
 /// Manages active discovery sessions and their cancellation tokens.

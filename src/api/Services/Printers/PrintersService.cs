@@ -708,10 +708,10 @@ namespace Farm.Web.Api.Services.Printers
             int defaultPort = dto.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : dto.Backend == Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125;
             string normalizedUrl = NormalizeServerUrl(dto.ServerUrl, defaultPort);
             List<Printer> existingPrinters = await _repo.GetAllAsync(ct).ConfigureAwait(false);
-            Printer? duplicate = existingPrinters.FirstOrDefault(p => 
-                NormalizeServerUrl(p.ServerUrl, defaultPort) == normalizedUrl || 
+            Printer? duplicate = existingPrinters.FirstOrDefault(p =>
+                NormalizeServerUrl(p.ServerUrl, defaultPort) == normalizedUrl ||
                 p.IpAddress == normalizedUrl.Replace("http://", "").Replace("https://", "").Split(':')[0]);
-            
+
             if (duplicate != null)
             {
                 _logger.LogWarning($"Duplicate printer detected: {dto.Name} at {dto.ServerUrl} - existing printer: {duplicate.Name} ({duplicate.Id})");

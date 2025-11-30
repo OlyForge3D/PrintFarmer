@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 
@@ -188,7 +188,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                                 discovered.Add(result);
                             }
                             _logger.LogInformation("[STREAMING-DISCOVERY] Found NEW printer at {Ip}: {Name}", ip, result.Name);
-                            
+
                             // Broadcast printer found event immediately
                             await _broadcaster.BroadcastPrinterFoundAsync(
                                 new DiscoveryPrinterFoundDto(sessionId, result),
@@ -262,8 +262,8 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
             }
 
             // Broadcast completion
-            DiscoveryStatus finalStatus = cts.Token.IsCancellationRequested 
-                ? DiscoveryStatus.Cancelled 
+            DiscoveryStatus finalStatus = cts.Token.IsCancellationRequested
+                ? DiscoveryStatus.Cancelled
                 : DiscoveryStatus.Completed;
 
             string completionMessage = excluded > 0
