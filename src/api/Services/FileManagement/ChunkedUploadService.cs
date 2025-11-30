@@ -17,13 +17,16 @@ public sealed class ChunkedUploadService : IChunkedUploadService
 
     private readonly ConcurrentDictionary<string, InternalUploadState> _uploadStates = new();
     private readonly IFileManagementService _fileManagementService;
+    private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
     private readonly IUnifiedLoggingService _logger;
 
     public ChunkedUploadService(
         IFileManagementService fileManagementService,
+        IGcodeThumbnailExtractorService thumbnailExtractor,
         IUnifiedLoggingService logger)
     {
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
+        _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -426,6 +429,24 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             }
             // Delete after successful copy
             File.Delete(state.TempFilePath);
+        }
+
+        // Extract and save thumbnail if this is a .gcode or .bgcode file
+        if (finalPath.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) || 
+            finalPath.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using (var fileStream = new FileStream(finalPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    _ = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(fileStream, CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug($"Failed to extract thumbnail for {finalPath}: {ex.Message}");
+                // Continue anyway - thumbnail extraction is optional
+            }
         }
 
         // Clean up metadata file

@@ -40,6 +40,7 @@ public partial class GcodeHarvestService(
     IHubContext<HarvestHub> harvestHub,
     IGcodeMetadataExtractorService metadataExtractor,
     StorageManagement.IStoragePathService storagePathService,
+    FileManagement.IGcodeThumbnailExtractorService thumbnailExtractor,
     IOptions<GcodeHarvestSettings> harvestOptions) : IGcodeHarvestService
 {
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
@@ -121,6 +122,7 @@ public partial class GcodeHarvestService(
     private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
     private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor;
     private readonly StorageManagement.IStoragePathService _storagePathService = storagePathService;
+    private readonly FileManagement.IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor;
     private readonly GcodeHarvestSettings _harvestSettings = harvestOptions.Value;
 
     private static readonly string[] sourceArray = { "gcode" };
@@ -745,25 +747,17 @@ public partial class GcodeHarvestService(
                         string gcodeText = await reader.ReadToEndAsync(ct);
                         extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
 
-                        // Extract and save thumbnail if present and no API thumbnail available
+                        // Extract and save thumbnail if present using shared service
                         if (extractedMetadata?.ThumbnailData != null && extractedMetadata.ThumbnailData.Length > 0)
                         {
                             try
                             {
-                                // Create thumbnails directory if needed (using centralized storage service)
-                                string thumbnailDir = _storagePathService.GetThumbnailDirectory();
-                                _ = Directory.CreateDirectory(thumbnailDir);
-
-                                // Save thumbnail with unique name
-                                string thumbnailFileName = $"{Guid.NewGuid()}.png";
-                                thumbnailPath = Path.Combine(thumbnailDir, thumbnailFileName);
-
-                                await File.WriteAllBytesAsync(thumbnailPath, extractedMetadata.ThumbnailData, ct);
-                                _logger.LogInformation($"Extracted and saved thumbnail for {discoveredFile.FileName} to {thumbnailFileName}");
+                                gcodeContent.Position = 0;
+                                thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(gcodeContent, ct);
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Failed to save extracted thumbnail for {FileName}", discoveredFile.FileName);
+                                _logger.LogWarning(ex, "Failed to extract thumbnail for {FileName}", discoveredFile.FileName);
                                 // Continue anyway - thumbnail is optional
                                 thumbnailPath = null;
                             }
