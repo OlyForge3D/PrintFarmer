@@ -221,6 +221,25 @@ public interface IMoonrakerClient
     Task<bool> FirmwareRestartAsync(Uri baseUrl, CancellationToken ct = default);
 
     /// <summary>
+    /// Disables all stepper motors (M84 G-code command).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task indicating whether the disable motors command was successfully sent</returns>
+    Task<bool> DisableMotorsAsync(string baseUrl, CancellationToken ct = default);
+    Task<bool> DisableMotorsAsync(Uri baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sends arbitrary G-code commands to the printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server</param>
+    /// <param name="gcode">The G-code command(s) to send</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task indicating whether the G-code command was successfully sent</returns>
+    Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default);
+    Task<bool> SendGcodeAsync(Uri baseUrl, string gcode, CancellationToken ct = default);
+
+    /// <summary>
     /// Starts printing a G-code file by name.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server</param>

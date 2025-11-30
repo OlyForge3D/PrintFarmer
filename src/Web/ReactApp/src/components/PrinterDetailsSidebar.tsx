@@ -7,15 +7,21 @@ import type { TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/components/ui';
-import { NozzleIcon, BedIcon } from '@/components/icons/TemperatureIcons';
+import { 
+  NozzleIcon, 
+  BedIcon, 
+  DisableMotorsIcon,
+  HomeIcon,
+  PlayIcon,
+  PauseIcon,
+  EmergencyStopIcon,
+  StopIcon
+} from '@/components/icons/MdiIcons';
 import { 
   ChevronUp,
-  Home,
+  ChevronDown,
   Minus,
   RotateCcw,
-  Pause,
-  Play,
-  AlertOctagon
 } from 'lucide-react';
 
 // Animation styles
@@ -199,9 +205,12 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     }
   };
 
-  const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart') => {
+  const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart' | 'disable-motors') => {
     try {
-      const endpoint = action === 'firmware-restart' ? 'firmware-restart' : action;
+      let endpoint = action;
+      if (action === 'disable-motors') {
+        endpoint = 'disable-motors';
+      }
       const response = await fetch(`http://localhost:5245/api/printers/${printer.id}/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -337,7 +346,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Pause print"
                 className="flex-1 p-0"
               >
-                <Pause className="h-4 w-4" />
+                <PauseIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -348,7 +357,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Resume print"
                 className="flex-1 p-0"
               >
-                <Play className="h-4 w-4" />
+                <PlayIcon className="h-4 w-4" />
               </Button>
             </div>
             {/* Stop button row */}
@@ -368,8 +377,8 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 </>
               ) : (
                 <>
-                  <AlertOctagon className="h-3 w-3 mr-1" />
-                  Stop
+                  <EmergencyStopIcon className="h-3 w-3" />
+                  <span className="ml-1">Stop</span>
                 </>
               )}
             </Button>
@@ -429,7 +438,17 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
               >
                 ▲
               </Button>
-              <div></div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={!isOnline || isPrinting}
+                onClick={() => handleControlAction('disable-motors')}
+                title="Disable Motors (M84)"
+                className="w-full h-full !p-0"
+              >
+                <DisableMotorsIcon className="w-4 h-4" />
+              </Button>
 
               {/* Middle row */}
               <Button
@@ -447,12 +466,12 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 variant="secondary"
                 size="sm"
                 disabled={isPrinting}
-                onClick={() => handleHome('xy')}
-                title="Home XY"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isXYHomed).className}`}
-                style={getHomeButtonStyle(isXYHomed).style}
+                onClick={() => handleHome('x')}
+                title="Home X"
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isXHomed).className}`}
+                style={getHomeButtonStyle(isXHomed).style}
               >
-                <Home className="h-4 w-4" />
+                <HomeIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -499,10 +518,10 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`flex-1 p-0 ${getHomeButtonStyle(isZHomed).className}`}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
                 style={getHomeButtonStyle(isZHomed).style}
               >
-                <Home className="h-4 w-4" />
+                <HomeIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"

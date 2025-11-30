@@ -42,17 +42,13 @@ import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/components/ui';
-import { NozzleIcon, BedIcon } from '@/components/icons/TemperatureIcons';
+import { NozzleIcon, BedIcon, HomeIcon, PlayIcon, PauseIcon, EmergencyStopIcon } from '@/components/icons/MdiIcons';
 import { 
   ChevronDown, 
   ExternalLink,
   Edit,
   History,
   Camera,
-  Play,
-  Pause,
-  AlertOctagon,
-  Home,
   Minus,
   RotateCcw
 } from 'lucide-react';
@@ -525,7 +521,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             onClick={() => handleControlAction('pause')}
             disabled={!isPrinting}
           >
-            <Pause className="h-3 w-3 mr-1" />
+            <PauseIcon className="h-3 w-3 mr-1" />
           </Button>
           <Button
             type="button"
@@ -534,7 +530,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             onClick={() => handleControlAction('resume')}
             disabled={!isPaused}
           >
-            <Play className="h-3 w-3 mr-1" />
+            <PlayIcon className="h-3 w-3 mr-1" />
           </Button>
           <Button
             type="button"
@@ -544,7 +540,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             disabled={!isOnline}
             title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           >
-            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <AlertOctagon className="h-3 w-3 mr-1" />}
+            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <EmergencyStopIcon className="h-3 w-3" />}
           </Button>
         </div>
 
@@ -823,7 +819,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   title="Home all axes"
                   className="w-full h-full !p-0"
                 >
-                  <Home className="h-4 w-4" />
+                  <HomeIcon className="h-4 w-4" />
                 </Button>
                 <Button
                   type="button"
@@ -857,7 +853,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   title="Home X/Y"
                   className="w-full h-full !p-0"
                 >
-                  <Home className="h-4 w-4" />
+                  <HomeIcon className="h-4 w-4" />
                 </Button>
                 <Button
                   type="button"
@@ -906,7 +902,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   title="Home Z"
                   className="flex-1 p-0"
                 >
-                  <Home className="h-4 w-4" />
+                  <HomeIcon className="h-4 w-4" />
                 </Button>
                 <Button
                   type="button"
@@ -939,7 +935,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   title="Pause"
                   className="w-full h-full !p-0"
                 >
-                  <Pause className="h-4 w-4" />
+                  <PauseIcon className="h-4 w-4" />
                 </Button>
                 <Button
                   type="button"
@@ -950,7 +946,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   title="Resume"
                   className="w-full h-full !p-0"
                 >
-                  <Play className="h-4 w-4" />
+                  <PlayIcon className="h-4 w-4" />
                 </Button>
                 <Button
                   type="button"
@@ -961,7 +957,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                   className="w-full h-full !p-0"
                 >
-                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <AlertOctagon className="h-4 w-4" />}
+                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
                 </Button>
               </div>
               

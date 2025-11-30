@@ -8,9 +8,10 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { 
-  ChevronDown, ChevronUp, Cog, Play, Pause, Square as StopIcon, Home, Upload, RefreshCw,
+  ChevronDown, ChevronUp, Cog, Square as StopIcon, Home, Upload, RefreshCw,
   Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, Move, FileText
 } from 'lucide-react';
+import { PlayIcon, PauseIcon } from '@/components/icons/MdiIcons';
 import { Button, Input, FileUpload } from '@/components/ui';
 
 interface EnhancedPrinterCardProps { printer: Printer; }
@@ -111,7 +112,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
                 title="Pause"
                 className="!p-2 !h-auto"
               >
-                <Pause className="h-4 w-4" />
+                <PauseIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -122,7 +123,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
                 title="Resume"
                 className="!p-2 !h-auto"
               >
-                <Play className="h-4 w-4" />
+                <PlayIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -390,7 +391,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
                   onClick={handlePause}
                   disabled={!isPrinting}
                 >
-                  <Pause className="h-3 w-3 mr-1" />Pause
+                  <PauseIcon className="h-3 w-3 mr-1" />Pause
                 </Button>
                 <Button
                   type="button"
@@ -399,7 +400,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
                   onClick={handleResume}
                   disabled={!isPaused}
                 >
-                  <Play className="h-3 w-3 mr-1" />Resume
+                  <PlayIcon className="h-3 w-3 mr-1" />Resume
                 </Button>
               </>
             )}

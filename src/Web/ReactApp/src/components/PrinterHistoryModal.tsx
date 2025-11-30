@@ -9,8 +9,6 @@ import {
   FileText, 
   CheckCircle, 
   XCircle, 
-  Pause,
-  Play,
   User,
   Layers,
   X,
@@ -18,6 +16,7 @@ import {
   Timer,
   Package
 } from 'lucide-react';
+import { PauseIcon, PlayIcon } from '@/components/icons/MdiIcons';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { renderUnknown } from '@/utils/renderUnknown';
@@ -69,9 +68,9 @@ function getStatusIcon(status: string) {
     case 'cancelled':
       return <XCircle className="h-4 w-4 text-red-500" />;
     case 'paused':
-      return <Pause className="h-4 w-4 text-yellow-500" />;
+      return <PauseIcon className="h-4 w-4" ariaLabel="Paused" />;
     case 'printing':
-      return <Play className="h-4 w-4 text-blue-500" />;
+      return <PlayIcon className="h-4 w-4" ariaLabel="Printing" />;
     default:
       return <FileText className="h-4 w-4 text-gray-500" />;
   }

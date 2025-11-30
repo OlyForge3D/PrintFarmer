@@ -1093,6 +1093,23 @@ namespace Farm.Web.Api.Services.Printers
             return await _moon.FirmwareRestartAsync(moonrakerUrl, ct).ConfigureAwait(false);
         }
 
+        public async Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct)
+        {
+            Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+            if (p == null)
+            {
+                return false;
+            }
+
+            if (p.Backend != (int)Farm.Infrastructure.PrinterBackend.Moonraker)
+            {
+                return false; // only moonraker supports M84
+            }
+
+            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+            return await _moon.SendGcodeAsync(moonrakerUrl, "M84", ct).ConfigureAwait(false);
+        }
+
         public async Task<bool> StartPrintFromFileAsync(Guid id, string filename, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);

@@ -502,13 +502,13 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, "G28", ct);
+        => await SendGcodePrivateAsync(baseUrl, "G28", ct);
 
     public async Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, "G28 X Y", ct);
+        => await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
 
     public async Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, "G28 Z", ct);
+        => await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
 
     public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
     {
@@ -523,7 +523,7 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             cmds.Add($"M140 S{bed:0}");
         }
 
-        return await SendGcodeAsync(baseUrl, cmds, ct);
+        return await SendGcodePrivateAsync(baseUrl, cmds, ct);
     }
 
     public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
@@ -550,7 +550,7 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
         }
 
         string[] cmds = new[] { string.Join(' ', parts), "G90" };
-        return await SendGcodeAsync(baseUrl, cmds, ct);
+        return await SendGcodePrivateAsync(baseUrl, cmds, ct);
     }
 
     public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
@@ -576,20 +576,20 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             parts.Add($"F{f:0.###}");
         }
 
-        return await SendGcodeAsync(baseUrl, string.Join(' ', parts), ct);
+        return await SendGcodePrivateAsync(baseUrl, string.Join(' ', parts), ct);
     }
 
     public async Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, "PAUSE", ct);
+        => await SendGcodePrivateAsync(baseUrl, "PAUSE", ct);
 
     public async Task<bool> ResumeAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, "RESUME", ct);
+        => await SendGcodePrivateAsync(baseUrl, "RESUME", ct);
 
     public async Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, "M112", ct);
+        => await SendGcodePrivateAsync(baseUrl, "M112", ct);
 
     public async Task<bool> FirmwareRestartAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, "FIRMWARE_RESTART", ct);
+        => await SendGcodePrivateAsync(baseUrl, "FIRMWARE_RESTART", ct);
 
     public Task<bool> FirmwareRestartAsync(Uri baseUrl, CancellationToken ct = default)
     {
@@ -597,10 +597,28 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
         return FirmwareRestartAsync(baseUrl.ToString(), ct);
     }
 
-    private async Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default)
-        => await SendGcodeAsync(baseUrl, new[] { gcode }, ct);
+    public async Task<bool> DisableMotorsAsync(string baseUrl, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, "M84", ct);
 
-    private async Task<bool> SendGcodeAsync(string baseUrl, IEnumerable<string> gcodes, CancellationToken ct = default)
+    public Task<bool> DisableMotorsAsync(Uri baseUrl, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return DisableMotorsAsync(baseUrl.ToString(), ct);
+    }
+
+    public async Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, gcode, ct);
+
+    public Task<bool> SendGcodeAsync(Uri baseUrl, string gcode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return SendGcodeAsync(baseUrl.ToString(), gcode, ct);
+    }
+
+    private async Task<bool> SendGcodePrivateAsync(string baseUrl, string gcode, CancellationToken ct = default)
+        => await SendGcodePrivateAsync(baseUrl, new[] { gcode }, ct);
+
+    private async Task<bool> SendGcodePrivateAsync(string baseUrl, IEnumerable<string> gcodes, CancellationToken ct = default)
     {
         try
         {

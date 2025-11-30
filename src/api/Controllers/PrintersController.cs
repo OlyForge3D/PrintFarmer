@@ -1171,6 +1171,20 @@ public class PrintersController(
         return new CommandResult(true, null);
     }
 
+    [HttpPost("{id:guid}/disable-motors")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<CommandResult>> DisableMotorsAsync(Guid id, CancellationToken ct)
+    {
+        bool ok = await _printersService.DisableMotorsAsync(id, ct);
+        if (!ok)
+        {
+            return NotFound();
+        }
+        return new CommandResult(true, null);
+    }
+
     // Print job control
     [HttpPost("{id:guid}/print/start")]
     [HttpPost("{id:guid}/start-print")] // Alternative route for frontend compatibility

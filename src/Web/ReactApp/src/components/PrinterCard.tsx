@@ -9,7 +9,8 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Button } from '@/components/ui';
-import { Cog, Play, Pause, Square as StopIcon } from 'lucide-react';
+import { Cog } from 'lucide-react';
+import { PlayIcon, PauseIcon } from '@/components/icons/MdiIcons';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
 import type { PrintJobStatusDto } from '@/types/api';
@@ -278,7 +279,7 @@ export function PrinterCard({
                     size="sm"
                     className="!p-2 !h-auto text-pf-warning"
                   >
-                    <Pause className="h-4 w-4" />
+                    <PauseIcon className="h-4 w-4" />
                   </Button>
                 )}
                 {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
@@ -290,7 +291,7 @@ export function PrinterCard({
                     size="sm"
                     className="!p-2 !h-auto text-pf-success"
                   >
-                    <Play className="h-4 w-4" />
+                    <PlayIcon className="h-4 w-4" />
                   </Button>
                 )}
                 <Button
@@ -488,14 +489,14 @@ export function PrinterCard({
               {/* Only show Pause if printer is printing and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && currentStatus.state === 'printing' && (
                 <Button variant="danger" size="sm">
-                  <Pause className="h-4 w-4 mr-1.5" />
+                  <PauseIcon className="h-4 w-4 mr-1.5" />
                   Pause
                 </Button>
               )}
               {/* Only show Resume/Start if printer is paused or ready and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
                 <Button variant="success" size="sm">
-                  <Play className="h-4 w-4 mr-1.5" />
+                  <PlayIcon className="h-4 w-4 mr-1.5" />
                   {currentStatus.state === 'paused' ? 'Resume' : 'Start'}
                 </Button>
               )}

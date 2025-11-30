@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import {
-  ChevronDown, History, Edit, Pause, Play, AlertOctagon, RotateCcw, Camera, ExternalLink
+  ChevronDown, History, Edit, Camera, ExternalLink, RotateCcw
 } from 'lucide-react';
+import { PauseIcon, PlayIcon, EmergencyStopIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
@@ -191,7 +192,7 @@ export function CollapsedPrinterCard({
           onClick={() => handleControlAction('pause')}
           disabled={!isPrinting}
         >
-          <Pause className="h-3 w-3 mr-1" />
+          <PauseIcon className="h-3 w-3 mr-1" />
         </Button>
         <Button
           type="button"
@@ -200,7 +201,7 @@ export function CollapsedPrinterCard({
           onClick={() => handleControlAction('resume')}
           disabled={!isPaused}
         >
-          <Play className="h-3 w-3 mr-1" />
+          <PlayIcon className="h-3 w-3 mr-1" />
         </Button>
         <Button
           type="button"
@@ -210,7 +211,7 @@ export function CollapsedPrinterCard({
           disabled={!isOnline}
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
         >
-          {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <AlertOctagon className="h-3 w-3 mr-1" />}
+          {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <EmergencyStopIcon className="h-3 w-3" />}
         </Button>
       </div>
 
