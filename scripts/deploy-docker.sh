@@ -1893,55 +1893,85 @@ tear_down_deployment() {
     local external_paths_removed=0
     
     # Load current config to find external paths
+    local external_models_path=""
+    local external_gcode_path=""
+    local external_profiles_path=""
+    local external_app_data_path=""
+    local external_database_path=""
+    
     if [ -f ".deploy-config" ]; then
-        # Source the config file to get EXTERNAL_* variables
-        set +a
-        # shellcheck source=/dev/null
-        source ./.deploy-config 2>/dev/null || true
-        set -a
+        # Extract paths directly from config file without sourcing (safer)
+        external_models_path=$(grep "^EXTERNAL_MODELS_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_gcode_path=$(grep "^EXTERNAL_GCODE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_profiles_path=$(grep "^EXTERNAL_PROFILES_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_app_data_path=$(grep "^EXTERNAL_APP_DATA_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_database_path=$(grep "^EXTERNAL_DATABASE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     fi
     
-    # List of external storage path variables to remove
-    local external_vars=(EXTERNAL_MODELS_PATH EXTERNAL_GCODE_PATH EXTERNAL_PROFILES_PATH EXTERNAL_DATABASE_PATH)
+    # Array of paths and descriptions for display
+    local paths_to_remove=()
+    if [ -n "$external_models_path" ] && [ -d "$external_models_path" ]; then
+        paths_to_remove+=("$external_models_path:Models")
+    fi
+    if [ -n "$external_gcode_path" ] && [ -d "$external_gcode_path" ]; then
+        paths_to_remove+=("$external_gcode_path:G-code")
+    fi
+    if [ -n "$external_profiles_path" ] && [ -d "$external_profiles_path" ]; then
+        paths_to_remove+=("$external_profiles_path:Profiles")
+    fi
+    if [ -n "$external_app_data_path" ] && [ -d "$external_app_data_path" ]; then
+        paths_to_remove+=("$external_app_data_path:App Data")
+    fi
+    if [ -n "$external_database_path" ] && [ -d "$external_database_path" ]; then
+        paths_to_remove+=("$external_database_path:Database")
+    fi
     
     if [ "$NON_INTERACTIVE" = "false" ]; then
-        echo
-        print_warning "External storage directories found:"
-        for var in "${external_vars[@]}"; do
-            local path_var="${!var:-}"
-            if [ -n "$path_var" ] && [ -d "$path_var" ]; then
-                echo "  • $var: $path_var"
-            fi
-        done
-        echo
-        read -p "Do you want to remove all external storage data? (y/n) [n]: " remove_storage
-        if [ "$remove_storage" != "y" ] && [ "$remove_storage" != "Y" ]; then
-            print_info "Kept external storage directories (data preserved)"
-            external_paths_removed=0
+        if [ ${#paths_to_remove[@]} -gt 0 ]; then
+            echo
+            print_warning "External storage directories found:"
+            for path_entry in "${paths_to_remove[@]}"; do
+                local path="${path_entry%:*}"
+                local desc="${path_entry#*:}"
+                echo "  • [$desc] $path"
+            done
+            echo
+            read -p "Do you want to remove all external storage data? (y/n) [n]: " remove_storage
         else
-            for var in "${external_vars[@]}"; do
-                local path_var="${!var:-}"
-                if [ -n "$path_var" ] && [ -d "$path_var" ]; then
-                    rm -rf "$path_var"
-                    echo "  • Removed $path_var"
+            remove_storage="n"
+        fi
+        
+        if [ "$remove_storage" = "y" ] || [ "$remove_storage" = "Y" ]; then
+            for path_entry in "${paths_to_remove[@]}"; do
+                local path="${path_entry%:*}"
+                local desc="${path_entry#*:}"
+                if [ -d "$path" ]; then
+                    rm -rf "$path"
+                    echo "  • Removed [$desc] $path"
                     ((external_paths_removed++))
-                    audit_log "remove" "teardown: removed external storage: $path_var"
+                    audit_log "remove" "teardown: removed external storage: $path"
                 fi
             done
-            print_success "External storage directories removed"
+            if [ $external_paths_removed -gt 0 ]; then
+                print_success "External storage directories removed"
+            fi
+        else
+            print_info "Kept external storage directories (data preserved)"
         fi
     else
-        # In non-interactive mode with --tear-down, prompt is already done above, so remove all
-        for var in "${external_vars[@]}"; do
-            local path_var="${!var:-}"
-            if [ -n "$path_var" ] && [ -d "$path_var" ]; then
-                rm -rf "$path_var"
-                echo "  • Removed $path_var"
-                ((external_paths_removed++))
-                audit_log "remove" "teardown: removed external storage: $path_var"
-            fi
-        done
-        if [ $external_paths_removed -gt 0 ]; then
+        # In non-interactive mode with --tear-down, remove all external storage
+        if [ ${#paths_to_remove[@]} -gt 0 ]; then
+            print_warning "Removing external storage directories:"
+            for path_entry in "${paths_to_remove[@]}"; do
+                local path="${path_entry%:*}"
+                local desc="${path_entry#*:}"
+                if [ -d "$path" ]; then
+                    rm -rf "$path"
+                    echo "  • Removed [$desc] $path"
+                    ((external_paths_removed++))
+                    audit_log "remove" "teardown: removed external storage: $path"
+                fi
+            done
             print_success "External storage directories removed"
         else
             print_info "No external storage directories to remove"
@@ -2380,6 +2410,7 @@ USE_EXTERNAL_STORAGE=${USE_EXTERNAL_STORAGE:-no}
 EXTERNAL_MODELS_PATH=${EXTERNAL_MODELS_PATH:-}
 EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
 EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
+EXTERNAL_APP_DATA_PATH=${EXTERNAL_APP_DATA_PATH:-}
 EXTERNAL_DATABASE_PATH=${EXTERNAL_DATABASE_PATH:-}
 EOF
 
@@ -3462,9 +3493,21 @@ configure_external_storage() {
         fi
         print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
         
-        # Database storage directory (defaults to user's home directory)
+        # Application data storage (SQLite database for monolithic, or general app data)
+        local default_app_data_path="${EXTERNAL_APP_DATA_PATH:-$HOME/.printfarmer/data}"
+        prompt_with_default "Host directory for application data (monolithic SQLite database):" "$default_app_data_path" "EXTERNAL_APP_DATA_PATH"
+        
+        # Ensure directory exists
+        if ! mkdir -p "$EXTERNAL_APP_DATA_PATH" 2>/dev/null; then
+            print_error "Failed to create app data directory: $EXTERNAL_APP_DATA_PATH"
+            print_info "Please ensure the directory path is writable or change the path above"
+            return 1
+        fi
+        print_success "Application data directory ready: $EXTERNAL_APP_DATA_PATH"
+        
+        # Database storage directory (defaults to user's home directory, for microservices PostgreSQL/MySQL/SQL Server)
         local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
-        prompt_with_default "Host directory for database storage:" "$default_database_path" "EXTERNAL_DATABASE_PATH"
+        prompt_with_default "Host directory for database storage (microservices only):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
         
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
@@ -3475,10 +3518,11 @@ configure_external_storage() {
         print_success "Database directory ready: $EXTERNAL_DATABASE_PATH"
         
         print_success "External storage directories configured:"
-        echo "  • Models:    $EXTERNAL_MODELS_PATH"
-        echo "  • G-code:    $EXTERNAL_GCODE_PATH"
-        echo "  • Profiles:  $EXTERNAL_PROFILES_PATH"
-        echo "  • Database:  $EXTERNAL_DATABASE_PATH"
+        echo "  • Models:       $EXTERNAL_MODELS_PATH"
+        echo "  • G-code:       $EXTERNAL_GCODE_PATH"
+        echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
+        echo "  • App Data:     $EXTERNAL_APP_DATA_PATH (Monolithic SQLite)"
+        echo "  • Database:     $EXTERNAL_DATABASE_PATH (Microservices PostgreSQL/MySQL/SQL Server)"
         echo
         print_info "⚠️  Data Persistence Guarantee:"
         echo "  • Data survives container recreation (docker-compose down/up)"
@@ -3494,6 +3538,8 @@ configure_external_storage() {
         EXTERNAL_MODELS_PATH=""
         EXTERNAL_GCODE_PATH=""
         EXTERNAL_PROFILES_PATH=""
+        EXTERNAL_APP_DATA_PATH=""
+        EXTERNAL_DATABASE_PATH=""
     fi
 }
 
@@ -4059,6 +4105,7 @@ USE_EXTERNAL_STORAGE=${USE_EXTERNAL_STORAGE:-no}
 EXTERNAL_MODELS_PATH=${EXTERNAL_MODELS_PATH:-}
 EXTERNAL_GCODE_PATH=${EXTERNAL_GCODE_PATH:-}
 EXTERNAL_PROFILES_PATH=${EXTERNAL_PROFILES_PATH:-}
+EXTERNAL_APP_DATA_PATH=${EXTERNAL_APP_DATA_PATH:-}
 EXTERNAL_DATABASE_PATH=${EXTERNAL_DATABASE_PATH:-}
 EOF
 
@@ -4571,7 +4618,6 @@ DBEOF
       - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
       - DEPLOYMENT_MODE=microservices
       - ModelStorage__Path=/app/models
-      - GCODE_LIBRARY_ROOT=/app/wwwroot/gcode-library
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}

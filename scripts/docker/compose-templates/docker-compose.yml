@@ -43,12 +43,13 @@ services:
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
       # Required JWT signing key (32+ chars) for auth configuration
       - Jwt__Key=dev-super-secret-key-change-this-please-1234567890
+      - GCODE_STORAGE_PATH=/app/gcode
+      - MODEL_UPLOAD_PATH=/app/models
     volumes:
-      - printfarmer-app-data:/data
+      - ${EXTERNAL_APP_DATA_PATH:-.volumes/printfarmer-app-data}:/data
       - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
       - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
-      - ./wwwroot/gcode-library:/app/wwwroot/gcode-library
 
     networks:
       - printfarmer-network
@@ -122,7 +123,6 @@ services:
       - printfarmer-network
 
 volumes:
-  printfarmer-app-data:
   printfarmer-gcode-storage:
   printfarmer-slicer-profiles:
   printfarmer-model-storage:

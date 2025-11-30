@@ -79,14 +79,13 @@ EXPOSE 5000
 
 # Create necessary directories with proper ownership
 # Note: appuser (UID 1000) is pre-created in base image, tools are pre-installed
-RUN mkdir -p /app/uploads /app/gcode /app/slicers /data /app/wwwroot/gcode-library && \
+RUN mkdir -p /app/gcode /app/uploads /app/slicers && \
     chown -R appuser:appuser /app
 
 # Copy API binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
 
 # Set environment
-ENV ASPNETCORE_WEBROOT=/app/wwwroot
 ENV ASPNETCORE_URLS=http://+:5000
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV GCODE_STORAGE_PATH=/app/gcode

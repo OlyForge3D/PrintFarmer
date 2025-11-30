@@ -519,6 +519,192 @@ This causes the deploy script to force-disable worker flags and set worker count
 - **SQL Server:** mcr.microsoft.com/mssql/server:2022-latest
 - **MySQL:** mysql:8.0
 
+## Data Persistence & Storage
+
+### Overview
+
+PrintFarmer stores all persistent data on the host filesystem using **Docker bind mounts**. This ensures:
+- ✅ Data survives container restarts and rebuilds
+- ✅ Easy backups of application data
+- ✅ Clear separation between application and data
+- ✅ Easy access to files from host system
+
+### External Storage Paths
+
+All storage is configurable via environment variables with sensible defaults under `~/.printfarmer/`:
+
+| Data Type | Environment Variable | Default Path | Purpose | Monolithic | Microservices |
+|-----------|---------------------|---------------|---------|-----------|--------------|
+| **G-code Files** | `EXTERNAL_GCODE_PATH` | `~/.printfarmer/gcode/` | Uploaded & sliced G-code files | ✅ | ✅ |
+| **3D Models** | `EXTERNAL_MODELS_PATH` | `~/.printfarmer/models/` | Uploaded 3D model files | ✅ | ✅ |
+| **Slicer Profiles** | `EXTERNAL_PROFILES_PATH` | `~/.printfarmer/slicer-profiles/` | OrcaSlicer/PrusaSlicer profiles | ✅ | ✅ |
+| **Application Data** | `EXTERNAL_APP_DATA_PATH` | `~/.printfarmer/data/` | SQLite database (monolithic) | ✅ | ❌ |
+| **Database** | `EXTERNAL_DATABASE_PATH` | `~/.printfarmer/database/` | PostgreSQL/MySQL/SQL Server data | ❌ | ✅ |
+
+### Volume Mounts in Docker Compose
+
+**Monolithic Architecture**:
+```yaml
+services:
+  printfarmer-api:
+    volumes:
+      - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode}:/app/gcode:Z
+      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-models}:/app/uploads:Z
+      - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-profiles}:/app/slicer-profiles:Z
+      - ${EXTERNAL_APP_DATA_PATH:-.volumes/printfarmer-app-data}:/data:Z
+    environment:
+      - GCODE_STORAGE_PATH=/app/gcode
+      - MODEL_UPLOAD_PATH=/app/uploads
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/data/certificates/server.pfx
+```
+
+**Microservices Architecture**:
+```yaml
+services:
+  postgres:
+    volumes:
+      - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/postgresql/data:Z
+  
+  api-worker:
+    volumes:
+      - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode}:/app/gcode:Z
+      - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-models}:/app/uploads:Z
+      - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-profiles}:/app/slicer-profiles:Z
+```
+
+**Note**: The `:Z` flag enables SELinux shared bind mount for multi-container access. It's safe to use even on non-SELinux systems.
+
+### Deployment Script Setup
+
+The `deploy-docker.sh` script handles storage configuration automatically:
+
+**Interactive Mode** (prompts for each path):
+```bash
+./scripts/deploy-docker.sh
+# Prompts:
+# 1. Models directory path (default: ~/.printfarmer/models)
+# 2. G-code directory path (default: ~/.printfarmer/gcode)
+# 3. Profiles directory path (default: ~/.printfarmer/slicer-profiles)
+# 4. App data directory path (default: ~/.printfarmer/data)
+# 5. Database directory path (default: ~/.printfarmer/database)
+```
+
+**Non-Interactive Mode** (uses environment variables or `.deploy-config`):
+```bash
+EXTERNAL_GCODE_PATH=/mnt/storage/gcode \
+EXTERNAL_MODELS_PATH=/mnt/storage/models \
+./scripts/deploy-docker.sh --non-interactive
+```
+
+**Configuration Persistence**:
+- Settings saved to `~/.deploy-config` for future deployments
+- Use the same paths on subsequent runs without re-entering
+- Edit `~/.deploy-config` to change storage locations
+
+### Data Persistence Examples
+
+**Verify storage setup**:
+```bash
+# Check that directories were created
+ls -lah ~/.printfarmer/
+
+# Expected output:
+# data/                 - Application data (SQLite database)
+# gcode/                - G-code files from uploads/slicing
+# models/               - 3D model uploads
+# slicer-profiles/      - OrcaSlicer/PrusaSlicer profile data
+# database/             - External database data (microservices only)
+```
+
+**Files survive container restart**:
+```bash
+# Upload a file via PrintFarmer UI
+# File appears in storage directory
+ls ~/.printfarmer/gcode/
+
+# Stop and restart containers
+docker compose down && docker compose up -d
+
+# File still accessible
+ls ~/.printfarmer/gcode/  # File is still there!
+```
+
+**Backup application data**:
+```bash
+# Backup entire PrintFarmer data
+tar -czf ~/printfarmer-backup-$(date +%Y%m%d).tar.gz ~/.printfarmer/
+
+# Backup only database
+cp ~/.printfarmer/data/farm.db ~/farm.db.backup
+```
+
+### Changing Storage Locations
+
+To use a different storage location (e.g., external NAS, separate SSD):
+
+**1. Update `.deploy-config`**:
+```bash
+nano ~/.deploy-config
+
+# Change paths, e.g.:
+EXTERNAL_GCODE_PATH=/mnt/nas/printfarmer-gcode
+EXTERNAL_MODELS_PATH=/mnt/nas/printfarmer-models
+EXTERNAL_APP_DATA_PATH=/mnt/nas/printfarmer-data
+```
+
+**2. Teardown and redeploy**:
+```bash
+./scripts/deploy-docker.sh --tear-down
+# Creates directories and generates new docker-compose.yml
+```
+
+**3. Optional: Migrate existing data**:
+```bash
+# Copy data from old location
+cp -r ~/.printfarmer/gcode/* /mnt/nas/printfarmer-gcode/
+cp -r ~/.printfarmer/models/* /mnt/nas/printfarmer-models/
+```
+
+### Troubleshooting Storage Issues
+
+**Problem: "Permission denied" when uploading files**
+
+```bash
+# Fix permissions on storage directories
+chmod -R 755 ~/.printfarmer/gcode
+chmod -R 755 ~/.printfarmer/models
+chmod -R 755 ~/.printfarmer/data
+
+# Or fix ownership if running as different user
+chown -R $(id -u):$(id -g) ~/.printfarmer/
+```
+
+**Problem: Disk space errors during uploads**
+
+```bash
+# Check available space
+df -h ~/.printfarmer/
+
+# If low, move storage to larger partition
+mkdir -p /mnt/larger-storage/printfarmer
+./scripts/deploy-docker.sh --tear-down
+# Edit ~/.deploy-config with new paths
+./scripts/deploy-docker.sh --non-interactive
+```
+
+**Problem: Files missing after container restart**
+
+```bash
+# Verify bind mounts are active
+docker inspect -f '{{json .Mounts}}' $(docker ps -q -f label=com.docker.compose.service=printfarmer-api) | jq
+
+# Check docker-compose.yml was generated with volume mounts
+grep -A 5 "volumes:" docker-compose.yml
+
+# Redeploy if necessary
+./scripts/deploy-docker.sh --non-interactive
+```
+
 ## Monitoring and Health Checks
 
 ### Health Endpoints
