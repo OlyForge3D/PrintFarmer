@@ -2233,6 +2233,26 @@ load_previous_config() {
             echo -e "  ${BLUE}Auto-Admin Setup:${NC} Enabled (${AUTO_ADMIN_USERNAME:-admin})"
         fi
         
+        # Display external storage paths if configured
+        if [ -n "${EXTERNAL_MODELS_PATH:-}" ] || [ -n "${EXTERNAL_GCODE_PATH:-}" ] || [ -n "${EXTERNAL_PROFILES_PATH:-}" ] || [ -n "${EXTERNAL_APP_DATA_PATH:-}" ] || [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
+            echo -e "  ${BLUE}External Storage:${NC}"
+            if [ -n "${EXTERNAL_MODELS_PATH:-}" ]; then
+                echo -e "    • Models:    $EXTERNAL_MODELS_PATH"
+            fi
+            if [ -n "${EXTERNAL_GCODE_PATH:-}" ]; then
+                echo -e "    • G-code:    $EXTERNAL_GCODE_PATH"
+            fi
+            if [ -n "${EXTERNAL_PROFILES_PATH:-}" ]; then
+                echo -e "    • Profiles:  $EXTERNAL_PROFILES_PATH"
+            fi
+            if [ -n "${EXTERNAL_APP_DATA_PATH:-}" ]; then
+                echo -e "    • App Data:  $EXTERNAL_APP_DATA_PATH"
+            fi
+            if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
+                echo -e "    • Database:  $EXTERNAL_DATABASE_PATH"
+            fi
+        fi
+        
         print_info "Previous settings will be used as defaults (press Enter to accept)"
         echo
         return 0
@@ -3493,36 +3513,48 @@ configure_external_storage() {
         fi
         print_success "Slicer profiles directory ready: $EXTERNAL_PROFILES_PATH"
         
-        # Application data storage (SQLite database for monolithic, or general app data)
-        local default_app_data_path="${EXTERNAL_APP_DATA_PATH:-$HOME/.printfarmer/data}"
-        prompt_with_default "Host directory for application data (monolithic SQLite database):" "$default_app_data_path" "EXTERNAL_APP_DATA_PATH"
-        
-        # Ensure directory exists
-        if ! mkdir -p "$EXTERNAL_APP_DATA_PATH" 2>/dev/null; then
-            print_error "Failed to create app data directory: $EXTERNAL_APP_DATA_PATH"
-            print_info "Please ensure the directory path is writable or change the path above"
-            return 1
+        # Prompt for appropriate database/app data path based on architecture
+        if [ "$ARCHITECTURE" = "monolithic" ]; then
+            # Application data storage (SQLite database for monolithic)
+            local default_app_data_path="${EXTERNAL_APP_DATA_PATH:-$HOME/.printfarmer/data}"
+            prompt_with_default "Host directory for application data (monolithic SQLite database):" "$default_app_data_path" "EXTERNAL_APP_DATA_PATH"
+            
+            # Ensure directory exists
+            if ! mkdir -p "$EXTERNAL_APP_DATA_PATH" 2>/dev/null; then
+                print_error "Failed to create app data directory: $EXTERNAL_APP_DATA_PATH"
+                print_info "Please ensure the directory path is writable or change the path above"
+                return 1
+            fi
+            print_success "Application data directory ready: $EXTERNAL_APP_DATA_PATH"
+            
+            # Clear database path for monolithic
+            EXTERNAL_DATABASE_PATH=""
+        else
+            # Database storage directory (PostgreSQL/MySQL/SQL Server for microservices)
+            local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
+            prompt_with_default "Host directory for database storage (PostgreSQL/MySQL/SQL Server):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
+            
+            # Ensure directory exists
+            if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
+                print_error "Failed to create database directory: $EXTERNAL_DATABASE_PATH"
+                print_info "Please ensure the directory path is writable or change the path above"
+                return 1
+            fi
+            print_success "Database directory ready: $EXTERNAL_DATABASE_PATH"
+            
+            # Clear app data path for microservices
+            EXTERNAL_APP_DATA_PATH=""
         fi
-        print_success "Application data directory ready: $EXTERNAL_APP_DATA_PATH"
-        
-        # Database storage directory (defaults to user's home directory, for microservices PostgreSQL/MySQL/SQL Server)
-        local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
-        prompt_with_default "Host directory for database storage (microservices only):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
-        
-        # Ensure directory exists
-        if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
-            print_error "Failed to create database directory: $EXTERNAL_DATABASE_PATH"
-            print_info "Please ensure the directory path is writable or change the path above"
-            return 1
-        fi
-        print_success "Database directory ready: $EXTERNAL_DATABASE_PATH"
         
         print_success "External storage directories configured:"
         echo "  • Models:       $EXTERNAL_MODELS_PATH"
         echo "  • G-code:       $EXTERNAL_GCODE_PATH"
         echo "  • Profiles:     $EXTERNAL_PROFILES_PATH"
-        echo "  • App Data:     $EXTERNAL_APP_DATA_PATH (Monolithic SQLite)"
-        echo "  • Database:     $EXTERNAL_DATABASE_PATH (Microservices PostgreSQL/MySQL/SQL Server)"
+        if [ "$ARCHITECTURE" = "monolithic" ]; then
+            echo "  • App Data:     $EXTERNAL_APP_DATA_PATH (Monolithic SQLite)"
+        else
+            echo "  • Database:     $EXTERNAL_DATABASE_PATH (Microservices PostgreSQL/MySQL/SQL Server)"
+        fi
         echo
         print_info "⚠️  Data Persistence Guarantee:"
         echo "  • Data survives container recreation (docker-compose down/up)"
@@ -3743,7 +3775,13 @@ configure_additional() {
             print_warning "macOS Docker has limited network access. Discovery may not work for all WiFi-connected printers."
         fi
         
-        prompt_yes_no "Enable network printer discovery?" "no" "INCLUDE_DISCOVERY_CHOICE"
+        # Use previously configured value as default if available
+        local default_discovery="no"
+        if [ "${ENABLE_DISCOVERY:-}" = "true" ]; then
+            default_discovery="yes"
+        fi
+        
+        prompt_yes_no "Enable network printer discovery?" "$default_discovery" "INCLUDE_DISCOVERY_CHOICE"
         
         if [ "$INCLUDE_DISCOVERY_CHOICE" = "yes" ]; then
             INCLUDE_DISCOVERY="true"
@@ -6001,14 +6039,6 @@ main() {
         exit 0
     fi
     
-    # Auto-load cached images if available (before interactive deployment)
-    # This searches common locations automatically - no user intervention needed
-    # Pass empty string to trigger auto-discovery in common paths
-    auto_load_cached_images ""
-    
-    # Auto-load OrcaSlicer AppImage if available
-    auto_load_orcaslicer ""
-    
     print_header "🚀 PrintFarmer Docker Deployment Setup"
     
     print_info "This script will help you deploy PrintFarmer using Docker containers."
@@ -6104,6 +6134,15 @@ main() {
 
     # Run prepull step if requested
     prepull_images
+    
+    # Auto-load cached images if available (after all configuration prompts)
+    # This searches common locations automatically - no user intervention needed
+    # Pass empty string to trigger auto-discovery in common paths
+    print_info "Checking for cached Docker images..."
+    auto_load_cached_images ""
+    
+    # Auto-load OrcaSlicer AppImage if available
+    auto_load_orcaslicer ""
     
     deploy_containers
     
