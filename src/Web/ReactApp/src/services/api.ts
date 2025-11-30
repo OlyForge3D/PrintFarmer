@@ -920,9 +920,13 @@ export class ApiClient {
   async getGcodeFilesWithFilter(
     request: Record<string, unknown>
   ): Promise<GetGcodeFilesResponse> {
+    // Filter out undefined values to avoid sending them as query parameters
+    const params = Object.fromEntries(
+      Object.entries(request).filter(([, value]) => value !== undefined && value !== null)
+    );
     const response = await this.client.get<GetGcodeFilesResponse>(
       "/gcode-files",
-      { params: request }
+      { params }
     );
     return response.data;
   }

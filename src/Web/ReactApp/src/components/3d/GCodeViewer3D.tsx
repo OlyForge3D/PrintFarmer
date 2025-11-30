@@ -1,8 +1,9 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Line, OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button, Checkbox } from '@/components/ui';
+import { Cog } from 'lucide-react';
 
 interface GCodePoint {
   x: number;
@@ -11,6 +12,7 @@ interface GCodePoint {
   e?: number;
   f?: number;
   type: 'move' | 'extrude';
+  feedRate?: number;
 }
 
 interface GCodeLayer {
@@ -19,11 +21,40 @@ interface GCodeLayer {
   color: THREE.Color;
 }
 
+interface ColorMode {
+  id: number;
+  label: string;
+}
+
+interface RenderQuality {
+  value: number;
+  label: string;
+}
+
 function parseGCode(gcode: string): GCodeLayer[] {
   const lines = gcode.split('\n');
   const layers: Map<number, GCodePoint[]> = new Map();
-  let currentPos = { x: 0, y: 0, z: 0, e: 0 };
+  let currentPos = { x: 0, y: 0, z: 0, e: 0, f: 0 };
+  let minFeed = Infinity;
+  let maxFeed = 0;
   
+  // First pass: collect feed rates to normalize colors
+  lines.forEach(line => {
+    const cleanLine = line.split(';')[0].trim();
+    if (!cleanLine.startsWith('G1') && !cleanLine.startsWith('G0')) return;
+    
+    const f = cleanLine.match(/F([\d.]+)/)?.[1];
+    if (f) {
+      const feedRate = parseFloat(f);
+      minFeed = Math.min(minFeed, feedRate);
+      maxFeed = Math.max(maxFeed, feedRate);
+    }
+  });
+  
+  if (minFeed === Infinity) minFeed = 20;
+  if (maxFeed === 0) maxFeed = 100;
+  
+  // Second pass: parse points with normalized feed rates
   lines.forEach(line => {
     const cleanLine = line.split(';')[0].trim();
     if (!cleanLine.startsWith('G1') && !cleanLine.startsWith('G0')) return;
@@ -32,17 +63,20 @@ function parseGCode(gcode: string): GCodeLayer[] {
     const y = cleanLine.match(/Y([-\d.]+)/)?.[1];
     const z = cleanLine.match(/Z([-\d.]+)/)?.[1];
     const e = cleanLine.match(/E([-\d.]+)/)?.[1];
+    const f = cleanLine.match(/F([\d.]+)/)?.[1];
     
     const newPos = {
       x: x ? parseFloat(x) : currentPos.x,
       y: y ? parseFloat(y) : currentPos.y,
       z: z ? parseFloat(z) : currentPos.z,
       e: e ? parseFloat(e) : currentPos.e,
+      f: f ? parseFloat(f) : currentPos.f,
     };
     
     const point: GCodePoint = {
       ...newPos,
-      type: e && parseFloat(e) > currentPos.e ? 'extrude' : 'move'
+      type: e && parseFloat(e) > currentPos.e ? 'extrude' : 'move',
+      feedRate: newPos.f,
     };
     
     const layerZ = Math.round(newPos.z * 100) / 100;
@@ -54,65 +88,140 @@ function parseGCode(gcode: string): GCodeLayer[] {
     currentPos = newPos;
   });
   
-  // Convert to layers with colors
+  // Convert to layers with colors based on feed rates
   return Array.from(layers.entries())
     .sort(([a], [b]) => a - b)
     .map(([z, points], index) => ({
       z,
       points,
-      color: new THREE.Color().setHSL((index * 0.1) % 1, 0.8, 0.6)
+      color: new THREE.Color().setHSL((index * 0.1) % 1, 0.8, 0.6),
     }));
 }
 
-function GCodePath({ layer, visible }: { layer: GCodeLayer; visible: boolean }) {
-  const { points, extrudePoints } = useMemo(() => {
-    const movePoints: THREE.Vector3[] = [];
-    const extrudePoints: THREE.Vector3[] = [];
+function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: { 
+  layer: GCodeLayer; 
+  visible: boolean;
+  colorMode: number;
+  minFeedColor: string;
+  maxFeedColor: string;
+}) {
+  const { extrudeSegments, moveSegments } = useMemo(() => {
+    const extrudeSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
+    const moveSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
     
-    layer.points.forEach(point => {
-      const vec = new THREE.Vector3(point.x, point.y, point.z);
-      if (point.type === 'extrude') {
-        extrudePoints.push(vec);
-      } else {
-        movePoints.push(vec);
+    // Group consecutive points of same type
+    let currentSegment: GCodePoint[] = [];
+    let lastType: string = '';
+    
+    layer.points.forEach((point, idx) => {
+      if (point.type !== lastType && currentSegment.length > 0) {
+        const color = getPointColor(currentSegment, colorMode, minFeedColor, maxFeedColor);
+        const vectors = currentSegment.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        
+        if (lastType === 'extrude') {
+          extrudeSegments.push({ points: vectors, color });
+        } else {
+          moveSegments.push({ points: vectors, color });
+        }
+        
+        currentSegment = [];
+        lastType = point.type;
+      }
+      
+      currentSegment.push(point);
+      
+      if (idx === layer.points.length - 1) {
+        const color = getPointColor(currentSegment, colorMode, minFeedColor, maxFeedColor);
+        const vectors = currentSegment.map(p => new THREE.Vector3(p.x, p.y, p.z));
+        
+        if (point.type === 'extrude') {
+          extrudeSegments.push({ points: vectors, color });
+        } else {
+          moveSegments.push({ points: vectors, color });
+        }
       }
     });
     
-    return { points: movePoints, extrudePoints };
-  }, [layer]);
+    return { extrudeSegments, moveSegments };
+  }, [layer, colorMode, minFeedColor, maxFeedColor]);
 
   if (!visible) return null;
 
   return (
     <>
-      {/* Extrusion lines (thick, colored) */}
-      {extrudePoints.length > 1 && (
-        <Line
-          points={extrudePoints}
-          color={layer.color}
-          lineWidth={2}
-        />
-      )}
+      {/* Extrusion lines */}
+      {extrudeSegments.map((segment, idx) => (
+        segment.points.length > 1 && (
+          <Line
+            key={`extrude-${idx}`}
+            points={segment.points}
+            color={segment.color}
+            lineWidth={2}
+          />
+        )
+      ))}
       
-      {/* Travel moves (thin, gray) */}
-      {points.length > 1 && (
-        <Line
-          points={points}
-          color="#999999"
-          lineWidth={0.5}
-          dashed={true}
-          dashSize={0.5}
-          gapSize={0.5}
-        />
-      )}
+      {/* Travel moves */}
+      {moveSegments.map((segment, idx) => (
+        segment.points.length > 1 && (
+          <Line
+            key={`move-${idx}`}
+            points={segment.points}
+            color={new THREE.Color('#666666')}
+            lineWidth={0.5}
+            dashed={true}
+            dashSize={0.5}
+            gapSize={0.5}
+          />
+        )
+      ))}
     </>
   );
+}
+
+function getPointColor(points: GCodePoint[], colorMode: number, minFeedColor: string, maxFeedColor: string): THREE.Color {
+  const color = new THREE.Color();
+  
+  if (colorMode === 0) {
+    // Layer color (default hue)
+    return color.setHSL(Math.random(), 0.8, 0.6);
+  } else if (colorMode === 1) {
+    // Speed-based color
+    const avgFeed = points.reduce((sum, p) => sum + (p.feedRate || 0), 0) / points.length;
+    const minFeed = 20;
+    const maxFeed = 150;
+    const normalized = Math.max(0, Math.min(1, (avgFeed - minFeed) / (maxFeed - minFeed)));
+    
+    const min = new THREE.Color(minFeedColor);
+    const max = new THREE.Color(maxFeedColor);
+    
+    return color.lerpColors(min, max, normalized);
+  } else if (colorMode === 2) {
+    // Extrusion color
+    const hasExtrusion = points.some(p => p.type === 'extrude');
+    return color.set(hasExtrusion ? '#FF6B35' : '#666666');
+  }
+  
+  return color;
 }
 
 export interface GCodeViewerProps {
   gcodeUrl: string;
   className?: string;
 }
+
+const COLOR_MODES: ColorMode[] = [
+  { id: 0, label: 'Layer' },
+  { id: 1, label: 'Speed' },
+  { id: 2, label: 'Extrusion' },
+];
+
+const RENDER_QUALITIES: RenderQuality[] = [
+  { value: 1, label: 'Low' },
+  { value: 2, label: 'Medium' },
+  { value: 3, label: 'High' },
+  { value: 4, label: 'Ultra' },
+];
 
 export const GCodeViewer: React.FC<GCodeViewerProps> = ({ 
   gcodeUrl, 
@@ -123,6 +232,17 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   const [currentLayer, setCurrentLayer] = useState<number>(0);
   const [playAnimation, setPlayAnimation] = useState(false);
   const [showMoves, setShowMoves] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [colorMode, setColorMode] = useState<number>(0);
+  const [renderQuality, setRenderQuality] = useState<number>(2);
+  const [backgroundColor, setBackgroundColor] = useState<string>('#1a1a1a');
+  const [gridColor, setGridColor] = useState<string>('#4a4a4a');
+  const [minFeedColor, setMinFeedColor] = useState<string>('#0000FF');
+  const [maxFeedColor, setMaxFeedColor] = useState<string>('#FF0000');
+  const [transparency, setTransparency] = useState(false);
+  const [hdRendering, setHdRendering] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch(gcodeUrl)
@@ -196,26 +316,157 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Controls */}
-      <div className="bg-white rounded-lg shadow p-4">
+      {/* Header with Controls */}
+      <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-lg shadow p-4 border border-gray-700">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-medium text-lg">G-code Preview</h3>
+          <div>
+            <h3 className="font-bold text-lg text-white">G-Code Viewer</h3>
+            {printStats && (
+              <p className="text-xs text-gray-400 mt-1">
+                {printStats.layers} layers • {printStats.dimensions.x}×{printStats.dimensions.y}×{printStats.dimensions.z}mm
+              </p>
+            )}
+          </div>
           
+          <div className="flex items-center space-x-2">
+            <div className="relative">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="p-2 rounded-md hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
+                title="Settings"
+              >
+                <Cog size={20} />
+              </button>
+              
+              {/* Settings Dropdown */}
+              {showSettings && (
+                <div 
+                  ref={settingsRef}
+                  className="absolute right-0 top-full mt-2 w-72 bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-4 z-50 space-y-3"
+                >
+                  <div className="border-b border-gray-600 pb-3">
+                    <h4 className="text-sm font-semibold text-white mb-2">Rendering</h4>
+                    <div className="space-y-2 text-sm">
+                      <div>
+                        <label className="text-gray-300">Quality Level</label>
+                        <select
+                          value={renderQuality}
+                          onChange={(e) => setRenderQuality(parseInt(e.target.value))}
+                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs"
+                        >
+                          {RENDER_QUALITIES.map(q => (
+                            <option key={q.value} value={q.value}>{q.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={hdRendering}
+                          onChange={(e) => setHdRendering(e.target.checked)}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-gray-300">HD Rendering</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className="border-b border-gray-600 pb-3">
+                    <h4 className="text-sm font-semibold text-white mb-2">Display</h4>
+                    <div className="space-y-2 text-sm">
+                      <div>
+                        <label className="text-gray-300">Color Mode</label>
+                        <select
+                          value={colorMode}
+                          onChange={(e) => setColorMode(parseInt(e.target.value))}
+                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs"
+                        >
+                          {COLOR_MODES.map(m => (
+                            <option key={m.id} value={m.id}>{m.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={showGrid}
+                          onChange={(e) => setShowGrid(e.target.checked)}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-gray-300">Show Grid</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={transparency}
+                          onChange={(e) => setTransparency(e.target.checked)}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-gray-300">Transparency</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className="pb-3">
+                    <h4 className="text-sm font-semibold text-white mb-2">Colors</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center space-x-2">
+                        <label className="text-gray-300 flex-1">Background</label>
+                        <input 
+                          type="color" 
+                          value={backgroundColor}
+                          onChange={(e) => setBackgroundColor(e.target.value)}
+                          className="w-8 h-8 rounded cursor-pointer"
+                        />
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <label className="text-gray-300 flex-1">Grid</label>
+                        <input 
+                          type="color" 
+                          value={gridColor}
+                          onChange={(e) => setGridColor(e.target.value)}
+                          className="w-8 h-8 rounded cursor-pointer"
+                        />
+                      </div>
+                      {colorMode === 1 && (
+                        <>
+                          <div className="flex items-center space-x-2">
+                            <label className="text-gray-300 flex-1">Min Speed</label>
+                            <input 
+                              type="color" 
+                              value={minFeedColor}
+                              onChange={(e) => setMinFeedColor(e.target.value)}
+                              className="w-8 h-8 rounded cursor-pointer"
+                            />
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <label className="text-gray-300 flex-1">Max Speed</label>
+                            <input 
+                              type="color" 
+                              value={maxFeedColor}
+                              onChange={(e) => setMaxFeedColor(e.target.value)}
+                              className="w-8 h-8 rounded cursor-pointer"
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Main Controls */}
+        <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <Checkbox
-              id="show-moves"
-              label="Show travel moves"
-              checked={showMoves}
-              onChange={(e) => setShowMoves(e.target.checked)}
-              className="text-sm"
-            />
-            
             <Button
               variant={playAnimation ? 'danger' : 'primary'}
               size="sm"
               onClick={() => setPlayAnimation(!playAnimation)}
             >
-              {playAnimation ? 'Pause' : 'Play'} Animation
+              {playAnimation ? '⏸ Pause' : '▶ Play'}
             </Button>
             
             <Button
@@ -223,68 +474,64 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
               size="sm"
               onClick={() => setCurrentLayer(layers.length - 1)}
             >
-              Show All
+              ⏭ Show All
             </Button>
           </div>
-        </div>
-        
-        {/* Layer slider */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <span>Layer: {currentLayer + 1} / {layers.length}</span>
-            <span>Z: {layers[currentLayer]?.z.toFixed(2)}mm</span>
-          </div>
           
-          <input
-            type="range"
-            min={0}
-            max={layers.length - 1}
-            value={currentLayer}
-            onChange={(e) => {
-              setCurrentLayer(parseInt(e.target.value));
-              setPlayAnimation(false);
-            }}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+          <Checkbox
+            id="show-moves"
+            label="Travel Moves"
+            checked={showMoves}
+            onChange={(e) => setShowMoves(e.target.checked)}
+            className="text-sm text-gray-300"
           />
         </div>
-
-        {/* Print stats */}
-        {printStats && (
-          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <span className="text-gray-600">Layers:</span>
-              <div className="font-medium">{printStats.layers}</div>
-            </div>
-            <div>
-              <span className="text-gray-600">Dimensions:</span>
-              <div className="font-medium">
-                {printStats.dimensions.x} × {printStats.dimensions.y} × {printStats.dimensions.z}mm
-              </div>
-            </div>
-            <div>
-              <span className="text-gray-600">Points:</span>
-              <div className="font-medium">{printStats.points.toLocaleString()}</div>
-            </div>
-          </div>
-        )}
+      </div>
+      
+      {/* Layer Slider */}
+      <div className="bg-gray-800 rounded-lg shadow p-4 border border-gray-700">
+        <div className="flex items-center justify-between text-sm text-gray-300 mb-2">
+          <span>Layer {currentLayer + 1} / {layers.length}</span>
+          <span>Z: {layers[currentLayer]?.z.toFixed(2)}mm</span>
+        </div>
+        
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0, layers.length - 1)}
+          value={currentLayer}
+          onChange={(e) => {
+            setCurrentLayer(parseInt(e.target.value));
+            setPlayAnimation(false);
+          }}
+          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+        />
       </div>
 
       {/* 3D Viewer */}
-      <div className={`${className} border rounded-lg bg-gray-900`}>
-        <Canvas camera={{ position: [100, 100, 100], fov: 45 }}>
-          <ambientLight intensity={0.3} />
-          <pointLight position={[10, 10, 10]} intensity={0.8} />
+      <div className={`${className} border border-gray-700 rounded-lg overflow-hidden`}>
+        <Canvas 
+          camera={{ position: [100, 100, 100], fov: 45 }}
+          style={{ background: backgroundColor }}
+        >
+          <ambientLight intensity={0.5} />
+          <pointLight position={[10, 10, 10]} intensity={1} />
+          <pointLight position={[-10, -10, -10]} intensity={0.5} />
+          
+          {showGrid && <Grid args={[200, 200]} cellColor={gridColor} sectionColor={gridColor} />}
           
           {layers.slice(0, currentLayer + 1).map((layer, index) => (
             <GCodePath 
               key={index}
               layer={layer}
               visible={true}
+              colorMode={colorMode}
+              minFeedColor={minFeedColor}
+              maxFeedColor={maxFeedColor}
             />
           ))}
           
           <OrbitControls />
-          <Grid args={[200, 200]} />
         </Canvas>
       </div>
     </div>

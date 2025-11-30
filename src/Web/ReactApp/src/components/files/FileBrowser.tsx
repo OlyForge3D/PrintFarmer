@@ -153,7 +153,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   const queueItems: UploadItem[] = files.map(f => ({ id: (crypto?.randomUUID?.() || Math.random().toString(36).slice(2)), file: f, progress: 0, status: 'queued', cancelRequested: false, paused: false, isChunked: f.size >= CHUNK_THRESHOLD }));
       setUploadQueue(prev => [...prev, ...queueItems]);
       const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB slices
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const apiBase = getApiBaseUrl();
 
       const chunkUpload = async (item: UploadItem): Promise<void> => {
         let uploadId = item.uploadId;
@@ -161,7 +161,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         if (!uploadId) {
           const initResp = await fetch(`${apiBase}/gcode-files/chunk/init`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              ...getAuthHeaders()
+            },
             body: JSON.stringify({ fileName: item.file.name, size: item.file.size, path: currentPath })
           });
           if (!initResp.ok) {
@@ -176,7 +179,9 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         } else {
           // Rehydrate from server
           try {
-            const stResp = await fetch(`${apiBase}/gcode-files/chunk/${uploadId}`);
+            const stResp = await fetch(`${apiBase}/gcode-files/chunk/${uploadId}`, {
+              headers: getAuthHeaders()
+            });
             if (stResp.ok) {
               const st = await stResp.json();
               offset = st.uploadedBytes || 0;
@@ -198,7 +203,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         while (offset < item.file.size) {
           if (item.cancelRequested) {
             // cancel on server
-            try { fetch(`${apiBase}/gcode-files/chunk/${uploadId}`, { method: 'DELETE' }); } catch {
+            try { fetch(`${apiBase}/gcode-files/chunk/${uploadId}`, { method: 'DELETE', headers: getAuthHeaders() }); } catch {
               // Ignore cleanup errors
             }
             throw new Error('Cancelled');
@@ -207,7 +212,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           const slice = item.file.slice(offset, Math.min(offset + CHUNK_SIZE, item.file.size));
           const putResp = await fetch(`${apiBase}/gcode-files/chunk/${uploadId}?offset=${offset}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/octet-stream' },
+            headers: { 
+              'Content-Type': 'application/octet-stream',
+              ...getAuthHeaders()
+            },
             body: slice
           });
           if (!putResp.ok) {
@@ -279,6 +287,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               xhr.onerror = () => reject(new Error('Network error'));
               xhr.onabort = () => reject(new Error('Cancelled'));
               xhr.open('POST', `${apiBase}/gcode-files/upload?path=${encodeURIComponent(currentPath)}`);
+              const headers = getAuthHeaders();
+              Object.entries(headers).forEach(([key, value]) => {
+                xhr.setRequestHeader(key, value as string);
+              });
               xhr.send(form);
             });
           }
@@ -649,13 +661,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                       title={item.paused ? 'Resume upload' : 'Pause upload'}
                       onClick={async () => {
                         if (!item.uploadId) return;
-                        const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+                        const apiBase = getApiBaseUrl();
                         try {
                           if (item.paused) {
-                            await fetch(`${apiBase}/gcode-files/chunk/${item.uploadId}/resume`, { method: 'POST' });
+                            await fetch(`${apiBase}/gcode-files/chunk/${item.uploadId}/resume`, { method: 'POST', headers: getAuthHeaders() });
                             item.paused = false;
                           } else {
-                            await fetch(`${apiBase}/gcode-files/chunk/${item.uploadId}/pause`, { method: 'POST' });
+                            await fetch(`${apiBase}/gcode-files/chunk/${item.uploadId}/pause`, { method: 'POST', headers: getAuthHeaders() });
                             item.paused = true;
                           }
                           setUploadQueue(q => [...q]);

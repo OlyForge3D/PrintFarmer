@@ -196,7 +196,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
 
             if (completed)
             {
-                // Finalize upload
+                // Finalize upload asynchronously - must complete before returning response
                 await FinalizeUploadAsync(state);
                 _ = _uploadStates.TryRemove(uploadId, out _);
             }
@@ -373,59 +373,70 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
     }
 
-    private Task FinalizeUploadAsync(InternalUploadState state)
+    private async Task FinalizeUploadAsync(InternalUploadState state)
     {
-        return Task.Run(() =>
+        string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
+
+        // Check for collision again (rare but possible)
+        if (File.Exists(finalPath))
         {
-            string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
+            string uniqueName = _fileManagementService.ResolveUniqueFileName(
+                state.TargetDirectoryFullPath,
+                state.FinalSafeName);
+            state.FinalSafeName = uniqueName;
+            finalPath = Path.Combine(state.TargetDirectoryFullPath, uniqueName);
+        }
 
-            // Check for collision again (rare but possible)
-            if (File.Exists(finalPath))
+        // Validate hash if provided
+        if (state.Hasher != null)
+        {
+            byte[] hashBytes = state.Hasher.GetHashAndReset();
+            string hex = _fileManagementService.ToHex(hashBytes);
+            state.FinalHash = hex;
+
+            if (state.ExpectedHash != null && !hex.Equals(state.ExpectedHash, StringComparison.OrdinalIgnoreCase))
             {
-                string uniqueName = _fileManagementService.ResolveUniqueFileName(
-                    state.TargetDirectoryFullPath,
-                    state.FinalSafeName);
-                state.FinalSafeName = uniqueName;
-                finalPath = Path.Combine(state.TargetDirectoryFullPath, uniqueName);
-            }
-
-            // Validate hash if provided
-            if (state.Hasher != null)
-            {
-                byte[] hashBytes = state.Hasher.GetHashAndReset();
-                string hex = _fileManagementService.ToHex(hashBytes);
-                state.FinalHash = hex;
-
-                if (state.ExpectedHash != null && !hex.Equals(state.ExpectedHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    // Hash mismatch - delete temp file and fail
-                    try
-                    {
-                        File.Delete(state.TempFilePath);
-                        if (File.Exists(state.MetaFilePath))
-                        {
-                            File.Delete(state.MetaFilePath);
-                        }
-                    }
-                    catch { }
-
-                    throw new InvalidOperationException($"Hash mismatch: expected {state.ExpectedHash}, got {hex}");
-                }
-            }
-
-            // Move temp file to final destination
-            File.Move(state.TempFilePath, finalPath, overwrite: false);
-
-            // Clean up metadata file
-            if (File.Exists(state.MetaFilePath))
-            {
+                // Hash mismatch - delete temp file and fail
                 try
                 {
-                    File.Delete(state.MetaFilePath);
+                    if (File.Exists(state.TempFilePath))
+                    {
+                        File.Delete(state.TempFilePath);
+                    }
+                    if (File.Exists(state.MetaFilePath))
+                    {
+                        File.Delete(state.MetaFilePath);
+                    }
                 }
                 catch { }
+
+                throw new InvalidOperationException($"Hash mismatch: expected {state.ExpectedHash}, got {hex}");
             }
-        });
+        }
+
+        // Move temp file to final destination asynchronously
+        // Use async file operations to properly await completion
+        if (File.Exists(state.TempFilePath))
+        {
+            // Copy asynchronously then delete
+            using (var sourceStream = new FileStream(state.TempFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true))
+            using (var destStream = new FileStream(finalPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+            {
+                await sourceStream.CopyToAsync(destStream);
+            }
+            // Delete after successful copy
+            File.Delete(state.TempFilePath);
+        }
+
+        // Clean up metadata file
+        if (File.Exists(state.MetaFilePath))
+        {
+            try
+            {
+                File.Delete(state.MetaFilePath);
+            }
+            catch { }
+        }
     }
 
     private void PersistState(InternalUploadState state)

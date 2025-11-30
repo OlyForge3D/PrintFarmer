@@ -181,7 +181,7 @@ public static class ServiceCollectionExtensions
         // File Management Services
         _ = services.AddSingleton<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
         _ = services.AddSingleton<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
-        _ = services.AddScoped<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
+        _ = services.AddSingleton<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
         _ = services.AddSingleton<Services.IO.IFileSystem, Services.IO.SystemFileSystem>();
