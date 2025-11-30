@@ -27,6 +27,8 @@ internal sealed class PrinterState
     public double? Progress { get; set; }
     public string? JobName { get; set; }
     public string? HomedAxes { get; set; }
+    public string? CameraStreamUrl { get; set; }
+    public string? ThumbnailUrl { get; set; }
 }
 
 public sealed class MoonrakerSubscriptionService(
@@ -610,7 +612,7 @@ public sealed class MoonrakerSubscriptionService(
                 res.TryGetProperty("status", out JsonElement statusObj))
             {
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
-                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, ct);
+                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, printer.CameraStreamUrl, printer.ThumbnailUrl, ct);
             }
         }
         catch (JsonException ex)
@@ -642,7 +644,7 @@ public sealed class MoonrakerSubscriptionService(
                 {
                     _logger.LogDebug("Processing notify_status_update for printer {PrinterName}. Status data: {StatusData}",
                         printer.Name, p[0].GetRawText());
-                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, ct);
+                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, printer.CameraStreamUrl, printer.ThumbnailUrl, ct);
                 }
                 break;
 
@@ -669,75 +671,152 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
-    private async Task ProcessStatusUpdateAsync(JsonElement statusObj, Guid printerId, string serverUrl, CancellationToken ct)
+    private async Task ProcessStatusUpdateAsync(JsonElement statusObj, Guid printerId, string serverUrl, string? cameraStreamUrl, string? thumbnailUrl, CancellationToken ct)
     {
         // Get or create persistent state for this printer
         PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
-
-        // Extract status data using the same logic as before
-        double? x = null, y = null, z = null, progress = null;
-        string? stateValue = null, jobName = null;
-        double? hotend = null, bed = null, hotendTarget = null, bedTarget = null;
+        
+        // Store camera and thumbnail URLs if provided
+        if (!string.IsNullOrEmpty(cameraStreamUrl)) state.CameraStreamUrl = cameraStreamUrl;
+        if (!string.IsNullOrEmpty(thumbnailUrl)) state.ThumbnailUrl = thumbnailUrl;
 
         _logger.LogDebug($"Processing status update for printer {printerId}. Raw status: {statusObj.GetRawText()}");
 
-        // Toolhead position and homed axes
-        string? homedAxes = null;
+        // Process each object type separately by dispatching to handler methods
+        // This aligns with Moonraker's incremental update model where each notification
+        // contains only the objects that have changed
+
         if (statusObj.TryGetProperty("toolhead", out JsonElement th))
         {
-            // Always log toolhead structure for debugging  
-            _logger.LogInformation($"Full toolhead object for printer {printerId}: {th}");
-
-            // Extract position
-            if (th.TryGetProperty("position", out JsonElement pos) &&
-                pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
-            {
-                try
-                { x = pos[0].GetDouble(); }
-                catch { }
-                try
-                { y = pos[1].GetDouble(); }
-                catch { }
-                try
-                { z = pos[2].GetDouble(); }
-                catch { }
-
-                _logger.LogDebug($"Extracted position for printer {printerId}: x={x}, y={y}, z={z}");
-            }
-            else
-            {
-                _logger.LogDebug($"No toolhead.position found in status update for printer {printerId}");
-            }
-
-            // Try to extract homed_axes from subscription if available
-            if (th.TryGetProperty("homed_axes", out JsonElement ha) && ha.ValueKind == JsonValueKind.String)
-            {
-                homedAxes = ha.GetString();
-                _logger.LogDebug($"Extracted homed_axes from subscription for printer {printerId}: '{homedAxes}'");
-            }
+            await HandleToolheadUpdateAsync(printerId, state, th, ct);
         }
 
-        // If homed_axes wasn't in subscription, query via HTTP periodically (every 10 seconds)
-        if (homedAxes == null)
+        if (statusObj.TryGetProperty("extruder", out JsonElement ex))
         {
-            _logger.LogInformation($"homedAxes is null for printer {printerId}, will attempt HTTP query");
-            var lastQueryTime = _lastStatusUpdateTimes.GetOrAdd(printerId, DateTime.MinValue);
-            if ((DateTime.UtcNow - lastQueryTime).TotalSeconds >= 10)
-            {
-                homedAxes = await QueryHomedAxesAsync(serverUrl, ct);
-                if (homedAxes != null)
-                {
-                    _logger.LogInformation($"Queried homed axes via HTTP for printer {printerId}: '{homedAxes}'");
-                }
-            }
-        }
-        else
-        {
-            _logger.LogInformation($"homedAxes already set from subscription for printer {printerId}: '{homedAxes}'");
+            await HandleExtruderUpdateAsync(printerId, state, ex, ct);
         }
 
-        // Fallback: Use empty string if homed_axes couldn't be obtained
-        homedAxes ??= "";
+        if (statusObj.TryGetProperty("heater_bed", out JsonElement hb))
+        {
+            await HandleHeaterBedUpdateAsync(printerId, state, hb, ct);
+        }
+
+        // State/progress updates can come from multiple sources (display_status, print_stats, webhooks)
+        if (statusObj.TryGetProperty("display_status", out _) ||
+            statusObj.TryGetProperty("print_stats", out _) ||
+            statusObj.TryGetProperty("webhooks", out _))
+        {
+            await HandleStateUpdateAsync(printerId, state, statusObj, ct);
+        }
+
+        // Get spool information for consolidated update
+        PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(serverUrl, ct);
+
+        // Send consolidated status update with persistent state for offline status and overall sync
+        await EmitConsolidatedStatusAsync(printerId, state, spoolInfo, ct);
+
+        // Track successful status update time
+        _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
+    }
+
+    private async Task HandleToolheadUpdateAsync(Guid printerId, PrinterState state, JsonElement th, CancellationToken ct)
+    {
+        double? x = null, y = null, z = null;
+        string? homedAxes = null;
+
+        // Extract position
+        if (th.TryGetProperty("position", out JsonElement pos) &&
+            pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
+        {
+            try { x = pos[0].GetDouble(); } catch { }
+            try { y = pos[1].GetDouble(); } catch { }
+            try { z = pos[2].GetDouble(); } catch { }
+        }
+
+        // Extract homed_axes
+        if (th.TryGetProperty("homed_axes", out JsonElement ha) && ha.ValueKind == JsonValueKind.String)
+        {
+            homedAxes = ha.GetString();
+        }
+
+        // Update persistent state
+        if (x.HasValue) state.X = x;
+        if (y.HasValue) state.Y = y;
+        if (z.HasValue) state.Z = z;
+        if (!string.IsNullOrEmpty(homedAxes)) state.HomedAxes = homedAxes;
+
+        // Emit separate toolhead event
+        try
+        {
+            var update = new PrinterToolheadUpdate(printerId, x, y, z, homedAxes);
+            _logger.LogDebug($"Emitting toolhead update for printer {printerId}: X={x}, Y={y}, Z={z}, HomedAxes={homedAxes}");
+            await hub!.Clients.All.SendAsync("toolheadupdate", update, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to emit toolhead update for printer {printerId}");
+        }
+    }
+
+    private async Task HandleExtruderUpdateAsync(Guid printerId, PrinterState state, JsonElement ex, CancellationToken ct)
+    {
+        double? temperature = null, target = null;
+
+        if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
+            try { temperature = t.GetDouble(); } catch { }
+        
+        if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
+            try { target = tt.GetDouble(); } catch { }
+
+        // Update persistent state
+        if (temperature.HasValue) state.HotendTemp = temperature;
+        if (target.HasValue) state.HotendTarget = target;
+
+        // Emit separate extruder event
+        try
+        {
+            var update = new PrinterExtruderUpdate(printerId, temperature, target);
+            _logger.LogDebug($"Emitting extruder update for printer {printerId}: Temp={temperature}, Target={target}");
+            await hub!.Clients.All.SendAsync("extruderupdate", update, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to emit extruder update for printer {printerId}");
+        }
+    }
+
+    private async Task HandleHeaterBedUpdateAsync(Guid printerId, PrinterState state, JsonElement hb, CancellationToken ct)
+    {
+        double? temperature = null, target = null;
+
+        if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
+            try { temperature = t.GetDouble(); } catch { }
+        
+        if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
+            try { target = tt.GetDouble(); } catch { }
+
+        // Update persistent state
+        if (temperature.HasValue) state.BedTemp = temperature;
+        if (target.HasValue) state.BedTarget = target;
+
+        // Emit separate heater bed event
+        try
+        {
+            var update = new PrinterHeaterBedUpdate(printerId, temperature, target);
+            _logger.LogDebug($"Emitting heater bed update for printer {printerId}: Temp={temperature}, Target={target}");
+            await hub!.Clients.All.SendAsync("heaterbedupdate", update, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to emit heater bed update for printer {printerId}");
+        }
+    }
+
+    private async Task HandleStateUpdateAsync(Guid printerId, PrinterState state, JsonElement statusObj, CancellationToken ct)
+    {
+        string? stateValue = null;
+        double? progress = null;
+        string? jobName = null;
 
         // Display status (progress)
         if (statusObj.TryGetProperty("display_status", out JsonElement ds) &&
@@ -756,190 +835,78 @@ public sealed class MoonrakerSubscriptionService(
         if (statusObj.TryGetProperty("print_stats", out JsonElement ps))
         {
             if (ps.TryGetProperty("state", out JsonElement st) && st.ValueKind == JsonValueKind.String)
-            {
                 printStatsState = st.GetString();
-            }
 
             if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
-            {
                 jobName = fn.GetString();
-            }
         }
 
         // Webhooks state (Klipper system state)
         string? webhooksState = null;
         if (statusObj.TryGetProperty("webhooks", out JsonElement wh) &&
             wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
-        {
             webhooksState = ws.GetString();
-            _logger.LogDebug($"Extracted webhooks state for printer {printerId}: {webhooksState}");
-        }
 
-        // Determine final state: print_stats state takes precedence over webhooks state
-        // because print_stats represents active print job state (printing, paused, complete, error, cancelled)
-        // which is more specific and relevant than system state (ready, shutdown, error, startup)
-        // Only fall back to webhooks state when no print job is active (standby/ready)
+        // Determine final state: print_stats takes precedence
         if (!string.IsNullOrEmpty(printStatsState))
-        {
-            // Print stats states: standby, printing, paused, complete, error, cancelled
             stateValue = printStatsState;
-            _logger.LogDebug($"Using print_stats state '{stateValue}' for printer {printerId}");
-        }
         else if (!string.IsNullOrEmpty(webhooksState))
-        {
-            // Webhooks states: startup, ready, shutdown, error
             stateValue = webhooksState;
-            _logger.LogDebug($"Using webhooks state '{stateValue}' for printer {printerId}");
-        }
 
-        // Extruder temperatures
-        if (statusObj.TryGetProperty("extruder", out JsonElement ex))
+        // Update persistent state
+        if (stateValue != null) state.State = stateValue;
+        if (progress.HasValue) state.Progress = progress;
+        if (jobName != null) state.JobName = jobName;
+
+        // Emit state update event if any state/progress/jobName changed
+        if (stateValue != null || progress.HasValue || jobName != null)
         {
-            if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
+            try
             {
-                try
-                { hotend = t.GetDouble(); }
-                catch { }
+                var update = new PrinterStateUpdate(printerId, stateValue, progress, jobName);
+                _logger.LogDebug($"Emitting state update for printer {printerId}: State={stateValue}, Progress={progress}, JobName={jobName}");
+                await hub!.Clients.All.SendAsync("stateupdate", update, ct);
             }
-            if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
+            catch (Exception ex)
             {
-                try
-                { hotendTarget = tt.GetDouble(); }
-                catch { }
+                _logger.LogError(ex, $"Failed to emit state update for printer {printerId}");
             }
-
-            _logger.LogDebug($"Extracted hotend temps for printer {printerId}: current={hotend}, target={hotendTarget}");
         }
-        else
-        {
-            _logger.LogDebug($"No extruder data found in status update for printer {printerId}");
-        }
+    }
 
-        // Bed temperatures
-        if (statusObj.TryGetProperty("heater_bed", out JsonElement hb))
-        {
-            if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-            {
-                try
-                { bed = t.GetDouble(); }
-                catch { }
-            }
-            if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-            {
-                try
-                { bedTarget = tt.GetDouble(); }
-                catch { }
-            }
-
-            _logger.LogDebug($"Extracted bed temps for printer {printerId}: current={bed}, target={bedTarget}");
-        }
-        else
-        {
-            _logger.LogDebug($"No heater_bed data found in status update for printer {printerId}");
-        }
-
-        // Get spool information
-        PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(serverUrl, ct);
-
-        // Update persistent state with any new non-null values
-        if (x.HasValue)
-        {
-            state.X = x;
-        }
-
-        if (y.HasValue)
-        {
-            state.Y = y;
-        }
-
-        if (z.HasValue)
-        {
-            state.Z = z;
-        }
-
-        if (hotend.HasValue)
-        {
-            state.HotendTemp = hotend;
-        }
-
-        if (bed.HasValue)
-        {
-            state.BedTemp = bed;
-        }
-
-        if (hotendTarget.HasValue)
-        {
-            state.HotendTarget = hotendTarget;
-        }
-
-        if (bedTarget.HasValue)
-        {
-            state.BedTarget = bedTarget;
-        }
-
-        if (stateValue != null)
-        {
-            state.State = stateValue;
-        }
-
-        if (progress.HasValue)
-        {
-            state.Progress = progress;
-        }
-
-        if (jobName != null)
-        {
-            state.JobName = jobName;
-        }
-
-        // Only update HomedAxes if we actually received a value (not empty string fallback)
-        if (!string.IsNullOrEmpty(homedAxes))
-        {
-            state.HomedAxes = homedAxes;
-        }
-
-        // Create and send status update using persistent state (never null out good values)
-        PrinterStatusUpdate update = new(
-            printerId,
-            true, // IsOnline
-            state.State,
-            state.Progress,
-            state.JobName,
-            ThumbnailUrl: null,
-            CameraStreamUrl: null,
-            X: state.X, Y: state.Y, Z: state.Z,
-            HotendTemp: state.HotendTemp,
-            BedTemp: state.BedTemp,
-            HotendTarget: state.HotendTarget,
-            BedTarget: state.BedTarget,
-            HomedAxes: state.HomedAxes,
-            SpoolInfo: spoolInfo
-        );
-
-        _logger.LogDebug($"Sending status update for printer {printerId}: X={state.X}, Y={state.Y}, Z={state.Z}, HotendTemp={state.HotendTemp}, HotendTarget={state.HotendTarget}, BedTemp={state.BedTemp}, BedTarget={state.BedTarget}, HomedAxes={state.HomedAxes}");
-
-        // Track successful status update time
-        _lastStatusUpdateTimes[printerId] = DateTime.UtcNow;
-
+    private async Task EmitConsolidatedStatusAsync(Guid printerId, PrinterState state, PrinterSpoolInfoDto? spoolInfo, CancellationToken ct)
+    {
         try
         {
-            if (hub == null)
-            {
-                _logger.LogError($"Hub context is null, cannot send status update for printer {printerId}");
-                return;
-            }
+            // Send consolidated update for offline status and overall state sync
+            var update = new PrinterStatusUpdate(
+                printerId,
+                true, // IsOnline
+                state.State,
+                state.Progress,
+                state.JobName,
+                ThumbnailUrl: state.ThumbnailUrl,
+                CameraStreamUrl: state.CameraStreamUrl,
+                X: state.X, Y: state.Y, Z: state.Z,
+                HotendTemp: state.HotendTemp,
+                BedTemp: state.BedTemp,
+                HotendTarget: state.HotendTarget,
+                BedTarget: state.BedTarget,
+                HomedAxes: state.HomedAxes,
+                SpoolInfo: spoolInfo
+            );
 
-            await hub.Clients.All.SendAsync("printerupdated", update, ct);
-            _logger.LogDebug($"Sent status update for printer {printerId}");
+            _logger.LogDebug($"Emitting consolidated status for printer {printerId}: X={state.X}, Y={state.Y}, Z={state.Z}, HotendTemp={state.HotendTemp}, HotendTarget={state.HotendTarget}, BedTemp={state.BedTemp}, BedTarget={state.BedTarget}, HomedAxes={state.HomedAxes}");
+            
+            await hub!.Clients.All.SendAsync("printerupdated", update, ct);
         }
         catch (OperationCanceledException)
         {
-            // Expected when cancellation token fires
-            _logger.LogDebug($"Status update for printer {printerId} was cancelled");
+            _logger.LogDebug($"Consolidated status for printer {printerId} was cancelled");
         }
-        catch (Exception sendEx)
+        catch (Exception ex)
         {
-            _logger.LogError(sendEx, $"Failed to send status update for printer {printerId}: {sendEx.Message}");
+            _logger.LogError(ex, $"Failed to emit consolidated status for printer {printerId}");
         }
     }
 
