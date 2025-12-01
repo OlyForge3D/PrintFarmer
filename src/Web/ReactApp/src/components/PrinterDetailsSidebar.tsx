@@ -335,8 +335,8 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
             Control
           </div>
           <div className="flex flex-col gap-0">
-            {/* Control buttons row */}
-            <div className="flex items-stretch gap-1 mb-1">
+            {/* Control buttons row - 3 buttons matching XY pad width and height */}
+            <div className="grid grid-cols-3 gap-1 w-40 h-12">
               <Button
                 type="button"
                 variant="secondary"
@@ -344,7 +344,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={!isPrinting}
                 onClick={() => handleControlAction('pause')}
                 title="Pause print"
-                className="flex-1 p-0"
+                className="w-full h-full !p-0"
               >
                 <PauseIcon className="h-4 w-4" />
               </Button>
@@ -355,33 +355,26 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={!isPaused}
                 onClick={() => handleControlAction('resume')}
                 title="Resume print"
-                className="flex-1 p-0"
+                className="w-full h-full !p-0"
               >
                 <PlayIcon className="h-4 w-4" />
               </Button>
+              <Button
+                type="button"
+                variant={isShutdown ? 'secondary' : 'danger'}
+                size="sm"
+                disabled={!isOnline}
+                onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
+                title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
+                className="w-full h-full !p-0"
+              >
+                {isShutdown ? (
+                  <RotateCcw className="h-4 w-4" />
+                ) : (
+                  <EmergencyStopIcon className="h-4 w-4" />
+                )}
+              </Button>
             </div>
-            {/* Stop button row */}
-            <Button
-              type="button"
-              variant={isShutdown ? 'secondary' : 'danger'}
-              size="sm"
-              disabled={!isOnline}
-              onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
-              title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-              className="w-full mb-1"
-            >
-              {isShutdown ? (
-                <>
-                  <RotateCcw className="h-3 w-3 mr-1" />
-                  Restart
-                </>
-              ) : (
-                <>
-                  <EmergencyStopIcon className="h-3 w-3" />
-                  <span className="ml-1">Stop</span>
-                </>
-              )}
-            </Button>
             {/* Step control */}
             <div className="flex items-center gap-1">
               <Button
@@ -500,14 +493,14 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
             </div>
 
             {/* Z Pad */}
-            <div className="flex flex-col gap-1 w-16 h-36">
+            <div className="grid grid-cols-1 grid-rows-3 gap-1 h-36" style={{ width: 'calc(160px / 3 - 4px / 3)' }}>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', step)}
-                className="flex-1 p-0"
+                className="w-full h-full !p-0"
               >
                 Z+
               </Button>
@@ -518,7 +511,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`flex-1 !p-0 ${getHomeButtonStyle(isZHomed).className}`}
+                className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
                 style={getHomeButtonStyle(isZHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
@@ -529,7 +522,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 size="sm"
                 disabled={isPrinting}
                 onClick={() => handleMove('Z', -step)}
-                className="flex-1 p-0"
+                className="w-full h-full !p-0"
               >
                 Z-
               </Button>
