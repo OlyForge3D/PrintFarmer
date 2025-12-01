@@ -518,7 +518,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleHome('z')}
                 title="Home Z"
-                className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
+                className={`flex-1 !p-0 ${getHomeButtonStyle(isZHomed).className}`}
                 style={getHomeButtonStyle(isZHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
