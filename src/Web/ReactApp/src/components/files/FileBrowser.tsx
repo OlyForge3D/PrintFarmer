@@ -730,6 +730,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                     onChange={handleSelectAll}
                   />
                 </th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Thumbnail</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Name</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Size</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Modified</th>
@@ -752,6 +753,22 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                       title={`Select ${file.name}`}
                       aria-label={`Select ${file.name}`}
                     />
+                  </td>
+                  <td className="px-4 py-3">
+                    {!file.isDirectory && file.thumbnailPath ? (
+                      <img
+                        src={file.thumbnailPath}
+                        alt={file.name}
+                        className="w-12 h-12 rounded object-cover"
+                        onError={(e) => {
+                          e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
+                        }}
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded bg-pf-bg-2 flex items-center justify-center">
+                        <DocumentIcon className="w-6 h-6 text-pf-text-tertiary" />
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div

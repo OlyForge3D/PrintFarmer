@@ -224,10 +224,11 @@ public class GcodeFilesController(
             {
                 try
                 {
-                    // Try to finalize the upload to database
+                    // Try to finalize the upload to database, passing the thumbnail path
                     var gcodeFile = await gcodeFilesService.FinalizeChunkedUploadAsync(
                         GetUploadFilePath(result),
                         result.SafeFileName,
+                        result.ThumbnailPath,
                         chunkedUploadService,
                         CancellationToken.None);
                     

@@ -703,6 +703,7 @@ export interface GcodeFile {
   modifiedAt: Date;
   isDirectory: boolean;
   harvestOperationId?: string;
+  thumbnailPath?: string;
 }
 
 export interface GetGcodeFilesRequest {

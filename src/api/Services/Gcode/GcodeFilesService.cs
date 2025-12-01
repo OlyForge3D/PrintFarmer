@@ -265,6 +265,7 @@ namespace Farm.Web.Api.Services.Gcode
         public async Task<GcodeFile?> FinalizeChunkedUploadAsync(
             string filePath,
             string? originalFileName,
+            string? thumbnailPath,
             IChunkedUploadService chunkedUploadService,
             CancellationToken ct)
         {
@@ -310,13 +311,10 @@ namespace Farm.Web.Api.Services.Gcode
                     EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
                     SlicerName = metadata?.SlicerName,
                     SlicerVersion = metadata?.SlicerVersion,
+                    ThumbnailPath = thumbnailPath,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
-
-                // TODO: Extract and save thumbnail for chunked uploads
-                // (thumbnail extraction happens during finalization in ChunkedUploadService)
-                // This could be passed as a parameter if needed
 
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 await _gcodeRepo.SaveChangesAsync(ct);
