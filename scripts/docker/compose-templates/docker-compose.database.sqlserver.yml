@@ -16,7 +16,7 @@ networks:
       - sqlserver
       - database
 volumes:
-  - printfarmer-database:/var/opt/mssql
+  - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/opt/mssql
 restart: unless-stopped
 healthcheck:
   test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -No -S localhost -U SA -P '${MSSQL_SA_PASSWORD}' -Q 'SELECT 1'"]

@@ -54,6 +54,9 @@ BUILD_VERBOSITY="${BUILD_VERBOSITY:-quiet}"
 # Compose up option to pass --remove-orphans (default true)
 COMPOSE_REMOVE_ORPHANS=${COMPOSE_REMOVE_ORPHANS:-true}
 
+# Validation flag: check storage permissions without deploying
+VALIDATE_STORAGE_ONLY=false
+
 # Generated files are retained by default; allow env override for CI
 KEEP_GENERATED=${KEEP_GENERATED:-true}
 
@@ -1763,7 +1766,7 @@ tear_down_deployment() {
     fi
 
     # 1. Stop all remaining running containers (fallback)
-    print_info "Step 1/7: Stopping any remaining running Docker containers..."
+    print_info "Step 1/8: Stopping any remaining running Docker containers..."
     local running_containers
     running_containers=$(timeout 10 docker ps -q 2>/dev/null || true)
     if [ -n "$running_containers" ]; then
@@ -1774,7 +1777,7 @@ tear_down_deployment() {
     fi
 
     # 2. Remove all remaining containers (force remove any leftovers)
-    print_info "Step 2/7: Removing any remaining Docker containers..."
+    print_info "Step 2/8: Removing any remaining Docker containers..."
     local all_containers
     all_containers=$(timeout 10 docker ps -aq 2>/dev/null || true)
     if [ -n "$all_containers" ]; then
@@ -1814,7 +1817,7 @@ tear_down_deployment() {
     fi
     
     # 3. Remove all volumes
-    print_info "Step 3/7: Removing all Docker volumes..."
+    print_info "Step 3/8: Removing all Docker volumes..."
     local vol_list
     vol_list=$(timeout 10 docker volume ls -q 2>/dev/null || true)
     if [ -n "$vol_list" ]; then
@@ -1829,18 +1832,127 @@ tear_down_deployment() {
     fi
     
     # 4. Remove PrintFarmer images
+    print_info "Step 4/8: Removing PrintFarmer Docker images..."
     docker_cleanup_printfarmer_images force
     
-    # 5-6. Docker system cleanup (preserve base images for faster rebuilds)
+    # 5. Docker system cleanup (preserve base images for faster rebuilds)
+    print_info "Step 5/8: Cleaning up Docker system..."
     docker_system_cleanup preserve-base
     
-    # Clear Docker builder cache for next build
-    print_info "Step 6/7: Clearing Docker builder cache..."
+    # 6. Clear Docker builder cache for next build
+    print_info "Step 6/8: Clearing Docker builder cache..."
     docker builder prune -af 2>/dev/null || true
     print_success "Builder cache cleared"
     
-    # 7. Remove generated files
-    print_info "Step 7/7: Removing generated configuration and build artifacts..."
+    # 7. Remove external storage paths (data persistence directories)
+    # NOTE: Must run BEFORE step 8 because it needs to read .deploy-config
+    print_header "Step 7/8: Removing External Storage Directories"
+    local external_paths_removed=0
+    
+    # Load current config to find external paths
+    local external_models_path=""
+    local external_gcode_path=""
+    local external_profiles_path=""
+    local external_app_data_path=""
+    local external_database_path=""
+    
+    if [ -f ".deploy-config" ]; then
+        print_info "Loading external paths from .deploy-config..."
+        # Extract paths directly from config file without sourcing (safer)
+        external_models_path=$(grep "^EXTERNAL_MODELS_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_gcode_path=$(grep "^EXTERNAL_GCODE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_profiles_path=$(grep "^EXTERNAL_PROFILES_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_app_data_path=$(grep "^EXTERNAL_APP_DATA_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        external_database_path=$(grep "^EXTERNAL_DATABASE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    else
+        print_info "No .deploy-config found - checking environment variables..."
+    fi
+    
+    # Array of paths and descriptions for display
+    # NOTE: Remove paths from config even if they don't exist yet (config is source of truth)
+    local paths_to_remove=()
+    if [ -n "$external_models_path" ]; then
+        paths_to_remove+=("$external_models_path:Models")
+    fi
+    if [ -n "$external_gcode_path" ]; then
+        paths_to_remove+=("$external_gcode_path:G-code")
+    fi
+    if [ -n "$external_profiles_path" ]; then
+        paths_to_remove+=("$external_profiles_path:Profiles")
+    fi
+    if [ -n "$external_app_data_path" ]; then
+        paths_to_remove+=("$external_app_data_path:App Data")
+    fi
+    if [ -n "$external_database_path" ]; then
+        paths_to_remove+=("$external_database_path:Database")
+    fi
+    
+    if [ "$NON_INTERACTIVE" = "false" ]; then
+        if [ ${#paths_to_remove[@]} -gt 0 ]; then
+            echo
+            print_warning "External storage directories configured:"
+            for path_entry in "${paths_to_remove[@]}"; do
+                local path="${path_entry%:*}"
+                local desc="${path_entry#*:}"
+                if [ -d "$path" ]; then
+                    echo "  • [$desc] $path (exists)"
+                else
+                    echo "  • [$desc] $path (not yet created)"
+                fi
+            done
+            echo
+            read -p "Do you want to remove all external storage data? (y/n) [n]: " remove_storage
+        else
+            print_info "No external storage directories configured in .deploy-config"
+            remove_storage="n"
+        fi
+        
+        if [ "$remove_storage" = "y" ] || [ "$remove_storage" = "Y" ]; then
+            for path_entry in "${paths_to_remove[@]}"; do
+                local path="${path_entry%:*}"
+                local desc="${path_entry#*:}"
+                if [ -d "$path" ]; then
+                    rm -rf "$path"
+                    echo "  • Removed [$desc] $path"
+                    ((external_paths_removed++))
+                    audit_log "remove" "teardown: removed external storage: $path"
+                else
+                    echo "  • Skipped [$desc] $path (not found)"
+                fi
+            done
+            if [ $external_paths_removed -gt 0 ]; then
+                print_success "External storage directories removed"
+            fi
+        else
+            print_info "Kept external storage directories (data preserved)"
+        fi
+    else
+        # In non-interactive mode with --tear-down, remove all external storage (paths from config)
+        if [ ${#paths_to_remove[@]} -gt 0 ]; then
+            print_warning "Removing external storage directories (from config):"
+            for path_entry in "${paths_to_remove[@]}"; do
+                local path="${path_entry%:*}"
+                local desc="${path_entry#*:}"
+                if [ -d "$path" ]; then
+                    print_info "Removing [$desc]: $path"
+                    rm -rf "$path"
+                    echo "  • Removed [$desc] $path"
+                    ((external_paths_removed++))
+                    audit_log "remove" "teardown: removed external storage: $path"
+                else
+                    print_info "Skipped [$desc] $path (not found)"
+                fi
+            done
+            if [ $external_paths_removed -gt 0 ]; then
+                print_success "✓ External storage directories removed: $external_paths_removed"
+            fi
+        else
+            print_info "✓ No external storage directories configured - nothing to remove"
+        fi
+    fi
+    
+    # 8. Remove generated files
+    print_info "Step 8/8: Removing generated configuration and build artifacts..."
     local files_removed=0
     
     # Remove docker-compose files
@@ -1878,7 +1990,7 @@ tear_down_deployment() {
             fi
         else
             # In non-interactive mode, keep the config by default
-            print_info "Kept .deploy-config (use --non-interactive to auto-remove)"
+            print_info "Kept .deploy-config (preserved for next deployment)"
         fi
     fi
     
@@ -1886,96 +1998,6 @@ tear_down_deployment() {
         print_success "Configuration files cleaned"
     else
         print_info "No configuration files to remove"
-    fi
-    
-    # Remove external storage paths (data persistence directories)
-    print_info "Step 8/8: Removing external storage directories..."
-    local external_paths_removed=0
-    
-    # Load current config to find external paths
-    local external_models_path=""
-    local external_gcode_path=""
-    local external_profiles_path=""
-    local external_app_data_path=""
-    local external_database_path=""
-    
-    if [ -f ".deploy-config" ]; then
-        # Extract paths directly from config file without sourcing (safer)
-        external_models_path=$(grep "^EXTERNAL_MODELS_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
-        external_gcode_path=$(grep "^EXTERNAL_GCODE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
-        external_profiles_path=$(grep "^EXTERNAL_PROFILES_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
-        external_app_data_path=$(grep "^EXTERNAL_APP_DATA_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
-        external_database_path=$(grep "^EXTERNAL_DATABASE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
-    fi
-    
-    # Array of paths and descriptions for display
-    local paths_to_remove=()
-    if [ -n "$external_models_path" ] && [ -d "$external_models_path" ]; then
-        paths_to_remove+=("$external_models_path:Models")
-    fi
-    if [ -n "$external_gcode_path" ] && [ -d "$external_gcode_path" ]; then
-        paths_to_remove+=("$external_gcode_path:G-code")
-    fi
-    if [ -n "$external_profiles_path" ] && [ -d "$external_profiles_path" ]; then
-        paths_to_remove+=("$external_profiles_path:Profiles")
-    fi
-    if [ -n "$external_app_data_path" ] && [ -d "$external_app_data_path" ]; then
-        paths_to_remove+=("$external_app_data_path:App Data")
-    fi
-    if [ -n "$external_database_path" ] && [ -d "$external_database_path" ]; then
-        paths_to_remove+=("$external_database_path:Database")
-    fi
-    
-    if [ "$NON_INTERACTIVE" = "false" ]; then
-        if [ ${#paths_to_remove[@]} -gt 0 ]; then
-            echo
-            print_warning "External storage directories found:"
-            for path_entry in "${paths_to_remove[@]}"; do
-                local path="${path_entry%:*}"
-                local desc="${path_entry#*:}"
-                echo "  • [$desc] $path"
-            done
-            echo
-            read -p "Do you want to remove all external storage data? (y/n) [n]: " remove_storage
-        else
-            remove_storage="n"
-        fi
-        
-        if [ "$remove_storage" = "y" ] || [ "$remove_storage" = "Y" ]; then
-            for path_entry in "${paths_to_remove[@]}"; do
-                local path="${path_entry%:*}"
-                local desc="${path_entry#*:}"
-                if [ -d "$path" ]; then
-                    rm -rf "$path"
-                    echo "  • Removed [$desc] $path"
-                    ((external_paths_removed++))
-                    audit_log "remove" "teardown: removed external storage: $path"
-                fi
-            done
-            if [ $external_paths_removed -gt 0 ]; then
-                print_success "External storage directories removed"
-            fi
-        else
-            print_info "Kept external storage directories (data preserved)"
-        fi
-    else
-        # In non-interactive mode with --tear-down, remove all external storage
-        if [ ${#paths_to_remove[@]} -gt 0 ]; then
-            print_warning "Removing external storage directories:"
-            for path_entry in "${paths_to_remove[@]}"; do
-                local path="${path_entry%:*}"
-                local desc="${path_entry#*:}"
-                if [ -d "$path" ]; then
-                    rm -rf "$path"
-                    echo "  • Removed [$desc] $path"
-                    ((external_paths_removed++))
-                    audit_log "remove" "teardown: removed external storage: $path"
-                fi
-            done
-            print_success "External storage directories removed"
-        else
-            print_info "No external storage directories to remove"
-        fi
     fi
     
     echo
@@ -2067,6 +2089,7 @@ COMPOSE GENERATOR OPTIONS:
 
 VERIFY / UTILITY OPTIONS:
     --verify-deployment   Run verification steps only against an existing deployment (no generation/start)
+    --validate-storage    Check external storage directory permissions (useful for troubleshooting)
     --env-file FILE       Use a specific .env file for verification or compose commands
     --config-file FILE    Use a specific deployment config file instead of $REPO_ROOT/.deploy-config
 
@@ -2097,6 +2120,12 @@ EXAMPLES:
 
     # Verify-only mode against an existing deployment (useful in CI)
     ./scripts/deploy-docker.sh --verify-deployment --env-file .env --config-file .deploy-config
+
+    # Check storage directory permissions (troubleshooting)
+    ./scripts/deploy-docker.sh --validate-storage
+    
+    # Check storage with a specific config file
+    ./scripts/deploy-docker.sh --validate-storage --config-file .deploy-config
 
     # Deploy with automatic initial admin setup (skip setup wizard)
     ./scripts/deploy-docker.sh --non-interactive --auto-admin
@@ -5588,6 +5617,259 @@ setup_initial_admin() {
     fi
 }
 
+# Pre-create external storage directories with proper ownership on the host
+# This ensures directories exist with correct permissions BEFORE containers try to mount them
+# Otherwise, Docker creates them as root when bind-mounting, breaking appuser access
+prepare_external_storage_directories() {
+    # Skip if external storage is not enabled
+    if [ "${USE_EXTERNAL_STORAGE:-no}" != "yes" ]; then
+        print_info "External storage not enabled - skipping pre-creation"
+        return 0
+    fi
+
+    print_header "📁 Pre-creating External Storage Directories"
+    
+    local current_user
+    current_user=$(whoami)
+    local current_uid
+    current_uid=$(id -u)
+    
+    print_info "Current user: $current_user (UID: $current_uid)"
+    print_info "Target ownership: Will be readable by appuser (UID 1000) inside containers"
+    echo
+    
+    local paths_created=0
+    local paths_failed=0
+    
+    # Array of paths to create: "path:description"
+    local paths_to_create=()
+    
+    if [ -n "${EXTERNAL_MODELS_PATH:-}" ]; then
+        paths_to_create+=("${EXTERNAL_MODELS_PATH}:3D Models")
+    fi
+    if [ -n "${EXTERNAL_GCODE_PATH:-}" ]; then
+        paths_to_create+=("${EXTERNAL_GCODE_PATH}:G-code Files")
+    fi
+    if [ -n "${EXTERNAL_PROFILES_PATH:-}" ]; then
+        paths_to_create+=("${EXTERNAL_PROFILES_PATH}:Slicer Profiles")
+    fi
+    if [ -n "${EXTERNAL_APP_DATA_PATH:-}" ]; then
+        paths_to_create+=("${EXTERNAL_APP_DATA_PATH}:Application Data (SQLite)")
+    fi
+    if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
+        paths_to_create+=("${EXTERNAL_DATABASE_PATH}:Database")
+    fi
+    
+    if [ ${#paths_to_create[@]} -eq 0 ]; then
+        print_info "No external storage paths configured"
+        return 0
+    fi
+    
+    for path_entry in "${paths_to_create[@]}"; do
+        local path="${path_entry%:*}"
+        local desc="${path_entry#*:}"
+        
+        if [ -z "$path" ]; then
+            continue
+        fi
+        
+        # Create parent directory if needed
+        local parent_dir
+        parent_dir=$(dirname "$path")
+        
+        if [ ! -d "$parent_dir" ]; then
+            print_info "Creating parent directory: $parent_dir"
+            if ! mkdir -p "$parent_dir" 2>/dev/null; then
+                print_error "Failed to create parent directory: $parent_dir"
+                print_info "  Reason: Permission denied or invalid path"
+                print_info "  Try: mkdir -p '$parent_dir' && chmod 755 '$parent_dir'"
+                ((paths_failed++))
+                continue
+            fi
+        fi
+        
+        # Create the storage directory itself
+        if [ ! -d "$path" ]; then
+            print_info "Creating directory: [$desc] $path"
+            if ! mkdir -p "$path" 2>/dev/null; then
+                print_error "Failed to create directory: $path"
+                ((paths_failed++))
+                continue
+            fi
+            print_success "Created: $path"
+            ((paths_created++))
+        else
+            print_info "Directory already exists: [$desc] $path"
+        fi
+        
+        # Fix permissions to 755 (rwxr-xr-x) so appuser (any process) can read/write
+        # This is critical: if directory is 700 (rwx------), processes from other UIDs cannot access it
+        if ! chmod 755 "$path" 2>/dev/null; then
+            print_warning "Could not set permissions on $path - may have restricted access"
+            ((paths_failed++))
+            continue
+        fi
+        
+        # Check current ownership (informational, not enforced)
+        local current_owner
+        current_owner=$(ls -ld "$path" | awk '{print $3":"$4}')
+        print_info "  Current ownership: $current_owner"
+        print_info "  Permissions set to: 755 (rwxr-xr-x)"
+        
+        # Verify permissions are now correct
+        local perms
+        perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
+        if [ "$perms" != "755" ] && [ "$perms" != "unknown" ]; then
+            print_warning "Permission verification returned: $perms (expected 755)"
+        else
+            print_success "  Permissions verified ✓"
+        fi
+    done
+    
+    echo
+    print_header "Storage Directory Preparation Summary"
+    print_info "Directories created: $paths_created"
+    
+    if [ $paths_failed -gt 0 ]; then
+        print_warning "Failed to create/prepare: $paths_failed directories"
+        print_warning "⚠️  Some storage directories may not be accessible. Docker will attempt to create them as root."
+        print_info "If containers fail to start or report permission errors:"
+        echo "  1. Fix the paths manually: mkdir -p <path> && chmod 755 <path>"
+        echo "  2. Or re-run: ./scripts/deploy-docker.sh (will retry pre-creation)"
+        return 1
+    else
+        print_success "✓ All external storage directories ready"
+        echo
+        print_info "Directory ownership summary:"
+        for path_entry in "${paths_to_create[@]}"; do
+            local path="${path_entry%:*}"
+            local desc="${path_entry#*:}"
+            if [ -d "$path" ]; then
+                local owner
+                owner=$(ls -ld "$path" 2>/dev/null | awk '{print $3}')
+                echo "  [$desc] $path - owned by $owner, perms 755 ✓"
+            fi
+        done
+        return 0
+    fi
+}
+
+# Validate external storage directories have correct permissions
+# Returns 0 if all directories are properly configured, 1 if any issues found
+validate_external_storage_permissions() {
+    # Skip if external storage is not enabled
+    if [ "${USE_EXTERNAL_STORAGE:-no}" != "yes" ]; then
+        return 0
+    fi
+
+    print_header "🔐 Validating External Storage Permissions"
+    
+    local validation_passed=true
+    local total_dirs=0
+    local valid_dirs=0
+    local invalid_dirs=0
+    
+    # Array of paths to validate: "path:description"
+    local paths_to_validate=()
+    
+    if [ -n "${EXTERNAL_MODELS_PATH:-}" ]; then
+        paths_to_validate+=("${EXTERNAL_MODELS_PATH}:3D Models")
+    fi
+    if [ -n "${EXTERNAL_GCODE_PATH:-}" ]; then
+        paths_to_validate+=("${EXTERNAL_GCODE_PATH}:G-code Files")
+    fi
+    if [ -n "${EXTERNAL_PROFILES_PATH:-}" ]; then
+        paths_to_validate+=("${EXTERNAL_PROFILES_PATH}:Slicer Profiles")
+    fi
+    if [ -n "${EXTERNAL_APP_DATA_PATH:-}" ]; then
+        paths_to_validate+=("${EXTERNAL_APP_DATA_PATH}:Application Data")
+    fi
+    if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
+        paths_to_validate+=("${EXTERNAL_DATABASE_PATH}:Database")
+    fi
+    
+    if [ ${#paths_to_validate[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    echo "Checking external storage directories..."
+    echo
+    
+    for path_entry in "${paths_to_validate[@]}"; do
+        local path="${path_entry%:*}"
+        local desc="${path_entry#*:}"
+        ((total_dirs++))
+        
+        if [ -z "$path" ]; then
+            continue
+        fi
+        
+        if [ ! -d "$path" ]; then
+            print_error "✗ [$desc] Directory not found: $path"
+            ((invalid_dirs++))
+            validation_passed=false
+            continue
+        fi
+        
+        # Check if directory is readable and writable by current user
+        if [ ! -r "$path" ]; then
+            print_error "✗ [$desc] Directory not readable: $path"
+            ((invalid_dirs++))
+            validation_passed=false
+            continue
+        fi
+        
+        if [ ! -w "$path" ]; then
+            print_error "✗ [$desc] Directory not writable: $path"
+            print_info "   Run: sudo chmod 755 '$path' to fix permissions"
+            ((invalid_dirs++))
+            validation_passed=false
+            continue
+        fi
+        
+        # Check permissions
+        local perms
+        perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
+        
+        # Acceptable permissions: 755 (optimal), 777 (permissive), 775 (group-writable)
+        if [[ "$perms" =~ ^(755|777|775)$ ]]; then
+            local owner
+            owner=$(ls -ld "$path" 2>/dev/null | awk '{print $3}')
+            print_success "✓ [$desc] $path"
+            echo "    Owner: $owner, Permissions: $perms"
+            ((valid_dirs++))
+        else
+            print_warning "⚠ [$desc] Unexpected permissions: $path"
+            echo "    Expected: 755, 775, or 777 (at least rw-r--r--)"
+            local perms_octal
+            perms_octal=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%OLp' "$path" 2>/dev/null | tail -c 4 || echo "unknown")
+            echo "    Current: $perms_octal"
+            print_info "   Run: sudo chmod 755 '$path' to fix permissions"
+            ((invalid_dirs++))
+            validation_passed=false
+        fi
+    done
+    
+    echo
+    print_header "Storage Permission Validation Summary"
+    print_info "Total directories: $total_dirs"
+    print_info "Valid: $valid_dirs"
+    print_info "Invalid/Inaccessible: $invalid_dirs"
+    
+    if [ "$validation_passed" = true ]; then
+        print_success "✓ All external storage directories have correct permissions"
+        return 0
+    else
+        print_error "✗ Some external storage directories have permission issues"
+        echo
+        print_warning "Fix permission issues before deployment:"
+        echo "  • For user-owned directories: chmod 755 <path>"
+        echo "  • For root-owned directories: sudo chmod 755 <path>"
+        echo "  • Or re-run: ./scripts/deploy-docker.sh (will attempt to fix)"
+        return 1
+    fi
+}
+
 # Verify deployment
 verify_deployment() {
     print_header "🔍 Verifying Deployment"
@@ -5968,6 +6250,13 @@ redeploy_existing() {
         print_info "Using existing docker-compose.override.yml"
     fi
     
+    # Pre-create external storage directories with proper ownership on the host
+    # CRITICAL: Must happen BEFORE docker compose up
+    prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
+    
+    # Validate that external storage directories have correct permissions
+    validate_external_storage_permissions || print_warning "External storage permission validation found issues - attempting deployment anyway"
+    
     # Deploy with rebuild
     deploy_containers
     
@@ -5995,6 +6284,27 @@ main() {
     if [ "$TEAR_DOWN" = "true" ]; then
         tear_down_deployment
         # Function exits, so we never reach here
+    fi
+    
+    # Handle storage validation-only mode
+    if [ "$VALIDATE_STORAGE_ONLY" = "true" ]; then
+        print_header "🔍 Storage Permission Validation"
+        
+        # Load config if available to get storage paths
+        if [ -f "$CONFIG_FILE" ]; then
+            print_info "Loading configuration from $CONFIG_FILE"
+            # shellcheck disable=SC1090
+            source "$CONFIG_FILE"
+        else
+            print_info "No stored configuration found - checking environment variables"
+        fi
+        
+        # Validate and exit
+        if validate_external_storage_permissions; then
+            exit 0
+        else
+            exit 1
+        fi
     fi
     
     # Handle offline deployment modes (these modes exit after completion)
@@ -6159,6 +6469,15 @@ main() {
     # Auto-load OrcaSlicer AppImage if available
     auto_load_orcaslicer ""
     
+    # Pre-create external storage directories with proper ownership on the host
+    # This prevents Docker from creating them as root when bind-mounting
+    # CRITICAL: Must happen BEFORE docker compose up
+    prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
+    
+    # Validate that external storage directories have correct permissions
+    # This is a safety check before deployment to catch permission issues early
+    validate_external_storage_permissions || print_warning "External storage permission validation found issues - attempting deployment anyway"
+    
     deploy_containers
     
     # Run auto-admin setup if requested
@@ -6167,6 +6486,15 @@ main() {
     # Run verification and capture result
     local verification_passed=true
     verify_deployment || verification_passed=false
+    
+    # Post-deployment validation: verify external storage is accessible
+    if [ "$verification_passed" = true ]; then
+        print_info "Validating external storage accessibility..."
+        validate_external_storage_permissions || {
+            print_warning "External storage post-deployment validation found issues"
+            verification_passed=false
+        }
+    fi
     
     display_final_info "$verification_passed"
     
@@ -6271,6 +6599,10 @@ while [ $# -gt 0 ]; do
             ;;
         --verify-deployment)
             VERIFY_DEPLOYMENT=true
+            shift
+            ;;
+        --validate-storage)
+            VALIDATE_STORAGE_ONLY=true
             shift
             ;;
         --env-file)

@@ -17,7 +17,7 @@ networks:
       - mysql
       - database
 volumes:
-  - printfarmer-database:/var/lib/mysql
+  - ${EXTERNAL_DATABASE_PATH:-.volumes/printfarmer-database}:/var/lib/mysql
 restart: unless-stopped
 healthcheck:
   test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]

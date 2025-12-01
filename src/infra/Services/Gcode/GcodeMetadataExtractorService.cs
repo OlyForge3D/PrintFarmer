@@ -232,7 +232,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             foreach (string line in lines)
             {
                 // Check if line contains thumbnail marker (handle both ";thumbnail" and "; thumbnail" formats)
-                if (line.StartsWith(";", StringComparison.OrdinalIgnoreCase))
+                if (line.StartsWith(';'))
                 {
                     string trimmedAfterSemicolon = line.Substring(1).TrimStart();
                     if (trimmedAfterSemicolon.StartsWith("thumbnail", StringComparison.OrdinalIgnoreCase))
@@ -286,9 +286,10 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 try
                 {
                     // Pad base64 data to valid length if needed
-                    while (base64Data.Length % 4 != 0)
+                    int paddingNeeded = (4 - (base64Data.Length % 4)) % 4;
+                    if (paddingNeeded > 0)
                     {
-                        base64Data += "=";
+                        base64Data = base64Data + new string('=', paddingNeeded);
                     }
                     
                     // Validate it's actual base64

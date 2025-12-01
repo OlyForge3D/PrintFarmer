@@ -947,6 +947,19 @@ catch (Exception ex)
     throw;
 }
 
+// Ensure storage directories exist (creates gcode, models, profiles directories if they don't exist)
+try
+{
+    await using AsyncServiceScope storageScope = app.Services.CreateAsyncScope();
+    var storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.StorageManagement.IStoragePathService>();
+    await storagePathService.EnsureDirectoriesExistAsync();
+}
+catch (Exception ex)
+{
+    _capturedStartupUnifiedLogging?.LogError(ex, "Failed to ensure storage directories exist");
+    throw;
+}
+
 // In test environments the test host (WebApplicationFactory/TestServer) manages the server lifecycle.
 // Avoid calling RunAsync when running under the 'Testing' environment to prevent interfering with the test host.
 if (!app.Environment.IsEnvironment("Testing"))
