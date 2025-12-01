@@ -10,6 +10,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Queue;
+using Farm.Web.Api.Services.StorageManagement;
 using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Gcode
@@ -19,12 +20,14 @@ namespace Farm.Web.Api.Services.Gcode
         private readonly IGcodeRepository _gcodeRepo;
         private readonly IQueueDataService _queueDataService;
         private readonly IUnifiedLoggingService _logger;
+        private readonly IStoragePathService _storagePathService;
 
-        public GcodeLibraryService(IGcodeRepository gcodeRepo, IQueueDataService queueDataService, IUnifiedLoggingService logger)
+        public GcodeLibraryService(IGcodeRepository gcodeRepo, IQueueDataService queueDataService, IUnifiedLoggingService logger, IStoragePathService storagePathService)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
             _queueDataService = queueDataService ?? throw new ArgumentNullException(nameof(queueDataService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
         }
 
         public async Task<IReadOnlyList<GcodeFileDto>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct)
@@ -65,8 +68,8 @@ namespace Farm.Web.Api.Services.Gcode
                 throw new InvalidOperationException("duplicate");
             }
 
-            // Ensure directory
-            string libraryPath = Path.Combine(webRootPath, "gcode-library");
+            // Use StoragePathService to get the correct gcode storage directory
+            string libraryPath = _storagePathService.GetGcodeStorageDirectory();
             string libraryRootFull = Path.GetFullPath(libraryPath);
             _ = Directory.CreateDirectory(libraryRootFull);
 

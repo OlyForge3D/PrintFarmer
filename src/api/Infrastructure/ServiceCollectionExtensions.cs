@@ -182,7 +182,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
         _ = services.AddSingleton<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
         _ = services.AddSingleton<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
-        _ = services.AddScoped<Services.FileManagement.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
+        _ = services.AddSingleton<Services.FileManagement.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
         _ = services.AddSingleton<Services.IO.IFileSystem, Services.IO.SystemFileSystem>();
@@ -443,8 +443,9 @@ public static class ServiceCollectionExtensions
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
         _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
         _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
-        _ = services.AddScoped<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
+        _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
+        _ = services.AddScoped<Services.Gcode.IGcodeLibraryService, Services.Gcode.GcodeLibraryService>();
 
         // Gcode upload settings and quota
         _ = services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();

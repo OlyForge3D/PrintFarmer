@@ -85,9 +85,6 @@ services:
     build:
       <<: *orcaslicer-build
     image: printfarmer-orcaslicer-worker
-    container_name: printfarmer-orcaslicer-worker
-    ports:
-      - "8081:8080"
     networks:
       - printfarmer-network
     environment:

@@ -86,7 +86,6 @@ services:
     build:
       <<: *orcaslicer-build
     image: printfarmer-orcaslicer-worker
-    container_name: printfarmer-orcaslicer-worker
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080

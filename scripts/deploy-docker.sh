@@ -5412,6 +5412,21 @@ wait_for_api() {
     local last_detail_log=-999
 
     while [ $elapsed -lt $timeout ]; do
+        # Check if API container is actually running
+        local container_state=$(docker compose ps -q api 2>/dev/null | xargs -I {} docker inspect -f '{{.State.Running}}' {} 2>/dev/null || echo "false")
+        if [ "$container_state" = "false" ]; then
+            # Container is not running - check if it exited with an error
+            local exit_code=$(docker compose ps -q api 2>/dev/null | xargs -I {} docker inspect -f '{{.State.ExitCode}}' {} 2>/dev/null || echo "0")
+            if [ "$exit_code" != "0" ]; then
+                print_error "API container exited with error code $exit_code (not running)"
+                run_api_diagnostics "🩺 API Startup Diagnostics"
+                print_info "Recent API container logs:"
+                docker compose logs api --tail 100 2>/dev/null || true
+                echo
+                exit 2
+            fi
+        fi
+
         local health_status="" health_desc="" health_http="" health_payload=""
         if fetch_api_health_summary "$api_base" health_status health_desc health_http health_payload; then
             if [ "$health_status" = "Healthy" ]; then
