@@ -33,7 +33,7 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
     private bool _isAuthenticated = false;
     private string? _sessionToken;
 
-    // API state tracking (FDM-Monster pattern)
+    // API state tracking
     private string _apiState = "unset"; // "responding", "authFail", "noResponse"
     private string _socketState = "unopened"; // "unopened", "connecting", "authenticated", "error", "closed"
 

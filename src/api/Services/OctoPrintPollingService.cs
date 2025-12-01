@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Services;
 
 /// <summary>
 /// Background service for OctoPrint real-time status updates.
-/// Implements dual-layer architecture: WebSocket primary + HTTP polling fallback (FDM-Monster pattern).
+/// Implements dual-layer architecture: WebSocket primary + HTTP polling fallback.
 /// Maintains persistent WebSocket connections to each OctoPrint printer's /sockjs/websocket endpoint.
 /// Falls back to HTTP polling every 10 seconds if WebSocket connection fails or is unavailable.
 /// Broadcasts all status updates via SignalR hub for consistent client experience.
@@ -31,8 +31,8 @@ public sealed class OctoPrintPollingService(
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
 
-    // Polling interval for HTTP fallback (10 seconds to match FDM-Monster)
-    private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(10);
+    // Polling interval for HTTP fallback
+    private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(5);
 
     private Task? _mainLoop;
 
@@ -207,7 +207,7 @@ public sealed class OctoPrintPollingService(
     /// <summary>
     /// HTTP polling fallback loop for OctoPrint printer.
     /// Only polls if WebSocket is not connected (fallback mechanism).
-    /// Runs every 10 seconds to match FDM-Monster pattern.
+    /// Runs every 5 seconds.
     /// </summary>
     private async Task PollPrinterAsync(Guid printerId, CancellationToken ct)
     {
@@ -346,7 +346,7 @@ public sealed class OctoPrintPollingService(
 
 
     /// <summary>
-    /// Determines the API state based on exception type (FDM-Monster pattern).
+    /// Determines the API state based on exception type.
     /// </summary>
     private static string DetermineApiState(Exception ex)
     {
