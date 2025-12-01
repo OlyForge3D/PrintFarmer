@@ -1,8 +1,14 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.FileManagement;
@@ -18,15 +24,18 @@ public sealed class ChunkedUploadService : IChunkedUploadService
     private readonly ConcurrentDictionary<string, InternalUploadState> _uploadStates = new();
     private readonly IFileManagementService _fileManagementService;
     private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
+    private readonly IGcodeMetadataExtractorService _metadataExtractor;
     private readonly IUnifiedLoggingService _logger;
 
     public ChunkedUploadService(
         IFileManagementService fileManagementService,
         IGcodeThumbnailExtractorService thumbnailExtractor,
+        IGcodeMetadataExtractorService metadataExtractor,
         IUnifiedLoggingService logger)
     {
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
+        _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -200,7 +209,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             if (completed)
             {
                 // Finalize upload asynchronously - must complete before returning response
-                await FinalizeUploadAsync(state);
+                state.ThumbnailPath = await FinalizeUploadAsync(state);
                 _ = _uploadStates.TryRemove(uploadId, out _);
             }
             else
@@ -215,7 +224,9 @@ public sealed class ChunkedUploadService : IChunkedUploadService
                 state.TotalSize,
                 completed,
                 state.FinalHash,
-                state.Paused);
+                state.Paused,
+                state.ThumbnailPath,
+                completed ? Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName) : null);
         }
         catch
         {
@@ -235,14 +246,17 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         // Check if in memory
         if (_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
+            bool isCompleted = state.UploadedBytes == state.TotalSize;
             return new ChunkedUploadStatus(
                 state.Id,
                 state.FinalSafeName,
                 state.UploadedBytes,
                 state.TotalSize,
-                state.UploadedBytes == state.TotalSize,
+                isCompleted,
                 state.FinalHash,
-                state.Paused);
+                state.Paused,
+                state.ThumbnailPath,
+                isCompleted ? Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName) : null);
         }
 
         // Try to rehydrate from metadata file
@@ -254,14 +268,17 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             if (rehydrated != null)
             {
                 _uploadStates[uploadId] = rehydrated;
+                bool isCompleted = rehydrated.UploadedBytes == rehydrated.TotalSize;
                 return new ChunkedUploadStatus(
                     rehydrated.Id,
                     rehydrated.FinalSafeName,
                     rehydrated.UploadedBytes,
                     rehydrated.TotalSize,
-                    rehydrated.UploadedBytes == rehydrated.TotalSize,
+                    isCompleted,
                     rehydrated.FinalHash,
-                    rehydrated.Paused);
+                    rehydrated.Paused,
+                    rehydrated.ThumbnailPath,
+                    isCompleted ? Path.Combine(rehydrated.TargetDirectoryFullPath, rehydrated.FinalSafeName) : null);
             }
         }
         catch (Exception ex)
@@ -294,7 +311,9 @@ public sealed class ChunkedUploadService : IChunkedUploadService
                 state.TotalSize,
                 true,
                 state.FinalHash,
-                false);
+                false,
+                state.ThumbnailPath,
+                Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName));
         }
 
         state.Paused = true;
@@ -307,7 +326,9 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             state.TotalSize,
             false,
             state.FinalHash,
-            true);
+            true,
+            state.ThumbnailPath,
+            null);
     }
 
     public ChunkedUploadStatus? ResumeUpload(string uploadId)
@@ -332,7 +353,9 @@ public sealed class ChunkedUploadService : IChunkedUploadService
                 state.TotalSize,
                 true,
                 state.FinalHash,
-                false);
+                false,
+                state.ThumbnailPath,
+                Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName));
         }
 
         state.Paused = false;
@@ -345,7 +368,9 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             state.TotalSize,
             false,
             state.FinalHash,
-            false);
+            false,
+            state.ThumbnailPath,
+            null);
     }
 
     public void CancelUpload(string uploadId)
@@ -376,9 +401,10 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
     }
 
-    private async Task FinalizeUploadAsync(InternalUploadState state)
+    private async Task<string?> FinalizeUploadAsync(InternalUploadState state)
     {
         string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
+        string? thumbnailPath = null;
 
         // Check for collision again (rare but possible)
         if (File.Exists(finalPath))
@@ -439,7 +465,11 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             {
                 using (var fileStream = new FileStream(finalPath, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
-                    _ = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(fileStream, CancellationToken.None);
+                    thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(fileStream, CancellationToken.None);
+                    if (thumbnailPath != null)
+                    {
+                        _logger.LogInformation($"Extracted thumbnail for {state.FinalSafeName}: {thumbnailPath}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -457,6 +487,46 @@ public sealed class ChunkedUploadService : IChunkedUploadService
                 File.Delete(state.MetaFilePath);
             }
             catch { }
+        }
+
+        return thumbnailPath;
+    }
+
+    /// <summary>
+    /// Extract metadata from a finalized gcode file.
+    /// This method is called after upload completes to extract metadata for database storage.
+    /// </summary>
+    public async Task<GcodeMetadataExtracted?> ExtractMetadataFromFileAsync(string filePath, CancellationToken ct = default)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                _logger.LogWarning("Cannot extract metadata: file not found at {FilePath}", filePath);
+                return null;
+            }
+
+            // Check if it's a gcode file
+            if (!filePath.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) &&
+                !filePath.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            using StreamReader reader = new(filePath, Encoding.UTF8);
+            string gcodeContent = await reader.ReadToEndAsync(ct);
+
+            if (string.IsNullOrWhiteSpace(gcodeContent))
+            {
+                return null;
+            }
+
+            return await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to extract metadata from file {FilePath}", filePath);
+            return null;
         }
     }
 
@@ -515,5 +585,6 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         public string? FinalHash { get; set; }
         public IncrementalHash? Hasher { get; init; }
         public bool Paused { get; set; }
+        public string? ThumbnailPath { get; set; }
     }
 }

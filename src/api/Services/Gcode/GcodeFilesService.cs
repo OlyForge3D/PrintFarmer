@@ -2,13 +2,17 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Services.FileManagement;
 using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Gcode
@@ -18,12 +22,21 @@ namespace Farm.Web.Api.Services.Gcode
         private readonly IGcodeRepository _gcodeRepo;
         private readonly IUnifiedLoggingService _logger;
         private readonly Farm.Web.Api.Services.StorageManagement.IStoragePathService _storagePathService;
+        private readonly IGcodeMetadataExtractorService _metadataExtractor;
+        private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
 
-        public GcodeFilesService(IGcodeRepository gcodeRepo, IUnifiedLoggingService logger, Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService)
+        public GcodeFilesService(
+            IGcodeRepository gcodeRepo,
+            IUnifiedLoggingService logger,
+            Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService,
+            IGcodeMetadataExtractorService metadataExtractor,
+            IGcodeThumbnailExtractorService thumbnailExtractor)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+            _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
+            _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
         }
 
         public async Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct)
@@ -227,7 +240,95 @@ namespace Farm.Web.Api.Services.Gcode
 
             System.IO.FileInfo info = new(fullTarget);
             string virtualFilePath = CombineVirtual(virtualDir, safeName);
+
+            // Create database record with metadata and thumbnail extraction
+            try
+            {
+                GcodeFile gcodeFile = await CreateGcodeFileRecordAsync(fullTarget, file.FileName, info.Length, ct);
+                await _gcodeRepo.AddAsync(gcodeFile, ct);
+                await _gcodeRepo.SaveChangesAsync(ct);
+                _logger.LogInformation("Created GcodeFile database record for {FileName} with ID {FileId}", file.FileName, gcodeFile.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create GcodeFile database record for {FileName}, but file was uploaded successfully", file.FileName);
+                // Continue anyway - file is on disk, just not indexed in database
+            }
+
             return new GcodeFileEntryDto(virtualFilePath, safeName, info.Length, info.LastWriteTimeUtc, false);
+        }
+
+        /// <summary>
+        /// Finalize a chunked upload by creating a GcodeFile database record with extracted metadata.
+        /// This is called after a chunked upload completes to index the file in the database.
+        /// </summary>
+        public async Task<GcodeFile?> FinalizeChunkedUploadAsync(
+            string filePath,
+            string? originalFileName,
+            IChunkedUploadService chunkedUploadService,
+            CancellationToken ct)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    _logger.LogWarning("Cannot finalize chunked upload: file not found at {FilePath}", filePath);
+                    return null;
+                }
+
+                // Extract metadata from the uploaded file
+                GcodeMetadataExtracted? metadata = await chunkedUploadService.ExtractMetadataFromFileAsync(filePath, ct);
+
+                // Get file info
+                FileInfo fileInfo = new(filePath);
+                string fileName = originalFileName ?? fileInfo.Name;
+
+                // Compute file hash
+                string fileHash;
+                await using (FileStream fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (SHA256 sha256 = SHA256.Create())
+                {
+                    byte[] hashBytes = await sha256.ComputeHashAsync(fs, ct);
+                    fileHash = Convert.ToHexString(hashBytes);
+                }
+
+                // Create database record
+                GcodeFile gcodeFile = new()
+                {
+                    Id = Guid.NewGuid(),
+                    OriginalFileName = fileName,
+                    DisplayName = Path.GetFileNameWithoutExtension(fileName),
+                    FilePath = Path.GetFullPath(filePath),
+                    FileSizeBytes = fileInfo.Length,
+                    FileHash = fileHash,
+                    UploadedAt = DateTime.UtcNow,
+                    Source = GcodeSource.Upload,
+                    RequiredNozzleDiameter = metadata?.NozzleDiameter,
+                    RequiredMaterial = metadata?.Material,
+                    EstimatedPrintTimeMinutes = metadata?.EstimatedPrintTimeMinutes,
+                    EstimatedFilamentLengthMm = metadata?.FilamentLengthMm,
+                    EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
+                    SlicerName = metadata?.SlicerName,
+                    SlicerVersion = metadata?.SlicerVersion,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                // TODO: Extract and save thumbnail for chunked uploads
+                // (thumbnail extraction happens during finalization in ChunkedUploadService)
+                // This could be passed as a parameter if needed
+
+                await _gcodeRepo.AddAsync(gcodeFile, ct);
+                await _gcodeRepo.SaveChangesAsync(ct);
+
+                _logger.LogInformation("Finalized chunked upload as GcodeFile database record for {FileName} with ID {FileId}", fileName, gcodeFile.Id);
+                return gcodeFile;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to finalize chunked upload to database at {FilePath}", filePath);
+                return null;
+            }
         }
 
         public async Task<MultiUploadResponse> UploadMultipleAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
@@ -523,6 +624,107 @@ namespace Farm.Web.Api.Services.Gcode
             string virtualNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
 
             return (storageRoot, candidate, virtualNormalized);
+        }
+
+        /// <summary>
+        /// Extract metadata from a G-code file by reading its content.
+        /// Handles errors gracefully and returns null if extraction fails.
+        /// </summary>
+        private async Task<GcodeMetadataExtracted?> ExtractMetadataAsync(string filePath, CancellationToken ct)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    return null;
+                }
+
+                using StreamReader reader = new(filePath, Encoding.UTF8);
+                string gcodeContent = await reader.ReadToEndAsync(ct);
+                
+                if (string.IsNullOrWhiteSpace(gcodeContent))
+                {
+                    return null;
+                }
+
+                return await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract metadata from gcode file {FilePath}", filePath);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Extract and save a thumbnail from a G-code file.
+        /// Handles errors gracefully and returns null if extraction fails.
+        /// </summary>
+        private async Task<string?> ExtractThumbnailAsync(string filePath, CancellationToken ct)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    return null;
+                }
+
+                await using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                return await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(fs, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract thumbnail from gcode file {FilePath}", filePath);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Create a GcodeFile database record from an uploaded file with metadata and thumbnail extraction.
+        /// </summary>
+        private async Task<GcodeFile> CreateGcodeFileRecordAsync(
+            string filePath,
+            string originalFileName,
+            long fileSizeBytes,
+            CancellationToken ct)
+        {
+            // Compute file hash
+            string fileHash;
+            await using (FileStream fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] hashBytes = await sha256.ComputeHashAsync(fs, ct);
+                fileHash = Convert.ToHexString(hashBytes);
+            }
+
+            // Extract metadata and thumbnail
+            GcodeMetadataExtracted? metadata = await ExtractMetadataAsync(filePath, ct);
+            string? thumbnailPath = await ExtractThumbnailAsync(filePath, ct);
+
+            // Create database record
+            GcodeFile gcodeFile = new()
+            {
+                Id = Guid.NewGuid(),
+                OriginalFileName = originalFileName,
+                DisplayName = Path.GetFileNameWithoutExtension(originalFileName),
+                FilePath = filePath,
+                FileSizeBytes = fileSizeBytes,
+                FileHash = fileHash,
+                UploadedAt = DateTime.UtcNow,
+                Source = GcodeSource.Upload,
+                RequiredNozzleDiameter = metadata?.NozzleDiameter,
+                RequiredMaterial = metadata?.Material,
+                EstimatedPrintTimeMinutes = metadata?.EstimatedPrintTimeMinutes,
+                EstimatedFilamentLengthMm = metadata?.FilamentLengthMm,
+                EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
+                SlicerName = metadata?.SlicerName,
+                SlicerVersion = metadata?.SlicerVersion,
+                ThumbnailPath = thumbnailPath,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            return gcodeFile;
         }
     }
 }

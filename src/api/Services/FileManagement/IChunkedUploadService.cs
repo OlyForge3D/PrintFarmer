@@ -1,4 +1,8 @@
-﻿using System.Security.Cryptography;
+﻿using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Services.Gcode;
 
 namespace Farm.Web.Api.Services.FileManagement;
 
@@ -78,6 +82,16 @@ public interface IChunkedUploadService
     /// </summary>
     /// <param name="uploadId">Upload session ID</param>
     void CancelUpload(string uploadId);
+
+    /// <summary>
+    /// Extract metadata from a finalized gcode file.
+    /// This method is called after upload completes to extract metadata for database storage.
+    /// Returns null if the file is not a gcode file or if metadata extraction fails.
+    /// </summary>
+    /// <param name="filePath">Full path to the uploaded gcode file</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Extracted metadata or null if not available</returns>
+    Task<GcodeMetadataExtracted?> ExtractMetadataFromFileAsync(string filePath, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -99,4 +113,6 @@ public sealed record ChunkedUploadStatus(
     long TotalSize,
     bool IsCompleted,
     string? FinalHash,
-    bool IsPaused);
+    bool IsPaused,
+    string? ThumbnailPath = null,
+    string? FinalFilePath = null);

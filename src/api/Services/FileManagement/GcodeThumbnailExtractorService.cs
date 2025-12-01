@@ -64,11 +64,15 @@ public class GcodeThumbnailExtractorService : IGcodeThumbnailExtractorService
 
             if (extractedMetadata?.ThumbnailData == null || extractedMetadata.ThumbnailData.Length == 0)
             {
+                _logger.LogDebug("No thumbnail data extracted from G-code content");
                 return null;
             }
 
+            _logger.LogInformation($"Found thumbnail data: {extractedMetadata.ThumbnailData.Length} bytes");
+
             // Create thumbnails directory if needed
             string thumbnailDir = _storagePathService.GetThumbnailDirectory();
+            _logger.LogInformation($"Creating thumbnails directory: {thumbnailDir}");
             _ = Directory.CreateDirectory(thumbnailDir);
 
             // Save thumbnail with unique name
@@ -76,7 +80,7 @@ public class GcodeThumbnailExtractorService : IGcodeThumbnailExtractorService
             string thumbnailPath = Path.Combine(thumbnailDir, thumbnailFileName);
 
             await File.WriteAllBytesAsync(thumbnailPath, extractedMetadata.ThumbnailData, ct);
-            _logger.LogInformation($"Extracted and saved thumbnail to {thumbnailFileName}");
+            _logger.LogInformation($"Extracted and saved thumbnail to {thumbnailPath}");
 
             return thumbnailPath;
         }

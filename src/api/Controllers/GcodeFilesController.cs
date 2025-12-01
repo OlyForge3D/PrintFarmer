@@ -26,13 +26,13 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-files")]
 public class GcodeFilesController(
-    IWebHostEnvironment env,
     IUnifiedLoggingService logger,
     IGcodeUploadSettings uploadSettings,
     IGcodeUploadQuotaService quotaService,
     Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,
     Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
-    Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService
+    Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService,
+    Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService
 ) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.
@@ -218,6 +218,32 @@ public class GcodeFilesController(
             // Delegate to service - it handles all the validation, quota checking, hashing, and finalization
             ChunkedUploadStatus result = await chunkedUploadService.AppendChunkAsync(uploadId, offset, chunkBytes, userId, quotaService);
 
+            // If upload is complete, finalize it to the database
+            Guid? gcodeFileId = null;
+            if (result.IsCompleted)
+            {
+                try
+                {
+                    // Try to finalize the upload to database
+                    var gcodeFile = await gcodeFilesService.FinalizeChunkedUploadAsync(
+                        GetUploadFilePath(result),
+                        result.SafeFileName,
+                        chunkedUploadService,
+                        CancellationToken.None);
+                    
+                    if (gcodeFile != null)
+                    {
+                        gcodeFileId = gcodeFile.Id;
+                        logger.LogInformation("Finalized chunked upload {UploadId} to database with GcodeFile ID {FileId}", uploadId, gcodeFileId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to finalize chunked upload {UploadId} to database, but file is on disk", uploadId);
+                    // Continue anyway - file is on disk, just not indexed in database
+                }
+            }
+
             return Ok(new ChunkStatusResponse(
                 result.UploadId,
                 result.SafeFileName,
@@ -225,7 +251,9 @@ public class GcodeFilesController(
                 result.TotalSize,
                 result.IsCompleted,
                 result.FinalHash,
-                result.IsPaused));
+                result.IsPaused,
+                result.ThumbnailPath,
+                gcodeFileId));
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {
@@ -243,7 +271,7 @@ public class GcodeFilesController(
                 return StatusCode(StatusCodes.Status423Locked, new
                 {
                     error = "upload_paused",
-                    status = new ChunkStatusResponse(status.UploadId, status.SafeFileName, status.UploadedBytes, status.TotalSize, status.IsCompleted, status.FinalHash, status.IsPaused)
+                    status = new ChunkStatusResponse(status.UploadId, status.SafeFileName, status.UploadedBytes, status.TotalSize, status.IsCompleted, status.FinalHash, status.IsPaused, status.ThumbnailPath, null)
                 });
             }
             return NotFound();
@@ -295,7 +323,9 @@ public class GcodeFilesController(
                 status.TotalSize,
                 status.IsCompleted,
                 status.FinalHash,
-                status.IsPaused));
+                status.IsPaused,
+                status.ThumbnailPath,
+                null));
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {
@@ -334,7 +364,9 @@ public class GcodeFilesController(
                 status.TotalSize,
                 status.IsCompleted,
                 status.FinalHash,
-                status.IsPaused));
+                status.IsPaused,
+                status.ThumbnailPath,
+                null));
         }
         catch (InvalidOperationException)
         {
@@ -368,7 +400,9 @@ public class GcodeFilesController(
                 status.TotalSize,
                 status.IsCompleted,
                 status.FinalHash,
-                status.IsPaused));
+                status.IsPaused,
+                status.ThumbnailPath,
+                null));
         }
         catch (InvalidOperationException)
         {
@@ -625,20 +659,13 @@ public class GcodeFilesController(
         string? rootFullPathOverride = null,
         bool treatAsFile = false)
     {
-        // Allow explicit override via environment variable (useful for integration tests)
-        string? envOverride = Environment.GetEnvironmentVariable("GCODE_LIBRARY_ROOT");
-        string baseRoot = !string.IsNullOrWhiteSpace(envOverride) ? Path.GetFullPath(envOverride) : env.WebRootPath;
+        // Delegate to storage service which handles all environment/config/default fallback logic
+        // StoragePathService guarantees a non-null, non-empty path is always returned
+        string baseRoot = rootFullPathOverride ?? storagePathService.GetGcodeStorageDirectory();
 
-        // Fallback: if WebRootPath is null/empty (common in API-only container when no wwwroot copied)
-        // use a local wwwroot under the content root (env.ContentRootPath) and ensure it exists so that
-        // downstream Path.Combine / Directory.CreateDirectory calls do not throw ArgumentNullException.
-        if (string.IsNullOrWhiteSpace(baseRoot))
-        {
-            baseRoot = Path.Combine(env.ContentRootPath, "wwwroot");
-        }
         // Ensure the resolved base root exists (idempotent) so later code relying on its presence succeeds.
         _ = Directory.CreateDirectory(baseRoot);
-        string root = rootFullPathOverride ?? Path.GetFullPath(Path.Combine(baseRoot, "gcode-library"));
+        string root = rootFullPathOverride ?? Path.GetFullPath(baseRoot);
         _ = Directory.CreateDirectory(root); // ensure exists
 
         // Normalize incoming virtual path
@@ -673,6 +700,19 @@ public class GcodeFilesController(
     {
         string core = $"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}";
         return weak ? $"W/\"{core}\"" : $"\"{core}\"";
+    }
+
+    /// <summary>
+    /// Helper method to derive the full file path from a chunked upload status.
+    /// Used to finalize uploads to the database after completion.
+    /// </summary>
+    private static string GetUploadFilePath(ChunkedUploadStatus status)
+    {
+        if (string.IsNullOrWhiteSpace(status.FinalFilePath))
+        {
+            throw new InvalidOperationException("Upload has not completed - no final file path available");
+        }
+        return status.FinalFilePath;
     }
 
     // Note: ToHex has been moved to IFileManagementService.ToHex() - use that instead
@@ -831,7 +871,9 @@ public sealed record ChunkStatusResponse(
     [property: JsonPropertyName("totalSize")] long TotalSize,
     [property: JsonPropertyName("completed")] bool Completed,
     [property: JsonPropertyName("finalHash")] string? FinalHash = null,
-    [property: JsonPropertyName("paused")] bool Paused = false
+    [property: JsonPropertyName("paused")] bool Paused = false,
+    [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null,
+    [property: JsonPropertyName("gcodeFileId")] Guid? GcodeFileId = null
 );
 
 public sealed record GcodeFileHashResponse(
