@@ -184,7 +184,7 @@ class SlicerService {
     formData.append('modelFile', file);
 
     const baseUrl = this.getBaseUrl();
-    const uploadUrl = `${baseUrl}/3d-models`;
+    const uploadUrl = `${baseUrl}/3d-models/upload`;
 
     const response = await fetch(uploadUrl, {
       method: 'POST',

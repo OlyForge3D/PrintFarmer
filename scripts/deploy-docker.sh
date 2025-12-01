@@ -1912,10 +1912,20 @@ tear_down_deployment() {
                 local path="${path_entry%:*}"
                 local desc="${path_entry#*:}"
                 if [ -d "$path" ]; then
-                    rm -rf "$path"
-                    echo "  • Removed [$desc] $path"
-                    ((external_paths_removed++))
-                    audit_log "remove" "teardown: removed external storage: $path"
+                    # Try regular removal first
+                    if rm -rf "$path" 2>/dev/null; then
+                        echo "  • Removed [$desc] $path"
+                        ((external_paths_removed++)) || true
+                        audit_log "remove" "teardown: removed external storage: $path"
+                    elif sudo rm -rf "$path" 2>/dev/null; then
+                        # Fallback to sudo if permission denied (e.g., Docker-owned files)
+                        echo "  • Removed [$desc] $path (with sudo)"
+                        ((external_paths_removed++)) || true
+                        audit_log "remove" "teardown: removed external storage: $path (with sudo)"
+                    else
+                        echo "  • Failed to remove [$desc] $path (permission denied)"
+                        audit_log "remove" "teardown: failed to remove external storage: $path (permission denied)"
+                    fi
                 else
                     echo "  • Skipped [$desc] $path (not found)"
                 fi
@@ -1935,10 +1945,20 @@ tear_down_deployment() {
                 local desc="${path_entry#*:}"
                 if [ -d "$path" ]; then
                     print_info "Removing [$desc]: $path"
-                    rm -rf "$path"
-                    echo "  • Removed [$desc] $path"
-                    ((external_paths_removed++))
-                    audit_log "remove" "teardown: removed external storage: $path"
+                    # Try regular removal first
+                    if rm -rf "$path" 2>/dev/null; then
+                        echo "  • Removed [$desc] $path"
+                        ((external_paths_removed++)) || true
+                        audit_log "remove" "teardown: removed external storage: $path"
+                    elif sudo rm -rf "$path" 2>/dev/null; then
+                        # Fallback to sudo if permission denied (e.g., Docker-owned files)
+                        echo "  • Removed [$desc] $path (with sudo)"
+                        ((external_paths_removed++)) || true
+                        audit_log "remove" "teardown: removed external storage: $path (with sudo)"
+                    else
+                        echo "  • Failed to remove [$desc] $path (permission denied)"
+                        audit_log "remove" "teardown: failed to remove external storage: $path (permission denied)"
+                    fi
                 else
                     print_info "Skipped [$desc] $path (not found)"
                 fi
@@ -1959,20 +1979,27 @@ tear_down_deployment() {
     if [ -f docker-compose.yml ]; then
         rm -f docker-compose.yml
         echo "  • Removed docker-compose.yml"
-        ((files_removed++))
+        ((files_removed++)) || true
     fi
     
     if [ -f docker-compose.override.yml ]; then
         rm -f docker-compose.override.yml
         echo "  • Removed docker-compose.override.yml"
-        ((files_removed++))
+        ((files_removed++)) || true
     fi
     
     # Remove environment file
     if [ -f .env ]; then
         rm -f .env
         echo "  • Removed .env"
-        ((files_removed++))
+        ((files_removed++)) || true
+    fi
+    
+    # Remove generated dockerfiles folder
+    if [ -d dockerfiles ]; then
+        rm -rf dockerfiles
+        echo "  • Removed dockerfiles/ directory"
+        ((files_removed++)) || true
     fi
     
     # Ask about .deploy-config separately
@@ -1984,7 +2011,7 @@ tear_down_deployment() {
             if [ "$keep_config" = "n" ] || [ "$keep_config" = "N" ]; then
                 rm -f .deploy-config
                 echo "  • Removed .deploy-config"
-                ((files_removed++))
+                ((files_removed++)) || true
             else
                 print_info "Kept .deploy-config (your preferences will be remembered)"
             fi

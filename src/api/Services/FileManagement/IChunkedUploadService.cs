@@ -23,6 +23,7 @@ public interface IChunkedUploadService
     /// <param name="allowedExtensions">Collection of allowed file extensions</param>
     /// <param name="hashAlgorithm">Optional hash algorithm ("sha256" or "sha1") for integrity checking</param>
     /// <param name="expectedHash">Optional expected hash value for validation on completion</param>
+    /// <param name="virtualDirectory">Optional virtual directory path for organizing uploads (e.g., "/subfolder")</param>
     /// <returns>Upload session metadata containing ID, safe filename, and upload parameters</returns>
     ChunkedUploadInitResult InitializeUpload(
         string userId,
@@ -31,7 +32,8 @@ public interface IChunkedUploadService
         string targetDirectory,
         IReadOnlyCollection<string> allowedExtensions,
         string? hashAlgorithm = null,
-        string? expectedHash = null);
+        string? expectedHash = null,
+        string? virtualDirectory = null);
 
     /// <summary>
     /// Appends a chunk of data to an active upload session.
@@ -59,6 +61,13 @@ public interface IChunkedUploadService
     /// <param name="uploadId">Upload session ID</param>
     /// <returns>Current session status, or null if not found</returns>
     ChunkedUploadStatus? GetOrResumeUpload(string uploadId);
+
+    /// <summary>
+    /// Retrieves the virtual directory path for an upload session.
+    /// </summary>
+    /// <param name="uploadId">Upload session ID</param>
+    /// <returns>Virtual directory path, or null if not found or not set</returns>
+    string? GetUploadVirtualDirectory(string uploadId);
 
     /// <summary>
     /// Pauses an active upload session.

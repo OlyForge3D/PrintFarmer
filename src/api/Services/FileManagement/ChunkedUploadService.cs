@@ -46,7 +46,8 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         string targetDirectory,
         IReadOnlyCollection<string> allowedExtensions,
         string? hashAlgorithm = null,
-        string? expectedHash = null)
+        string? expectedHash = null,
+        string? virtualDirectory = null)
     {
         if (string.IsNullOrWhiteSpace(userId))
         {
@@ -127,7 +128,8 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             HashAlgorithm = normalizedHashAlgo,
             ExpectedHash = normalizedExpectedHash,
             Hasher = hasher,
-            Paused = false
+            Paused = false,
+            VirtualDirectory = virtualDirectory
         };
 
         if (!_uploadStates.TryAdd(uploadId, state))
@@ -284,6 +286,21 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         catch (Exception ex)
         {
             _logger.LogDebug($"Failed to rehydrate upload session {uploadId}: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    public string? GetUploadVirtualDirectory(string uploadId)
+    {
+        if (string.IsNullOrWhiteSpace(uploadId))
+        {
+            return null;
+        }
+
+        if (_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
+        {
+            return state.VirtualDirectory;
         }
 
         return null;
@@ -595,5 +612,6 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         public IncrementalHash? Hasher { get; init; }
         public bool Paused { get; set; }
         public string? ThumbnailPath { get; set; }
+        public string? VirtualDirectory { get; init; }
     }
 }

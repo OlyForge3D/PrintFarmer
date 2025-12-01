@@ -108,11 +108,16 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 parentDirectory = string.Empty;
             }
 
+            // Normalize parent directory - ensure no trailing separators
             string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            if (normalizedParent.EndsWith("/"))
+            {
+                normalizedParent = normalizedParent[..^1];
+            }
 
             // Get all unique subdirectories that are direct children of the parent
             var subdirs = await _db.GcodeFiles
-                .Where(g => g.FileDirectory.StartsWith(normalizedParent))
+                .Where(g => g.FileDirectory == normalizedParent || g.FileDirectory.StartsWith(normalizedParent + "/") || g.FileDirectory.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
                 .Select(g => g.FileDirectory)
                 .Distinct()
                 .ToListAsync(ct);
@@ -121,11 +126,17 @@ namespace Farm.Infrastructure.Repositories.Gcode
             var directChildren = new HashSet<string>();
             foreach (var dir in subdirs)
             {
+                // Skip if this is the same as parent (files directly in this directory)
+                if (dir == normalizedParent)
+                {
+                    continue;
+                }
+
                 // If parent is empty, we want top-level directories
                 if (string.IsNullOrEmpty(normalizedParent))
                 {
-                    // Find the first segment
-                    var segments = dir.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                    // Split on both / and \ to handle any path separator
+                    var segments = dir.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
                     if (segments.Length > 0)
                     {
                         directChildren.Add(segments[0]);
@@ -133,11 +144,22 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 }
                 else
                 {
-                    // Check if this directory is a direct child of parent
-                    if (dir.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
+                    // Check if this directory starts with parent + separator
+                    if (dir.StartsWith(normalizedParent + "/") || dir.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
                     {
-                        string relative = dir.Substring(normalizedParent.Length).TrimStart(Path.DirectorySeparatorChar);
-                        var segments = relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                        // Extract the relative path
+                        string relative;
+                        if (dir.StartsWith(normalizedParent + "/"))
+                        {
+                            relative = dir.Substring(normalizedParent.Length + 1);
+                        }
+                        else
+                        {
+                            relative = dir.Substring(normalizedParent.Length + 1);
+                        }
+                        
+                        // Get the first segment of the relative path
+                        var segments = relative.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
                         if (segments.Length > 0)
                         {
                             directChildren.Add(segments[0]);

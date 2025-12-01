@@ -237,7 +237,7 @@ namespace Farm.Web.Api.Services.Gcode
             GcodeFile gcodeFile;
             try
             {
-                gcodeFile = await CreateGcodeFileRecordAsync(fullTarget, file.FileName, info.Length, ext, ct);
+                gcodeFile = await CreateGcodeFileRecordAsync(fullTarget, file.FileName, info.Length, ext, virtualDir, ct);
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 await _gcodeRepo.SaveChangesAsync(ct);
                 _logger.LogInformation("Created GcodeFile database record for {FileName} with ID {FileId}", file.FileName, gcodeFile.Id);
@@ -261,6 +261,7 @@ namespace Farm.Web.Api.Services.Gcode
             string filePath,
             string? originalFileName,
             string? thumbnailPath,
+            string? virtualDirectory,
             IChunkedUploadService chunkedUploadService,
             CancellationToken ct)
         {
@@ -295,6 +296,9 @@ namespace Farm.Web.Api.Services.Gcode
                 // Generate GUID for file ID (used for all file names)
                 Guid fileId = Guid.NewGuid();
                 
+                // Normalize virtual directory path
+                string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
+                
                 // Create database record
                 GcodeFile gcodeFile = new()
                 {
@@ -302,7 +306,7 @@ namespace Farm.Web.Api.Services.Gcode
                     OriginalFileName = fileName,
                     DisplayName = Path.GetFileNameWithoutExtension(fileName),
                     FilePath = Path.GetFullPath(filePath),
-                    FileDirectory = Path.GetDirectoryName(filePath) ?? "/",
+                    FileDirectory = normalizedVirtualDir,
                     FileSizeBytes = fileInfo.Length,
                     FileHash = fileHash,
                     UploadedAt = DateTime.UtcNow,
@@ -564,6 +568,27 @@ namespace Farm.Web.Api.Services.Gcode
             return (baseVirtual ?? "/").TrimEnd('/') + "/" + childName;
         }
 
+        private static string NormalizeVirtualPath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || path == "/")
+            {
+                return string.Empty; // Root directory is stored as empty string
+            }
+
+            // Extract path segments, remove leading slashes
+            string normalizedPath = path.Trim();
+            if (normalizedPath.StartsWith('/'))
+            {
+                normalizedPath = normalizedPath[1..];
+            }
+            if (normalizedPath.EndsWith('/'))
+            {
+                normalizedPath = normalizedPath[..^1];
+            }
+
+            return normalizedPath;
+        }
+
         private static string SafeOriginalName(string? name)
             => string.IsNullOrWhiteSpace(name) ? "(unnamed)" : Path.GetFileName(name);
 
@@ -711,6 +736,7 @@ namespace Farm.Web.Api.Services.Gcode
             string originalFileName,
             long fileSizeBytes,
             string fileExtension,
+            string? virtualDirectory,
             CancellationToken ct)
         {
             _logger.LogInformation("CreateGcodeFileRecordAsync: Starting for {FileName} at {FilePath}", originalFileName, filePath);
@@ -762,7 +788,7 @@ namespace Farm.Web.Api.Services.Gcode
                 Id = fileId,
                 OriginalFileName = originalFileName,
                 DisplayName = Path.GetFileNameWithoutExtension(originalFileName),
-                FileDirectory = Path.GetDirectoryName(finalFilePath) ?? string.Empty,
+                FileDirectory = NormalizeVirtualPath(virtualDirectory ?? "/"),
                 FilePath = Path.GetFullPath(finalFilePath),
                 FileSizeBytes = fileSizeBytes,
                 FileHash = fileHash,

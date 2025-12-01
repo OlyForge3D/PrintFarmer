@@ -168,7 +168,8 @@ public class GcodeFilesController(
                 targetDirFullPath,
                 AllowedExtensions,
                 req.HashAlgorithm,
-                req.ExpectedHash);
+                req.ExpectedHash,
+                virtualDir);
 
             string virtualFilePath = virtualDir == "/" ? "/" + result.SafeFileName : virtualDir?.TrimEnd('/') + "/" + result.SafeFileName;
             return Ok(new ChunkInitResponse(
@@ -225,11 +226,15 @@ public class GcodeFilesController(
                 logger.LogInformation("Upload chunk: Upload is complete, calling FinalizeChunkedUploadAsync with thumbnailPath={ThumbnailPath}", result.ThumbnailPath ?? "(null)");
                 try
                 {
-                    // Try to finalize the upload to database, passing the thumbnail path
+                    // Retrieve virtual directory from upload session
+                    string? virtualDir = chunkedUploadService.GetUploadVirtualDirectory(uploadId);
+                    
+                    // Try to finalize the upload to database, passing the thumbnail path and virtual directory
                     var gcodeFile = await gcodeFilesService.FinalizeChunkedUploadAsync(
                         GetUploadFilePath(result),
                         result.SafeFileName,
                         result.ThumbnailPath,
+                        virtualDir,
                         chunkedUploadService,
                         CancellationToken.None);
                     
