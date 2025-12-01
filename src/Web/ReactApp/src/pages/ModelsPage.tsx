@@ -1,11 +1,12 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Box, Trash2, Eye, Settings, Search, Tag, Grid3x3, List, X, FileText } from 'lucide-react';
+import { Upload, Box, Trash2, Eye, Settings, Search, Tag, Grid3x3, List, X, FileText, FolderOpen } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
 import { Button, Input, FileUpload } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { HierarchicalFileBrowser, FileEntry } from '@/components/files/HierarchicalFileBrowser';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
 import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
@@ -48,6 +49,7 @@ export const ModelsPage: React.FC = () => {
   const navigate = useNavigate();
   const [dragOver, setDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [showBrowser, setShowBrowser] = useState(false);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
   // Slicing now redirects to NewSliceJobPage instead of using modal
@@ -349,6 +351,16 @@ export const ModelsPage: React.FC = () => {
             Bulk Tag
           </Button>
 
+          {/* Browser toggle button */}
+          <Button
+            variant={showBrowser ? 'primary' : 'secondary'}
+            onClick={() => setShowBrowser(!showBrowser)}
+            title="Browse files by folder"
+          >
+            <FolderOpen className="w-4 h-4 mr-1" />
+            {showBrowser ? 'Hide Browser' : 'File Browser'}
+          </Button>
+
           {/* View mode toggle */}
           <div className="flex gap-2">
             <Button
@@ -413,8 +425,41 @@ export const ModelsPage: React.FC = () => {
         )}
       </div>
 
+      {/* Hierarchical File Browser */}
+      {showBrowser && (
+        <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-pf-text-primary flex items-center gap-2">
+              <FolderOpen className="w-5 h-5" />
+              Browse Models by Folder
+            </h3>
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => setShowBrowser(false)}
+              title="Close browser"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+          <HierarchicalFileBrowser
+            endpoint="models"
+            initialPath="/"
+            showThumbnails={true}
+            onFileSelect={(file: FileEntry) => {
+              if (!file.isDirectory) {
+                navigate(`/models?view=browser&path=${encodeURIComponent(file.path)}`);
+              }
+            }}
+            onFileDelete={() => {
+              queryClient.invalidateQueries({ queryKey: ['models-search'] });
+            }}
+          />
+        </div>
+      )}
+
       {/* Models Display */}
-      {models.length === 0 ? (
+      {models.length === 0 && !showBrowser ? (
         <div className="text-center py-12">
           <Box className="w-12 h-12 text-pf-text-tertiary mx-auto mb-4 opacity-50" />
           <p className="text-pf-text-secondary">No models found</p>

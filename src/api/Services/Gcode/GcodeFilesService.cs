@@ -231,12 +231,13 @@ namespace Farm.Web.Api.Services.Gcode
             fs.Position = 0;  // Reset position
 
             System.IO.FileInfo info = new(fullTarget);
-            string virtualFilePath = CombineVirtual(virtualDir, safeName);
 
             // Create database record with metadata and thumbnail extraction
+            // This will rename the file to a GUID-based name
+            GcodeFile gcodeFile;
             try
             {
-                GcodeFile gcodeFile = await CreateGcodeFileRecordAsync(fullTarget, file.FileName, info.Length, ct);
+                gcodeFile = await CreateGcodeFileRecordAsync(fullTarget, file.FileName, info.Length, ext, ct);
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 await _gcodeRepo.SaveChangesAsync(ct);
                 _logger.LogInformation("Created GcodeFile database record for {FileName} with ID {FileId}", file.FileName, gcodeFile.Id);
@@ -244,10 +245,12 @@ namespace Farm.Web.Api.Services.Gcode
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to create GcodeFile database record for {FileName}, but file was uploaded successfully", file.FileName);
-                // Continue anyway - file is on disk, just not indexed in database
+                throw;
             }
 
-            return new GcodeFileEntryDto(virtualFilePath, safeName, info.Length, info.LastWriteTimeUtc, false);
+            // Return the virtual path using the display name (original filename), not the GUID
+            string virtualFilePath = CombineVirtual(virtualDir, gcodeFile.DisplayName);
+            return new GcodeFileEntryDto(virtualFilePath, gcodeFile.DisplayName, gcodeFile.FileSizeBytes, info.LastWriteTimeUtc, false);
         }
 
         /// <summary>
@@ -278,6 +281,7 @@ namespace Farm.Web.Api.Services.Gcode
                 // Get file info
                 FileInfo fileInfo = new(filePath);
                 string fileName = originalFileName ?? fileInfo.Name;
+                string fileExtension = Path.GetExtension(fileName) ?? ".gcode";
 
                 // Compute file hash
                 string fileHash;
@@ -288,13 +292,17 @@ namespace Farm.Web.Api.Services.Gcode
                     fileHash = Convert.ToHexString(hashBytes);
                 }
 
+                // Generate GUID for file ID (used for all file names)
+                Guid fileId = Guid.NewGuid();
+                
                 // Create database record
                 GcodeFile gcodeFile = new()
                 {
-                    Id = Guid.NewGuid(),
+                    Id = fileId,
                     OriginalFileName = fileName,
                     DisplayName = Path.GetFileNameWithoutExtension(fileName),
                     FilePath = Path.GetFullPath(filePath),
+                    FileDirectory = Path.GetDirectoryName(filePath) ?? "/",
                     FileSizeBytes = fileInfo.Length,
                     FileHash = fileHash,
                     UploadedAt = DateTime.UtcNow,
@@ -311,10 +319,33 @@ namespace Farm.Web.Api.Services.Gcode
                     UpdatedAt = DateTime.UtcNow
                 };
 
+                // Move uploaded file to GUID-based name before saving to DB
+                string storageDir = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
+                string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
+                
+                if (filePath != finalFilePath && File.Exists(filePath))
+                {
+                    File.Move(filePath, finalFilePath, overwrite: true);
+                    gcodeFile.FilePath = Path.GetFullPath(finalFilePath);
+                    _logger.LogInformation("Moved file from {SourcePath} to {FinalPath}", filePath, finalFilePath);
+                }
+
+                // Rename thumbnail to match file ID with _thumb.png suffix
+                if (!string.IsNullOrEmpty(thumbnailPath) && File.Exists(thumbnailPath))
+                {
+                    string finalThumbnailPath = Path.Combine(storageDir, $"{fileId}_thumb.png");
+                    if (thumbnailPath != finalThumbnailPath)
+                    {
+                        File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
+                        gcodeFile.ThumbnailPath = Path.GetFullPath(finalThumbnailPath);
+                        _logger.LogInformation("Moved thumbnail from {SourcePath} to {FinalPath}", thumbnailPath, finalThumbnailPath);
+                    }
+                }
+
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 await _gcodeRepo.SaveChangesAsync(ct);
 
-                _logger.LogInformation("Finalized chunked upload as GcodeFile database record for {FileName} with ID {FileId}", fileName, gcodeFile.Id);
+                _logger.LogInformation("Finalized chunked upload as GcodeFile database record for {FileName} with ID {FileId}", fileName, fileId);
                 return gcodeFile;
             }
             catch (Exception ex)
@@ -679,6 +710,7 @@ namespace Farm.Web.Api.Services.Gcode
             string filePath,
             string originalFileName,
             long fileSizeBytes,
+            string fileExtension,
             CancellationToken ct)
         {
             _logger.LogInformation("CreateGcodeFileRecordAsync: Starting for {FileName} at {FilePath}", originalFileName, filePath);
@@ -692,6 +724,9 @@ namespace Farm.Web.Api.Services.Gcode
                 fileHash = Convert.ToHexString(hashBytes);
             }
 
+            // Generate GUID for file ID
+            Guid fileId = Guid.NewGuid();
+
             // Extract metadata and thumbnail
             GcodeMetadataExtracted? metadata = await ExtractMetadataAsync(filePath, ct);
             _logger.LogInformation("CreateGcodeFileRecordAsync: Metadata extracted for {FileName}", originalFileName);
@@ -699,14 +734,36 @@ namespace Farm.Web.Api.Services.Gcode
             string? thumbnailPath = await ExtractThumbnailAsync(filePath, ct);
             _logger.LogInformation("CreateGcodeFileRecordAsync: Thumbnail path for {FileName} is: {ThumbnailPath}", originalFileName, thumbnailPath ?? "(null)");
 
+            // Rename file to GUID-based name
+            string storageDir = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
+            string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
+            
+            if (filePath != finalFilePath && File.Exists(filePath))
+            {
+                File.Move(filePath, finalFilePath, overwrite: true);
+                _logger.LogInformation("Renamed file from {SourcePath} to {FinalPath}", filePath, finalFilePath);
+            }
+
+            // Rename thumbnail to match file ID with _thumb.png suffix
+            if (!string.IsNullOrEmpty(thumbnailPath) && File.Exists(thumbnailPath))
+            {
+                string finalThumbnailPath = Path.Combine(storageDir, $"{fileId}_thumb.png");
+                if (thumbnailPath != finalThumbnailPath)
+                {
+                    File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
+                    thumbnailPath = finalThumbnailPath;
+                    _logger.LogInformation("Moved thumbnail from {SourcePath} to {FinalPath}", thumbnailPath, finalThumbnailPath);
+                }
+            }
+
             // Create database record
             GcodeFile gcodeFile = new()
             {
-                Id = Guid.NewGuid(),
+                Id = fileId,
                 OriginalFileName = originalFileName,
                 DisplayName = Path.GetFileNameWithoutExtension(originalFileName),
-                FileDirectory = Path.GetDirectoryName(filePath) ?? string.Empty,
-                FilePath = filePath,
+                FileDirectory = Path.GetDirectoryName(finalFilePath) ?? string.Empty,
+                FilePath = Path.GetFullPath(finalFilePath),
                 FileSizeBytes = fileSizeBytes,
                 FileHash = fileHash,
                 UploadedAt = DateTime.UtcNow,

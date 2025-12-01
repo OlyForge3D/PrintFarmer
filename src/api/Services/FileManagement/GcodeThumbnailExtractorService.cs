@@ -70,13 +70,14 @@ public class GcodeThumbnailExtractorService : IGcodeThumbnailExtractorService
 
             _logger.LogInformation($"Found thumbnail data: {extractedMetadata.ThumbnailData.Length} bytes");
 
-            // Create thumbnails directory if needed
+            // Create thumbnails directory if needed (same as GCODE files directory now)
             string thumbnailDir = _storagePathService.GetThumbnailDirectory();
-            _logger.LogInformation($"Creating thumbnails directory: {thumbnailDir}");
+            _logger.LogInformation($"Using thumbnail directory: {thumbnailDir}");
             _ = Directory.CreateDirectory(thumbnailDir);
 
-            // Save thumbnail with unique name
-            string thumbnailFileName = $"{Guid.NewGuid()}.png";
+            // Save thumbnail with temporary GUID name - will be renamed by FinalizeChunkedUploadAsync
+            // to match the GCODE file ID with _thumb.png suffix
+            string thumbnailFileName = $"{Guid.NewGuid()}_thumb.png";
             string thumbnailPath = Path.Combine(thumbnailDir, thumbnailFileName);
 
             await File.WriteAllBytesAsync(thumbnailPath, extractedMetadata.ThumbnailData, ct);

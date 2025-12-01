@@ -83,8 +83,9 @@ public class StoragePathService : IStoragePathService
 
     public string GetThumbnailDirectory()
     {
-        string baseDir = GetGcodeStorageDirectory();
-        return Path.Combine(baseDir, "thumbnails");
+        // Thumbnails are now stored in the same directory as GCODE files with _thumb.png suffix
+        // This maintains consistency with Model3D storage approach
+        return GetGcodeStorageDirectory();
     }
 
     public string GetModelUploadDirectory()

@@ -1002,6 +1002,36 @@ export class ApiClient {
     return resp.data as { path: string; isDirectory: boolean };
   }
 
+  // ============ 3D Model methods ============
+
+  async listModelsHierarchical(
+    path: string = "/",
+    sortBy: string = "name",
+    sortOrder: string = "asc",
+    search?: string,
+    page: number = 1,
+    pageSize: number = 50
+  ): Promise<import("@/types/api").Model3DListResponse> {
+    const params: Record<string, any> = {
+      path,
+      sortBy,
+      sortOrder,
+      page,
+      pageSize,
+    };
+    if (search) params.search = search;
+
+    const response = await this.client.get<import("@/types/api").Model3DListResponse>(
+      "/3d-models/hierarchy",
+      { params }
+    );
+    return response.data;
+  }
+
+  async deleteModels(modelPaths: string[]): Promise<void> {
+    await this.client.delete("/3d-models", { data: { modelPaths } });
+  }
+
   // ============ Job Queue methods ============
 
   async getJobQueue(printerId?: string): Promise<JobQueuePrintJob[]> {

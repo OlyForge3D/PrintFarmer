@@ -521,8 +521,9 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           <Input
             id="file-search"
             type="text"
-            placeholder="Search files..."
-            aria-label="Search files"
+            placeholder="Search by filename or path..."
+            aria-label="Search files by filename or path"
+            title="Search by filename or full file path"
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setPage(1);} }
           />
@@ -785,7 +786,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                       ) : (
                         <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
                       )}
-                      <span className="text-pf-text-primary font-medium">{file.name}</span>
+                      <div className="flex flex-col">
+                        <span className="text-pf-text-primary font-medium">{file.name}</span>
+                        <span className="text-xs text-pf-text-tertiary">{file.path}</span>
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-pf-text-secondary">

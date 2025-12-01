@@ -10,7 +10,7 @@ import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Button } from '@/components/ui';
 import { Cog } from 'lucide-react';
-import { PlayIcon, PauseIcon } from '@/components/icons/MdiIcons';
+import { PlayIcon, PauseIcon, StopIcon } from '@/components/icons/MdiIcons';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
 import type { PrintJobStatusDto } from '@/types/api';

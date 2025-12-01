@@ -725,6 +725,26 @@ export interface GetGcodeFilesResponse {
   totalItems?: number;
 }
 
+// 3D Model file entry (hierarchical browser)
+export interface Model3DFile {
+  path: string;
+  name: string;
+  size: number;
+  modifiedAt: Date;
+  isDirectory: boolean;
+  thumbnailUrl?: string;
+}
+
+export interface Model3DListResponse {
+  files: Model3DFile[];
+  totalFiles: number;
+  totalSize: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  totalItems?: number;
+}
+
 // G-code library runtime settings
 export interface GcodeUploadSettings {
   allowedExtensions: string[];

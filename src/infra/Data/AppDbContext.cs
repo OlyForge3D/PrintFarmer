@@ -227,6 +227,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasKey(g => g.Id);
             _ = b.Property(g => g.OriginalFileName).IsRequired().HasMaxLength(255);
             _ = b.Property(g => g.DisplayName).IsRequired().HasMaxLength(255);
+            _ = b.Property(g => g.FileDirectory).IsRequired().HasMaxLength(512);
             _ = b.Property(g => g.FileHash).IsRequired().HasMaxLength(64);
             _ = b.Property(g => g.FileSizeBytes).IsRequired();
             _ = b.Property(g => g.FilePath).IsRequired().HasMaxLength(512);
@@ -577,6 +578,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasKey(m => m.Id);
             _ = b.Property(m => m.OriginalFileName).IsRequired().HasMaxLength(255);
             _ = b.Property(m => m.DisplayName).IsRequired().HasMaxLength(255);
+            _ = b.Property(m => m.FileDirectory).IsRequired().HasMaxLength(512);
             _ = b.Property(m => m.FilePath).IsRequired().HasMaxLength(512);
             _ = b.Property(m => m.FileHash).IsRequired().HasMaxLength(64);
             _ = b.Property(m => m.FileFormat).HasConversion<int>();

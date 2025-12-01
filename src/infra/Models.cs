@@ -1428,6 +1428,13 @@ public record Model3DListResponse(
     int TotalItems);
 
 /// <summary>
+/// Request to delete models by file paths (for hierarchical browser)
+/// </summary>
+public record DeleteModelsRequest(
+    [property: JsonPropertyName("modelPaths")] IReadOnlyList<string> ModelPaths
+);
+
+/// <summary>
 /// Tag for organizing and categorizing 3D models
 /// </summary>
 public class Model3DTagDto

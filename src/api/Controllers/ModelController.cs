@@ -59,7 +59,7 @@ public class ModelController : ControllerBase
     /// Upload a 3D model file
     /// </summary>
     /// <returns>Model upload result with ID and URL</returns>
-    [HttpPost]
+    [HttpPost("upload")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(100_000_000)] // 100MB limit
@@ -110,6 +110,52 @@ public class ModelController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError($"Failed to list models: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
+        }
+    }
+
+    /// <summary>
+    /// List models and subdirectories within a specific path (hierarchical browsing)
+    /// </summary>
+    /// <param name="path">Virtual path to browse (e.g., '/', '/subfolder')</param>
+    /// <param name="sortBy">Sort field: name, size, or date</param>
+    /// <param name="sortOrder">asc or desc</param>
+    /// <param name="search">Optional search term to filter by filename</param>
+    /// <param name="page">Page number (1-based)</param>
+    /// <param name="pageSize">Items per page</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Hierarchical listing with files and directories</returns>
+    [HttpGet("hierarchy")]
+    [ProducesResponseType(typeof(Model3DListResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ListModelsHierarchicalAsync(
+        [FromQuery] string? path = "/",
+        [FromQuery] string? sortBy = "name",
+        [FromQuery] string? sortOrder = "asc",
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _modelService.ListModelsWithHierarchyAsync(
+                path ?? "/",
+                sortBy ?? "name",
+                sortOrder ?? "asc",
+                search,
+                page,
+                pageSize,
+                ct);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to list models hierarchically: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
         }
     }
@@ -255,6 +301,54 @@ public class ModelController : ControllerBase
         {
             _logger.LogError($"Failed to delete model: {id}: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete model");
+        }
+    }
+
+    /// <summary>
+    /// Delete models by file paths (for hierarchical browser)
+    /// </summary>
+    /// <param name="request">Request with list of model paths to delete</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content if successful</returns>
+    [HttpDelete]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteModelsAsync([FromBody] DeleteModelsRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            if (request?.ModelPaths == null || request.ModelPaths.Count == 0)
+            {
+                return BadRequest("At least one model path is required");
+            }
+
+            // Find models by file paths and delete them
+            int deleted = 0;
+            foreach (var path in request.ModelPaths)
+            {
+                try
+                {
+                    // Find model by path and delete
+                    var model = await _modelRepo.ListValidAsync(ct);
+                    var matchingModel = model.FirstOrDefault(m => m.FilePath == path);
+                    if (matchingModel != null)
+                    {
+                        await _modelService.DeleteModelAsync(matchingModel.Id, ct);
+                        deleted++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to delete model at path {path}: {ex.Message}");
+                }
+            }
+
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to delete models: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete models");
         }
     }
 
