@@ -426,7 +426,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isAllHomed).className}`}
                 style={getHomeButtonStyle(isAllHomed).style}
               >
-                <Home className="h-4 w-4" />
+                <HomeIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"

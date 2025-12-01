@@ -1883,11 +1883,20 @@ tear_down_deployment() {
     if [ -n "$external_app_data_path" ]; then
         paths_to_remove+=("$external_app_data_path:App Data")
     fi
+    # Note: Database is handled separately due to permission issues
+    
+    # Separate array for interactive-only prompts (includes database)
+    local paths_interactive_only=()
     if [ -n "$external_database_path" ]; then
-        paths_to_remove+=("$external_database_path:Database")
+        paths_interactive_only+=("$external_database_path:Database")
     fi
     
     if [ "$NON_INTERACTIVE" = "false" ]; then
+        # In interactive mode, include database in the removal list
+        if [ -n "$external_database_path" ]; then
+            paths_to_remove+=("$external_database_path:Database")
+        fi
+        
         if [ ${#paths_to_remove[@]} -gt 0 ]; then
             echo
             print_warning "External storage directories configured:"
@@ -1937,7 +1946,8 @@ tear_down_deployment() {
             print_info "Kept external storage directories (data preserved)"
         fi
     else
-        # In non-interactive mode with --tear-down, remove all external storage (paths from config)
+        # In non-interactive mode with --tear-down, remove all external storage EXCEPT database
+        # (Database is skipped due to permission issues with Docker-managed containers)
         if [ ${#paths_to_remove[@]} -gt 0 ]; then
             print_warning "Removing external storage directories (from config):"
             for path_entry in "${paths_to_remove[@]}"; do
@@ -1965,6 +1975,11 @@ tear_down_deployment() {
             done
             if [ $external_paths_removed -gt 0 ]; then
                 print_success "✓ External storage directories removed: $external_paths_removed"
+            fi
+            
+            # Notify about database (skipped in non-interactive mode)
+            if [ -n "$external_database_path" ] && [ -d "$external_database_path" ]; then
+                print_info "⊘ Skipped Database directory (Docker-managed, kept for data preservation)"
             fi
         else
             print_info "✓ No external storage directories configured - nothing to remove"

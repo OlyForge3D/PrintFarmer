@@ -137,6 +137,33 @@ namespace Farm.Web.Api.Services.Gcode
                 }
 
                 string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
+                
+                // Convert thumbnail path to API URL if available
+                string? thumbnailUrl = null;
+                if (!string.IsNullOrEmpty(file.ThumbnailPath))
+                {
+                    // Convert full filesystem path to virtual path for API download endpoint
+                    // Remove the storage root prefix to get virtual path
+                    string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
+                    string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
+                    string normalizedThumbnailPath = Path.GetFullPath(file.ThumbnailPath);
+                    
+                    if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
+                    {
+                        // Extract relative path from storage directory
+                        string relativePath = normalizedThumbnailPath.Substring(normalizedStorageDir.Length)
+                            .TrimStart(Path.DirectorySeparatorChar, '/');
+                        // Convert to forward slashes for URL
+                        relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
+                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(relativePath)}";
+                    }
+                    else
+                    {
+                        // Fallback: just use the filename
+                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(Path.GetFileName(file.ThumbnailPath))}";
+                    }
+                }
+                
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
                     Name: file.OriginalFileName,
@@ -144,7 +171,7 @@ namespace Farm.Web.Api.Services.Gcode
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
                     HarvestOperationId: harvestOpId,
-                    ThumbnailPath: file.ThumbnailPath
+                    ThumbnailPath: thumbnailUrl
                 ));
             }
 
