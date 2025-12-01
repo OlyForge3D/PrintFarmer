@@ -1,34 +1,41 @@
 import React, { useState, useRef } from 'react';
 import {
-  ChevronDown, History, Edit, Camera, ExternalLink, RotateCcw
+  PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw
 } from 'lucide-react';
 import { PauseIcon, PlayIcon, EmergencyStopIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
+import { formatPrinterState } from '@/utils/printerStateDisplay';
 import { PrinterBackend, type Printer } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
+import prusalinkIcon from '@/assets/prusalink.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 
 // Backend icon helper
 function getBackendIcon(backend: PrinterBackend | number | string) {
   let backendValue: PrinterBackend | undefined = undefined;
+  
+  // Handle numeric values
   if (typeof backend === 'number') {
     backendValue = backend;
-  } else if (typeof backend === 'string') {
-    switch (backend) {
-      case 'Moonraker': backendValue = PrinterBackend.Moonraker; break;
-      case 'PrusaLink': backendValue = PrinterBackend.PrusaLink; break;
-      case 'SDCP': backendValue = PrinterBackend.SDCP; break;
-      case 'OctoPrint': backendValue = PrinterBackend.OctoPrint; break;
+  } 
+  // Handle string values
+  else if (typeof backend === 'string') {
+    switch (backend.toLowerCase()) {
+      case 'moonraker': backendValue = PrinterBackend.Moonraker; break;
+      case 'prusalink': backendValue = PrinterBackend.PrusaLink; break;
+      case 'sdcp': backendValue = PrinterBackend.SDCP; break;
+      case 'octoprint': backendValue = PrinterBackend.OctoPrint; break;
       default: backendValue = undefined;
     }
   }
+  
   switch (backendValue) {
     case PrinterBackend.Moonraker:
       return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle mr-1" />;
     case PrinterBackend.PrusaLink:
-      return <span title="PrusaLink" aria-label="PrusaLink" role="img" className="mr-1">🔗</span>;
+      return <img src={prusalinkIcon} alt="PrusaLink" title="PrusaLink" className="inline h-5 w-5 align-middle mr-1" />;
     case PrinterBackend.SDCP:
       return <span title="SDCP" aria-label="SDCP" role="img" className="mr-1">📡</span>;
     case PrinterBackend.OctoPrint:
@@ -58,14 +65,36 @@ export function CollapsedPrinterCard({
 
   // Real-time status updates
   const { printerStatuses } = usePrinterStatusUpdates();
-  const status = printerStatuses.get(printer.id);  // State helpers
-  const isOnline = status?.isOnline ?? printer.isOnline ?? false;
-  const state = status?.state ?? printer.state ?? 'Unknown';
+  const status = printerStatuses.get(printer.id);
+  
+  // Debug: Log all printerStatuses and this printer's lookup
+  React.useEffect(() => {
+    const allIds = Array.from(printerStatuses.keys());
+    console.log(`[CollapsedCard] Printer ID: "${printer.id}", Type: ${typeof printer.id}`);
+    console.log(`[CollapsedCard] Available IDs in map:`, allIds);
+    console.log(`[CollapsedCard] Status lookup result:`, status ? { isOnline: status.isOnline, state: status.state } : 'NOT FOUND');
+  }, [printer.id, status, printerStatuses]);
+  
+  // Merge SignalR status updates with printer data
+  const displayPrinter = status ? {
+    ...printer,
+    isOnline: status.isOnline,
+    state: status.state,
+    progress: status.progress,
+    jobName: status.jobName,
+    thumbnailUrl: status.thumbnailUrl,
+    cameraStreamUrl: status.cameraStreamUrl,
+    cameraSnapshotUrl: status.cameraSnapshotUrl,
+  } : printer;
+  
+  // State helpers
+  const isOnline = displayPrinter.isOnline ?? false;
+  const state = displayPrinter.state ?? 'Unknown';
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
-  const hasCameraUrls = !!printer.cameraStreamUrl;
-  const cameraStreamUrl = printer.cameraStreamUrl;
+  const hasCameraUrls = !!displayPrinter.cameraStreamUrl;
+  const cameraStreamUrl = displayPrinter.cameraStreamUrl;
 
   // State color classes
   const getStateColorClasses = (isOnline: boolean, state: string): string => {
@@ -77,8 +106,8 @@ export function CollapsedPrinterCard({
   };
   const stateColorClasses = getStateColorClasses(isOnline, state);
 
-  const toCamelCase = (str: string): string => {
-    return str.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()).trim();
+  const displayState = (state: string | undefined): string => {
+    return formatPrinterState(state);
   };
 
   const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart') => {
@@ -101,98 +130,103 @@ export function CollapsedPrinterCard({
   };
 
   return (
-    <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg min-w-[26rem] max-w-[26rem]">
-      <div className="flex justify-between items-start mb-4 gap-4">
-        <div className="flex justify-between items-start flex-1 gap-4">
-          <div className="flex-1">
-            <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1">
-              {printer.name}
-            </div>
-            {(printer.manufacturerName || printer.modelName) && (
-              <div className="text-pf-text-secondary text-sm mb-1">
-                {`${printer.manufacturerName || ''} ${printer.modelName || ''}`.trim()}
-              </div>
-            )}
-            <div className="flex items-center gap-2 mb-1">
-              <div className="text-pf-text-secondary text-xs">
-                {printer.serverUrl}
-              </div>
-              <a 
-                href={printer.serverUrl} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-pf-text-secondary hover:text-pf-text-primary"
-                aria-label={`Open printer ${printer.name} in new tab`}
-                title={`Open printer ${printer.name}`}
-              >
-                <ExternalLink className="h-4 w-4" />
-              </a>
-              {/* Camera button - always visible, enabled/disabled based on camera URLs */}
-              <Button
-                type="button"
-                variant="subtle"
-                size="sm"
-                onClick={() => setShowCamera(!showCamera)}
-                disabled={!hasCameraUrls}
-                className="!p-1 !h-auto"
-                aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
-                title={hasCameraUrls ? `Camera available` : 'No camera configured'}
-              >
-                <Camera className="h-4 w-4" />
-              </Button>
-            </div>
+    <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg min-w-[18rem] max-w-[18rem]">
+      {/* Top row: Name + Status Pill */}
+      <div className="flex justify-between items-center mb-2 gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase truncate">
+            {printer.name}
           </div>
+          {(printer.manufacturerName || printer.modelName) && (
+            <div className="text-pf-text-secondary text-xs truncate">
+              {`${printer.manufacturerName || ''} ${printer.modelName || ''}`.trim()}
+            </div>
+          )}
         </div>
         
-        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${stateColorClasses}`}>
+        {/* Status pill - compact */}
+        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${stateColorClasses}`}>
           {getBackendIcon(printer.backend)}
-          {isOnline ? toCamelCase(state) : 'Offline'}
-        </div>
-        
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            onClick={onExpand}
-            className="!p-1 !h-auto"
-            title="Expand card"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            onClick={handleViewHistory}
-            className="!p-1 !h-auto"
-            title="View print history"
-          >
-            <History className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            onClick={() => onEdit?.(printer)}
-            className="!p-1 !h-auto"
-            title="Edit details"
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
+          <span className="hidden sm:inline">{isOnline ? displayState(state) : 'Offline'}</span>
         </div>
       </div>
 
-      {/* Control buttons in collapsed view */}
-      <div className="flex items-center gap-2">
+      {/* Action buttons row - all grouped together */}
+      <div className="flex items-center gap-1 mb-2">
+        {/* Details/Sidebar button */}
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          onClick={onExpand}
+          className="!p-1 !h-auto"
+          title="Open details sidebar"
+        >
+          <PanelRightOpen className="h-4 w-4" />
+        </Button>
+        
+        {/* External link */}
+        <a 
+          href={printer.serverUrl} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="text-pf-text-secondary hover:text-pf-text-primary flex-shrink-0 p-1"
+          aria-label={`Open printer ${printer.name} in new tab`}
+          title={`Open printer ${printer.name}`}
+        >
+          <ExternalLink className="h-4 w-4" />
+        </a>
+        
+        {/* Camera button */}
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          onClick={() => setShowCamera(!showCamera)}
+          disabled={!hasCameraUrls}
+          className="!p-1 !h-auto"
+          aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
+          title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+        >
+          <Camera className="h-4 w-4" />
+        </Button>
+        
+        {/* History button */}
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          onClick={handleViewHistory}
+          className="!p-1 !h-auto"
+          title="View print history"
+        >
+          <History className="h-4 w-4" />
+        </Button>
+        
+        {/* Edit button */}
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          onClick={() => onEdit?.(printer)}
+          className="!p-1 !h-auto"
+          title="Edit details"
+        >
+          <Edit className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Control buttons in collapsed view - same size as XY pad buttons */}
+      <div className="grid grid-cols-3 gap-1 w-40 h-12 mb-2">
         <Button
           type="button"
           variant="secondary"
           size="sm"
           onClick={() => handleControlAction('pause')}
           disabled={!isPrinting}
+          className="w-full h-full !p-0"
         >
-          <PauseIcon className="h-3 w-3 mr-1" />
+          <PauseIcon className="h-6 w-6" />
         </Button>
         <Button
           type="button"
@@ -200,8 +234,9 @@ export function CollapsedPrinterCard({
           size="sm"
           onClick={() => handleControlAction('resume')}
           disabled={!isPaused}
+          className="w-full h-full !p-0"
         >
-          <PlayIcon className="h-3 w-3 mr-1" />
+          <PlayIcon className="h-6 w-6" />
         </Button>
         <Button
           type="button"
@@ -210,8 +245,9 @@ export function CollapsedPrinterCard({
           onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           disabled={!isOnline}
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
+          className="w-full h-full !p-0"
         >
-          {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <EmergencyStopIcon className="h-3 w-3" />}
+          {isShutdown ? <RotateCcw className="h-6 w-6" /> : <EmergencyStopIcon className="h-6 w-6" />}
         </Button>
       </div>
 

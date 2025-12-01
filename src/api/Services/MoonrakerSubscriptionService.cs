@@ -1201,7 +1201,7 @@ public sealed class MoonrakerSubscriptionService(
             var update = new PrinterStatusUpdate(
                 printerId,
                 true, // IsOnline
-                state.State,
+                PrinterStateNormalizer.NormalizeState(state.State),
                 state.Progress,
                 state.JobName,
                 ThumbnailUrl: state.ThumbnailUrl,
@@ -1248,7 +1248,7 @@ public sealed class MoonrakerSubscriptionService(
             PrinterStatusUpdate offlineUpdate = new(
                 printerId,
                 false, // IsOnline
-                "Offline",
+                PrinterStateNormalizer.NormalizeState("Offline"),
                 null, null, null, null,
                 null, null, null,
                 null, null, null, null,
@@ -1288,7 +1288,7 @@ public sealed class MoonrakerSubscriptionService(
             PrinterStatusUpdate shutdownUpdate = new(
                 printerId,
                 false, // IsOnline
-                "Shutdown",
+                PrinterStateNormalizer.NormalizeState("Shutdown"),
                 null, null, null, null,
                 null, null, null,
                 null, null, null, null,
@@ -1511,7 +1511,7 @@ public sealed class MoonrakerSubscriptionService(
                 PrinterStatusUpdate statusUpdate = new(
                     printer.Id,
                     compositeStatus.IsOnline,
-                    compositeStatus.State,
+                    PrinterStateNormalizer.NormalizeState(compositeStatus.State),
                     compositeStatus.Progress,
                     compositeStatus.JobName,
                     compositeStatus.ThumbnailUrl,

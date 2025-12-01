@@ -1,9 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { usePrinter } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
+import { formatPrinterState } from '@/utils/printerStateDisplay';
 import type { TempTargets, MoveRequest } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/components/ui';
@@ -15,7 +17,11 @@ import {
   PlayIcon,
   PauseIcon,
   EmergencyStopIcon,
-  StopIcon
+  StopIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon
 } from '@/components/icons/MdiIcons';
 import { 
   ChevronUp,
@@ -75,7 +81,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     return null;
   }
 
-  const { data: printer, isLoading } = usePrinter(printerId);
+  const { data: printer, isLoading, refetch } = usePrinter(printerId);
   const { printerStatuses } = usePrinterStatusUpdates();
   const status = printerId ? printerStatuses.get(printerId) : undefined;
   
@@ -86,6 +92,21 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
   const [step, setStep] = useState(10);
+  
+  // Poll printer data for PrusaLink (fallback - server now broadcasts via SignalR)
+  // Server-side PrusaLinkPollingService polls every 5 seconds and broadcasts via SignalR
+  // This client-side polling serves as a fallback in case SignalR connection drops
+  useEffect(() => {
+    if (!printer || printer.backend !== PrinterBackend.PrusaLink) {
+      return;
+    }
+
+    const pollInterval = setInterval(() => {
+      refetch();
+    }, 5000); // Poll every 5 seconds for PrusaLink as fallback
+
+    return () => clearInterval(pollInterval);
+  }, [printer, refetch]);
   
   // Use refs instead of state for caching display values - this avoids setState during render
   const lastKnownHotendTempRef = useRef<number | null>(null);
@@ -115,10 +136,11 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
   // State helpers - safe to access printer now
   const isOnline = status?.isOnline ?? printer.isOnline ?? false;
-  const state = status?.state ?? printer.state ?? 'Unknown';
-  const isPrinting = state.toLowerCase().includes('printing');
-  const isPaused = state.toLowerCase().includes('paused');
-  const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
+  const rawState = status?.state ?? printer.state ?? 'unknown';
+  const state = formatPrinterState(rawState);
+  const isPrinting = rawState.toLowerCase().includes('printing');
+  const isPaused = rawState.toLowerCase().includes('paused');
+  const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
 
   // Format temperature with target
   const formatTempWithTarget = (current?: number, target?: number, lastKnown?: number | null): string => {
@@ -323,7 +345,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           className="!p-1 !h-auto flex-shrink-0"
           title="Close sidebar"
         >
-          <X className="h-4 w-4" />
+          <X className="h-6 w-6" />
         </Button>
       </div>
 
@@ -346,7 +368,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Pause print"
                 className="w-full h-full !p-0"
               >
-                <PauseIcon className="h-4 w-4" />
+                <PauseIcon className="h-6 w-6" />
               </Button>
               <Button
                 type="button"
@@ -357,7 +379,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Resume print"
                 className="w-full h-full !p-0"
               >
-                <PlayIcon className="h-4 w-4" />
+                <PlayIcon className="h-6 w-6" />
               </Button>
               <Button
                 type="button"
@@ -369,9 +391,9 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 className="w-full h-full !p-0"
               >
                 {isShutdown ? (
-                  <RotateCcw className="h-4 w-4" />
+                  <RotateCcw className="h-6 w-6" />
                 ) : (
-                  <EmergencyStopIcon className="h-4 w-4" />
+                  <EmergencyStopIcon className="h-6 w-6" />
                 )}
               </Button>
             </div>
@@ -419,7 +441,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isAllHomed).className}`}
                 style={getHomeButtonStyle(isAllHomed).style}
               >
-                <HomeIcon className="h-4 w-4" />
+                <HomeIcon className="h-6 w-6" />
               </Button>
               <Button
                 type="button"
@@ -429,7 +451,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleMove('Y', step)}
                 className="w-full h-full !p-0"
               >
-                ▲
+                <ArrowUpIcon className="h-6 w-6" />
               </Button>
               <Button
                 type="button"
@@ -440,7 +462,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Disable Motors (M84)"
                 className="w-full h-full !p-0"
               >
-                <DisableMotorsIcon className="w-4 h-4" />
+                <DisableMotorsIcon className="w-6 h-6" />
               </Button>
 
               {/* Middle row */}
@@ -452,7 +474,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleMove('X', -step)}
                 className="w-full h-full !p-0"
               >
-                ◀
+                <ArrowLeftIcon className="h-6 w-6" />
               </Button>
               <Button
                 type="button"
@@ -464,7 +486,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isXHomed).className}`}
                 style={getHomeButtonStyle(isXHomed).style}
               >
-                <HomeIcon className="h-4 w-4" />
+                <HomeIcon className="h-6 w-6" />
               </Button>
               <Button
                 type="button"
@@ -474,7 +496,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleMove('X', step)}
                 className="w-full h-full !p-0"
               >
-                ▶
+                <ArrowRightIcon className="h-6 w-6" />
               </Button>
 
               {/* Bottom row */}
@@ -487,7 +509,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleMove('Y', -step)}
                 className="w-full h-full !p-0"
               >
-                ▼
+                <ArrowDownIcon className="h-6 w-6" />
               </Button>
               <div></div>
             </div>
@@ -514,7 +536,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
                 style={getHomeButtonStyle(isZHomed).style}
               >
-                <HomeIcon className="h-4 w-4" />
+                <HomeIcon className="h-6 w-6" />
               </Button>
               <Button
                 type="button"

@@ -8,7 +8,11 @@ import {
   mdiPlay,
   mdiPause,
   mdiAlertOctagonOutline,
-  mdiStop
+  mdiStop,
+  mdiChevronUp,
+  mdiChevronDown,
+  mdiChevronLeft,
+  mdiChevronRight
 } from '@mdi/js';
 
 interface IconProps {
@@ -119,6 +123,58 @@ export function StopIcon({ className = 'w-4 h-4', ariaLabel = 'Stop' }: Omit<Ico
       role="img"
     >
       <path fill="currentColor" d={mdiStop} />
+    </svg>
+  );
+}
+
+export function ArrowUpIcon({ className = 'w-4 h-4', ariaLabel = 'Move up' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiChevronUp} />
+    </svg>
+  );
+}
+
+export function ArrowDownIcon({ className = 'w-4 h-4', ariaLabel = 'Move down' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiChevronDown} />
+    </svg>
+  );
+}
+
+export function ArrowLeftIcon({ className = 'w-4 h-4', ariaLabel = 'Move left' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiChevronLeft} />
+    </svg>
+  );
+}
+
+export function ArrowRightIcon({ className = 'w-4 h-4', ariaLabel = 'Move right' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiChevronRight} />
     </svg>
   );
 }

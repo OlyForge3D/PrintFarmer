@@ -532,6 +532,9 @@ public static class ServiceCollectionExtensions
 
             // Realtime update service for Klipper/Moonraker printers
             _ = services.AddHostedService<MoonrakerSubscriptionService>();
+
+            // Polling update service for PrusaLink printers (HTTP polling every 5 seconds)
+            _ = services.AddHostedService<PrusaLinkPollingService>();
         }
     }
 
