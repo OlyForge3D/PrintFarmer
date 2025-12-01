@@ -20,10 +20,12 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
     {
         return await Task.Run(() =>
         {
+            _logger.LogInformation("ExtractMetadataAsync: Starting metadata extraction");
             GcodeMetadataExtracted metadata = new GcodeMetadataExtracted();
 
             if (string.IsNullOrWhiteSpace(gcodeContent))
             {
+                _logger.LogWarning("ExtractMetadataAsync: G-code content is empty or null");
                 return metadata;
             }
 
@@ -33,6 +35,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
 
                 // Parse the first ~500 lines (metadata is typically at the start)
                 List<string> metadataLines = lines.Take(500).ToList();
+                _logger.LogInformation("ExtractMetadataAsync: Processing {LineCount} lines from {TotalLines} total", metadataLines.Count.ToString(), lines.Length.ToString());
 
                 ExtractSlicerInfo(metadataLines, metadata);
                 ExtractMaterial(metadataLines, metadata);
@@ -40,7 +43,11 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 ExtractLayerHeight(metadataLines, metadata);
                 ExtractPrintTime(metadataLines, metadata);
                 ExtractFilamentInfo(metadataLines, metadata);
+                _logger.LogInformation("ExtractMetadataAsync: About to extract thumbnail");
                 ExtractThumbnail(metadataLines, metadata);
+                _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
+
+                _logger.LogInformation($"ExtractMetadataAsync: Extracted metadata - Slicer={metadata.SlicerName ?? "(unknown)"} {metadata.SlicerVersion ?? ""}, Material={metadata.Material ?? "(unknown)"}, NozzleDiameter={metadata.NozzleDiameter?.ToString("F1") ?? "0"}, PrintTime={metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0"}min, Filament={metadata.FilamentWeightGrams?.ToString("F1") ?? "0"}g, LayerHeight={metadata.LayerHeight?.ToString("F2") ?? "0"}");
 
                 return metadata;
             }
@@ -64,6 +71,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             {
                 metadata.SlicerName = match.Groups[0].Value.Split()[0]; // Get first word (slicer name)
                 metadata.SlicerVersion = match.Groups[1].Value;
+                _logger.LogInformation("ExtractSlicerInfo: Found {SlicerName} {Version}", metadata.SlicerName, metadata.SlicerVersion);
             }
         }
 
@@ -76,11 +84,12 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             {
                 metadata.SlicerName = "Cura";
                 metadata.SlicerVersion = match.Groups[1].Value.Trim();
+                _logger.LogInformation("ExtractSlicerInfo: Found Cura {Version}", metadata.SlicerVersion);
             }
         }
     }
 
-    private static void ExtractMaterial(List<string> lines, GcodeMetadataExtracted metadata)
+    private void ExtractMaterial(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; filament_type = PLA" or "; MATERIAL = PLA"
         string? materialLine = lines.FirstOrDefault(l =>
@@ -95,11 +104,12 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             {
                 string material = match.Groups[1].Value.Trim();
                 metadata.Material = material.Trim(';', ' ', '"');
+                _logger.LogInformation("ExtractMaterial: Found {Material}", metadata.Material);
             }
         }
     }
 
-    private static void ExtractNozzleDiameter(List<string> lines, GcodeMetadataExtracted metadata)
+    private void ExtractNozzleDiameter(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; nozzle_diameter = 0.4"
         string? nozzleLine = lines.FirstOrDefault(l => l.Contains("nozzle_diameter", StringComparison.OrdinalIgnoreCase));
@@ -109,11 +119,12 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             if (match.Success && double.TryParse(match.Groups[1].Value, out double diameter))
             {
                 metadata.NozzleDiameter = diameter;
+                _logger.LogInformation("ExtractNozzleDiameter: Found {Diameter}mm", diameter.ToString("F1"));
             }
         }
     }
 
-    private static void ExtractLayerHeight(List<string> lines, GcodeMetadataExtracted metadata)
+    private void ExtractLayerHeight(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; layer_height = 0.2"
         string? layerLine = lines.FirstOrDefault(l => l.Contains("layer_height", StringComparison.OrdinalIgnoreCase));
@@ -123,11 +134,12 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             if (match.Success && double.TryParse(match.Groups[1].Value, out double height))
             {
                 metadata.LayerHeight = height;
+                _logger.LogInformation("ExtractLayerHeight: Found {Height}mm", height.ToString("F2"));
             }
         }
     }
 
-    private static void ExtractPrintTime(List<string> lines, GcodeMetadataExtracted metadata)
+    private void ExtractPrintTime(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // Multiple formats:
         // PrusaSlicer: "; estimated printing time (normal mode) = 1h 23m 45s"
@@ -150,6 +162,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 int minutes = int.Parse(prusaMatch.Groups[2].Value);
                 int seconds = int.Parse(prusaMatch.Groups[3].Value);
                 metadata.EstimatedPrintTimeMinutes = hours * 60 + minutes + seconds / 60.0;
+                _logger.LogInformation("ExtractPrintTime: Found {Minutes}min", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
             }
             else
             {
@@ -158,12 +171,13 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 if (secondsMatch.Success && int.TryParse(secondsMatch.Groups[1].Value, out int seconds))
                 {
                     metadata.EstimatedPrintTimeMinutes = seconds / 60.0;
+                    _logger.LogInformation("ExtractPrintTime: Found {Minutes}min", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
                 }
             }
         }
     }
 
-    private static void ExtractFilamentInfo(List<string> lines, GcodeMetadataExtracted metadata)
+    private void ExtractFilamentInfo(List<string> lines, GcodeMetadataExtracted metadata)
     {
         // PrusaSlicer: "; filament_mm3 = 123.45" (mm³) or "; filament_length = 12345" (mm)
         // Cura: "; Filament used: 12.34m" or similar
@@ -175,6 +189,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             if (match.Success && double.TryParse(match.Groups[1].Value, out double length))
             {
                 metadata.FilamentLengthMm = length;
+                _logger.LogInformation("ExtractFilamentInfo: Found {Length}mm of filament", length.ToString("F0"));
             }
         }
 
@@ -189,6 +204,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             if (match.Success && double.TryParse(match.Groups[1].Value, out double weight))
             {
                 metadata.FilamentWeightGrams = weight;
+                _logger.LogInformation("ExtractFilamentInfo: Found {Weight}g of filament", weight.ToString("F1"));
             }
         }
     }
@@ -208,24 +224,35 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
 
         try
         {
+            _logger.LogInformation("ExtractThumbnail: Starting thumbnail extraction from {LineCount} lines", lines.Count.ToString());
+            
             List<string> thumbnailLines = new List<string>();
             bool inThumbnail = false;
 
             foreach (string line in lines)
             {
-                if (line.StartsWith(";thumbnail", StringComparison.OrdinalIgnoreCase))
+                // Check if line contains thumbnail marker (handle both ";thumbnail" and "; thumbnail" formats)
+                if (line.StartsWith(";", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (line.Contains("begin", StringComparison.OrdinalIgnoreCase))
+                    string trimmedAfterSemicolon = line.Substring(1).TrimStart();
+                    if (trimmedAfterSemicolon.StartsWith("thumbnail", StringComparison.OrdinalIgnoreCase))
                     {
-                        inThumbnail = true;
-                        continue;
-                    }
-
-                    if (line.Contains("end", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (inThumbnail)
+                        _logger.LogInformation("ExtractThumbnail: Found thumbnail line: {Line}", line.Substring(0, Math.Min(50, line.Length)));
+                        
+                        if (line.Contains("begin", StringComparison.OrdinalIgnoreCase))
                         {
-                            break;
+                            inThumbnail = true;
+                            _logger.LogInformation("ExtractThumbnail: Thumbnail block started");
+                            continue;
+                        }
+
+                        if (line.Contains("end", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (inThumbnail)
+                            {
+                                _logger.LogInformation("ExtractThumbnail: Thumbnail block ended, collected {DataLines} lines", thumbnailLines.Count.ToString());
+                                break;
+                            }
                         }
                     }
                 }
@@ -234,7 +261,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 {
                     // Extract base64 data from comment line (remove leading ";")
                     string data = line.TrimStart(';').Trim();
-                    if (!string.IsNullOrEmpty(data))
+                    if (!string.IsNullOrEmpty(data) && !data.StartsWith("thumbnail", StringComparison.OrdinalIgnoreCase) && !data.StartsWith("THUMBNAIL", StringComparison.OrdinalIgnoreCase))
                     {
                         thumbnailLines.Add(data);
                     }
@@ -243,19 +270,46 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
 
             if (thumbnailLines.Count > 0)
             {
+                string base64Data = string.Concat(thumbnailLines);
+                _logger.LogInformation("ExtractThumbnail: Attempting to decode {ByteCount} bytes of base64 data (lines={LineCount})", base64Data.Length.ToString(), thumbnailLines.Count.ToString());
+                
+                // Log first and last lines for debugging
+                if (thumbnailLines.Count > 0)
+                {
+                    _logger.LogDebug("ExtractThumbnail: First base64 line (len={Len}): {Data}", thumbnailLines[0].Length.ToString(), thumbnailLines[0].Substring(0, Math.Min(50, thumbnailLines[0].Length)));
+                    if (thumbnailLines.Count > 1)
+                    {
+                        _logger.LogDebug("ExtractThumbnail: Last base64 line (len={Len}): {Data}", thumbnailLines[thumbnailLines.Count - 1].Length.ToString(), thumbnailLines[thumbnailLines.Count - 1].Substring(0, Math.Min(50, thumbnailLines[thumbnailLines.Count - 1].Length)));
+                    }
+                }
+                
                 try
                 {
-                    string base64Data = string.Concat(thumbnailLines);
+                    // Pad base64 data to valid length if needed
+                    while (base64Data.Length % 4 != 0)
+                    {
+                        base64Data += "=";
+                    }
+                    
                     // Validate it's actual base64
-                    if (base64Data.Length % 4 == 0 && IsValidBase64(base64Data))
+                    if (IsValidBase64(base64Data))
                     {
                         metadata.ThumbnailData = Convert.FromBase64String(base64Data);
+                        _logger.LogInformation("ExtractThumbnail: Successfully decoded {ThumbnailBytes} bytes of PNG data", metadata.ThumbnailData.Length.ToString());
+                    }
+                    else
+                    {
+                        _logger.LogWarning("ExtractThumbnail: Base64 data validation failed (length={Length}, could not decode)", base64Data.Length.ToString());
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to decode base64 thumbnail data from gcode");
                 }
+            }
+            else
+            {
+                _logger.LogWarning("ExtractThumbnail: No thumbnail data lines found in GCODE");
             }
         }
         catch (Exception ex)

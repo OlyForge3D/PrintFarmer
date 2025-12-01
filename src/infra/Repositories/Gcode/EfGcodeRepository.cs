@@ -75,6 +75,93 @@ namespace Farm.Infrastructure.Repositories.Gcode
             return _db.GcodeFiles.FirstOrDefaultAsync(g => g.FilePath == fullPath, ct);
         }
 
+        public async Task<List<GcodeFile>> GetByFullPathsAsync(IEnumerable<string> fullPaths, CancellationToken ct)
+        {
+            var pathList = fullPaths.ToList();
+            if (pathList.Count == 0)
+            {
+                return new List<GcodeFile>();
+            }
+            return await _db.GcodeFiles
+                .Where(g => pathList.Contains(g.FilePath))
+                .ToListAsync(ct);
+        }
+
+        public async Task<List<GcodeFile>> ListByDirectoryPrefixAsync(string directoryPrefix, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPrefix))
+            {
+                return new List<GcodeFile>();
+            }
+            // Query all files where FilePath starts with the directory prefix
+            // Normalize the path separator for consistent matching
+            string normalizedPrefix = directoryPrefix.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return await _db.GcodeFiles
+                .Where(g => g.FilePath.StartsWith(normalizedPrefix))
+                .ToListAsync(ct);
+        }
+
+        public async Task<List<string>> ListSubdirectoriesAsync(string parentDirectory, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(parentDirectory))
+            {
+                parentDirectory = string.Empty;
+            }
+
+            string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
+
+            // Get all unique subdirectories that are direct children of the parent
+            var subdirs = await _db.GcodeFiles
+                .Where(g => g.FileDirectory.StartsWith(normalizedParent))
+                .Select(g => g.FileDirectory)
+                .Distinct()
+                .ToListAsync(ct);
+
+            // Filter to only direct children (one level down)
+            var directChildren = new HashSet<string>();
+            foreach (var dir in subdirs)
+            {
+                // If parent is empty, we want top-level directories
+                if (string.IsNullOrEmpty(normalizedParent))
+                {
+                    // Find the first segment
+                    var segments = dir.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                    if (segments.Length > 0)
+                    {
+                        directChildren.Add(segments[0]);
+                    }
+                }
+                else
+                {
+                    // Check if this directory is a direct child of parent
+                    if (dir.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
+                    {
+                        string relative = dir.Substring(normalizedParent.Length).TrimStart(Path.DirectorySeparatorChar);
+                        var segments = relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                        if (segments.Length > 0)
+                        {
+                            directChildren.Add(segments[0]);
+                        }
+                    }
+                }
+            }
+
+            return directChildren.OrderBy(d => d).ToList();
+        }
+
+        public async Task<List<GcodeFile>> ListFilesInDirectoryAsync(string directory, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                directory = string.Empty;
+            }
+
+            // Get files where FileDirectory exactly matches (not recursive)
+            return await _db.GcodeFiles
+                .Where(g => g.FileDirectory == directory)
+                .ToListAsync(ct);
+        }
+
         public async Task<Guid?> GetLatestHarvestOperationIdForPrinterAsync(Guid printerId, CancellationToken ct)
         {
             GcodeHarvestOperation? op = await _db.GcodeHarvestOperations
@@ -82,6 +169,29 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 .OrderByDescending(o => o.StartedAt)
                 .FirstOrDefaultAsync(ct);
             return op?.Id;
+        }
+
+        public async Task<Dictionary<Guid, Guid?>> GetLatestHarvestOperationIdsByPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+        {
+            var printerIdList = printerIds.ToList();
+            if (printerIdList.Count == 0)
+            {
+                return new Dictionary<Guid, Guid?>();
+            }
+
+            var latestOps = await _db.GcodeHarvestOperations
+                .Where(o => printerIdList.Contains(o.PrinterId))
+                .GroupBy(o => o.PrinterId)
+                .Select(g => new { PrinterId = g.Key, LatestOpId = g.OrderByDescending(o => o.StartedAt).First().Id })
+                .ToListAsync(ct);
+
+            var result = new Dictionary<Guid, Guid?>();
+            foreach (var printerId in printerIdList)
+            {
+                var op = latestOps.FirstOrDefault(o => o.PrinterId == printerId);
+                result[printerId] = op?.LatestOpId;
+            }
+            return result;
         }
 
         public Task AddAsync(GcodeFile file, CancellationToken ct)

@@ -66,6 +66,136 @@ namespace Farm.Web.Api.Services.Model
             }).ToList();
         }
 
+        public async Task<Model3DListResponse> ListModelsWithHierarchyAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, CancellationToken ct)
+        {
+            if (page < 1)
+            {
+                page = 1;
+            }
+
+            if (pageSize < 1)
+            {
+                pageSize = 1;
+            }
+
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
+
+            // Parse virtual path to directory
+            string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
+            if (!vPath.StartsWith('/'))
+            {
+                vPath = "/" + vPath;
+            }
+
+            string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Where(s => s != "." && s != "..")
+                .ToArray();
+            string requestedDir = segments.Length == 0 ? string.Empty : Path.Combine(segments);
+            string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
+
+            // Get all files and subdirectories from database for this directory (pure DB approach)
+            List<Model3D> dbFiles = await _repository.ListValidByDirectoryAsync(requestedDir, ct);
+            List<string> subdirectories = await _repository.ListSubdirectoriesAsync(requestedDir, ct);
+
+            // Build directory entries
+            List<Model3DEntryDto> entries = new();
+
+            foreach (string subdir in subdirectories)
+            {
+                if (subdir.StartsWith('.'))
+                {
+                    continue;
+                }
+
+                if (!IsMatch(subdir, search))
+                {
+                    continue;
+                }
+
+                string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
+                entries.Add(new Model3DEntryDto(
+                    Path: childVirtual,
+                    Name: subdir,
+                    Size: 0,
+                    ModifiedAt: DateTime.UtcNow,
+                    IsDirectory: true
+                ));
+            }
+
+            // Add files from database
+            foreach (var file in dbFiles)
+            {
+                if (!IsMatch(file.OriginalFileName, search))
+                {
+                    continue;
+                }
+
+                string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
+                entries.Add(new Model3DEntryDto(
+                    Path: childVirtual,
+                    Name: file.OriginalFileName,
+                    Size: file.FileSizeBytes,
+                    ModifiedAt: file.UploadedAt,
+                    IsDirectory: false,
+                    ThumbnailUrl: file.ThumbnailPath != null ? $"/api/3d-models/{file.Id}/thumbnail" : null
+                ));
+            }
+
+            // Sorting
+            string normalizedSortBy = string.IsNullOrWhiteSpace(sortBy) ? "name" : sortBy.Trim();
+            string normalizedSortOrder = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
+            bool orderDesc = normalizedSortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase);
+
+            if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            else
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+
+            int totalFiles = entries.Count(e => !e.IsDirectory);
+            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
+            int skip = (page - 1) * pageSize;
+            IReadOnlyList<Model3DEntryDto> pagedEntries = skip >= entries.Count ? Array.Empty<Model3DEntryDto>() : entries.Skip(skip).Take(pageSize).ToList();
+            int totalItems = entries.Count;
+            int totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
+
+            return new Model3DListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
+        }
+
+        private static string CombineVirtual(string? parentPath, string name)
+        {
+            if (string.IsNullOrEmpty(parentPath) || parentPath == "/")
+            {
+                return "/" + name;
+            }
+            return parentPath.TrimEnd('/') + "/" + name;
+        }
+
+        private static bool IsMatch(string name, string? search)
+        {
+            if (string.IsNullOrWhiteSpace(search))
+            {
+                return true;
+            }
+            return name.Contains(search, StringComparison.OrdinalIgnoreCase);
+        }
+
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _repository.GetByIdAsync(id, ct);
@@ -284,6 +414,7 @@ namespace Farm.Web.Api.Services.Model
                     Id = modelId,
                     OriginalFileName = originalName,
                     DisplayName = Path.GetFileNameWithoutExtension(originalName),
+                    FileDirectory = Path.GetDirectoryName(finalFilePath) ?? string.Empty,
                     FilePath = finalFilePath,  // Store final path in DB
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,

@@ -320,12 +320,14 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
     private GcodeFile CreateAndPersistGcodeFile(string fileName, FileHealthStatus healthStatus)
     {
+        string filePath = Path.Combine(_gcodeStoragePath, fileName);
         GcodeFile gcode = new GcodeFile
         {
             Id = Guid.NewGuid(),
             OriginalFileName = fileName,
             DisplayName = fileName,
-            FilePath = Path.Combine(_gcodeStoragePath, fileName),
+            FileDirectory = Path.GetDirectoryName(filePath) ?? string.Empty,
+            FilePath = filePath,
             FileHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLower(),
             FileSizeBytes = 4096,
             UploadedAt = DateTime.UtcNow,

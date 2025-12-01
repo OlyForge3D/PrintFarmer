@@ -47,6 +47,68 @@ namespace Farm.Infrastructure.Repositories.Model
             return await _db.Models3D.Where(m => m.IsValid).OrderByDescending(m => m.UploadedAt).ToListAsync(ct);
         }
 
+        public async Task<List<Model3D>> ListValidByDirectoryAsync(string directory, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                directory = string.Empty;
+            }
+
+            // Get valid models where FileDirectory exactly matches (not recursive)
+            return await _db.Models3D
+                .Where(m => m.IsValid && m.FileDirectory == directory)
+                .OrderByDescending(m => m.UploadedAt)
+                .ToListAsync(ct);
+        }
+
+        public async Task<List<string>> ListSubdirectoriesAsync(string parentDirectory, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(parentDirectory))
+            {
+                parentDirectory = string.Empty;
+            }
+
+            string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
+
+            // Get all unique subdirectories that are direct children of the parent
+            var subdirs = await _db.Models3D
+                .Where(m => m.IsValid && m.FileDirectory.StartsWith(normalizedParent))
+                .Select(m => m.FileDirectory)
+                .Distinct()
+                .ToListAsync(ct);
+
+            // Filter to only direct children (one level down)
+            var directChildren = new HashSet<string>();
+            foreach (var dir in subdirs)
+            {
+                // If parent is empty, we want top-level directories
+                if (string.IsNullOrEmpty(normalizedParent))
+                {
+                    // Find the first segment
+                    var segments = dir.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                    if (segments.Length > 0)
+                    {
+                        directChildren.Add(segments[0]);
+                    }
+                }
+                else
+                {
+                    // Check if this directory is a direct child of parent
+                    if (dir.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
+                    {
+                        string relative = dir.Substring(normalizedParent.Length).TrimStart(Path.DirectorySeparatorChar);
+                        var segments = relative.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                        if (segments.Length > 0)
+                        {
+                            directChildren.Add(segments[0]);
+                        }
+                    }
+                }
+            }
+
+            return directChildren.OrderBy(d => d).ToList();
+        }
+
         public async Task<int> CountValidAsync(CancellationToken ct)
         {
             return await _db.Models3D.Where(m => m.IsValid).CountAsync(ct);

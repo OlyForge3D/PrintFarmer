@@ -461,6 +461,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         if (finalPath.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) || 
             finalPath.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
         {
+            _logger.LogInformation($"FinalizeUploadAsync: File is GCODE, attempting thumbnail extraction for {state.FinalSafeName}");
             try
             {
                 using (var fileStream = new FileStream(finalPath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -470,6 +471,10 @@ public sealed class ChunkedUploadService : IChunkedUploadService
                     {
                         _logger.LogInformation($"Extracted thumbnail for {state.FinalSafeName}: {thumbnailPath}");
                     }
+                    else
+                    {
+                        _logger.LogWarning($"Thumbnail extraction returned null for {state.FinalSafeName}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -477,6 +482,10 @@ public sealed class ChunkedUploadService : IChunkedUploadService
                 _logger.LogDebug($"Failed to extract thumbnail for {finalPath}: {ex.Message}");
                 // Continue anyway - thumbnail extraction is optional
             }
+        }
+        else
+        {
+            _logger.LogWarning($"FinalizeUploadAsync: File is NOT GCODE (path={finalPath}), skipping thumbnail extraction");
         }
 
         // Clean up metadata file

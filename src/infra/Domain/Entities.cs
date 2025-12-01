@@ -132,7 +132,8 @@ public class GcodeFile
     public Guid Id { get; set; }
     public string OriginalFileName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty; // Physical path on disk
+    public string FileDirectory { get; set; } = string.Empty; // Directory path (e.g., "/home/user/gcode")
+    public string FilePath { get; set; } = string.Empty; // Physical path on disk (full path)
     public long FileSizeBytes { get; set; }
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public DateTime UploadedAt { get; set; }
@@ -273,6 +274,7 @@ public class Model3D
     public Guid Id { get; set; }
     public string OriginalFileName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
+    public string FileDirectory { get; set; } = string.Empty; // Directory path (e.g., "/home/user/models")
     public string FilePath { get; set; } = string.Empty; // Physical path on disk
     public long FileSizeBytes { get; set; }
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication

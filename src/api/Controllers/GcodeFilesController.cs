@@ -222,6 +222,7 @@ public class GcodeFilesController(
             Guid? gcodeFileId = null;
             if (result.IsCompleted)
             {
+                logger.LogInformation("Upload chunk: Upload is complete, calling FinalizeChunkedUploadAsync with thumbnailPath={ThumbnailPath}", result.ThumbnailPath ?? "(null)");
                 try
                 {
                     // Try to finalize the upload to database, passing the thumbnail path
@@ -803,7 +804,8 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("size")] long Size,
     [property: JsonPropertyName("modifiedAt")] DateTime ModifiedAt,
     [property: JsonPropertyName("isDirectory")] bool IsDirectory,
-    [property: JsonPropertyName("harvestOperationId")] Guid? HarvestOperationId = null
+    [property: JsonPropertyName("harvestOperationId")] Guid? HarvestOperationId = null,
+    [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null
 );
 
 /// <summary>

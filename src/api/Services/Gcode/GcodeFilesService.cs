@@ -56,106 +56,96 @@ namespace Farm.Web.Api.Services.Gcode
                 pageSize = 500;
             }
 
-            // Use StoragePathService to get the correct gcode storage directory
-            string storageRoot = _storagePathService.GetGcodeStorageDirectory();
-            // Ensure storage root exists
-            if (!Directory.Exists(storageRoot))
-            {
-                _ = Directory.CreateDirectory(storageRoot);
-            }
-
+            // Parse virtual path to directory
             string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
             if (!vPath.StartsWith('/'))
             {
                 vPath = "/" + vPath;
             }
 
-            // Parse virtual path to relative path
             string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
                 .Where(s => s != "." && s != "..")
                 .ToArray();
-            string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
-            string requestedDirFullPath = Path.GetFullPath(Path.Combine(storageRoot, safeRel));
-
-            // Security check: ensure path doesn't escape the storage root
-            if (!requestedDirFullPath.StartsWith(storageRoot, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Path escapes storage root");
-            }
-
+            string requestedDir = segments.Length == 0 ? string.Empty : Path.Combine(segments);
             string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
-            // Create the requested directory if it doesn't exist (for root or nested paths)
-            if (!Directory.Exists(requestedDirFullPath))
-            {
-                _ = Directory.CreateDirectory(requestedDirFullPath);
-            }
 
-            System.IO.DirectoryInfo dirInfo = new(requestedDirFullPath);
+            // Get all files and subdirectories from database for this directory (pure DB approach)
+            List<GcodeFile> dbFiles = await _gcodeRepo.ListFilesInDirectoryAsync(requestedDir, ct);
+            List<string> subdirectories = await _gcodeRepo.ListSubdirectoriesAsync(requestedDir, ct);
+
+            // Build directory entries
             List<GcodeFileEntryDto> entries = new();
 
-            // Directories
-            foreach (System.IO.DirectoryInfo dir in dirInfo.EnumerateDirectories())
+            foreach (string subdir in subdirectories)
             {
-                if (dir.Name.StartsWith('.'))
+                if (subdir.StartsWith('.'))
                 {
                     continue;
                 }
 
-                if (!IsMatch(dir.Name, search))
+                if (!IsMatch(subdir, search))
                 {
                     continue;
                 }
 
-                string childVirtual = CombineVirtual(virtualPathNormalized, dir.Name);
+                string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
-                    Name: dir.Name,
+                    Name: subdir,
                     Size: 0,
-                    ModifiedAt: dir.LastWriteTimeUtc,
+                    ModifiedAt: DateTime.UtcNow, // Directories don't have modification time in DB
                     IsDirectory: true
                 ));
             }
 
-            // Files
-            foreach (string? pattern in new[] { "*.gcode", "*.bgcode" })
+            // Get harvest operations for all printers (once, not per file)
+            var printerIds = dbFiles
+                .Where(f => f.SourcePrinterId.HasValue)
+                .Select(f => f.SourcePrinterId!.Value)
+                .Distinct()
+                .ToList();
+
+            Dictionary<Guid, Guid?> harvestOpsByPrinter = new();
+            if (printerIds.Count > 0)
             {
-                foreach (System.IO.FileInfo file in dirInfo.EnumerateFiles(pattern))
+                try
                 {
-                    if (!IsMatch(file.Name, search))
-                    {
-                        continue;
-                    }
-
-                    string childVirtual = CombineVirtual(virtualPathNormalized, file.Name);
-                    Guid? harvestOpId = null;
-                    try
-                    {
-                        // Repository abstraction: avoid direct DbContext usage in service layer
-                        GcodeFile? dbEntry = await _gcodeRepo.GetByFullPathAsync(file.FullName, ct);
-                        if (dbEntry?.SourcePrinterId != null)
-                        {
-                            harvestOpId = await _gcodeRepo.GetLatestHarvestOperationIdForPrinterAsync(dbEntry.SourcePrinterId.Value, ct);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug($"Non-fatal DB correlation failure for file {file.FullName}: {ex.Message}");
-                    }
-
-                    if (harvestId.HasValue && harvestOpId != harvestId)
-                    {
-                        continue;
-                    }
-
-                    entries.Add(new GcodeFileEntryDto(
-                        Path: childVirtual,
-                        Name: file.Name,
-                        Size: file.Length,
-                        ModifiedAt: file.LastWriteTimeUtc,
-                        IsDirectory: false,
-                        HarvestOperationId: harvestOpId
-                    ));
+                    harvestOpsByPrinter = await _gcodeRepo.GetLatestHarvestOperationIdsByPrintersAsync(printerIds, ct);
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug($"Non-fatal DB query failure fetching harvest operations: {ex.Message}");
+                }
+            }
+
+            // Add files from database
+            foreach (var file in dbFiles)
+            {
+                if (!IsMatch(file.OriginalFileName, search))
+                {
+                    continue;
+                }
+
+                Guid? harvestOpId = file.SourcePrinterId.HasValue
+                    ? harvestOpsByPrinter.GetValueOrDefault(file.SourcePrinterId.Value)
+                    : null;
+
+                // Apply harvest filter if specified
+                if (harvestId.HasValue && harvestOpId != harvestId)
+                {
+                    continue;
+                }
+
+                string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
+                entries.Add(new GcodeFileEntryDto(
+                    Path: childVirtual,
+                    Name: file.OriginalFileName,
+                    Size: file.FileSizeBytes,
+                    ModifiedAt: file.UploadedAt,
+                    IsDirectory: false,
+                    HarvestOperationId: harvestOpId,
+                    ThumbnailPath: file.ThumbnailPath
+                ));
             }
 
             // Sorting
@@ -235,8 +225,10 @@ namespace Farm.Web.Api.Services.Gcode
                 safeName = Path.GetFileName(fullTarget);
             }
 
-            await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             await file.CopyToAsync(fs, ct);
+            await fs.FlushAsync(ct);  // Ensure all bytes are written before reading
+            fs.Position = 0;  // Reset position
 
             System.IO.FileInfo info = new(fullTarget);
             string virtualFilePath = CombineVirtual(virtualDir, safeName);
@@ -271,6 +263,8 @@ namespace Farm.Web.Api.Services.Gcode
         {
             try
             {
+                _logger.LogInformation("FinalizeChunkedUploadAsync: Starting for {FileName}, received thumbnailPath={ThumbnailPath}", originalFileName, thumbnailPath ?? "(null)");
+                
                 if (!File.Exists(filePath))
                 {
                     _logger.LogWarning("Cannot finalize chunked upload: file not found at {FilePath}", filePath);
@@ -279,6 +273,7 @@ namespace Farm.Web.Api.Services.Gcode
 
                 // Extract metadata from the uploaded file
                 GcodeMetadataExtracted? metadata = await chunkedUploadService.ExtractMetadataFromFileAsync(filePath, ct);
+                _logger.LogInformation("FinalizeChunkedUploadAsync: Metadata extracted for {FileName}", originalFileName);
 
                 // Get file info
                 FileInfo fileInfo = new(filePath);
@@ -686,6 +681,8 @@ namespace Farm.Web.Api.Services.Gcode
             long fileSizeBytes,
             CancellationToken ct)
         {
+            _logger.LogInformation("CreateGcodeFileRecordAsync: Starting for {FileName} at {FilePath}", originalFileName, filePath);
+
             // Compute file hash
             string fileHash;
             await using (FileStream fs = System.IO.File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -697,7 +694,10 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Extract metadata and thumbnail
             GcodeMetadataExtracted? metadata = await ExtractMetadataAsync(filePath, ct);
+            _logger.LogInformation("CreateGcodeFileRecordAsync: Metadata extracted for {FileName}", originalFileName);
+            
             string? thumbnailPath = await ExtractThumbnailAsync(filePath, ct);
+            _logger.LogInformation("CreateGcodeFileRecordAsync: Thumbnail path for {FileName} is: {ThumbnailPath}", originalFileName, thumbnailPath ?? "(null)");
 
             // Create database record
             GcodeFile gcodeFile = new()
@@ -705,6 +705,7 @@ namespace Farm.Web.Api.Services.Gcode
                 Id = Guid.NewGuid(),
                 OriginalFileName = originalFileName,
                 DisplayName = Path.GetFileNameWithoutExtension(originalFileName),
+                FileDirectory = Path.GetDirectoryName(filePath) ?? string.Empty,
                 FilePath = filePath,
                 FileSizeBytes = fileSizeBytes,
                 FileHash = fileHash,

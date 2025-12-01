@@ -1404,6 +1404,30 @@ public class Model3DDto
 }
 
 /// <summary>
+/// Entry in a hierarchical model file listing (file or directory)
+/// </summary>
+public record Model3DEntryDto(
+    string Path,
+    string Name,
+    long Size,
+    DateTime ModifiedAt,
+    bool IsDirectory,
+    string? ThumbnailUrl = null
+);
+
+/// <summary>
+/// Response envelope for hierarchical model file listing
+/// </summary>
+public record Model3DListResponse(
+    IReadOnlyList<Model3DEntryDto> Files,
+    int TotalFiles,
+    long TotalSize,
+    int Page,
+    int PageSize,
+    int TotalPages,
+    int TotalItems);
+
+/// <summary>
 /// Tag for organizing and categorizing 3D models
 /// </summary>
 public class Model3DTagDto
