@@ -535,6 +535,9 @@ public static class ServiceCollectionExtensions
 
             // Polling update service for PrusaLink printers (HTTP polling every 5 seconds)
             _ = services.AddHostedService<PrusaLinkPollingService>();
+
+            // Polling update service for OctoPrint printers (HTTP polling every 10 seconds)
+            _ = services.AddHostedService<OctoPrintPollingService>();
         }
     }
 
