@@ -19,12 +19,20 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
             StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
             Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
 
+            // Extract thumbnail URL from job file refs if available
+            string? thumbnailUrl = job?.File?.Refs?.Thumbnail;
+            if (!string.IsNullOrEmpty(thumbnailUrl) && !thumbnailUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                // Convert relative thumbnail path to absolute URL
+                thumbnailUrl = new Uri(new Uri(baseUrl.TrimEnd('/')), thumbnailUrl).ToString();
+            }
+
             return new PrusaCompositeStatus(
                 status?.Printer != null,
                 status?.Printer?.State,
                 job?.Progress,
                 job?.File?.Name,
-                null, // Thumbnail handling would need additional endpoint
+                thumbnailUrl,
                 null, // Camera stream URL would need camera configuration
                 null  // Camera snapshot URL would need camera configuration
             );
@@ -73,11 +81,19 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
                 return null;
             }
 
+            // Extract thumbnail URL from job file refs if available
+            string? thumbnailUrl = job.File?.Refs?.Thumbnail;
+            if (!string.IsNullOrEmpty(thumbnailUrl) && !thumbnailUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                // Convert relative thumbnail path to absolute URL
+                thumbnailUrl = new Uri(new Uri(baseUrl.TrimEnd('/')), thumbnailUrl).ToString();
+            }
+
             return new PrusaJob(
                 job.State,
                 job.Progress,
                 job.File?.Name,
-                null, // Thumbnail handling would need additional logic
+                thumbnailUrl,
                 null, // Camera stream URL would need camera configuration  
                 null  // Camera snapshot URL would need camera configuration
             );
