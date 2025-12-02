@@ -225,5 +225,34 @@ public class OctoPrintClient(HttpClient httpClient) : IOctoPrintClient
     {
         return _httpClient.SendAsync(request, cancellationToken);
     }
+
+    public async Task<string> GetHistoryListAsync(string baseUrl, string apiKey, int? limit = null, int? start = null)
+    {
+        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history");
+        request.Headers.Add("X-Api-Key", apiKey);
+        
+        // OctoPrint supports limit and start query parameters for pagination
+        var queryParams = new List<string>();
+        if (limit.HasValue)
+            queryParams.Add($"limit={limit.Value}");
+        if (start.HasValue)
+            queryParams.Add($"start={start.Value}");
+        
+        if (queryParams.Count > 0)
+        {
+            request.RequestUri = new Uri($"{baseUrl}/api/history?{string.Join("&", queryParams)}");
+        }
+        
+        HttpResponseMessage response = await _httpClient.SendAsync(request);
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    public async Task<string> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId)
+    {
+        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
+        request.Headers.Add("X-Api-Key", apiKey);
+        HttpResponseMessage response = await _httpClient.SendAsync(request);
+        return await response.Content.ReadAsStringAsync();
+    }
 }
 

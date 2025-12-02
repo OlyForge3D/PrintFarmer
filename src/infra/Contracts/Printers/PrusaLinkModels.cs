@@ -286,6 +286,22 @@ public class FirmwareMetadata
     public int? PrinterVersion { get; set; }
 }
 
+/// <summary>
+/// Represents a file child entry from the legacy /api/files endpoint.
+/// Used as a fallback when the v1 API fails due to authentication issues.
+/// </summary>
+public class FileChild
+{
+    public string Name { get; set; } = string.Empty;
+    public string Display { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
+    public string? Origin { get; set; }
+    public string? Type { get; set; }
+
+    [SuppressMessage("Performance", "CA1819:Properties should not return arrays", Justification = "DTO for JSON deserialization")]
+    public FileChild[]? Children { get; set; }
+}
+
 public class FolderInfo : FileInfoBase
 {
     public FileInfoBase[] Children { get; set; } = Array.Empty<FileInfoBase>();

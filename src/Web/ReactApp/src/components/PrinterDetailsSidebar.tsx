@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, FileText, History } from 'lucide-react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { usePrinter } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
@@ -7,6 +7,7 @@ import { formatPrinterState } from '@/utils/printerStateDisplay';
 import type { TempTargets, MoveRequest } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
+import { PrinterFilesModal } from '@/components/PrinterFilesModal';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/components/ui';
 import { 
@@ -86,6 +87,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const status = printerId ? printerStatuses.get(printerId) : undefined;
   
   const [showHistory, setShowHistory] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const [hotendTemp, setHotendTemp] = useState<number | ''>('');
   const [bedTemp, setBedTemp] = useState<number | ''>('');
   const [moveX, setMoveX] = useState<number | ''>('');
@@ -552,6 +554,37 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           </div>
         </div>
 
+        {/* Files and History Section */}
+        <div className="flex flex-col gap-2">
+          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
+            Quick Access
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowFiles(true)}
+              className="flex items-center justify-center gap-2"
+              title="View printer files"
+            >
+              <FileText className="h-4 w-4" />
+              <span>Files</span>
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowHistory(true)}
+              className="flex items-center justify-center gap-2"
+              title="View print history"
+            >
+              <History className="h-4 w-4" />
+              <span>History</span>
+            </Button>
+          </div>
+        </div>
+
         {/* Manual Movement Input Section */}
         <div className="space-y-2">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">Manual Move</div>
@@ -680,6 +713,13 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
       <PrinterHistoryModal
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
+        printer={printer}
+      />
+
+      {/* Files Modal */}
+      <PrinterFilesModal
+        isOpen={showFiles}
+        onClose={() => setShowFiles(false)}
         printer={printer}
       />
     </div>

@@ -246,6 +246,7 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
     {
         try
         {
+            // Try the v1 API first (more official, supports metadata)
             FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
             if (folderInfo is FolderInfo folder)
             {
@@ -262,8 +263,22 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to get file list from {BaseUrl}", baseUrl);
-            return Array.Empty<string>();
+            // Fallback to legacy /api/files endpoint (OctoPrint compatibility)
+            // This endpoint also requires API key authentication
+            _logger?.LogWarning($"Failed to get file list from v1 API, trying legacy endpoint: {ex.Message}");
+            try
+            {
+                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, apiKey, ct);
+                return legacyFiles
+                    .Where(f => f.Type != "FOLDER" && !string.IsNullOrEmpty(f.Display))
+                    .Select(f => f.Display)
+                    .ToArray();
+            }
+            catch (Exception legacyEx)
+            {
+                _logger?.LogError(legacyEx, "Failed to get file list from legacy endpoint as well");
+                return Array.Empty<string>();
+            }
         }
     }
 

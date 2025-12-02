@@ -16,6 +16,16 @@ namespace Farm.Web.Api.Services.Interfaces
         Task<string> GetCameraStreamUrlAsync(string baseUrl, string apiKey);
 
         /// <summary>
+        /// Gets the list of completed print jobs from OctoPrint history.
+        /// </summary>
+        Task<string> GetHistoryListAsync(string baseUrl, string apiKey, int? limit = null, int? start = null);
+
+        /// <summary>
+        /// Gets details for a specific print job from OctoPrint history.
+        /// </summary>
+        Task<string> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId);
+
+        /// <summary>
         /// Creates a PrinterDto from OctoPrint printer entity and status information.
         /// Encapsulates OctoPrint-specific DTO creation logic.
         /// </summary>

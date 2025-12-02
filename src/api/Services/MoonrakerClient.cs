@@ -1473,18 +1473,38 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
             }
 
             Uri uri = new(baseUri, relative);
+            _logger.LogInformation($"[Moonraker] Fetching history from {uri}");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
+                _logger.LogWarning($"[Moonraker] History API returned {resp.StatusCode} from {uri}");
                 return null;
             }
 
+            string content = await resp.Content.ReadAsStringAsync(cts.Token);
+            _logger.LogDebug($"[Moonraker] History response: {content.Substring(0, Math.Min(200, content.Length))}...");
             MoonrakerResponse<HistoryListResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
-            return response?.Result;
+            if (response?.Result == null)
+            {
+                _logger.LogWarning($"[Moonraker] History response deserialization returned null");
+                return null;
+            }
+            _logger.LogInformation($"[Moonraker] Successfully fetched {response.Result.Count} history items");
+            return response.Result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("History request cancelled by user");
+            throw;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogWarning(ex, $"[Moonraker] History request timed out for {baseUrl}");
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, $"Failed to get history list from {baseUrl}: {ex.Message}");
+            _logger.LogError(ex, $"[Moonraker] Failed to get history list from {baseUrl}: {ex.Message}");
             return null;
         }
     }

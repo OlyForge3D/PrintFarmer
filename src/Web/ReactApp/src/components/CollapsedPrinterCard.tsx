@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
 import {
-  PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw
+  PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw, FileText
 } from 'lucide-react';
 import { PauseIcon, PlayIcon, EmergencyStopIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
+import { PrinterFilesModal } from '@/components/PrinterFilesModal';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
 import { PrinterBackend, type Printer } from '@/types/api';
@@ -60,6 +61,7 @@ export function CollapsedPrinterCard({
 }: CollapsedPrinterCardProps) {
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const [collapsedImageVisible, setCollapsedImageVisible] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +205,18 @@ export function CollapsedPrinterCard({
           <History className="h-4 w-4" />
         </Button>
         
+        {/* Files button */}
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          onClick={() => setShowFiles(true)}
+          className="!p-1 !h-auto"
+          title="View printer files"
+        >
+          <FileText className="h-4 w-4" />
+        </Button>
+        
         {/* Edit button */}
         <Button
           type="button"
@@ -292,6 +306,13 @@ export function CollapsedPrinterCard({
       <PrinterHistoryModal
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
+        printer={printer}
+      />
+
+      {/* Files Modal */}
+      <PrinterFilesModal
+        isOpen={showFiles}
+        onClose={() => setShowFiles(false)}
         printer={printer}
       />
     </div>

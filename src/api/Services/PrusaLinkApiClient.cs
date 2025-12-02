@@ -276,7 +276,8 @@ public class PrusaLinkApiClient
     public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null,
         string? acceptLanguage = null, string? accept = null, CancellationToken ct = default)
     {
-        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), apiKey);
+        string url = new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString();
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
         {
             request.Headers.Add("Accept-Language", acceptLanguage);
@@ -288,7 +289,11 @@ public class PrusaLinkApiClient
         }
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
-        _ = response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger?.LogError($"PrusaLink API returned {response.StatusCode} for {url}");
+            throw new HttpRequestException($"PrusaLink API error: {response.StatusCode}", null, response.StatusCode);
+        }
         string json = await response.Content.ReadAsStringAsync(ct);
 
         // Deserialize to appropriate type based on response content
@@ -508,6 +513,57 @@ public class PrusaLinkApiClient
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), apiKey);
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
+    }
+
+    /// <summary>
+    /// Gets file list using the legacy /api/files endpoint (OctoPrint compatibility endpoint).
+    /// This endpoint also requires API key authentication and returns files grouped by storage location.
+    /// Used as a fallback when /api/v1/files fails due to authentication issues.
+    /// Reference: FDM-Monster implementation at https://github.com/fdm-monster/fdm-monster
+    /// </summary>
+    public async Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        string url = new Uri(EnsureBaseUri(baseUrl), "api/files").ToString();
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, apiKey);
+        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger?.LogError($"PrusaLink legacy files API returned {response.StatusCode} for {url}");
+            throw new HttpRequestException($"PrusaLink legacy API error: {response.StatusCode}", null, response.StatusCode);
+        }
+
+        string json = await response.Content.ReadAsStringAsync(ct);
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        List<FileChild> allFiles = [];
+
+        // Response structure: { "files": [ { "path": "/usb", "children": [...], ... }, { "path": "/local", "children": [...], ... } ] }
+        if (document.RootElement.TryGetProperty("files", out JsonElement filesArray))
+        {
+            foreach (JsonElement storageElement in filesArray.EnumerateArray())
+            {
+                // Look for the USB storage (print files are typically here)
+                if (storageElement.TryGetProperty("path", out JsonElement pathElement))
+                {
+                    string? storagePath = pathElement.GetString();
+                    // Collect files from /usb or /local storage
+                    if ((storagePath == "/usb" || storagePath == "/local") && storageElement.TryGetProperty("children", out JsonElement childrenArray))
+                    {
+                        foreach (JsonElement childElement in childrenArray.EnumerateArray())
+                        {
+                            FileChild? fileChild = JsonSerializer.Deserialize<FileChild>(childElement.GetRawText(), _jsonOptions);
+                            if (fileChild != null)
+                            {
+                                allFiles.Add(fileChild);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return allFiles;
     }
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string? apiKey)

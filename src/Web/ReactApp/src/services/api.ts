@@ -573,6 +573,15 @@ export class ApiClient {
     return response.data;
   }
 
+  // ============ Printer Files API methods ============
+
+  async getPrinterFileList(printerId: string): Promise<string[]> {
+    const response = await this.client.get<string[]>(
+      `/printers/${printerId}/files`
+    );
+    return response.data;
+  }
+
   // ============ Catalog API methods ============
 
   async getManufacturers(): Promise<ManufacturerDto[]> {
