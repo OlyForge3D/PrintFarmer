@@ -5846,6 +5846,13 @@ validate_external_storage_permissions() {
             continue
         fi
         
+        # Skip database directory validation - ownership will be changed by database provider
+        if [ "$desc" = "Database" ]; then
+            print_info "⊘ [$desc] $path (skipped - ownership managed by database provider)"
+            ((valid_dirs++))
+            continue
+        fi
+        
         if [ ! -d "$path" ]; then
             print_error "✗ [$desc] Directory not found: $path"
             ((invalid_dirs++))
@@ -6028,11 +6035,29 @@ verify_deployment() {
     # Test worker health if enabled
     if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
         print_info "Testing OrcaSlicer worker..."
-        local orca_url="http://localhost:${ORCA_HOST_PORT:-8081}"
-        if curl -sf "$orca_url/healthz" >/dev/null 2>&1; then
+        local orca_checked=false
+        local orca_container=""
+        
+        # Get the first OrcaSlicer worker container (whether single or scaled)
+        orca_container=$(docker-compose -f "$COMPOSE_FILE" ps -q orcaslicer-worker 2>/dev/null | head -1)
+        
+        if [ -n "$orca_container" ]; then
+            # Check container health via docker-compose exec
+            if docker-compose -f "$COMPOSE_FILE" exec -T orcaslicer-worker curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
+                print_success "✓ OrcaSlicer worker: Healthy"
+                orca_checked=true
+            fi
+        fi
+        
+        # Fallback: try localhost:port (works when worker port is bound to host in monolithic mode)
+        if [ "$orca_checked" = false ] && curl -sf "http://localhost:${ORCA_HOST_PORT:-8081}/healthz" >/dev/null 2>&1; then
             print_success "✓ OrcaSlicer worker: Healthy"
-        else
+            orca_checked=true
+        fi
+        
+        if [ "$orca_checked" = false ]; then
             print_warning "✗ OrcaSlicer worker: Not responding"
+            print_info "  (Worker may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
             health_check_failed=true
         fi
     fi

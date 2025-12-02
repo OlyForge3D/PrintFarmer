@@ -38,7 +38,7 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
     private string _socketState = "unopened"; // "unopened", "connecting", "authenticated", "error", "closed"
 
     // Polling fallback when WebSocket fails
-    private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(5);
     private DateTime _lastHttpPoll = DateTime.MinValue;
 
     public string SocketState => _socketState;

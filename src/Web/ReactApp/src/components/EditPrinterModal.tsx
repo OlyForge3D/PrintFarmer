@@ -229,15 +229,15 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             )}
-            {formData.backend === PrinterBackend.PrusaLink && (
+            {(formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && (
               <div className="col-span-2">
-                <FormField label="API Key (PrusaLink)">
+                <FormField label={formData.backend === PrinterBackend.PrusaLink ? "API Key (PrusaLink)" : "API Key (OctoPrint)"}>
                   <Input
                     type="text"
                     value={formData.apiKey || ''}
                     onChange={e => handleInputChange('apiKey', e.target.value)}
-                    placeholder="Enter PrusaLink API Key"
-                    title="PrusaLink API Key"
+                    placeholder={formData.backend === PrinterBackend.PrusaLink ? "Enter PrusaLink API Key" : "Enter OctoPrint API Key"}
+                    title={formData.backend === PrinterBackend.PrusaLink ? "PrusaLink API Key" : "OctoPrint API Key"}
                   />
                 </FormField>
               </div>

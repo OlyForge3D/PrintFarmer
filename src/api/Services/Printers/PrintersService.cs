@@ -417,7 +417,19 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
-            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP : Farm.Infrastructure.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, BackendPort: p.BackendPort, FrontendPort: p.FrontendPort, InMaintenance: p.InMaintenance, IsEnabled: p.IsEnabled)).ToArray();
+            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: MapBackendEnum(p.Backend), ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, BackendPort: p.BackendPort, FrontendPort: p.FrontendPort, InMaintenance: p.InMaintenance, IsEnabled: p.IsEnabled)).ToArray();
+        }
+
+        /// <summary>
+        /// Maps an integer backend value to the PrinterBackend enum.
+        /// Handles PrusaLink (2), SDCP (3), OctoPrint (4), and defaults to Moonraker.
+        /// </summary>
+        private static PrinterBackend MapBackendEnum(int backendValue)
+        {
+            return backendValue == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink
+                : backendValue == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP
+                : backendValue == (int)Farm.Infrastructure.PrinterBackend.OctoPrint ? Farm.Infrastructure.PrinterBackend.OctoPrint
+                : Farm.Infrastructure.PrinterBackend.Moonraker;
         }
 
         private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
@@ -494,7 +506,7 @@ namespace Farm.Web.Api.Services.Printers
                     PrinterName = p.Name,
                     PrinterModel = p.Model != null ? p.Model.Name ?? string.Empty : string.Empty,
                     ManufacturerName = p.Manufacturer != null ? p.Manufacturer.Name : null,
-                    Backend = p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP : Farm.Infrastructure.PrinterBackend.Moonraker,
+                    Backend = MapBackendEnum(p.Backend),
                     IpAddress = p.IpAddress,
                     // Add import-friendly fields for re-importing
                     ServerUrl = p.ServerUrl,
@@ -667,7 +679,7 @@ namespace Farm.Web.Api.Services.Printers
                 State: null,
                 ManufacturerName: p.Manufacturer?.Name,
                 ModelName: p.Model?.Name,
-                Backend: p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP : Farm.Infrastructure.PrinterBackend.Moonraker,
+                Backend: MapBackendEnum(p.Backend),
                 ApiKey: p.ApiKey,
                 OriginalServerUrl: p.OriginalServerUrl,
                 IpAddress: p.IpAddress
@@ -985,6 +997,11 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
+            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.SendHomeAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+            }
+
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.SendHomeAsync(moonrakerUrl, ct).ConfigureAwait(false);
         }
@@ -995,6 +1012,11 @@ namespace Farm.Web.Api.Services.Printers
             if (p == null)
             {
                 return false;
+            }
+
+            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.HomeXYAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1009,6 +1031,11 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
+            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.HomeZAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+            }
+
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.HomeZAsync(moonrakerUrl, ct).ConfigureAwait(false);
         }
@@ -1019,6 +1046,26 @@ namespace Farm.Web.Api.Services.Printers
             if (p == null)
             {
                 return false;
+            }
+
+            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                // OctoPrint: Use native API for both bed and hotend temperatures
+                bool success = true;
+                
+                if (bed.HasValue)
+                {
+                    bool bedSuccess = await _octoprint.SetBedTempAsync(p.ServerUrl, p.ApiKey ?? string.Empty, bed.Value).ConfigureAwait(false);
+                    success = success && bedSuccess;
+                }
+                
+                if (hotend.HasValue)
+                {
+                    bool hotendSuccess = await _octoprint.SetHotendTempAsync(p.ServerUrl, p.ApiKey ?? string.Empty, hotend.Value).ConfigureAwait(false);
+                    success = success && hotendSuccess;
+                }
+                
+                return success;
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1061,6 +1108,10 @@ namespace Farm.Web.Api.Services.Printers
             {
                 return await _sdcp.PausePrintAsync(p.ServerUrl, ct).ConfigureAwait(false);
             }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.PauseAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+            }
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.PauseAsync(moonrakerUrl, ct).ConfigureAwait(false);
         }
@@ -1077,6 +1128,10 @@ namespace Farm.Web.Api.Services.Printers
             {
                 return await _sdcp.ResumePrintAsync(p.ServerUrl, ct).ConfigureAwait(false);
             }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.ResumeAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+            }
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.ResumeAsync(moonrakerUrl, ct).ConfigureAwait(false);
         }
@@ -1092,6 +1147,10 @@ namespace Farm.Web.Api.Services.Printers
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
                 return await _sdcp.CancelPrintAsync(p.ServerUrl, ct).ConfigureAwait(false);
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.CancelPrintAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.EmergencyStopAsync(moonrakerUrl, ct).ConfigureAwait(false);
@@ -1142,6 +1201,10 @@ namespace Farm.Web.Api.Services.Printers
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
                 return await _sdcp.StartPrintAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.StartJobAsync(p.ServerUrl, p.ApiKey ?? string.Empty, filename).ConfigureAwait(false);
             }
             return false;
         }
@@ -1283,6 +1346,7 @@ namespace Farm.Web.Api.Services.Printers
             {
                 PrinterBackend.PrusaLink => await _prusa.GetFileListAsync(p.ServerUrl, p.ApiKey, ct).ConfigureAwait(false),
                 PrinterBackend.SDCP => await _sdcp.GetFileListAsync(p.ServerUrl, ct).ConfigureAwait(false),
+                PrinterBackend.OctoPrint => await _octoprint.GetFileListAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false),
                 _ => Array.Empty<string>()
             };
 
