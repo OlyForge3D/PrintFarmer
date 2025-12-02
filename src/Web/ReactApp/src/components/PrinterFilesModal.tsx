@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, FileText, AlertCircle, Play, Copy, Trash2, Image } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { X, FileText, AlertCircle, Play, Copy, Trash2, Image, ArrowUpDown } from 'lucide-react';
+import { Button, Select } from '@/components/ui';
 import { apiClient } from '@/services/api';
 import type { Printer, PrinterFileDto } from '@/types/api';
 
@@ -11,12 +11,17 @@ interface PrinterFilesModalProps {
   printer: Printer;
 }
 
+type SortBy = 'name' | 'modified' | 'size';
+type SortOrder = 'asc' | 'desc';
+
 export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModalProps) {
   const [files, setFiles] = useState<PrinterFileDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
   const [hoveredThumbnail, setHoveredThumbnail] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SortBy>('name');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
   useEffect(() => {
     if (isOpen && printer) {
@@ -62,6 +67,50 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     }
     // TODO: Implement delete functionality
     console.log('Delete file:', fileName);
+  };
+
+  const getSortedFiles = () => {
+    const sorted = [...files];
+    
+    sorted.sort((a, b) => {
+      let aValue: string | number;
+      let bValue: string | number;
+
+      if (sortBy === 'name') {
+        aValue = a.fileName.toLowerCase();
+        bValue = b.fileName.toLowerCase();
+      } else if (sortBy === 'modified') {
+        aValue = a.modified ?? 0;
+        bValue = b.modified ?? 0;
+      } else if (sortBy === 'size') {
+        aValue = a.sizeBytes ?? 0;
+        bValue = b.sizeBytes ?? 0;
+      } else {
+        return 0;
+      }
+
+      if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  };
+
+  const toggleSortOrder = () => {
+    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+  };
+
+  const formatFileSize = (bytes?: number): string => {
+    if (!bytes) return 'N/A';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatModifiedDate = (timestamp?: number): string => {
+    if (!timestamp) return 'N/A';
+    return new Date(timestamp * 1000).toLocaleDateString() + ' ' + new Date(timestamp * 1000).toLocaleTimeString();
   };
 
   if (!isOpen) {
@@ -125,14 +174,37 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               </div>
             ) : (
               <div>
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-medium text-pf-text-primary">
                     {files.length} File{files.length !== 1 ? 's' : ''}
                   </h3>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="sort-by" className="text-sm text-pf-text-secondary">Sort by:</label>
+                    <Select
+                      id="sort-by"
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as SortBy)}
+                      className="text-sm"
+                    >
+                      <option value="name">Name</option>
+                      <option value="modified">Date Modified</option>
+                      <option value="size">File Size</option>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="sm"
+                      onClick={toggleSortOrder}
+                      className="!p-2 !h-auto"
+                      title={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+                    >
+                      <ArrowUpDown className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  {files.map((file) => (
+                  {getSortedFiles().map((file) => (
                     <div
                       key={file.fileName}
                       className="relative flex items-center justify-between bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
@@ -158,7 +230,11 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                         )}
                         <div className="min-w-0 flex-1">
                           <p className="text-pf-text-primary break-words font-medium">{file.fileName}</p>
-                          <p className="text-xs text-pf-text-tertiary">G-code file</p>
+                          <div className="flex gap-4 text-xs text-pf-text-tertiary mt-1">
+                            <span>G-code file</span>
+                            {file.sizeBytes && <span>{formatFileSize(file.sizeBytes)}</span>}
+                            {file.modified && <span>{formatModifiedDate(file.modified)}</span>}
+                          </div>
                         </div>
                       </div>
 

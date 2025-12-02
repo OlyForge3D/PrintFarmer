@@ -217,7 +217,9 @@ public partial record PrinterStatusDto
 /// </summary>
 public record PrinterFileDto(
     string FileName,
-    string? ThumbnailUrl = null);
+    string? ThumbnailUrl = null,
+    long? Modified = null,
+    long? SizeBytes = null);
 
 // Real-time update payload for SignalR
 /// <summary>

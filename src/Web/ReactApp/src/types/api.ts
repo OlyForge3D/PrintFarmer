@@ -251,6 +251,8 @@ export interface PrinterStatusUpdate {
 export interface PrinterFileDto {
   fileName: string;
   thumbnailUrl?: string;
+  modified?: number; // Unix timestamp in seconds (only for Moonraker)
+  sizeBytes?: number; // File size in bytes (only for Moonraker)
 }
 
 // DTOs for API operations

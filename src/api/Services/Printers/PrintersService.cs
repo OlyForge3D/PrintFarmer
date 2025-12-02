@@ -1214,73 +1214,101 @@ namespace Farm.Web.Api.Services.Printers
                 return Array.Empty<PrinterFileDto>();
             }
 
-            string[] fileNames = ((PrinterBackend)p.Backend) switch
+            // For Moonraker, use GetFileListAsync to get file info with metadata
+            if (((PrinterBackend)p.Backend) == PrinterBackend.Moonraker)
             {
-                PrinterBackend.Moonraker => await _moon.GetFileListAsync(BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort), ct).ConfigureAwait(false),
+                try
+                {
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    string[] fileNames = await _moon.GetFileListAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                    
+                    if (fileNames.Length == 0)
+                    {
+                        return Array.Empty<PrinterFileDto>();
+                    }
+
+                    // Get detailed metadata for each file
+                    List<PrinterFileDto> result = new();
+                    foreach (string fileName in fileNames)
+                    {
+                        string? thumbnailUrl = null;
+                        long? modified = null;
+                        long? sizeBytes = null;
+
+                        try
+                        {
+                            GCodeMetadata? metadata = await _moon.GetFileMetadataAsync(
+                                moonrakerUrl,
+                                fileName,
+                                ct)
+                                .ConfigureAwait(false);
+
+                            if (metadata != null)
+                            {
+                                // Capture file metadata
+                                modified = (long)metadata.Modified;
+                                sizeBytes = metadata.Size;
+
+                                if (metadata.Thumbnails.Length > 0)
+                                {
+                                    // Get the largest thumbnail
+                                    ThumbnailInfo? largestThumb = metadata.Thumbnails
+                                        .OrderByDescending(t => t.Width * t.Height)
+                                        .FirstOrDefault();
+
+                                    if (largestThumb != null)
+                                    {
+                                        // Build full URL for thumbnail
+                                        thumbnailUrl = $"{p.ServerUrl.TrimEnd('/')}/server/files/gcodes/{Uri.EscapeDataString(largestThumb.RelativePath)}";
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Silently ignore metadata fetch errors, still add file to list
+                        }
+
+                        result.Add(new PrinterFileDto(fileName, thumbnailUrl, modified, sizeBytes));
+                    }
+
+                    return result.ToArray();
+                }
+                catch
+                {
+                    // Fallback if Moonraker file list fails
+                    return Array.Empty<PrinterFileDto>();
+                }
+            }
+
+            // For PrusaLink and SDCP, fetch file list
+            string[] fileNames2 = ((PrinterBackend)p.Backend) switch
+            {
                 PrinterBackend.PrusaLink => await _prusa.GetFileListAsync(p.ServerUrl, p.ApiKey, ct).ConfigureAwait(false),
                 PrinterBackend.SDCP => await _sdcp.GetFileListAsync(p.ServerUrl, ct).ConfigureAwait(false),
                 _ => Array.Empty<string>()
             };
 
-            if (fileNames.Length == 0)
+            if (fileNames2.Length == 0)
             {
                 return Array.Empty<PrinterFileDto>();
             }
 
-            // Get thumbnails for each file
-            List<PrinterFileDto> result = new();
-            foreach (string fileName in fileNames)
+            // For PrusaLink and SDCP, no metadata available currently
+            // PrusaLink: thumbnail retrieval requires Digest Authentication
+            // According to PrusaLink OpenAPI spec, v1 endpoints (/api/v1/files/{storage}/{path})
+            // require Digest Auth, NOT X-Api-Key header authentication.
+            // The legacy /api/files endpoint (OctoPrint compatible) works with X-Api-Key
+            // but doesn't include thumbnail metadata in the response.
+            // TODO: Implement Digest Authentication support for PrusaLink to enable v1 API access
+            // SDCP: no metadata API currently exposed
+            List<PrinterFileDto> result2 = new();
+            foreach (string fileName in fileNames2)
             {
-                string? thumbnailUrl = null;
-
-                // For Moonraker, try to get file metadata which includes thumbnails
-                if (((PrinterBackend)p.Backend) == PrinterBackend.Moonraker)
-                {
-                    try
-                    {
-                        GCodeMetadata? metadata = await _moon.GetFileMetadataAsync(
-                            BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort),
-                            fileName,
-                            ct)
-                            .ConfigureAwait(false);
-
-                        if (metadata?.Thumbnails.Length > 0)
-                        {
-                            // Get the largest thumbnail
-                            ThumbnailInfo? largestThumb = metadata.Thumbnails
-                                .OrderByDescending(t => t.Width * t.Height)
-                                .FirstOrDefault();
-
-                            if (largestThumb != null)
-                            {
-                                // Build full URL for thumbnail
-                                thumbnailUrl = $"{p.ServerUrl.TrimEnd('/')}/server/files/gcodes/{Uri.EscapeDataString(largestThumb.RelativePath)}";
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Silently ignore thumbnail fetch errors
-                    }
-                }
-                // For PrusaLink, thumbnail retrieval requires Digest Authentication
-                // According to PrusaLink OpenAPI spec, v1 endpoints (/api/v1/files/{storage}/{path})
-                // require Digest Auth, NOT X-Api-Key header authentication.
-                // The legacy /api/files endpoint (OctoPrint compatible) works with X-Api-Key
-                // but doesn't include thumbnail metadata in the response.
-                // TODO: Implement Digest Authentication support for PrusaLink to enable v1 API access
-                else if (((PrinterBackend)p.Backend) == PrinterBackend.PrusaLink)
-                {
-                    // Thumbnails not currently supported for PrusaLink due to auth limitations
-                    // PrusaLink requires Digest Auth for the v1 API which has thumbnail info
-                    thumbnailUrl = null;
-                }
-                // For SDCP, similar logic could be added
-
-                result.Add(new PrinterFileDto(fileName, thumbnailUrl));
+                result2.Add(new PrinterFileDto(fileName, null, null, null));
             }
 
-            return result.ToArray();
+            return result2.ToArray();
         }
 
         public async Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct)
