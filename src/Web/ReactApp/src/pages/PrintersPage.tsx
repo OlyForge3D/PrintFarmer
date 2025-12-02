@@ -13,6 +13,7 @@ import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import type { Printer } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
 
 import { Printer as PrinterIcon, LayoutGrid, List } from 'lucide-react';
 
@@ -21,8 +22,12 @@ type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
 type ViewMode = 'cards' | 'table';
 
-
-
+// Helper function to get backend name from enum value
+function getBackendName(backend: PrinterBackend | string | number): string {
+  if (typeof backend === 'string') return backend;
+  // Map enum value to name by looking up the enum
+  return PrinterBackend[backend as number] || '';
+}
 
 export function PrintersPage() {
   const { hasPermission } = useAuth();
@@ -32,6 +37,7 @@ export function PrintersPage() {
     error,
     refetch: refetchPrinters
   } = usePrintersWithCameraUrls();
+  
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
@@ -62,21 +68,7 @@ export function PrintersPage() {
     }
     // Backend filter
     if (backendFilter !== 'all') {
-      filtered = filtered.filter(p => {
-        let backendName = '';
-        if (typeof p.backend === 'string') {
-          backendName = p.backend;
-        } else if (typeof p.backend === 'number') {
-          switch (p.backend) {
-            case 0: backendName = 'Moonraker'; break;
-            case 1: backendName = 'PrusaLink'; break;
-            case 2: backendName = 'SDCP'; break;
-            case 3: backendName = 'OctoPrint'; break;
-            default: backendName = '';
-          }
-        }
-        return backendName === backendFilter;
-      });
+      filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
     }
     return filtered;
   }, [printers, stateFilter, backendFilter]);

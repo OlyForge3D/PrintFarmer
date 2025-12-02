@@ -378,18 +378,15 @@ namespace Farm.Web.Api.Services.Printers
                 string? streamUrl = null;
                 string? snapshotUrl = null;
 
-                if (await IsCameraAvailableAsync(p.ServerUrl, p.Backend, p.FrontendPort, ct))
+                // PrusaLink camera URLs are not supported due to encoding issues
+                if (p.Backend != (int)Farm.Infrastructure.PrinterBackend.PrusaLink && 
+                    await IsCameraAvailableAsync(p.ServerUrl, p.Backend, p.FrontendPort, ct))
                 {
                     // Delegate to backend-specific client for URL generation
                     if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker) // Moonraker
                     {
                         streamUrl = await _moon.GetCameraStreamUrlAsync(p.ServerUrl, p.FrontendPort, ct);
                         snapshotUrl = await _moon.GetCameraSnapshotUrlAsync(p.ServerUrl, p.FrontendPort, ct);
-                    }
-                    else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink) // PrusaLink
-                    {
-                        streamUrl = await _prusa.GetCameraStreamUrlAsync(p.ServerUrl, p.FrontendPort, ct);
-                        snapshotUrl = await _prusa.GetCameraSnapshotUrlAsync(p.ServerUrl, p.FrontendPort, ct);
                     }
                     else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP) // SDCP
                     {

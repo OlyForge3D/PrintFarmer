@@ -143,8 +143,8 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
             UriBuilder builder = new(baseUri)
             {
                 Port = port,
-                Path = "/webcam/?action=snapshot",
-                Query = null
+                Path = "/webcam/",
+                Query = "action=snapshot"
             };
 
             return Task.FromResult<string?>(builder.Uri.ToString());
@@ -176,8 +176,8 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
             UriBuilder builder = new(baseUri)
             {
                 Port = port,
-                Path = "/webcam/?action=stream",
-                Query = null
+                Path = "/webcam/",
+                Query = "action=stream"
             };
 
             return Task.FromResult<string?>(builder.Uri.ToString());

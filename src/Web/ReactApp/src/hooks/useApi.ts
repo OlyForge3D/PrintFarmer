@@ -95,6 +95,13 @@ export function usePrintersWithCameraUrls(includeDisabled = false) {
   const printersQuery = usePrintersFast(includeDisabled);
   const cameraUrlsQuery = usePrinterCameraUrls();
 
+  // Compute derived values based on query states
+  const isLoading = printersQuery.isLoading || cameraUrlsQuery.isLoading;
+  const isError = printersQuery.isError || cameraUrlsQuery.isError;
+  const error = printersQuery.error || cameraUrlsQuery.error;
+  const isSuccess = (printersQuery.isSuccess && cameraUrlsQuery.isSuccess) || (!!printersQuery.data && !!cameraUrlsQuery.data);
+  const isFetching = printersQuery.isFetching || cameraUrlsQuery.isFetching;
+
   return useMemo(() => {
     if (printersQuery.data && cameraUrlsQuery.data) {
       // Create a map of camera URLs by printer ID for efficient lookup
@@ -106,7 +113,7 @@ export function usePrintersWithCameraUrls(includeDisabled = false) {
       // Merge camera URLs into printer data and convert PrinterFast to Printer
       const printersWithCameraUrls: Printer[] = printersQuery.data.map(printerFast => {
         const cameraUrls = cameraUrlsMap.get(printerFast.id);
-        return {
+        const merged = {
           ...printerFast,
           isReachable: printerFast.isOnline, // Add missing property for Printer interface
           cameraStreamUrl: cameraUrls?.cameraStreamUrl,
@@ -124,30 +131,32 @@ export function usePrintersWithCameraUrls(includeDisabled = false) {
           bedTarget: undefined,
           spoolInfo: undefined,
         } as Printer;
+        
+        return merged;
       });
 
       return {
         data: printersWithCameraUrls,
-        isLoading: printersQuery.isLoading || cameraUrlsQuery.isLoading,
-        isError: printersQuery.isError || cameraUrlsQuery.isError,
-        error: printersQuery.error || cameraUrlsQuery.error,
+        isLoading,
+        isError,
+        error,
         refetch: printersQuery.refetch,
-        isSuccess: printersQuery.isSuccess && cameraUrlsQuery.isSuccess,
-        isFetching: printersQuery.isFetching || cameraUrlsQuery.isFetching,
+        isSuccess,
+        isFetching,
       };
     }
-
-    // Return loading/error states from fast query if no data yet
+    
+    // Return loading/error states when data is not ready
     return {
       data: undefined,
-      isLoading: printersQuery.isLoading || cameraUrlsQuery.isLoading,
-      isError: printersQuery.isError || cameraUrlsQuery.isError,
-      error: printersQuery.error || cameraUrlsQuery.error,
+      isLoading,
+      isError,
+      error,
       refetch: printersQuery.refetch,
       isSuccess: false,
-      isFetching: printersQuery.isFetching || cameraUrlsQuery.isFetching,
+      isFetching,
     };
-  }, [printersQuery, cameraUrlsQuery]);
+  }, [printersQuery.data, cameraUrlsQuery.data]);
 }
 
 export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiError>) {

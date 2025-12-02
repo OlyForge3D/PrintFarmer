@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
-  PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw, FileText
+  PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw, FileText, Image, Video
 } from 'lucide-react';
 import { PauseIcon, PlayIcon, EmergencyStopIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
@@ -60,24 +60,17 @@ export function CollapsedPrinterCard({
   onDelete
 }: CollapsedPrinterCardProps) {
   const [showCamera, setShowCamera] = useState(false);
+  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [collapsedImageVisible, setCollapsedImageVisible] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
   // Real-time status updates
   const { printerStatuses } = usePrinterStatusUpdates();
   const status = printerStatuses.get(printer.id);
   
-  // Debug: Log all printerStatuses and this printer's lookup
-  React.useEffect(() => {
-    const allIds = Array.from(printerStatuses.keys());
-    console.log(`[CollapsedCard] Printer ID: "${printer.id}", Type: ${typeof printer.id}`);
-    console.log(`[CollapsedCard] Available IDs in map:`, allIds);
-    console.log(`[CollapsedCard] Status lookup result:`, status ? { isOnline: status.isOnline, state: status.state } : 'NOT FOUND');
-  }, [printer.id, status, printerStatuses]);
-  
   // Merge SignalR status updates with printer data
+  // Only override camera URLs if status provides them, otherwise keep original printer values
   const displayPrinter = status ? {
     ...printer,
     isOnline: status.isOnline,
@@ -85,8 +78,8 @@ export function CollapsedPrinterCard({
     progress: status.progress,
     jobName: status.jobName,
     thumbnailUrl: status.thumbnailUrl,
-    cameraStreamUrl: status.cameraStreamUrl,
-    cameraSnapshotUrl: status.cameraSnapshotUrl,
+    cameraStreamUrl: status.cameraStreamUrl ?? printer.cameraStreamUrl,
+    cameraSnapshotUrl: status.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
   } : printer;
   
   // State helpers
@@ -95,8 +88,10 @@ export function CollapsedPrinterCard({
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
-  const hasCameraUrls = !!displayPrinter.cameraStreamUrl;
-  const cameraStreamUrl = displayPrinter.cameraStreamUrl;
+  // Only support cameras for Moonraker and OctoPrint backends
+  const supportsCameras = printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint;
+  const hasCameraUrls = supportsCameras && !!displayPrinter.cameraSnapshotUrl;
+  const cameraSnapshotUrl = displayPrinter.cameraSnapshotUrl;
 
   // State color classes
   const getStateColorClasses = (isOnline: boolean, state: string): string => {
@@ -193,17 +188,19 @@ export function CollapsedPrinterCard({
           <Camera className="h-4 w-4" />
         </Button>
         
-        {/* History button */}
-        <Button
-          type="button"
-          variant="subtle"
-          size="sm"
-          onClick={handleViewHistory}
-          className="!p-1 !h-auto"
-          title="View print history"
-        >
-          <History className="h-4 w-4" />
-        </Button>
+        {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
+        {(printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint) && (
+          <Button
+            type="button"
+            variant="subtle"
+            size="sm"
+            onClick={handleViewHistory}
+            className="!p-1 !h-auto"
+            title="View print history"
+          >
+            <History className="h-4 w-4" />
+          </Button>
+        )}
         
         {/* Files button */}
         <Button
@@ -284,21 +281,67 @@ export function CollapsedPrinterCard({
       )}
 
       {showCamera && (
-        <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-          {cameraStreamUrl && collapsedImageVisible ? (
-            <img 
-              src={cameraStreamUrl} 
-              alt="webcam snapshot"
-              className="max-w-full max-h-full object-contain"
-              onError={() => setCollapsedImageVisible(false)}
-              onLoad={() => setCollapsedImageVisible(true)}
-            />
-          ) : (
-            <div className="text-center text-pf-text-secondary p-4">
-              <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No camera configured</p>
+        <div className="mt-4 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+          {/* Camera mode toggle */}
+          {hasCameraUrls && displayPrinter.cameraStreamUrl && (
+            <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
+              <button
+                onClick={() => setCameraMode('snapshot')}
+                title="Snapshot"
+                className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
+                  cameraMode === 'snapshot'
+                    ? 'bg-pf-primary text-pf-text-primary'
+                    : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
+                }`}
+              >
+                <Image className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setCameraMode('stream')}
+                title="Stream"
+                className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
+                  cameraMode === 'stream'
+                    ? 'bg-pf-primary text-pf-text-primary'
+                    : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
+                }`}
+              >
+                <Video className="h-4 w-4" />
+              </button>
             </div>
           )}
+          
+          {/* Camera display */}
+          <div className="min-h-32 flex items-center justify-center overflow-hidden">
+            {hasCameraUrls ? (
+              cameraMode === 'snapshot' && displayPrinter.cameraSnapshotUrl ? (
+                <img 
+                  src={displayPrinter.cameraSnapshotUrl}
+                  alt="webcam snapshot"
+                  className="max-w-full max-h-full object-contain"
+                  onError={() => {}}
+                  onLoad={() => {}}
+                />
+              ) : cameraMode === 'stream' && displayPrinter.cameraStreamUrl ? (
+                <img 
+                  src={displayPrinter.cameraStreamUrl}
+                  alt="webcam stream"
+                  className="max-w-full max-h-full object-contain"
+                  onError={() => {}}
+                  onLoad={() => {}}
+                />
+              ) : (
+                <div className="text-center text-pf-text-secondary p-4">
+                  <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Camera mode not available</p>
+                </div>
+              )
+            ) : (
+              <div className="text-center text-pf-text-secondary p-4 w-full">
+                <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No camera configured</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

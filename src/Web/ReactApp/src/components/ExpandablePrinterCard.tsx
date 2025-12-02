@@ -50,7 +50,9 @@ import {
   History,
   Camera,
   Minus,
-  RotateCcw
+  RotateCcw,
+  Image,
+  Video
 } from 'lucide-react';
 
 interface ExpandablePrinterCardProps {
@@ -65,6 +67,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [step, setStep] = useState(10);
   const [hotendTemp, setHotendTemp] = useState<number | ''>('');
   const [bedTemp, setBedTemp] = useState<number | ''>('');
@@ -110,12 +113,12 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const isShutdown = state === 'shutdown';
 
   // Camera URL logic: prioritize real-time status, fallback to printer config
-  const cameraStreamUrl = status?.cameraStreamUrl ?? printer.cameraStreamUrl;
   const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
-  // Only enable camera button if at least one URL is a non-empty string
-  const hasCameraUrls = (
-    (typeof cameraStreamUrl === 'string' && cameraStreamUrl.trim().length > 0) ||
-    (typeof cameraSnapshotUrl === 'string' && cameraSnapshotUrl.trim().length > 0)
+  // Only support cameras for Moonraker and OctoPrint backends
+  const supportsCameras = printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint;
+  // Only enable camera button if snapshot URL is available
+  const hasCameraUrls = supportsCameras && (
+    typeof cameraSnapshotUrl === 'string' && cameraSnapshotUrl.trim().length > 0
   );
 
   // Update last known values when new data is available
@@ -489,16 +492,19 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             >
               <ChevronDown className="h-4 w-4" />
             </Button>
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              onClick={handleViewHistory}
-              className="!p-1 !h-auto"
-              title="View print history"
-            >
-              <History className="h-4 w-4" />
-            </Button>
+            {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
+            {(printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint) && (
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={handleViewHistory}
+                className="!p-1 !h-auto"
+                title="View print history"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               type="button"
               variant="subtle"
@@ -563,21 +569,67 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         )}
 
               {showCamera && (
-                <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-                  {cameraStreamUrl && collapsedImageVisible ? (
-                    <img 
-                      src={cameraStreamUrl} 
-                      alt="webcam snapshot"
-                      className="max-w-full max-h-full object-contain"
-                      onError={() => setCollapsedImageVisible(false)}
-                      onLoad={() => setCollapsedImageVisible(true)}
-                    />
-                  ) : (
-                    <div className="text-center text-pf-text-secondary p-4">
-                      <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No camera configured</p>
+                <div className="mt-4 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                  {/* Camera mode toggle */}
+                  {hasCameraUrls && printer.cameraStreamUrl && (
+                    <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
+                      <button
+                        onClick={() => setCameraMode('snapshot')}
+                        title="Snapshot"
+                        className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
+                          cameraMode === 'snapshot'
+                            ? 'bg-pf-primary text-pf-text-primary'
+                            : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
+                        }`}
+                      >
+                        <Image className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setCameraMode('stream')}
+                        title="Stream"
+                        className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
+                          cameraMode === 'stream'
+                            ? 'bg-pf-primary text-pf-text-primary'
+                            : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
+                        }`}
+                      >
+                        <Video className="h-4 w-4" />
+                      </button>
                     </div>
                   )}
+                  
+                  {/* Camera display */}
+                  <div className="min-h-32 flex items-center justify-center overflow-hidden">
+                    {hasCameraUrls ? (
+                      cameraMode === 'snapshot' && printer.cameraSnapshotUrl ? (
+                        <img 
+                          src={printer.cameraSnapshotUrl}
+                          alt="webcam snapshot"
+                          className="max-w-full max-h-full object-contain"
+                          onError={() => {}}
+                          onLoad={() => {}}
+                        />
+                      ) : cameraMode === 'stream' && printer.cameraStreamUrl ? (
+                        <img 
+                          src={printer.cameraStreamUrl}
+                          alt="webcam stream"
+                          className="max-w-full max-h-full object-contain"
+                          onError={() => {}}
+                          onLoad={() => {}}
+                        />
+                      ) : (
+                        <div className="text-center text-pf-text-secondary p-4">
+                          <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">Camera mode not available</p>
+                        </div>
+                      )
+                    ) : (
+                      <div className="text-center text-pf-text-secondary p-4 w-full">
+                        <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No camera configured</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -642,21 +694,67 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               </Button>
             </div>
             {showCamera && (
-              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-                {cameraStreamUrl && expandedImageVisible ? (
-                    <img 
-                      src={cameraStreamUrl} 
-                      alt="webcam snapshot"
-                      className="max-w-full max-h-full object-contain"
-                      onError={() => setExpandedImageVisible(false)}
-                      onLoad={() => setExpandedImageVisible(true)}
-                    />
-                  ) : (
-                  <div className="text-center text-pf-text-secondary p-4">
-                    <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No camera configured</p>
+              <div className="mt-2 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                {/* Camera mode toggle */}
+                {hasCameraUrls && printer.cameraStreamUrl && (
+                  <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
+                    <button
+                      onClick={() => setCameraMode('snapshot')}
+                      title="Snapshot"
+                      className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
+                        cameraMode === 'snapshot'
+                          ? 'bg-pf-primary text-pf-text-primary'
+                          : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
+                      }`}
+                    >
+                      <Image className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setCameraMode('stream')}
+                      title="Stream"
+                      className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
+                        cameraMode === 'stream'
+                          ? 'bg-pf-primary text-pf-text-primary'
+                          : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
+                      }`}
+                    >
+                      <Video className="h-4 w-4" />
+                    </button>
                   </div>
                 )}
+                
+                {/* Camera display */}
+                <div className="min-h-32 flex items-center justify-center overflow-hidden">
+                  {hasCameraUrls ? (
+                    cameraMode === 'snapshot' && printer.cameraSnapshotUrl ? (
+                      <img 
+                        src={printer.cameraSnapshotUrl}
+                        alt="webcam snapshot"
+                        className="max-w-full max-h-full object-contain"
+                        onError={() => {}}
+                        onLoad={() => {}}
+                      />
+                    ) : cameraMode === 'stream' && printer.cameraStreamUrl ? (
+                      <img 
+                        src={printer.cameraStreamUrl}
+                        alt="webcam stream"
+                        className="max-w-full max-h-full object-contain"
+                        onError={() => {}}
+                        onLoad={() => {}}
+                      />
+                    ) : (
+                      <div className="text-center text-pf-text-secondary p-4">
+                        <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">Camera mode not available</p>
+                      </div>
+                    )
+                  ) : (
+                    <div className="text-center text-pf-text-secondary p-4 w-full">
+                      <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No camera configured</p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -678,16 +776,19 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           >
             <Minus className="h-4 w-4" />
           </Button>
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            onClick={handleViewHistory}
-            className="!p-1 !h-auto"
-            title="View print history"
-          >
-            <History className="h-4 w-4" />
-          </Button>
+          {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
+          {(printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint) && (
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={handleViewHistory}
+              className="!p-1 !h-auto"
+              title="View print history"
+            >
+              <History className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             type="button"
             variant="subtle"
