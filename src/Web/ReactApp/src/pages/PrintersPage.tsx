@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
+import { useQueryClient } from '@tanstack/react-query';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { useAuth } from '@/contexts/AuthHooks';
 import { CollapsedPrinterCard } from '@/components/CollapsedPrinterCard';
@@ -31,6 +32,7 @@ function getBackendName(backend: PrinterBackend | string | number): string {
 
 export function PrintersPage() {
   const { hasPermission } = useAuth();
+  const queryClient = useQueryClient();
   const { 
     data: printers, 
     isLoading, 
@@ -106,15 +108,29 @@ export function PrintersPage() {
 
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
-      // TODO: Implement maintenance status API calls
-      await Promise.all(printers.map(printer => 
-        fetch(`${getApiBaseUrl()}/printers/${printer.id}/maintenance`, {
+      console.log(`Starting maintenance update for ${printers.length} printer(s), inMaintenance=${inMaintenance}`);
+      
+      const results = await Promise.all(printers.map(async (printer) => {
+        console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
+        const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/maintenance`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ inMaintenance })
-        })
-      ));
-      refetchPrinters();
+          body: JSON.stringify(inMaintenance)
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.text();
+          console.error(`Failed to update maintenance for ${printer.id}:`, response.status, errorData);
+          throw new Error(`HTTP ${response.status}: ${errorData}`);
+        }
+        
+        return response.json();
+      }));
+      
+      console.log('Maintenance status updated successfully:', results);
+      console.log('Refetching printer queries...');
+      await queryClient.refetchQueries({ queryKey: ['printers'] });
+      console.log('Printers refetched, UI should update now');
     } catch (error) {
       console.error('Failed to update maintenance status:', error);
     }
@@ -201,7 +217,6 @@ export function PrintersPage() {
               title="Card View"
             >
               <LayoutGrid className="h-4 w-4" />
-              <span className="hidden sm:inline">Cards</span>
             </Button>
             <Button
               type="button"
@@ -212,7 +227,6 @@ export function PrintersPage() {
               title="Table View"
             >
               <List className="h-4 w-4" />
-              <span className="hidden sm:inline">Table</span>
             </Button>
           </div>
           {hasPermission('printers', 'create') && (

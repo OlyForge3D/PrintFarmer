@@ -417,7 +417,7 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
-            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP : Farm.Infrastructure.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, BackendPort: p.BackendPort, FrontendPort: p.FrontendPort, IsEnabled: p.IsEnabled)).ToArray();
+            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP : Farm.Infrastructure.PrinterBackend.Moonraker, ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, BackendPort: p.BackendPort, FrontendPort: p.FrontendPort, InMaintenance: p.InMaintenance, IsEnabled: p.IsEnabled)).ToArray();
         }
 
         private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)

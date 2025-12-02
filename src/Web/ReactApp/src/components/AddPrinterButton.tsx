@@ -30,7 +30,6 @@ export function AddPrinterButton({ onSuccess }: AddPrinterButtonProps) {
         onClick={handleAddPrinter}
         className="inline-flex items-center"
       >
-        <Plus className="w-4 h-4 mr-2" />
         Add Printer
       </Button>
 

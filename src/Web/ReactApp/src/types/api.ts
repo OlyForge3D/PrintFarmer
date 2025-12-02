@@ -121,6 +121,7 @@ export interface PrinterFast {
   ipAddress?: string;
   backendPort?: number;
   frontendPort?: number;
+  inMaintenance?: boolean;
   isEnabled?: boolean;
 }
 

@@ -176,6 +176,7 @@ public partial record PrinterFastDto(
     string? IpAddress = null,
     int? BackendPort = null,
     int? FrontendPort = null,
+    bool InMaintenance = false,
     bool IsEnabled = true);
 
 public partial record PrinterFastDto

@@ -333,11 +333,10 @@ export function PrinterTableView({
                         onClick={() => onBulkSetMaintenance([printer], !printer.inMaintenance)}
                         variant={printer.inMaintenance ? 'success' : 'secondary'}
                         size="sm"
-                        className="!p-2 !h-auto flex items-center gap-1"
+                        className="!p-2 !h-auto"
                         title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
                       >
                         <Wrench className="w-4 h-4" />
-                        {printer.inMaintenance ? 'Exit Maintenance' : 'Maintenance'}
                       </Button>
                       
                       {hasPermission('printers', 'update') && (
