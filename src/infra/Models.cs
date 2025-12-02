@@ -212,6 +212,13 @@ public partial record PrinterStatusDto
     [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 
+/// <summary>
+/// File information including G-code file name and thumbnail URL.
+/// </summary>
+public record PrinterFileDto(
+    string FileName,
+    string? ThumbnailUrl = null);
+
 // Real-time update payload for SignalR
 /// <summary>
 /// SignalR broadcast payload representing a delta style update for a printer.

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, FileText, AlertCircle, Play, Copy, Trash2 } from 'lucide-react';
+import { X, FileText, AlertCircle, Play, Copy, Trash2, Image } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { apiClient } from '@/services/api';
-import type { Printer } from '@/types/api';
+import type { Printer, PrinterFileDto } from '@/types/api';
 
 interface PrinterFilesModalProps {
   isOpen: boolean;
@@ -12,10 +12,11 @@ interface PrinterFilesModalProps {
 }
 
 export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModalProps) {
-  const [files, setFiles] = useState<string[]>([]);
+  const [files, setFiles] = useState<PrinterFileDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
+  const [hoveredThumbnail, setHoveredThumbnail] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && printer) {
@@ -72,7 +73,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="fixed inset-0 bg-black bg-opacity-75" onClick={onClose} />
         
-        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
             <div>
@@ -133,13 +134,30 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                 <div className="space-y-2">
                   {files.map((file) => (
                     <div
-                      key={file}
-                      className="flex items-center justify-between bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
+                      key={file.fileName}
+                      className="relative flex items-center justify-between bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
+                      onMouseEnter={() => file.thumbnailUrl && setHoveredThumbnail(file.fileName)}
+                      onMouseLeave={() => setHoveredThumbnail(null)}
                     >
                       <div className="flex items-center flex-1 min-w-0 gap-3">
-                        <FileText className="h-5 w-5 text-pf-accent flex-shrink-0" />
+                        {file.thumbnailUrl ? (
+                          <div className="relative h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border overflow-hidden">
+                            <img
+                              src={file.thumbnailUrl}
+                              alt={file.fileName}
+                              className="h-full w-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border flex items-center justify-center">
+                            <Image className="h-6 w-6 text-pf-text-tertiary" />
+                          </div>
+                        )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-pf-text-primary break-words font-medium">{file}</p>
+                          <p className="text-pf-text-primary break-words font-medium">{file.fileName}</p>
                           <p className="text-xs text-pf-text-tertiary">G-code file</p>
                         </div>
                       </div>
@@ -149,7 +167,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           type="button"
                           variant="subtle"
                           size="sm"
-                          onClick={() => handleQueueFile(file)}
+                          onClick={() => handleQueueFile(file.fileName)}
                           className="!p-2 !h-auto"
                           title="Queue for printing"
                         >
@@ -160,9 +178,9 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           type="button"
                           variant="subtle"
                           size="sm"
-                          onClick={() => handleCopyFilename(file)}
+                          onClick={() => handleCopyFilename(file.fileName)}
                           className="!p-2 !h-auto"
-                          title={copiedFile === file ? 'Copied!' : 'Copy filename'}
+                          title={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
                         >
                           <Copy className="h-4 w-4" />
                         </Button>
@@ -171,13 +189,27 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           type="button"
                           variant="subtle"
                           size="sm"
-                          onClick={() => handleDeleteFile(file)}
+                          onClick={() => handleDeleteFile(file.fileName)}
                           className="!p-2 !h-auto text-red-500 hover:text-red-600"
                           title="Delete file"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
+
+                      {/* Thumbnail Preview on Hover */}
+                      {hoveredThumbnail === file.fileName && file.thumbnailUrl && (
+                        <div className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 z-10 hidden group-hover:block">
+                          <img
+                            src={file.thumbnailUrl}
+                            alt={file.fileName}
+                            className="max-h-48 max-w-xs rounded shadow-lg border border-pf-border"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

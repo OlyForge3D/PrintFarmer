@@ -1284,14 +1284,14 @@ public class PrintersController(
     }
 
     [HttpGet("{id:guid}/files")]
-    [ProducesResponseType(typeof(string[]), 200)]
+    [ProducesResponseType(typeof(PrinterFileDto[]), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<string[]>> GetFileListAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<PrinterFileDto[]>> GetFileListAsync(Guid id, CancellationToken ct)
     {
         try
         {
-            string[] files = await _printersService.GetFileListAsync(id, ct);
+            PrinterFileDto[] files = await _printersService.GetFileListAsync(id, ct);
             return Ok(files);
         }
         catch (KeyNotFoundException)

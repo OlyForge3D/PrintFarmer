@@ -14,6 +14,8 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
@@ -1204,21 +1206,81 @@ namespace Farm.Web.Api.Services.Printers
             };
         }
 
-        public async Task<string[]> GetFileListAsync(Guid id, CancellationToken ct)
+        public async Task<PrinterFileDto[]> GetFileListAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
             if (p == null)
             {
-                return Array.Empty<string>();
+                return Array.Empty<PrinterFileDto>();
             }
 
-            return ((PrinterBackend)p.Backend) switch
+            string[] fileNames = ((PrinterBackend)p.Backend) switch
             {
                 PrinterBackend.Moonraker => await _moon.GetFileListAsync(BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort), ct).ConfigureAwait(false),
                 PrinterBackend.PrusaLink => await _prusa.GetFileListAsync(p.ServerUrl, p.ApiKey, ct).ConfigureAwait(false),
                 PrinterBackend.SDCP => await _sdcp.GetFileListAsync(p.ServerUrl, ct).ConfigureAwait(false),
                 _ => Array.Empty<string>()
             };
+
+            if (fileNames.Length == 0)
+            {
+                return Array.Empty<PrinterFileDto>();
+            }
+
+            // Get thumbnails for each file
+            List<PrinterFileDto> result = new();
+            foreach (string fileName in fileNames)
+            {
+                string? thumbnailUrl = null;
+
+                // For Moonraker, try to get file metadata which includes thumbnails
+                if (((PrinterBackend)p.Backend) == PrinterBackend.Moonraker)
+                {
+                    try
+                    {
+                        GCodeMetadata? metadata = await _moon.GetFileMetadataAsync(
+                            BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort),
+                            fileName,
+                            ct)
+                            .ConfigureAwait(false);
+
+                        if (metadata?.Thumbnails.Length > 0)
+                        {
+                            // Get the largest thumbnail
+                            ThumbnailInfo? largestThumb = metadata.Thumbnails
+                                .OrderByDescending(t => t.Width * t.Height)
+                                .FirstOrDefault();
+
+                            if (largestThumb != null)
+                            {
+                                // Build full URL for thumbnail
+                                thumbnailUrl = $"{p.ServerUrl.TrimEnd('/')}/server/files/gcodes/{Uri.EscapeDataString(largestThumb.RelativePath)}";
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Silently ignore thumbnail fetch errors
+                    }
+                }
+                // For PrusaLink, thumbnail retrieval requires Digest Authentication
+                // According to PrusaLink OpenAPI spec, v1 endpoints (/api/v1/files/{storage}/{path})
+                // require Digest Auth, NOT X-Api-Key header authentication.
+                // The legacy /api/files endpoint (OctoPrint compatible) works with X-Api-Key
+                // but doesn't include thumbnail metadata in the response.
+                // TODO: Implement Digest Authentication support for PrusaLink to enable v1 API access
+                else if (((PrinterBackend)p.Backend) == PrinterBackend.PrusaLink)
+                {
+                    // Thumbnails not currently supported for PrusaLink due to auth limitations
+                    // PrusaLink requires Digest Auth for the v1 API which has thumbnail info
+                    thumbnailUrl = null;
+                }
+                // For SDCP, similar logic could be added
+
+                result.Add(new PrinterFileDto(fileName, thumbnailUrl));
+            }
+
+            return result.ToArray();
         }
 
         public async Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct)

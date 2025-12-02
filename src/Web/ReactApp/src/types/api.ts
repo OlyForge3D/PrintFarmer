@@ -247,6 +247,12 @@ export interface PrinterStatusUpdate {
   spoolInfo?: PrinterSpoolInfo;
 }
 
+// File information with thumbnail
+export interface PrinterFileDto {
+  fileName: string;
+  thumbnailUrl?: string;
+}
+
 // DTOs for API operations
 export interface CreatePrinterDto {
   name: string;

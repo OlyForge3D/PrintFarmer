@@ -27,6 +27,7 @@ import {
   PrinterCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
+  PrinterFileDto,
   PrinterModelDto,
   RegisterRequest,
   ResolveHostnameRequest,
@@ -575,8 +576,8 @@ export class ApiClient {
 
   // ============ Printer Files API methods ============
 
-  async getPrinterFileList(printerId: string): Promise<string[]> {
-    const response = await this.client.get<string[]>(
+  async getPrinterFileList(printerId: string): Promise<PrinterFileDto[]> {
+    const response = await this.client.get<PrinterFileDto[]>(
       `/printers/${printerId}/files`
     );
     return response.data;

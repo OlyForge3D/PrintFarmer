@@ -288,6 +288,75 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
         return GetFileListAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
     }
 
+    /// <summary>
+    /// Gets a list of file details including names and paths for metadata retrieval.
+    /// Used internally for thumbnail extraction.
+    /// </summary>
+    public async Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        List<(string, string)> result = [];
+        try
+        {
+            // Try the v1 API first (more official, supports metadata)
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
+            if (folderInfo is FolderInfo folder && folder.Children != null)
+            {
+                foreach (FileInfoBase child in folder.Children)
+                {
+                    if (child.Type != FileTypes.Folder)
+                    {
+                        // For v1 API, use the display name or name, and the name as path
+                        string displayName = child.DisplayName ?? child.Name;
+                        result.Add((displayName, "/" + Uri.EscapeDataString(child.Name)));
+                    }
+                }
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            // Fallback to legacy /api/files endpoint
+            _logger?.LogWarning($"Failed to get file details from v1 API, trying legacy endpoint: {ex.Message}");
+            try
+            {
+                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, apiKey, ct);
+                foreach (FileChild file in legacyFiles)
+                {
+                    if (file.Type != "FOLDER" && !string.IsNullOrEmpty(file.Display) && !string.IsNullOrEmpty(file.Path))
+                    {
+                        result.Add((file.Display, file.Path));
+                    }
+                }
+            }
+            catch (Exception legacyEx)
+            {
+                _logger?.LogError(legacyEx, "Failed to get file details from legacy endpoint as well");
+            }
+            return result;
+        }
+    }
+
+    public Task<List<(string Name, string Path)>> GetFileDetailsListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetFileDetailsListAsync(baseUrl.ToString().TrimEnd('/'), apiKey, ct);
+    }
+
+    /// <summary>
+    /// Gets detailed file information including metadata and thumbnail URLs.
+    /// Used for retrieving thumbnail information for display.
+    /// </summary>
+    public async Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
+    {
+        return await _apiClient.GetFileInfoAsync(baseUrl, storagePath, filePath, apiKey, ct: ct);
+    }
+
+    public Task<FileInfoBase> GetFileDetailsAsync(Uri baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        return GetFileDetailsAsync(baseUrl.ToString().TrimEnd('/'), storagePath, filePath, apiKey, ct);
+    }
+
     // Convenience helpers previously provided as extensions
     public async Task<PrintJobProgress?> GetPrintProgressAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {

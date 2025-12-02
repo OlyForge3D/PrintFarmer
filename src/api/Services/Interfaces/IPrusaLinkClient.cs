@@ -94,6 +94,20 @@ public interface IPrusaLinkClient
     Task<string[]> GetFileListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets a list of file details including names and paths for metadata retrieval.
+    /// Used internally for thumbnail extraction.
+    /// </summary>
+    Task<List<(string Name, string Path)>> GetFileDetailsListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+    Task<List<(string Name, string Path)>> GetFileDetailsListAsync(Uri baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets detailed file information including metadata and thumbnail URLs.
+    /// Used for retrieving thumbnail information for display.
+    /// </summary>
+    Task<FileInfoBase> GetFileDetailsAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default);
+    Task<FileInfoBase> GetFileDetailsAsync(Uri baseUrl, string storagePath, string filePath, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets detailed printer information from a PrusaLink printer (name, firmware, capabilities, etc.)
     /// </summary>
     Task<PrinterInformation?> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
