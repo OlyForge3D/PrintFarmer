@@ -701,7 +701,51 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           </div>
         </div>
 
-        {/* Optional debug panel */}
+        {/* Spool Info Section - Display if available */}
+        {status?.spoolInfo && status.spoolInfo.hasActiveSpool && (
+          <div className="mt-4 pt-4 border-t border-pf-border">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-2">Spool</div>
+            <div className="space-y-2 text-xs">
+              {status.spoolInfo.vendor && (
+                <div className="flex justify-between">
+                  <span className="text-pf-text-secondary">Vendor:</span>
+                  <span className="text-pf-text-primary font-medium">{status.spoolInfo.vendor}</span>
+                </div>
+              )}
+              {status.spoolInfo.material && (
+                <div className="flex justify-between">
+                  <span className="text-pf-text-secondary">Material:</span>
+                  <span className="text-pf-text-primary font-medium">{status.spoolInfo.material}</span>
+                </div>
+              )}
+              {status.spoolInfo.colorHex && (
+                <div className="flex justify-between items-center">
+                  <span className="text-pf-text-secondary">Color:</span>
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="w-3 h-3 rounded border border-pf-border"
+                      style={{ backgroundColor: status.spoolInfo.colorHex }}
+                      title={status.spoolInfo.colorHex}
+                    />
+                    <span className="text-pf-text-primary font-medium">{status.spoolInfo.colorHex}</span>
+                  </div>
+                </div>
+              )}
+              {status.spoolInfo.spoolName && (
+                <div className="flex justify-between">
+                  <span className="text-pf-text-secondary">Spool:</span>
+                  <span className="text-pf-text-primary font-medium">{status.spoolInfo.spoolName}</span>
+                </div>
+              )}
+              {status.spoolInfo.remainingWeightG !== undefined && status.spoolInfo.remainingWeightG !== null && (
+                <div className="flex justify-between">
+                  <span className="text-pf-text-secondary">Remaining:</span>
+                  <span className="text-pf-text-primary font-medium">{Math.round(status.spoolInfo.remainingWeightG)}g</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
           <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
             {renderUnknown({ status, lastKnownHotendTemp: lastKnownHotendTempRef.current, lastKnownBedTemp: lastKnownBedTempRef.current, lastKnownX: lastKnownXRef.current, lastKnownY: lastKnownYRef.current, lastKnownZ: lastKnownZRef.current })}

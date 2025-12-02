@@ -898,6 +898,51 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         </div>
       </div>
 
+      {/* Spool Info Section - Display if available */}
+      {status?.spoolInfo && status.spoolInfo.hasActiveSpool && (
+        <div className="mb-2">
+          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Spool</div>
+          <div className="bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md p-3 space-y-2">
+            {status.spoolInfo.vendor && (
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-pf-text-secondary">Vendor:</span>
+                <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.vendor}</span>
+              </div>
+            )}
+            {status.spoolInfo.material && (
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-pf-text-secondary">Material:</span>
+                <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.material}</span>
+              </div>
+            )}
+            {status.spoolInfo.colorHex && (
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-pf-text-secondary">Color:</span>
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-4 h-4 rounded border border-pf-border"
+                    style={{ backgroundColor: status.spoolInfo.colorHex }}
+                    title={status.spoolInfo.colorHex}
+                  />
+                  <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.colorHex}</span>
+                </div>
+              </div>
+            )}
+            {status.spoolInfo.spoolName && (
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-pf-text-secondary">Spool:</span>
+                <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.spoolName}</span>
+              </div>
+            )}
+            {status.spoolInfo.remainingWeightG !== undefined && status.spoolInfo.remainingWeightG !== null && (
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-pf-text-secondary">Remaining:</span>
+                <span className="text-xs font-medium text-pf-text-primary">{Math.round(status.spoolInfo.remainingWeightG)}g</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Move and Control Section - Side by Side */}
       <div className="mb-2">
         {/* Row 1: Labels and Pads side by side */}

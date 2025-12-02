@@ -201,8 +201,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 <BackendSelector
                   value={formData.backend}
                   onChange={(backend) => handleInputChange('backend', backend)}
-                  className="w-full px-3 py-2 rounded-lg bg-pf-panel border border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent text-pf-text-primary"
-                  title="Printer backend"
+                  ariaLabel="Printer backend"
                 />
               </FormField>
             {/* Moonraker/PrusaLink port/API key fields */}

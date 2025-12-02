@@ -1,7 +1,7 @@
 import React from 'react';
 import { PrinterBackend } from '@/types/api';
 import { getPrinterBackendOptions } from '@/utils/enumHelpers';
-import { Select, FormField } from '@/components/ui';
+import { Select } from '@/components/ui';
 
 interface BackendSelectorProps {
   value: PrinterBackend | undefined;
@@ -10,12 +10,13 @@ interface BackendSelectorProps {
   placeholder?: string;
   required?: boolean;
   disabled?: boolean;
-  title?: string;
+  ariaLabel?: string;
 }
 
 /**
  * Reusable backend selector component that automatically includes all PrinterBackend enum values.
  * When new backends are added to the enum, they will automatically appear in this dropdown.
+ * Renders as a bare Select element without FormField wrapper for flexible layout.
  */
 export function BackendSelector({
   value,
@@ -24,7 +25,7 @@ export function BackendSelector({
   placeholder = 'Select backend...',
   required = false,
   disabled = false,
-  title = 'Backend',
+  ariaLabel = 'Backend type',
 }: BackendSelectorProps) {
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newValue = e.target.value === '' ? undefined : parseInt(e.target.value, 10) as PrinterBackend;
@@ -32,21 +33,20 @@ export function BackendSelector({
   };
 
   return (
-    <FormField label={title} className={className}>
-      <Select
-        value={value ?? ''}
-        onChange={handleChange}
-        title={title}
-        required={required}
-        disabled={disabled}
-      >
-        {!required && <option value="">{placeholder}</option>}
-        {getPrinterBackendOptions().map(option => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </Select>
-    </FormField>
+    <Select
+      value={value ?? ''}
+      onChange={handleChange}
+      aria-label={ariaLabel}
+      className={className}
+      required={required}
+      disabled={disabled}
+    >
+      {!required && <option value="">{placeholder}</option>}
+      {getPrinterBackendOptions().map(option => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </Select>
   );
 }

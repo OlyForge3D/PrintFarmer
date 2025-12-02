@@ -3,7 +3,9 @@ import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { X, Check, Loader2 } from 'lucide-react';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { BackendSelector } from './BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/components/ui';
 
 interface ManufacturerDto {
@@ -18,18 +20,11 @@ interface AddPrinterModalProps {
   onSuccess: () => void;
 }
 
-const PrinterBackends = {
-  Moonraker: 0,
-  PrusaLink: 1,
-  SDCP: 2,
-  OctoPrint: 3
-} as const;
-
 export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalProps) {
   const [formData, setFormData] = useState<CreatePrinterDto>({
     name: '',
     serverUrl: '',
-    backend: PrinterBackends.Moonraker,
+    backend: PrinterBackend.Moonraker,
     notes: '',
     dateAcquired: new Date(), // Default to today's date
     manufacturerId: undefined,
@@ -126,9 +121,9 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
       }
     }
     
-    if ((formData.backend === PrinterBackends.PrusaLink || formData.backend === PrinterBackends.OctoPrint) && !formData.apiKey?.trim()) {
+    if ((formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && !formData.apiKey?.trim()) {
       errors.apiKey = [
-        formData.backend === PrinterBackends.OctoPrint
+        formData.backend === PrinterBackend.OctoPrint
           ? 'API Key is required for OctoPrint printers'
           : 'API Key is required for PrusaLink printers'
       ];
@@ -182,7 +177,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     setFormData({
       name: '',
       serverUrl: '',
-      backend: PrinterBackends.Moonraker,
+      backend: PrinterBackend.Moonraker,
       notes: '',
       dateAcquired: new Date(), // Reset to today's date
       manufacturerId: undefined,
@@ -257,16 +252,11 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                 label="Backend Type"
                 required
               >
-                <Select
+                <BackendSelector
                   value={formData.backend}
-                  onChange={(e) => handleInputChange('backend', parseInt(e.target.value))}
-                  aria-label="Backend type"
-                >
-                  <option value={PrinterBackends.Moonraker}>Moonraker (Klipper)</option>
-                  <option value={PrinterBackends.PrusaLink}>PrusaLink (Prusa)</option>
-                  <option value={PrinterBackends.SDCP}>SDCP (Generic)</option>
-                  <option value={PrinterBackends.OctoPrint}>OctoPrint</option>
-                </Select>
+                  onChange={(backend) => handleInputChange('backend', backend)}
+                  required
+                />
               </FormField>
             </div>
 
@@ -286,7 +276,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             </FormField>
 
             {/* API Key (for PrusaLink and OctoPrint) */}
-            {(formData.backend === PrinterBackends.PrusaLink || formData.backend === PrinterBackends.OctoPrint) && (
+            {(formData.backend === PrinterBackend.PrusaLink || formData.backend === PrinterBackend.OctoPrint) && (
               <FormField
                 label="API Key"
                 required
@@ -296,14 +286,14 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                   type="text"
                   value={formData.apiKey || ''}
                   onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                  placeholder={formData.backend === PrinterBackends.OctoPrint ? "Enter OctoPrint API key" : "Enter PrusaLink API key"}
+                  placeholder={formData.backend === PrinterBackend.OctoPrint ? "Enter OctoPrint API key" : "Enter PrusaLink API key"}
                   aria-label="API Key"
                 />
               </FormField>
             )}
 
             {/* Show backend/frontend port fields for Moonraker */}
-            {formData.backend === PrinterBackends.Moonraker && (
+            {formData.backend === PrinterBackend.Moonraker && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField label="Backend Port (API)">
                   <Input
@@ -331,7 +321,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
             )}
 
             {/* Camera URLs (for OctoPrint) */}
-            {formData.backend === PrinterBackends.OctoPrint && (
+            {formData.backend === PrinterBackend.OctoPrint && (
               <>
                 <FormField label="Camera Stream URL">
                   <Input

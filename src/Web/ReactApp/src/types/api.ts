@@ -148,6 +148,16 @@ export type PrinterBackendString =
 export type MotionTypeString = "Cartesian" | "CoreXY" | "Delta" | "Unknown";
 
 export interface PrinterSpoolInfo {
+  hasActiveSpool?: boolean;
+  activeSpoolId?: number;
+  spoolName?: string;
+  material?: string;
+  colorHex?: string;
+  filamentName?: string;
+  vendor?: string;
+  remainingWeightG?: number;
+  spoolInUse?: boolean;
+  // Legacy properties (may still be used)
   id?: number;
   filament?: FilamentInfo;
   used_length?: number;
