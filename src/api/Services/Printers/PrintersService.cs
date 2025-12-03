@@ -444,15 +444,8 @@ namespace Farm.Web.Api.Services.Printers
 
         /// <summary>
         /// Maps an integer backend value to the PrinterBackend enum.
-        /// Handles PrusaLink (2), SDCP (3), OctoPrint (4), and defaults to Moonraker.
         /// </summary>
-        private static PrinterBackend MapBackendEnum(int backendValue)
-        {
-            return backendValue == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? Farm.Infrastructure.PrinterBackend.PrusaLink
-                : backendValue == (int)Farm.Infrastructure.PrinterBackend.SDCP ? Farm.Infrastructure.PrinterBackend.SDCP
-                : backendValue == (int)Farm.Infrastructure.PrinterBackend.OctoPrint ? Farm.Infrastructure.PrinterBackend.OctoPrint
-                : Farm.Infrastructure.PrinterBackend.Moonraker;
-        }
+        private static PrinterBackend MapBackendEnum(int backendValue) => (PrinterBackend)backendValue;
 
         private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
         {
@@ -464,17 +457,25 @@ namespace Farm.Web.Api.Services.Printers
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
 
             // Export fields matching AdminCli CSV format for consistency
-            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled" };
 
             StringBuilder csv = new();
             _ = csv.AppendLine(string.Join(',', headerParts));
 
             foreach (Printer printer in printers)
             {
-                string backendName = printer.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? "PrusaLink" : printer.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? "SDCP" : "Moonraker";
-                string backendPort = printer.BackendPort?.ToString() ?? "";
-                string frontendPort = printer.FrontendPort?.ToString() ?? "";
-                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{printer.IsEnabled}");
+                // Use Backend enum ToString() for backend name
+                PrinterBackend backend = (PrinterBackend)printer.Backend;
+                string backendName = backend.ToString();
+                
+                // Calculate correct default ports based on backend if not explicitly set
+                int defaultBackendPort = PrinterBackendHelpers.GetDefaultPort(backend);
+                int defaultFrontendPort = 80;
+                
+                string backendPort = (printer.BackendPort ?? defaultBackendPort).ToString();
+                string frontendPort = (printer.FrontendPort ?? defaultFrontendPort).ToString();
+                string apiKey = printer.ApiKey ?? "";
+                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{EscapeCsvValue(apiKey)},{printer.IsEnabled}");
             }
 
             return Encoding.UTF8.GetBytes(csv.ToString());
@@ -505,11 +506,8 @@ namespace Farm.Web.Api.Services.Printers
 
             foreach (Printer p in query)
             {
-                string backendName = p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker ? "Moonraker" :
-                                     p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? "PrusaLink" :
-                                     p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? "SDCP" :
-                                     p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint ? "OctoPrint" :
-                                     "Unknown";
+                PrinterBackend backend = (PrinterBackend)p.Backend;
+                string backendName = backend.ToString();
                 string backendPort = p.BackendPort?.ToString() ?? "";
                 string frontendPort = p.FrontendPort?.ToString() ?? "";
                 string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{p.IsEnabled}";
@@ -764,7 +762,7 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
         {
             // Check for duplicate printer by serverUrl or name
-            int defaultPort = dto.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : dto.Backend == Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125;
+            int defaultPort = PrinterBackendHelpers.GetDefaultPort(dto.Backend);
             string normalizedUrl = NormalizeServerUrl(dto.ServerUrl, defaultPort);
             List<Printer> existingPrinters = await _repo.GetAllAsync(ct).ConfigureAwait(false);
             Printer? duplicate = existingPrinters.FirstOrDefault(p =>
@@ -1440,7 +1438,7 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct)
         {
             // First normalize with port for internal operations (URL comparison, parsing)
-            int defaultPort = backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : backend == Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125;
+            int defaultPort = PrinterBackendHelpers.GetDefaultPort(backend);
             string normalizedWithPort = NormalizeServerUrl(serverUrl, defaultPort);
 
             string? resolvedIp = null;
@@ -1910,7 +1908,7 @@ namespace Farm.Web.Api.Services.Printers
 
                             // Build ServerUrl from IpAddress and backend
                             string ipAddress = values[ipAddressIdx];
-                            int defaultPort = backendEnum == PrinterBackend.PrusaLink ? 80 : backendEnum == PrinterBackend.SDCP ? 80 : 7125;
+                            int defaultPort = PrinterBackendHelpers.GetDefaultPort(backendEnum);
                             string serverUrl = $"http://{ipAddress}:{defaultPort}";
 
                             CreatePrinterDto printer = new CreatePrinterDto

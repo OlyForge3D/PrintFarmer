@@ -730,13 +730,8 @@ public class PrintersController(
         }
 
         p.Name = dto.Name;
-        int defaultPort = dto.Backend.HasValue ?
-            (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 :
-             dto.Backend.Value == PrinterBackend.SDCP ? 80 :
-             dto.Backend.Value == PrinterBackend.OctoPrint ? 5000 : 7125) :
-            (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 :
-             p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? 80 :
-             p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint ? 5000 : 7125);
+        PrinterBackend backendForPort = dto.Backend ?? (PrinterBackend)p.Backend;
+        int defaultPort = PrinterBackendHelpers.GetDefaultPort(backendForPort);
 
         // Delegate normalization and optional hostname resolution to the PrintersService
         PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
@@ -874,8 +869,7 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
         // Delegate hostname normalization and resolution to the service
-        int defaultPort = body.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 :
-                         body.Backend == Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125;
+        int defaultPort = PrinterBackendHelpers.GetDefaultPort(body.Backend);
         try
         {
             ResolveHostnameResponse resp = await _printersService.ResolveHostnameAsync(body.ServerUrl, body.Backend, ct);

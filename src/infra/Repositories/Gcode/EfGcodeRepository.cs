@@ -110,7 +110,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
 
             // Normalize parent directory - ensure no trailing separators
             string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
-            if (normalizedParent.EndsWith("/"))
+            if (normalizedParent.EndsWith('/'))
             {
                 normalizedParent = normalizedParent[..^1];
             }
@@ -148,15 +148,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
                     if (dir.StartsWith(normalizedParent + "/") || dir.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
                     {
                         // Extract the relative path
-                        string relative;
-                        if (dir.StartsWith(normalizedParent + "/"))
-                        {
-                            relative = dir.Substring(normalizedParent.Length + 1);
-                        }
-                        else
-                        {
-                            relative = dir.Substring(normalizedParent.Length + 1);
-                        }
+                        string relative = dir.Substring(normalizedParent.Length + 1);
                         
                         // Get the first segment of the relative path
                         var segments = relative.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);

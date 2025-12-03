@@ -185,7 +185,7 @@ public class ImportProcessorService : IImportProcessorService
             }
         }
 
-        int defaultPort = dto.Backend == Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : 7125;
+        int defaultPort = PrinterBackendHelpers.GetDefaultPort(dto.Backend);
         string normalizedInput = dto.ServerUrl ?? string.Empty;
 
         // Strip port from ServerUrl - port is managed via FrontendPort field, not stored in ServerUrl

@@ -2382,3 +2382,16 @@ public record RolePermissionRequestDto(
 public record ConfirmEmailRequest(string Token);
 
 #pragma warning restore CA1056
+
+/// <summary>
+/// Utility helpers for printer backend operations.
+/// </summary>
+public static class PrinterBackendHelpers
+{
+    /// <summary>
+    /// Gets the default backend port for a given printer backend.
+    /// Moonraker uses 7125, all other backends use 80.
+    /// </summary>
+    public static int GetDefaultPort(PrinterBackend backend) => 
+        backend == PrinterBackend.Moonraker ? 7125 : 80;
+}
