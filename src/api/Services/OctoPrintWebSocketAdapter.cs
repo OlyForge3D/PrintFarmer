@@ -429,24 +429,21 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
             }
 
             double? hotendTemp = null, bedTemp = null, hotendTarget = null, bedTarget = null;
-            if (currentObj.TryGetProperty("temps", out var tempsArr) && tempsArr.ValueKind == JsonValueKind.Array)
+            if (currentObj.TryGetProperty("temperature", out var tempProp))
             {
-                foreach (var tempObj in tempsArr.EnumerateArray())
+                if (tempProp.TryGetProperty("tool0", out var tool0) && tool0.ValueKind != JsonValueKind.Null)
                 {
-                    if (tempObj.TryGetProperty("tool0", out var tool0) && tool0.ValueKind != JsonValueKind.Null)
-                    {
-                        if (tool0.TryGetProperty("actual", out var actual))
-                            hotendTemp = actual.GetDouble();
-                        if (tool0.TryGetProperty("target", out var target))
-                            hotendTarget = target.GetDouble();
-                    }
-                    if (tempObj.TryGetProperty("bed", out var bed) && bed.ValueKind != JsonValueKind.Null)
-                    {
-                        if (bed.TryGetProperty("actual", out var actual))
-                            bedTemp = actual.GetDouble();
-                        if (bed.TryGetProperty("target", out var target))
-                            bedTarget = target.GetDouble();
-                    }
+                    if (tool0.TryGetProperty("actual", out var actual))
+                        hotendTemp = actual.GetDouble();
+                    if (tool0.TryGetProperty("target", out var target))
+                        hotendTarget = target.GetDouble();
+                }
+                if (tempProp.TryGetProperty("bed", out var bed) && bed.ValueKind != JsonValueKind.Null)
+                {
+                    if (bed.TryGetProperty("actual", out var actual))
+                        bedTemp = actual.GetDouble();
+                    if (bed.TryGetProperty("target", out var target))
+                        bedTarget = target.GetDouble();
                 }
             }
 
@@ -492,24 +489,21 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
                 z = zProp.GetDouble();
 
             double? hotendTemp = null, bedTemp = null, hotendTarget = null, bedTarget = null;
-            if (root.TryGetProperty("temps", out var tempsArr) && tempsArr.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty("temperature", out var tempProp))
             {
-                foreach (var tempObj in tempsArr.EnumerateArray())
+                if (tempProp.TryGetProperty("tool0", out var tool0) && tool0.ValueKind != JsonValueKind.Null)
                 {
-                    if (tempObj.TryGetProperty("tool0", out var tool0) && tool0.ValueKind != JsonValueKind.Null)
-                    {
-                        if (tool0.TryGetProperty("actual", out var actual))
-                            hotendTemp = actual.GetDouble();
-                        if (tool0.TryGetProperty("target", out var target))
-                            hotendTarget = target.GetDouble();
-                    }
-                    if (tempObj.TryGetProperty("bed", out var bed) && bed.ValueKind != JsonValueKind.Null)
-                    {
-                        if (bed.TryGetProperty("actual", out var actual))
-                            bedTemp = actual.GetDouble();
-                        if (bed.TryGetProperty("target", out var target))
-                            bedTarget = target.GetDouble();
-                    }
+                    if (tool0.TryGetProperty("actual", out var actual))
+                        hotendTemp = actual.GetDouble();
+                    if (tool0.TryGetProperty("target", out var target))
+                        hotendTarget = target.GetDouble();
+                }
+                if (tempProp.TryGetProperty("bed", out var bed) && bed.ValueKind != JsonValueKind.Null)
+                {
+                    if (bed.TryGetProperty("actual", out var actual))
+                        bedTemp = actual.GetDouble();
+                    if (bed.TryGetProperty("target", out var target))
+                        bedTarget = target.GetDouble();
                 }
             }
 
