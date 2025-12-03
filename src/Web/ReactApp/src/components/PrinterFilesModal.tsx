@@ -24,6 +24,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ type: 'print' | 'delete'; file: PrinterFileDto } | null>(null);
 
   useEffect(() => {
     if (isOpen && printer) {
@@ -47,10 +48,14 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   };
 
   const handleQueueFile = async (fileName: string) => {
-    if (!confirm(`Start printing "${fileName}"?`)) {
-      return;
+    const file = files.find(f => f.fileName === fileName);
+    if (file) {
+      setConfirmDialog({ type: 'print', file });
     }
+  };
 
+  const confirmPrintFile = async (fileName: string) => {
+    setConfirmDialog(null);
     try {
       const success = await apiClient.startPrintFromFile(printer.id, fileName);
       if (success) {
@@ -73,10 +78,14 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   };
 
   const handleDeleteFile = async (fileName: string) => {
-    if (!confirm(`Delete "${fileName}"? This action cannot be undone.`)) {
-      return;
+    const file = files.find(f => f.fileName === fileName);
+    if (file) {
+      setConfirmDialog({ type: 'delete', file });
     }
+  };
 
+  const confirmDeleteFile = async (fileName: string) => {
+    setConfirmDialog(null);
     try {
       setIsDeleting(fileName);
       const success = await apiClient.deletePrinterFile(printer.id, fileName);
@@ -94,7 +103,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     } finally {
       setIsDeleting(null);
     }
-  };
+  };;
 
   const getSortedFiles = () => {
     const sorted = [...files];
@@ -344,5 +353,113 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     </div>
   );
 
-  return createPortal(modalContent, document.body);
+  // Confirmation dialog component
+  const confirmDialogContent = confirmDialog && (
+    <div className="fixed inset-0 z-[60] overflow-y-auto">
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-75" onClick={() => setConfirmDialog(null)} />
+        
+        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-pf-border">
+            <h3 className="text-lg font-semibold text-pf-text-primary">
+              {confirmDialog.type === 'print' ? 'Start Printing?' : 'Delete File?'}
+            </h3>
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={() => setConfirmDialog(null)}
+              className="!p-2 !h-auto"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+
+          {/* Content */}
+          <div className="p-6 space-y-4">
+            {/* Thumbnail Preview */}
+            {confirmDialog.file.thumbnailUrl && (
+              <div className="flex justify-center mb-4">
+                <img
+                  src={confirmDialog.file.thumbnailUrl}
+                  alt={confirmDialog.file.fileName}
+                  className="rounded-lg max-w-xs max-h-48 object-cover border border-pf-border"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+
+            {/* File Details */}
+            <div className="bg-pf-bg-0 rounded p-3 space-y-2">
+              <p className="text-sm text-pf-text-secondary">File:</p>
+              <p className="text-pf-text-primary font-medium break-all">{confirmDialog.file.fileName}</p>
+              
+              {confirmDialog.file.sizeBytes && (
+                <div>
+                  <p className="text-sm text-pf-text-secondary">Size:</p>
+                  <p className="text-pf-text-primary">{formatFileSize(confirmDialog.file.sizeBytes)}</p>
+                </div>
+              )}
+              
+              {confirmDialog.file.modified && (
+                <div>
+                  <p className="text-sm text-pf-text-secondary">Modified:</p>
+                  <p className="text-pf-text-primary text-sm">{formatModifiedDate(confirmDialog.file.modified)}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Confirmation Message */}
+            <div className="bg-pf-bg-0 rounded p-3 border border-pf-border-warning">
+              {confirmDialog.type === 'print' ? (
+                <p className="text-sm text-pf-text-primary">
+                  Start printing this file? The printer will begin the print job.
+                </p>
+              ) : (
+                <p className="text-sm text-red-400">
+                  Delete this file? This action cannot be undone.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-pf-border bg-pf-bg-0">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setConfirmDialog(null)}
+            >
+              Cancel
+            </Button>
+            
+            <Button
+              type="button"
+              variant={confirmDialog.type === 'print' ? 'primary' : 'danger'}
+              onClick={() => {
+                if (confirmDialog.type === 'print') {
+                  confirmPrintFile(confirmDialog.file.fileName);
+                } else {
+                  confirmDeleteFile(confirmDialog.file.fileName);
+                }
+              }}
+            >
+              {confirmDialog.type === 'print' ? 'Start Printing' : 'Delete'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(
+    <>
+      {modalContent}
+      {confirmDialogContent}
+    </>,
+    document.body
+  );
 }
