@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Discovery;
 public class OctoPrintDiscoveryProbe : BaseDiscoveryProbe
 {
     public override string DisplayName => "OctoPrint";
-    protected override int[] Ports => new[] { 80, 5000 };
+    protected override int[] Ports => new[] { 80, 5000 }; // Probe both, but prefer 80 as default
     protected override string EndpointPath => "/api/version";
     protected override PrinterBackend Backend => PrinterBackend.OctoPrint;
     protected override string PrinterName => "OctoPrint Printer";

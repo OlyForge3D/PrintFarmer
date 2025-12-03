@@ -470,11 +470,9 @@ namespace Farm.Web.Api.Services.Printers
             {
                 PrinterBackend backend = (PrinterBackend)p.Backend;
                 string backendName = backend.ToString();
-                int defaultBackendPort = PrinterBackendHelpers.GetDefaultPort(backend);
-                int defaultFrontendPort = 80;
                 
-                string backendPort = (p.BackendPort ?? defaultBackendPort).ToString();
-                string frontendPort = (p.FrontendPort ?? defaultFrontendPort).ToString();
+                string backendPort = p.BackendPort?.ToString() ?? "";
+                string frontendPort = p.FrontendPort?.ToString() ?? "";
                 string apiKey = p.ApiKey ?? "";
                 string cameraStreamUrl = p.CameraStreamUrl ?? "";
                 string cameraSnapshotUrl = p.CameraSnapshotUrl ?? "";
