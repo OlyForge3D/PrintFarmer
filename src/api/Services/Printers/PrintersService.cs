@@ -457,7 +457,7 @@ namespace Farm.Web.Api.Services.Printers
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
 
             // Export fields matching AdminCli CSV format for consistency
-            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled" };
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired" };
 
             StringBuilder csv = new();
             _ = csv.AppendLine(string.Join(',', headerParts));
@@ -475,7 +475,10 @@ namespace Farm.Web.Api.Services.Printers
                 string backendPort = (printer.BackendPort ?? defaultBackendPort).ToString();
                 string frontendPort = (printer.FrontendPort ?? defaultFrontendPort).ToString();
                 string apiKey = printer.ApiKey ?? "";
-                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{EscapeCsvValue(apiKey)},{printer.IsEnabled}");
+                string cameraStreamUrl = printer.CameraStreamUrl ?? "";
+                string cameraSnapshotUrl = printer.CameraSnapshotUrl ?? "";
+                string dateAcquired = printer.DateAcquired?.ToString("O") ?? "";
+                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{EscapeCsvValue(apiKey)},{printer.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired}");
             }
 
             return Encoding.UTF8.GetBytes(csv.ToString());
