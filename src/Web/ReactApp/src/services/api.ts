@@ -1104,6 +1104,16 @@ export class ApiClient {
     return response.data.success;
   }
 
+  async deletePrinterFile(
+    printerId: string,
+    fileName: string
+  ): Promise<boolean> {
+    const response = await this.client.delete<{ success: boolean }>(
+      `/printers/${printerId}/files/${encodeURIComponent(fileName)}`
+    );
+    return response.data.success;
+  }
+
   // ============ Health checks ============
 
   async getHealthStatus(): Promise<HealthStatus> {

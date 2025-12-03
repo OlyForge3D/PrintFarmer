@@ -576,7 +576,9 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
 
     /// <summary>
     /// Data class for parsed printer state from HTTP fallback.
+    /// Used for JSON deserialization - properties must have setters.
     /// </summary>
+#pragma warning disable S3459, S1144 // Suppress "unassigned property" and "unused setter" warnings for DTO
     private sealed class PrinterStateData
     {
         public bool IsOnline { get; set; }
@@ -592,6 +594,7 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
         public string? ThumbnailUrl { get; set; }
         public string? CameraStreamUrl { get; set; }
     }
+#pragma warning restore S3459, S1144
 
     /// <summary>
     /// Data class for parsed job status from HTTP fallback.

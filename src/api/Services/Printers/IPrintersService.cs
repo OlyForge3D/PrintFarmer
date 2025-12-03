@@ -70,6 +70,7 @@ namespace Farm.Web.Api.Services.Printers
         Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct);
         Task<bool> StartPrintFromFileAsync(Guid id, string filename, CancellationToken ct);
         Task<bool> StartPrintAsync(Guid id, string filename, CancellationToken ct);
+        Task<bool> DeletePrinterFileAsync(Guid id, string filename, CancellationToken ct);
         Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct);
         Task<PrinterFileDto[]> GetFileListAsync(Guid id, CancellationToken ct);
 

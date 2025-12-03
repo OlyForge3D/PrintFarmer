@@ -1056,7 +1056,9 @@ namespace Farm.Web.Api.Services.Printers
                 if (bed.HasValue)
                 {
                     bool bedSuccess = await _octoprint.SetBedTempAsync(p.ServerUrl, p.ApiKey ?? string.Empty, bed.Value).ConfigureAwait(false);
+#pragma warning disable S2589 // Boolean expression always evaluates to true
                     success = success && bedSuccess;
+#pragma warning restore S2589
                 }
                 
                 if (hotend.HasValue)
@@ -1213,6 +1215,30 @@ namespace Farm.Web.Api.Services.Printers
         {
             // alias for StartPrintFromFileAsync - keep compatibility
             return await StartPrintFromFileAsync(id, filename, ct).ConfigureAwait(false);
+        }
+
+        public async Task<bool> DeletePrinterFileAsync(Guid id, string filename, CancellationToken ct)
+        {
+            Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+            if (p == null)
+            {
+                return false;
+            }
+
+            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
+            {
+                // SDCP doesn't support file deletion
+                return false;
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                return await _octoprint.DeleteFileAsync(p.ServerUrl, p.ApiKey ?? string.Empty, filename).ConfigureAwait(false);
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker)
+            {
+                return await _moon.DeleteFileAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
+            }
+            return false;
         }
 
         public async Task<bool> EnableCameraAsync(Guid id, CancellationToken ct)
@@ -1977,7 +2003,8 @@ namespace Farm.Web.Api.Services.Printers
         /// <summary>
         /// Parses OctoPrint history JSON response and returns a HistoryListResponse.
         /// </summary>
-        private static HistoryListResponse ParseOctoPrintHistory(string historyJson, string printerUrl)
+#pragma warning disable S1172 // Parameter is intentionally unused - kept for method signature compatibility
+        private static HistoryListResponse ParseOctoPrintHistory(string historyJson, string _)
         {
             try
             {
@@ -2083,6 +2110,7 @@ namespace Farm.Web.Api.Services.Printers
                 return null;
             }
         }
+#pragma warning restore S1172
 
         /// <summary>
         /// Parses a single OctoPrint job detail JSON response into a HistoryJob object.

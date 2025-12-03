@@ -136,9 +136,9 @@ public sealed class OctoPrintPollingService(
                                     _hub);
 
                                 _webSocketAdapters.TryAdd(id, adapter);
-                                var state = _printerStates.GetOrAdd(id, _ => new PrinterPollingState 
+                                var state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState 
                                 { 
-                                    PrinterId = id,
+                                    PrinterId = printerId,
                                     LastKnownIsOnline = false,
                                     LastApiState = "unset",
                                     WebSocketAdapter = adapter

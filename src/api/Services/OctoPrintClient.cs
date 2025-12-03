@@ -156,7 +156,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         // Copy content if present
         if (request.Content != null)
         {
+#pragma warning disable VSTHRD002
             var contentAsString = request.Content.ReadAsStringAsync().Result;
+#pragma warning restore VSTHRD002
             newRequest.Content = new StringContent(contentAsString, Encoding.UTF8, "application/json");
         }
 

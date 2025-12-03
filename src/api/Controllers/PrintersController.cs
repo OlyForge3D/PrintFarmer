@@ -1327,6 +1327,29 @@ public class PrintersController(
         }
     }
 
+    [HttpDelete("{id:guid}/files/{fileName}")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<CommandResult>> DeletePrinterFileAsync(Guid id, string fileName, CancellationToken ct)
+    {
+        try
+        {
+            bool success = await _printersService.DeletePrinterFileAsync(id, fileName, ct);
+
+            if (!success)
+            {
+                return NotFound();
+            }
+
+            return Ok(new CommandResult(true, "File deleted successfully"));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to delete file: {ex.Message}"));
+        }
+    }
+
     // ===== HISTORY ENDPOINTS =====
 
     [HttpGet("{id}/history")]

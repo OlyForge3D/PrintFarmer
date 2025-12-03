@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, FileText, AlertCircle, Play, Copy, Trash2, Image, ArrowUpDown } from 'lucide-react';
 import { Button, Select } from '@/components/ui';
 import { apiClient } from '@/services/api';
+import { toast } from 'sonner';
 import type { Printer, PrinterFileDto } from '@/types/api';
 
 interface PrinterFilesModalProps {
@@ -22,6 +23,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [hoveredThumbnail, setHoveredThumbnail] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && printer) {
@@ -45,13 +47,22 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   };
 
   const handleQueueFile = async (fileName: string) => {
+    if (!confirm(`Start printing "${fileName}"?`)) {
+      return;
+    }
+
     try {
-      // TODO: Implement queue functionality
-      // For now, just show a confirmation
-      console.log('Queue file:', fileName);
-      // const response = await apiClient.queuePrintFile(printer.id, fileName);
+      const success = await apiClient.startPrintFromFile(printer.id, fileName);
+      if (success) {
+        toast.success(`Started printing: ${fileName}`);
+        onClose();
+      } else {
+        toast.error('Failed to start print - printer may not be ready');
+      }
     } catch (err) {
-      console.error('Error queueing file:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to start print';
+      toast.error(errorMessage);
+      console.error('Error starting print:', err);
     }
   };
 
@@ -62,11 +73,27 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   };
 
   const handleDeleteFile = async (fileName: string) => {
-    if (!confirm(`Are you sure you want to delete "${fileName}"?`)) {
+    if (!confirm(`Delete "${fileName}"? This action cannot be undone.`)) {
       return;
     }
-    // TODO: Implement delete functionality
-    console.log('Delete file:', fileName);
+
+    try {
+      setIsDeleting(fileName);
+      const success = await apiClient.deletePrinterFile(printer.id, fileName);
+      if (success) {
+        toast.success(`Deleted: ${fileName}`);
+        // Reload the file list after deletion
+        await loadFiles();
+      } else {
+        toast.error('Failed to delete file');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete file';
+      toast.error(errorMessage);
+      console.error('Error deleting file:', err);
+    } finally {
+      setIsDeleting(null);
+    }
   };
 
   const getSortedFiles = () => {
@@ -266,10 +293,15 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           variant="subtle"
                           size="sm"
                           onClick={() => handleDeleteFile(file.fileName)}
-                          className="!p-2 !h-auto text-red-500 hover:text-red-600"
-                          title="Delete file"
+                          disabled={isDeleting === file.fileName}
+                          className="!p-2 !h-auto text-red-500 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          {isDeleting === file.fileName ? (
+                            <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
                         </Button>
                       </div>
 
