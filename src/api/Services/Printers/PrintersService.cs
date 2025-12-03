@@ -454,34 +454,37 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct)
         {
+            // Delegate to StreamExportToResponseAsync using a memory stream wrapper
+            using MemoryStream ms = new MemoryStream();
+            using StreamWriter writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
+            
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
-
+            IQueryable<Printer> query = printers.AsQueryable();
+            
             // Export fields matching AdminCli CSV format for consistency
             List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired" };
-
-            StringBuilder csv = new();
-            _ = csv.AppendLine(string.Join(',', headerParts));
-
-            foreach (Printer printer in printers)
+            
+            await writer.WriteLineAsync(string.Join(',', headerParts));
+            
+            foreach (Printer p in query)
             {
-                // Use Backend enum ToString() for backend name
-                PrinterBackend backend = (PrinterBackend)printer.Backend;
+                PrinterBackend backend = (PrinterBackend)p.Backend;
                 string backendName = backend.ToString();
-                
-                // Calculate correct default ports based on backend if not explicitly set
                 int defaultBackendPort = PrinterBackendHelpers.GetDefaultPort(backend);
                 int defaultFrontendPort = 80;
                 
-                string backendPort = (printer.BackendPort ?? defaultBackendPort).ToString();
-                string frontendPort = (printer.FrontendPort ?? defaultFrontendPort).ToString();
-                string apiKey = printer.ApiKey ?? "";
-                string cameraStreamUrl = printer.CameraStreamUrl ?? "";
-                string cameraSnapshotUrl = printer.CameraSnapshotUrl ?? "";
-                string dateAcquired = printer.DateAcquired?.ToString("O") ?? "";
-                _ = csv.AppendLine($"{EscapeCsvValue(printer.Name)},{EscapeCsvValue(printer.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(printer.Manufacturer?.Name)},{EscapeCsvValue(printer.Model?.Name)},{EscapeCsvValue(printer.Notes)},{EscapeCsvValue(apiKey)},{printer.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired}");
+                string backendPort = (p.BackendPort ?? defaultBackendPort).ToString();
+                string frontendPort = (p.FrontendPort ?? defaultFrontendPort).ToString();
+                string apiKey = p.ApiKey ?? "";
+                string cameraStreamUrl = p.CameraStreamUrl ?? "";
+                string cameraSnapshotUrl = p.CameraSnapshotUrl ?? "";
+                string dateAcquired = p.DateAcquired?.ToString("O") ?? "";
+                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired}";
+                await writer.WriteLineAsync(csvLine);
             }
-
-            return Encoding.UTF8.GetBytes(csv.ToString());
+            
+            await writer.FlushAsync();
+            return ms.ToArray();
         }
 
         public async Task StreamExportToResponseAsync(Guid[]? ids, string format, HttpResponse response, CancellationToken ct)
@@ -502,7 +505,7 @@ namespace Farm.Web.Api.Services.Printers
             string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
             response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
 
-            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "IsEnabled" };
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired" };
 
             await using StreamWriter writer = new StreamWriter(response.Body, Encoding.UTF8, leaveOpen: true);
             await writer.WriteLineAsync(string.Join(',', headerParts));
@@ -513,7 +516,11 @@ namespace Farm.Web.Api.Services.Printers
                 string backendName = backend.ToString();
                 string backendPort = p.BackendPort?.ToString() ?? "";
                 string frontendPort = p.FrontendPort?.ToString() ?? "";
-                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{p.IsEnabled}";
+                string apiKey = p.ApiKey ?? "";
+                string cameraStreamUrl = p.CameraStreamUrl ?? "";
+                string cameraSnapshotUrl = p.CameraSnapshotUrl ?? "";
+                string dateAcquired = p.DateAcquired?.ToString("O") ?? "";
+                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired}";
                 await writer.WriteLineAsync(csvLine);
                 await writer.FlushAsync();
             }
