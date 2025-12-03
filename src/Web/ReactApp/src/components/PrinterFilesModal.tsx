@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, FileText, AlertCircle, Play, Copy, Trash2, Image, ArrowUpDown } from 'lucide-react';
 import { Button, Select } from '@/components/ui';
@@ -26,13 +26,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'print' | 'delete'; file: PrinterFileDto } | null>(null);
 
-  useEffect(() => {
-    if (isOpen && printer) {
-      loadFiles();
-    }
-  }, [isOpen, printer]);
-
-  const loadFiles = async () => {
+  const loadFiles = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
@@ -45,7 +39,13 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [printer.id]);
+
+  useEffect(() => {
+    if (isOpen && printer) {
+      loadFiles();
+    }
+  }, [isOpen, printer, loadFiles]);
 
   const handleQueueFile = async (fileName: string) => {
     const file = files.find(f => f.fileName === fileName);

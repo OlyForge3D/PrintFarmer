@@ -50,14 +50,12 @@ interface CollapsedPrinterCardProps {
   printer: Printer;
   onExpand: () => void;
   onEdit?: (printer: Printer) => void;
-  onDelete?: () => void;
 }
 
 export function CollapsedPrinterCard({
   printer,
   onExpand,
-  onEdit,
-  onDelete
+  onEdit
 }: CollapsedPrinterCardProps) {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
@@ -91,7 +89,6 @@ export function CollapsedPrinterCard({
   // Only support cameras for Moonraker and OctoPrint backends
   const supportsCameras = printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint;
   const hasCameraUrls = supportsCameras && !!displayPrinter.cameraSnapshotUrl;
-  const cameraSnapshotUrl = displayPrinter.cameraSnapshotUrl;
 
   // State color classes
   const getStateColorClasses = (isOnline: boolean, state: string): string => {

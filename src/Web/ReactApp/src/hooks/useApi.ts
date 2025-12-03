@@ -156,7 +156,7 @@ export function usePrintersWithCameraUrls(includeDisabled = false) {
       isSuccess: false,
       isFetching,
     };
-  }, [printersQuery.data, cameraUrlsQuery.data]);
+  }, [printersQuery.data, printersQuery.refetch, cameraUrlsQuery.data, isLoading, isError, error, isSuccess, isFetching]);
 }
 
 export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiError>) {

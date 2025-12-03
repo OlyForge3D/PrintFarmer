@@ -411,7 +411,21 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
         catch
         {
         }
-        string? state = job?.PrintState ?? status.State; // prefer print job state (printing, paused, complete) over system state
+        // Prefer print job state (printing, paused, complete) over system state, but not for error states
+        // If system is shutdown/error, that takes precedence over print_stats state
+        string? state = null;
+        if (!string.IsNullOrEmpty(status.State) && 
+            (status.State.Equals("shutdown", StringComparison.OrdinalIgnoreCase) || 
+             status.State.Equals("error", StringComparison.OrdinalIgnoreCase)))
+        {
+            // System is in error state, use system state
+            state = status.State;
+        }
+        else
+        {
+            // Otherwise prefer job state if available
+            state = job?.PrintState ?? status.State;
+        }
         // Query temps
         double? hotend = null, bed = null, hotendT = null, bedT = null;
         try

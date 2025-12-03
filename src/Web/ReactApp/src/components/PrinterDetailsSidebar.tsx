@@ -18,15 +18,12 @@ import {
   PlayIcon,
   PauseIcon,
   EmergencyStopIcon,
-  StopIcon,
   ArrowUpIcon,
   ArrowDownIcon,
   ArrowLeftIcon,
   ArrowRightIcon
 } from '@/components/icons/MdiIcons';
 import { 
-  ChevronUp,
-  ChevronDown,
   Minus,
   RotateCcw,
 } from 'lucide-react';
@@ -77,14 +74,10 @@ interface PrinterDetailsSidebarProps {
 }
 
 export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSidebarProps) {
-  // Guard early and don't fetch if no printerId
-  if (!printerId) {
-    return null;
-  }
-
-  const { data: printer, isLoading, refetch } = usePrinter(printerId);
+  // Call hooks first before any early returns (React Rules of Hooks)
+  // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
+  const { data: printer, isLoading, refetch } = usePrinter(printerId || '');
   const { printerStatuses } = usePrinterStatusUpdates();
-  const status = printerId ? printerStatuses.get(printerId) : undefined;
   
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -94,22 +87,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
   const [step, setStep] = useState(10);
-  
-  // Poll printer data for PrusaLink (fallback - server now broadcasts via SignalR)
-  // Server-side PrusaLinkPollingService polls every 5 seconds and broadcasts via SignalR
-  // This client-side polling serves as a fallback in case SignalR connection drops
-  useEffect(() => {
-    if (!printer || printer.backend !== PrinterBackend.PrusaLink) {
-      return;
-    }
 
-    const pollInterval = setInterval(() => {
-      refetch();
-    }, 5000); // Poll every 5 seconds for PrusaLink as fallback
-
-    return () => clearInterval(pollInterval);
-  }, [printer, refetch]);
-  
   // Use refs instead of state for caching display values - this avoids setState during render
   const lastKnownHotendTempRef = useRef<number | null>(null);
   const lastKnownBedTempRef = useRef<number | null>(null);
@@ -118,6 +96,28 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const lastKnownZRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Poll printer data for PrusaLink (fallback - server now broadcasts via SignalR)
+  // Server-side PrusaLinkPollingService polls every 5 seconds and broadcasts via SignalR
+  // This client-side polling serves as a fallback in case SignalR connection drops
+  useEffect(() => {
+    if (!printer || printer.backend !== PrinterBackend.PrusaLink || !printerId) {
+      return;
+    }
+
+    const pollInterval = setInterval(() => {
+      refetch();
+    }, 5000); // Poll every 5 seconds for PrusaLink as fallback
+
+    return () => clearInterval(pollInterval);
+  }, [printer, refetch, printerId]);
+
+  // Guard early after all hooks are called
+  if (!printerId) {
+    return null;
+  }
+
+  const status = printerStatuses.get(printerId);
+  
   // Update refs when status changes - refs don't trigger re-renders
   if (status) {
     if (status.hotendTemp !== undefined) lastKnownHotendTempRef.current = status.hotendTemp;
@@ -159,7 +159,6 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   
   // Guarded debug logging - only log if enabled in window.PrintFarmerDebug
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
-    // eslint-disable-next-line no-console
     console.log('PrinterDetailsSidebar - Status update:', {
       printerId,
       homedAxesRaw: status?.homedAxes,
@@ -177,13 +176,12 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const isZHomed = homedAxes.includes('z');
   
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
-    // eslint-disable-next-line no-console
     console.log('Homing state:', { isXHomed, isYHomed, isZHomed, homedAxes });
   }
   
   // Printer is fully homed if all axes are homed
   const isAllHomed = isXHomed && isYHomed && isZHomed;
-  const isXYHomed = isXHomed && isYHomed;
+
 
   // Get button class based on homed state
   const getHomeButtonStyle = (isHomed: boolean): { className: string; style?: React.CSSProperties } => {
@@ -205,7 +203,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     };
   };
 
-  const handleHome = async (axis?: string) => {
+  const handleHome = async () => {
     try {
       const result = await apiClient.homePrinter(printer.id);
       if (!result.success) {
@@ -483,7 +481,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 variant="secondary"
                 size="sm"
                 disabled={isPrinting}
-                onClick={() => handleHome('x')}
+                onClick={() => handleHome()}
                 title="Home X"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isXHomed).className}`}
                 style={getHomeButtonStyle(isXHomed).style}
@@ -533,7 +531,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 variant="secondary"
                 size="sm"
                 disabled={isPrinting}
-                onClick={() => handleHome('z')}
+                onClick={() => handleHome()}
                 title="Home Z"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
                 style={getHomeButtonStyle(isZHomed).style}

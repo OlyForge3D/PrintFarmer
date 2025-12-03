@@ -222,9 +222,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> StartJobAsync(string baseUrl, string apiKey, string fileName)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
+        // OctoPrint API: Select and start print via /api/files/local/{filename}
+        // This endpoint requires URL encoding of special characters in filename
+        string encodedFileName = Uri.EscapeDataString(fileName);
+        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/files/local/{encodedFileName}");
         request.Headers.Add("X-Api-Key", apiKey);
-        var payload = new { command = "select", print = true, file = fileName };
+        var payload = new { command = "select", print = true };
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         
         try

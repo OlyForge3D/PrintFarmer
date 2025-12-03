@@ -963,6 +963,7 @@ export interface MoveRequest {
 export interface CommandResult {
   success: boolean;
   error?: string;
+  message?: string;
 }
 
 // Failure detail for an individual file during multi-upload.

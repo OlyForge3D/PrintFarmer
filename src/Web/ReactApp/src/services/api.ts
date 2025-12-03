@@ -1022,7 +1022,7 @@ export class ApiClient {
     page: number = 1,
     pageSize: number = 50
   ): Promise<import("@/types/api").Model3DListResponse> {
-    const params: Record<string, any> = {
+    const params: Record<string, string | number | undefined> = {
       path,
       sortBy,
       sortOrder,
@@ -1095,23 +1095,28 @@ export class ApiClient {
     printerId: string,
     fileName: string
   ): Promise<boolean> {
-    const response = await this.client.post<{ success: boolean }>(
-      `/printers/${printerId}/start-print`,
-      {
-        fileName,
-      }
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/print`,
+      { fileName }
     );
-    return response.data.success;
+    if (!response.data.success) {
+      throw new Error(response.data.message || response.data.error || 'Failed to start print');
+    }
+    return true;
   }
 
   async deletePrinterFile(
     printerId: string,
     fileName: string
   ): Promise<boolean> {
-    const response = await this.client.delete<{ success: boolean }>(
-      `/printers/${printerId}/files/${encodeURIComponent(fileName)}`
+    const response = await this.client.delete<CommandResult>(
+      `/printers/${printerId}/files`,
+      { data: { fileName } }
     );
-    return response.data.success;
+    if (!response.data.success) {
+      throw new Error(response.data.message || response.data.error || 'Failed to delete file');
+    }
+    return true;
   }
 
   // ============ Health checks ============

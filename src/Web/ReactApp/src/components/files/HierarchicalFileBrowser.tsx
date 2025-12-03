@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronRightIcon, FolderIcon, DocumentIcon, ArrowDownTrayIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { ChevronRightIcon, FolderIcon, DocumentIcon } from '@heroicons/react/24/outline';
 import { Button, Checkbox, Input, Select } from '@/components/ui';
 import { toast } from 'sonner';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
-import styles from './FileBrowser.module.css';
 
 export interface FileEntry {
   path: string;
@@ -65,7 +64,7 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize] = useState(50);
   const queryClient = useQueryClient();
 
   const apiPath = getApiPath(endpoint);
@@ -194,12 +193,12 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
           }}
           className="flex-1 min-w-64"
         />
-        <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)}>
+        <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'name' | 'size' | 'date')}>
           <option value="name">Name</option>
           <option value="size">Size</option>
           <option value="date">Date</option>
         </Select>
-        <Select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as any)}>
+        <Select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}>
           <option value="asc">Ascending</option>
           <option value="desc">Descending</option>
         </Select>

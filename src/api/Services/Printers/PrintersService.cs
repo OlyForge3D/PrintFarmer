@@ -319,6 +319,14 @@ namespace Farm.Web.Api.Services.Printers
                     PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), statusCts.Token);
                     return new PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl, X: status.X, Y: status.Y, Z: status.Z, HotendTemp: status.HotendTemp, BedTemp: status.BedTemp, HotendTarget: status.HotendTarget, BedTarget: status.BedTarget);
                 }
+                else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+                {
+                    // OctoPrint support
+                    CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{p.Id}");
+                    // TODO: Implement OctoPrint status retrieval
+                    // For now, return offline status
+                    return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: 0);
+                }
                 else
                 {
                     CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{p.Id}");
@@ -360,6 +368,16 @@ namespace Farm.Web.Api.Services.Printers
                 PrinterCompositeStatus status = await _sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
                 return await _sdcp.CreatePrinterDtoAsync(p, status, ct);
             }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
+            {
+                // Delegate to OctoPrint client for DTO creation
+                // TODO: Implement OctoPrint DTO creation
+                // For now, fallback to Moonraker DTO with OctoPrint backend
+                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                PrinterCompositeStatus status = await _moon.GetCompositeStatusAsync(moonrakerUrl, ct);
+                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(moonrakerUrl, ct);
+                return await _moon.CreatePrinterDtoAsync(p, status, spoolInfo, ct);
+            }
             else
             {
                 // Delegate to Moonraker client for DTO creation
@@ -392,6 +410,10 @@ namespace Farm.Web.Api.Services.Printers
                     {
                         streamUrl = await _sdcp.GetCameraUrlAsync(p.ServerUrl, ct);
                         snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.ServerUrl, ct);
+                    }
+                    else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint) // OctoPrint
+                    {
+                        // OctoPrint camera URLs would go here
                     }
                 }
                 return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
@@ -483,7 +505,11 @@ namespace Farm.Web.Api.Services.Printers
 
             foreach (Printer p in query)
             {
-                string backendName = p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? "PrusaLink" : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? "SDCP" : "Moonraker";
+                string backendName = p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker ? "Moonraker" :
+                                     p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? "PrusaLink" :
+                                     p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? "SDCP" :
+                                     p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint ? "OctoPrint" :
+                                     "Unknown";
                 string backendPort = p.BackendPort?.ToString() ?? "";
                 string frontendPort = p.FrontendPort?.ToString() ?? "";
                 string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{p.IsEnabled}";
@@ -1200,7 +1226,15 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
-            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
+            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker)
+            {
+                return await _moon.StartPrintAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
+            {
+                return await _prusa.StartPrintAsync(p.ServerUrl, filename, p.ApiKey, ct).ConfigureAwait(false);
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
                 return await _sdcp.StartPrintAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
             }
@@ -1225,7 +1259,16 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
-            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
+            if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker)
+            {
+                return await _moon.DeleteFileAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
+            {
+                // PrusaLink doesn't support file deletion
+                return false;
+            }
+            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
                 // SDCP doesn't support file deletion
                 return false;
@@ -1233,10 +1276,6 @@ namespace Farm.Web.Api.Services.Printers
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
                 return await _octoprint.DeleteFileAsync(p.ServerUrl, p.ApiKey ?? string.Empty, filename).ConfigureAwait(false);
-            }
-            else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker)
-            {
-                return await _moon.DeleteFileAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
             }
             return false;
         }

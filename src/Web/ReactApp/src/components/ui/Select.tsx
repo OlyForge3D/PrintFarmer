@@ -1,7 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
 import clsx from 'clsx';
-import { ChevronDown } from 'lucide-react';
 
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   invalid?: boolean;

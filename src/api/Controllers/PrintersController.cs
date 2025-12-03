@@ -732,8 +732,11 @@ public class PrintersController(
         p.Name = dto.Name;
         int defaultPort = dto.Backend.HasValue ?
             (dto.Backend.Value == PrinterBackend.PrusaLink ? 80 :
-             dto.Backend.Value == PrinterBackend.SDCP ? 80 : 7125) :
-            (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 : p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? 80 : 7125);
+             dto.Backend.Value == PrinterBackend.SDCP ? 80 :
+             dto.Backend.Value == PrinterBackend.OctoPrint ? 5000 : 7125) :
+            (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink ? 80 :
+             p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP ? 80 :
+             p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint ? 5000 : 7125);
 
         // Delegate normalization and optional hostname resolution to the PrintersService
         PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
@@ -1157,6 +1160,16 @@ public class PrintersController(
         return new CommandResult(true, null);
     }
 
+    [HttpPost("{id:guid}/stop")]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<CommandResult>> StopAsync(Guid id, CancellationToken ct)
+    {
+        // Alias for emergency-stop for compatibility with frontend
+        return await EmergencyStopAsync(id, ct);
+    }
+
     [HttpPost("{id:guid}/firmware-restart")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1178,27 +1191,6 @@ public class PrintersController(
     public async Task<ActionResult<CommandResult>> DisableMotorsAsync(Guid id, CancellationToken ct)
     {
         bool ok = await _printersService.DisableMotorsAsync(id, ct);
-        if (!ok)
-        {
-            return NotFound();
-        }
-        return new CommandResult(true, null);
-    }
-
-    // Print job control
-    [HttpPost("{id:guid}/print/start")]
-    [HttpPost("{id:guid}/start-print")] // Alternative route for frontend compatibility
-    [ProducesResponseType(typeof(CommandResult), 200)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] StartPrintRequest request, CancellationToken ct)
-    {
-        if (request is null)
-        {
-            return BadRequest("Request body is required.");
-        }
-        bool ok = await _printersService.StartPrintAsync(id, request.Filename, ct);
         if (!ok)
         {
             return NotFound();
@@ -1304,44 +1296,50 @@ public class PrintersController(
         }
     }
 
-    [HttpPost("{id:guid}/files/{fileName}/print")]
+    // File operations with body-based parameters (handles special characters in filenames)
+    [HttpPost("{id:guid}/print")]
     [ProducesResponseType(typeof(StartPrintResultDto), 200)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<StartPrintResultDto>> StartPrintFromFileAsync(Guid id, string fileName, CancellationToken ct)
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 500)]
+    public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(request?.FileName))
+        {
+            return BadRequest(new CommandResult(false, "fileName is required"));
+        }
+
         try
         {
-            bool success = await _printersService.StartPrintFromFileAsync(id, fileName, ct);
-
+            bool success = await _printersService.StartPrintFromFileAsync(id, request.FileName, ct);
             if (!success)
             {
-                return NotFound();
+                return Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"));
             }
-
-            return Ok(new StartPrintResultDto("Print started successfully", fileName));
+            return Ok(new CommandResult(true, "Print started successfully"));
         }
         catch (Exception ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to start print: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to start print: {ex.Message}"));
         }
     }
 
-    [HttpDelete("{id:guid}/files/{fileName}")]
+    [HttpDelete("{id:guid}/files")]
     [ProducesResponseType(typeof(CommandResult), 200)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> DeletePrinterFileAsync(Guid id, string fileName, CancellationToken ct)
+    [ProducesResponseType(typeof(CommandResult), 500)]
+    public async Task<ActionResult<CommandResult>> DeleteFileAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(request?.FileName))
+        {
+            return BadRequest(new CommandResult(false, "fileName is required"));
+        }
+
         try
         {
-            bool success = await _printersService.DeletePrinterFileAsync(id, fileName, ct);
-
+            bool success = await _printersService.DeletePrinterFileAsync(id, request.FileName, ct);
             if (!success)
             {
-                return NotFound();
+                return Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"));
             }
-
             return Ok(new CommandResult(true, "File deleted successfully"));
         }
         catch (Exception ex)

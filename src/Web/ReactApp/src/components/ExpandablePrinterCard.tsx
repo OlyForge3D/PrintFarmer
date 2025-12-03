@@ -74,8 +74,6 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const [moveX, setMoveX] = useState<number | ''>('');
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
-  const [collapsedImageVisible, setCollapsedImageVisible] = useState(true);
-  const [expandedImageVisible, setExpandedImageVisible] = useState(true);
   
   // State to track last known good values
   const [lastKnownHotendTemp, setLastKnownHotendTemp] = useState<number | null>(null);
@@ -406,25 +404,26 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     }
   };
 
-  const handleSetTemperatures = async () => {
-    try {
-      const hotendValue = typeof hotendTemp === 'string' ? parseFloat(hotendTemp) || 0 : hotendTemp;
-      const bedValue = typeof bedTemp === 'string' ? parseFloat(bedTemp) || 0 : bedTemp;
-      
-      const targets: TempTargets = {
-        hotend: hotendValue,
-        bed: bedValue
-      };
-      
-      const result = await apiClient.setTemperatures(printer.id, targets);
-      
-      if (!result.success) {
-        console.error('Failed to set temperatures:', result.error);
-      }
-    } catch (error) {
-      console.error('Error setting temperatures:', error);
-    }
-  };
+  // TODO: Implement set temperatures UI
+  // const handleSetTemperatures = async () => {
+  //   try {
+  //     const hotendValue = typeof hotendTemp === 'string' ? parseFloat(hotendTemp) || 0 : hotendTemp;
+  //     const bedValue = typeof bedTemp === 'string' ? parseFloat(bedTemp) || 0 : bedTemp;
+  //     
+  //     const targets: TempTargets = {
+  //       hotend: hotendValue,
+  //       bed: bedValue
+  //     };
+  //     
+  //     const result = await apiClient.setTemperatures(printer.id, targets);
+  //     
+  //     if (!result.success) {
+  //       console.error('Failed to set temperatures:', result.error);
+  //     }
+  //   } catch (error) {
+  //     console.error('Error setting temperatures:', error);
+  //   }
+  // };
 
   const handleViewHistory = () => {
     setShowHistory(true);
