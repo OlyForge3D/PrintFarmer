@@ -27,6 +27,7 @@ import {
   Minus,
   RotateCcw,
 } from 'lucide-react';
+import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 // Animation styles
 const sidebarAnimationStyles = `
@@ -233,7 +234,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
       if (action === 'disable-motors') {
         endpoint = 'disable-motors';
       }
-      const response = await fetch(`http://localhost:5245/api/printers/${printer.id}/${endpoint}`, {
+      const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });

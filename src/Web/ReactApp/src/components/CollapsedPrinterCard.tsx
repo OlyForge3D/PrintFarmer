@@ -12,6 +12,7 @@ import { PrinterBackend, type Printer } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import prusalinkIcon from '@/assets/prusalink.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
+import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 // Backend icon helper
 function getBackendIcon(backend: PrinterBackend | number | string) {
@@ -107,7 +108,7 @@ export function CollapsedPrinterCard({
   const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart') => {
     try {
       const endpoint = action === 'firmware-restart' ? 'firmware-restart' : action;
-      const response = await fetch(`http://localhost:5245/api/printers/${printer.id}/${endpoint}`, {
+      const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
