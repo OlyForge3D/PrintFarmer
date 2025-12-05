@@ -655,6 +655,20 @@ generate_compose() {
         fi
     fi
     
+    # Conditionally merge orcaslicer-worker addon if enabled
+    local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+    # Parse yes/no and numeric values
+    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
+        if merge_addon_services "$compose_file" "orcaslicer-worker"; then
+            log_info "Merged OrcaSlicer worker service (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
+            addons_merged=true
+        else
+            log_warning "Failed to merge OrcaSlicer worker service, continuing without it"
+        fi
+    else
+        log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
+    fi
+    
     if [[ "$addons_merged" == "true" ]]; then
         log_info "Successfully merged addon services into compose file"
     fi

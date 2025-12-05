@@ -81,30 +81,6 @@ services:
         condition: service_healthy
     healthcheck: *frontend-healthcheck
 
-  # OrcaSlicer Worker for distributed slicing - Multi-stage build
-  orcaslicer-worker:
-    build:
-      <<: *orcaslicer-build
-    image: printfarmer-orcaslicer-worker
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5000}
-      - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
-      - Worker__WorkerId=orcaslicer-worker-1
-      - Worker__MaxConcurrentJobs=1
-      - Worker__MaxMemoryMb=1024
-    volumes: *worker-volumes
-    depends_on:
-      api:
-        condition: service_healthy
-    networks:
-      - printfarmer-network
-    healthcheck: *worker-healthcheck
-    <<: *worker-security
-    deploy: *worker-deployment
-
   # Optional: Load balancer / Reverse proxy
   nginx-proxy:
     image: ${NGINX_IMAGE:-nginx:alpine-upgraded}
@@ -116,7 +92,6 @@ services:
     depends_on:
       - frontend
       - api
-      - orcaslicer-worker
     healthcheck: *nginx-healthcheck
     networks:
       - printfarmer-network

@@ -97,6 +97,40 @@ CACHE_ORCASLICER=false
 LOAD_CACHED_ORCASLICER=false
 IMAGES_DIR="./docker-images"
 
+# ============================================================================
+# PLATFORM DETECTION AND CONFIGURATION
+# ============================================================================
+
+# Detect host system architecture and configure Docker build platform
+# On macOS with Apple Silicon (arm64), we force x86_64 by default because:
+# - Most Docker images are x86_64 (better compatibility)
+# - Cross-building to arm64 can cause compatibility issues with some tools
+# - This provides a consistent experience across different Mac hardware
+SYSTEM_UNAME="$(uname -s 2>/dev/null || echo 'unknown')"
+SYSTEM_ARCH="$(uname -m 2>/dev/null || echo 'unknown')"
+
+# Determine Docker build platform
+DOCKER_BUILD_PLATFORM=""
+if [[ "$SYSTEM_UNAME" == "Darwin" ]]; then
+    # macOS detected: force linux/amd64 (x86_64) for better compatibility
+    case "$SYSTEM_ARCH" in
+        arm64|aarch64)
+            # Apple Silicon: explicitly set x86_64 for maximum compatibility
+            DOCKER_BUILD_PLATFORM="linux/amd64"
+            print_info "macOS on Apple Silicon detected: Docker builds will use x86_64 for maximum compatibility"
+            ;;
+        x86_64|amd64)
+            # Intel Mac: use native x86_64
+            DOCKER_BUILD_PLATFORM="linux/amd64"
+            print_info "macOS on Intel detected: Docker builds will use x86_64"
+            ;;
+        *)
+            print_warning "Unknown macOS architecture: $SYSTEM_ARCH (will use Docker defaults)"
+            ;;
+    esac
+fi
+# On Linux or other systems, leave DOCKER_BUILD_PLATFORM empty to use system defaults
+
 # Base container images for offline deployment (standard upstream images)
 # These are pulled as fallback if upgraded images aren't available
 DOCKER_BASE_IMAGES=(
@@ -173,10 +207,11 @@ find_cached_images_dir() {
 
 # Auto-load cached images if they exist and are not in Docker
 # Core function to load Docker images from TAR files
+# Intelligently matches platform-tagged files (e.g., image-linux-amd64.tar)
 # Usage: _load_tar_images <images_dir> [quiet]
 # Returns: 0 on success, 1 on failure
 # Arguments:
-#   images_dir: Directory containing .tar files
+#   images_dir: Directory containing .tar files (with optional -platform suffix)
 #   quiet: If "quiet", minimal output (for auto-load scenarios)
 _load_tar_images() {
     local images_dir="$1"
@@ -187,8 +222,31 @@ _load_tar_images() {
         return 1
     fi
     
+    # Detect current platform for smart matching
+    local current_platform="linux-amd64"  # Default
+    if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+        # Convert linux/amd64 -> linux-amd64
+        current_platform=$(echo "$DOCKER_BUILD_PLATFORM" | sed 's|/|-|g')
+    else
+        local system_arch
+        system_arch=$(uname -m 2>/dev/null || echo "unknown")
+        case "$system_arch" in
+            arm64|aarch64) current_platform="linux-arm64" ;;
+            x86_64|amd64) current_platform="linux-amd64" ;;
+        esac
+    fi
+    
+    # Find TAR files: prefer platform-specific, then fall back to unprefixed
     local tar_files
-    tar_files=$(find "$images_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
+    local preferred_tar_files
+    preferred_tar_files=$(find "$images_dir" -maxdepth 1 -name "*-${current_platform}.tar" 2>/dev/null)
+    if [ -n "$preferred_tar_files" ]; then
+        tar_files="$preferred_tar_files"
+        [ "$quiet" != "quiet" ] && print_info "Found platform-specific images for ${current_platform}"
+    else
+        # Fall back to any .tar files (legacy support for non-platform-tagged files)
+        tar_files=$(find "$images_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
+    fi
     
     if [ -z "$tar_files" ]; then
         [ "$quiet" != "quiet" ] && print_error "No TAR files found in $images_dir"
@@ -197,7 +255,7 @@ _load_tar_images() {
     
     local tar_count
     tar_count=$(echo "$tar_files" | wc -l)
-    print_info "Found $tar_count cached image TAR file(s). Loading from $images_dir..."
+    print_info "Found $tar_count cached image TAR file(s) for current platform. Loading from $images_dir..."
     
     local success_count=0
     local fail_count=0
@@ -1075,6 +1133,7 @@ pull_base_images() {
 }
 
 # Save images to TAR files
+# Filenames include platform information (e.g., image-name-linux-amd64.tar)
 save_images_to_tar() {
     local target_dir="${1:-.}"
     
@@ -1083,6 +1142,22 @@ save_images_to_tar() {
     if [ ! -d "$target_dir" ]; then
         mkdir -p "$target_dir"
         print_info "Created directory: $target_dir"
+    fi
+    
+    # Determine platform suffix for filenames
+    local platform_suffix=""
+    if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+        # Convert linux/amd64 -> linux-amd64
+        platform_suffix="-$(echo "$DOCKER_BUILD_PLATFORM" | sed 's|/|-|g')"
+    else
+        # Try to detect from system
+        local system_arch
+        system_arch=$(uname -m 2>/dev/null || echo "unknown")
+        case "$system_arch" in
+            arm64|aarch64) platform_suffix="-linux-arm64" ;;
+            x86_64|amd64) platform_suffix="-linux-amd64" ;;
+            *) platform_suffix="" ;;
+        esac
     fi
     
     local success_count=0
@@ -1099,10 +1174,10 @@ save_images_to_tar() {
             continue
         fi
         
-        # Replace special characters in image name for filename
+        # Replace special characters in image name for filename, add platform suffix
         local safe_name
         safe_name=$(echo "$image" | sed 's|[:/ ]|-|g')
-        local tar_file="$target_dir/$safe_name.tar"
+        local tar_file="$target_dir/$safe_name${platform_suffix}.tar"
         
         print_info "Exporting $image to $tar_file..."
         if docker save -o "$tar_file" "$image" > /dev/null 2>&1; then
@@ -1138,10 +1213,10 @@ save_images_to_tar() {
             continue
         fi
         
-        # Replace special characters in image name for filename
+        # Replace special characters in image name for filename, add platform suffix
         local safe_name
         safe_name=$(echo "$base_image" | sed 's|[:/ ]|-|g')
-        local tar_file="$target_dir/$safe_name.tar"
+        local tar_file="$target_dir/$safe_name${platform_suffix}.tar"
         
         print_info "Exporting $base_image to $tar_file..."
         if docker save -o "$tar_file" "$base_image" > /dev/null 2>&1; then
@@ -1167,10 +1242,10 @@ save_images_to_tar() {
             continue
         fi
         
-        # Replace special characters in image name for filename
+        # Replace special characters in image name for filename, add platform suffix
         local safe_name
         safe_name=$(echo "$image" | sed 's|[:/ ]|-|g')
-        local tar_file="$target_dir/$safe_name.tar"
+        local tar_file="$target_dir/$safe_name${platform_suffix}.tar"
         
         print_info "Exporting $image to $tar_file..."
         if docker save -o "$tar_file" "$image" > /dev/null 2>&1; then
@@ -1243,6 +1318,12 @@ load_images_from_tar() {
                 fi
             fi
         done
+        
+        # Also set ORCA_ASSET_PATH if available for Docker build context
+        if [ -d "$source_dir/orcaslicer" ]; then
+            export ORCA_ASSET_PATH="$source_dir/orcaslicer"
+            print_info "OrcaSlicer assets available at: $ORCA_ASSET_PATH"
+        fi
         
         return 0
     else
@@ -1422,12 +1503,17 @@ build_base_images() {
         print_info "  Dockerfile: $dockerfile"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         
-        if docker build \
-            -f "$docker_dir/$dockerfile" \
-            -t "$new_tag" \
-            --label="printfarmer-precache=true" \
-            --build-arg "CACHE_BUST=$cache_bust" \
-            . > /dev/null 2>&1; then
+        # Prepare build command with optional platform
+        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$new_tag" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
+        
+        # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
+        if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+            build_cmd+=(--platform "${DOCKER_BUILD_PLATFORM}")
+        fi
+        
+        build_cmd+=(.)
+        
+        if "${build_cmd[@]}" > /dev/null 2>&1; then
             
             print_success "✓ Build successful: $new_tag"
             ((successful++))
@@ -1440,24 +1526,47 @@ build_base_images() {
     
     # Build OrcaSlicer binary layer
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    print_info "Building: orcaslicer-binaries:2.3.1"
-    print_info "  Extracts OrcaSlicer Linux AppImage for caching"
-    print_info "  Dockerfile: Dockerfile.base-orcaslicer-binaries"
-    print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    if docker build \
-        -f "$docker_dir/Dockerfile.base-orcaslicer-binaries" \
-        -t "orcaslicer-binaries:2.3.1" \
-        --label="printfarmer-precache=true" \
-        --build-arg ORCASLICER_VERSION=2.3.1 \
-        --build-arg "CACHE_BUST=$cache_bust" \
-        . > /dev/null 2>&1; then
-        
-        print_success "✓ Build successful: orcaslicer-binaries:2.3.1"
+    # Check if orcaslicer-binaries:2.3.1 already exists locally
+    if docker image inspect "orcaslicer-binaries:2.3.1" >/dev/null 2>&1; then
+        print_success "✓ orcaslicer-binaries:2.3.1 already exists locally (skipping rebuild)"
         ((successful++))
     else
-        print_warning "⚠ Build failed: orcaslicer-binaries:2.3.1 (optional, continuing)"
-        # Don't count as failure - OrcaSlicer binaries are optional
+        print_info "Building: orcaslicer-binaries:2.3.1"
+        print_info "  Extracts OrcaSlicer Linux AppImage for caching"
+        print_info "  Dockerfile: Dockerfile.base-orcaslicer-binaries"
+        print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Prepare build args - include ORCA_ASSET_PATH if available for offline builds
+        local build_args=(
+            -f "$docker_dir/Dockerfile.base-orcaslicer-binaries"
+            -t "orcaslicer-binaries:2.3.1"
+            --label="printfarmer-precache=true"
+            --build-arg ORCASLICER_VERSION=2.3.1
+            --build-arg "CACHE_BUST=$cache_bust"
+        )
+        
+        # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
+        if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
+            build_args+=(--platform "${DOCKER_BUILD_PLATFORM}")
+        fi
+        
+        # Pass cached AppImage path if available (for offline deployments)
+        if [ -n "${ORCA_ASSET_PATH:-}" ]; then
+            build_args+=(--build-arg "ORCA_ASSET_PATH=$ORCA_ASSET_PATH")
+            print_info "Using cached OrcaSlicer from: $ORCA_ASSET_PATH"
+        fi
+        
+        build_args+=(.)
+        
+        if docker build "${build_args[@]}" > /dev/null 2>&1; then
+            
+            print_success "✓ Build successful: orcaslicer-binaries:2.3.1"
+            ((successful++))
+        else
+            print_warning "⚠ Build failed: orcaslicer-binaries:2.3.1 (optional, continuing)"
+            # Don't count as failure - OrcaSlicer binaries are optional
+        fi
     fi
     echo
     
@@ -4961,6 +5070,15 @@ deploy_containers() {
                 fi
             fi
             
+            # Auto-detect if orcaslicer-binaries image already exists locally (even if not from ORCA_ASSET_IMAGE)
+            # This handles the case where images were loaded externally before this script runs
+            if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ]; then
+                if docker image inspect "orcaslicer-binaries:${ORCA_VERSION}" >/dev/null 2>&1; then
+                    print_success "✓ orcaslicer-binaries:${ORCA_VERSION} already exists locally - skipping rebuild"
+                    export _PF_SKIP_ORCA_BUILD=1
+                fi
+            fi
+            
             # Ensure a root-level Dockerfile.multistage exists for build commands
             if [ ! -f "./Dockerfile.multistage" ]; then
                 print_error "Dockerfile.multistage not found - required for OrcaSlicer builds"
@@ -5018,17 +5136,44 @@ EOF
         
         # Now build all services
         # Support passing --platform to docker compose build when requested
+        # Prepare build args including ORCA_ASSET_PATH for offline deployments
+        declare -a compose_build_args=(--progress=plain --build-arg "BUILD_VERBOSITY=${BUILD_VERBOSITY}")
+        
+        # Copy AppImage files to build context if they exist (for offline builds)
+        # Docker cannot access host paths in build args, so we must copy files into the build context
+        if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ] && [ -n "${ORCA_ASSET_PATH:-}" ] && [ -d "${ORCA_ASSET_PATH}" ]; then
+            print_info "Copying OrcaSlicer AppImage files to build context for Docker access..."
+            mkdir -p ./build_context/orcaslicer
+            # Copy all AppImage files from the source directory to build context
+            if cp "${ORCA_ASSET_PATH}"/*.AppImage ./build_context/orcaslicer/ 2>/dev/null; then
+                print_success "✓ Copied AppImage files to ./build_context/orcaslicer"
+                # Update ORCA_ASSET_PATH to point to the build context directory
+                export ORCA_ASSET_PATH="./build_context/orcaslicer"
+                compose_build_args+=(--build-arg "ORCA_ASSET_PATH=${ORCA_ASSET_PATH}")
+                print_info "Using AppImage from build context: ${ORCA_ASSET_PATH}"
+            else
+                print_warning "No AppImage files found in ${ORCA_ASSET_PATH}, will attempt download during build"
+            fi
+        fi
+        
+        # When using prebuilt orcaslicer-binaries image via additional_contexts,
+        # tell the Dockerfile to skip building the binary and use only what's in the prebuilt image
+        if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ]; then
+            compose_build_args+=(--build-arg "ALLOW_STUB=true" --build-arg "_SKIP_ORCA_BINARY_BUILD=1")
+            print_info "Configuring build to use prebuilt orcaslicer-binaries (ALLOW_STUB=true, skip binary build)"
+        fi
+
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
             print_info "Attempting docker compose build with platform ${DOCKER_BUILD_PLATFORM}"
             # Try using the --platform flag first (supported on modern compose). If it fails
             # (for example older compose binary that reports unknown flag), fall back to
             # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
-            if "${build_compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}" --platform "${DOCKER_BUILD_PLATFORM}"; then
+            if "${build_compose_cmd[@]}" build "${compose_build_args[@]}" --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
                 print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
                 export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
-                if "${build_compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
+                if "${build_compose_cmd[@]}" build "${compose_build_args[@]}"; then
                     print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
                 else
                     print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
@@ -5037,7 +5182,7 @@ EOF
                 fi
             fi
         else
-            if "${build_compose_cmd[@]}" build --progress=plain --build-arg BUILD_VERBOSITY="${BUILD_VERBOSITY}"; then
+            if "${build_compose_cmd[@]}" build "${compose_build_args[@]}"; then
                 print_success "Docker images built successfully"
             else
                 print_error "Failed to build Docker images"

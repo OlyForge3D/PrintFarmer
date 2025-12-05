@@ -80,34 +80,6 @@ services:
         condition: service_healthy
     healthcheck: *api-healthcheck
 
-  # OrcaSlicer Worker - Distributed slicing microservice with multi-stage build
-  orcaslicer-worker:
-    build:
-      <<: *orcaslicer-build
-    image: printfarmer-orcaslicer-worker
-    networks:
-      - printfarmer-network
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - Worker__StorageEndpoint=http://api:5245
-      - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
-      - Worker__WorkerId=orcaslicer-worker-1
-      - Worker__QueueName=orcaslicer-jobs
-      - Logging__LogLevel__Default=Information
-      - Worker__MaxConcurrentJobs=1
-      - Worker__MaxMemoryMb=1024
-    volumes: *worker-volumes
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck: *worker-healthcheck
-    <<: *worker-security
-    deploy: *worker-deployment
-
-
-
   # React Frontend with multi-stage build
   frontend:
     build:
