@@ -44,6 +44,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\import\Farm.Importing.csproj" />
+    <ProjectReference Include="..\..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
   </ItemGroup>
 
   <!-- Exclude Docker integration tests moved to Farm.Web.IntegrationTests -->

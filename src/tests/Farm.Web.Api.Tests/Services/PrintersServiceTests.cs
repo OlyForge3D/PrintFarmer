@@ -195,9 +195,125 @@ namespace Farm.Web.Api.Tests.Services
 
         #endregion URL Normalization Tests
 
-        private static PrintersService CreatePrintersService()
+        #region Additional Printer Management Tests
+
+        [Fact]
+        public async Task GetAllFastDtosAsync_WithMultiplePrinters_ReturnsCorrectBackends()
+        {
+            // Arrange
+            var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Prusa" };
+            var model = new PrinterModel { Id = Guid.NewGuid(), Name = "CORE One" };
+            
+            var printers = new List<Printer>
+            {
+                new() { Id = Guid.NewGuid(), Name = "Moon", Backend = (int)PrinterBackend.Moonraker, Manufacturer = manufacturer, Model = model },
+                new() { Id = Guid.NewGuid(), Name = "Prusa", Backend = (int)PrinterBackend.PrusaLink, Manufacturer = manufacturer, Model = model }
+            };
+            
+            var mockRepo = new Mock<IPrintersRepository>();
+            mockRepo.Setup(r => r.GetAllWithIncludesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(printers);
+            var service = CreatePrintersService(mockRepo.Object);
+
+            // Act
+            var result = await service.GetAllFastDtosAsync(CancellationToken.None);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(2, result.Length);
+            Assert.Single(result.Where(p => p.Backend == PrinterBackend.Moonraker));
+            Assert.Single(result.Where(p => p.Backend == PrinterBackend.PrusaLink));
+        }
+
+        [Fact]
+        public async Task GetCapabilitiesListAsync_ReturnsList()
+        {
+            // Arrange
+            var capabilities = new List<PrinterCapabilities>
+            {
+                new() { Id = Guid.NewGuid(), PrinterId = Guid.NewGuid(), NozzleDiameter = 0.4 },
+                new() { Id = Guid.NewGuid(), PrinterId = Guid.NewGuid(), NozzleDiameter = 0.6 }
+            };
+            
+            var mockRepo = new Mock<IPrintersRepository>();
+            mockRepo.Setup(r => r.GetCapabilitiesListAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(capabilities);
+            var service = CreatePrintersService(mockRepo.Object);
+
+            // Act
+            var result = await service.GetCapabilitiesListAsync(null, CancellationToken.None);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(2, result.Count);
+        }
+
+        [Fact]
+        public async Task GetCapabilitiesDictionaryAsync_ReturnsDictionaryByPrinterId()
+        {
+            // Arrange
+            var id1 = Guid.NewGuid();
+            var id2 = Guid.NewGuid();
+            var capabilities = new Dictionary<Guid, PrinterCapabilities>
+            {
+                { id1, new PrinterCapabilities { Id = Guid.NewGuid(), PrinterId = id1, NozzleDiameter = 0.4 } },
+                { id2, new PrinterCapabilities { Id = Guid.NewGuid(), PrinterId = id2, NozzleDiameter = 0.6 } }
+            };
+            
+            var mockRepo = new Mock<IPrintersRepository>();
+            mockRepo.Setup(r => r.GetCapabilitiesDictionaryAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(capabilities);
+            var service = CreatePrintersService(mockRepo.Object);
+
+            // Act
+            var result = await service.GetCapabilitiesDictionaryAsync(null, CancellationToken.None);
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.True(result.ContainsKey(id1));
+            Assert.True(result.ContainsKey(id2));
+        }
+
+        [Fact]
+        public async Task SaveCapabilitiesAsync_CallsRepository()
+        {
+            // Arrange
+            var mockRepo = new Mock<IPrintersRepository>();
+            var service = CreatePrintersService(mockRepo.Object);
+            var capabilities = new PrinterCapabilities { Id = Guid.NewGuid(), PrinterId = Guid.NewGuid() };
+
+            // Act
+            await service.SaveCapabilitiesAsync(capabilities, CancellationToken.None);
+
+            // Assert
+            mockRepo.Verify(r => r.SaveCapabilitiesAsync(capabilities, It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task GetPrintersForExportAsync_WithIds_ReturnsFilteredPrinters()
+        {
+            // Arrange
+            var id1 = Guid.NewGuid();
+            var id2 = Guid.NewGuid();
+            var id3 = Guid.NewGuid();
+            var printers = new List<Printer> { new() { Id = id1 }, new() { Id = id2 }, new() { Id = id3 } };
+            
+            var mockRepo = new Mock<IPrintersRepository>();
+            mockRepo.Setup(r => r.GetPrintersForExportAsync(It.IsAny<Guid[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(printers.Where(p => p.Id == id1 || p.Id == id2).ToList());
+            var service = CreatePrintersService(mockRepo.Object);
+
+            // Act
+            var result = await service.GetPrintersForExportAsync(new[] { id1, id2 }, CancellationToken.None);
+
+            // Assert
+            Assert.Equal(2, result.Count);
+            Assert.DoesNotContain(result, p => p.Id == id3);
+        }
+
+        #endregion Additional Printer Management Tests
+
+        private static PrintersService CreatePrintersService(IPrintersRepository? customRepo = null)
         {
             Mock<IPrintersRepository> repoMock = new Mock<IPrintersRepository>();
+            var repo = customRepo ?? repoMock.Object;
             Mock<IMoonrakerClient> moonMock = new Mock<IMoonrakerClient>();
             Mock<IPrusaLinkClient> prusaMock = new Mock<IPrusaLinkClient>();
             Mock<ISdcpClient> sdcpMock = new Mock<ISdcpClient>();
@@ -214,7 +330,7 @@ namespace Farm.Web.Api.Tests.Services
             IMapper mapper = mapperConfig.CreateMapper();
 
             return new PrintersService(
-                repoMock.Object,
+                repo,
                 moonMock.Object,
                 prusaMock.Object,
                 sdcpMock.Object,
