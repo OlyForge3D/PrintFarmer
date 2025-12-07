@@ -83,7 +83,7 @@ services:
 
   # Optional: Load balancer / Reverse proxy
   nginx-proxy:
-    image: ${NGINX_IMAGE:-nginx:alpine-upgraded}
+    image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: printfarmer-nginx-proxy
     ports:
       - "8080:80"

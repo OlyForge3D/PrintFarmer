@@ -296,15 +296,18 @@ auto_load_cached_images() {
     # If ImagesDir not specified, search for cached images automatically
     if [ -z "$images_dir" ] || [ "$images_dir" = "." ]; then
         print_info "Searching for cached Docker images..."
-        images_dir=$(find_cached_images_dir) || {
+        images_dir=$(find_cached_images_dir) || true
+        if [ -z "$images_dir" ]; then
             print_info "No cached images found in common locations"
-            return 1
-        }
+            print_info "Images will be built during docker-compose deployment"
+            return 0
+        fi
     fi
     
     if [ ! -d "$images_dir" ]; then
         print_info "Images directory not found: $images_dir"
-        return 1
+        print_info "Images will be built during docker-compose deployment"
+        return 0
     fi
     
     # Check if there are any TAR files
@@ -312,7 +315,8 @@ auto_load_cached_images() {
     tar_files=$(find "$images_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
     if [ -z "$tar_files" ]; then
         print_info "No cached images found in $images_dir"
-        return 1
+        print_info "Images will be built during docker-compose deployment"
+        return 0
     fi
     
     # Find images that need to be loaded
@@ -4300,6 +4304,19 @@ ORCA_HOST_PORT=$ORCA_HOST_PORT
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
+# Docker Base Image Tags (override Dockerfile defaults for normal deployments)
+SDK_TAG=9.0
+ASPNET_TAG=9.0-bookworm-slim
+NODE_TAG=22-alpine
+NGINX_TAG=alpine
+UBUNTU_TAG=24.04
+
+# Standalone Service Image Tags (override compose template defaults for normal deployments)
+NGINX_IMAGE=nginx:alpine
+POSTGRES_IMAGE=postgres:16-alpine
+SQLSERVER_IMAGE=mcr.microsoft.com/mssql/server:2022-latest
+MYSQL_IMAGE=mysql:8.0
+
 # Spoolman
 SPOOLMAN_ENABLED=${ENABLE_SPOOLMAN:-no}
 SPOOLMAN_BASE_URL=${SPOOLMAN_BASE_URL:-}
@@ -6184,18 +6201,18 @@ verify_deployment() {
         local orca_container=""
         
         # Get the first OrcaSlicer worker container (whether single or scaled)
-        orca_container=$(docker-compose -f "$COMPOSE_FILE" ps -q orcaslicer-worker 2>/dev/null | head -1)
+        orca_container=$(dc ps -q orcaslicer-worker 2>/dev/null | head -1)
         
         if [ -n "$orca_container" ]; then
-            # Check container health via docker-compose exec
-            if docker-compose -f "$COMPOSE_FILE" exec -T orcaslicer-worker curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
+            # Check container health via docker compose exec
+            if dc exec -T orcaslicer-worker curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
                 print_success "✓ OrcaSlicer worker: Healthy"
                 orca_checked=true
             fi
         fi
         
         # Fallback: try localhost:port (works when worker port is bound to host in monolithic mode)
-        if [ "$orca_checked" = false ] && curl -sf "http://localhost:${ORCA_HOST_PORT:-8081}/healthz" >/dev/null 2>&1; then
+        if [ "$orca_checked" = false ] && curl -sf "http://localhost:${ORCA_HOST_PORT:-8080}/healthz" >/dev/null 2>&1; then
             print_success "✓ OrcaSlicer worker: Healthy"
             orca_checked=true
         fi

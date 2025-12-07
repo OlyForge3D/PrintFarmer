@@ -77,8 +77,15 @@ FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
 WORKDIR /app
 EXPOSE 5000
 
+# Install runtime tools that are present in the upgraded image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates iputils-ping iproute2 net-tools dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
+
 # Create necessary directories with proper ownership
-# Note: appuser (UID 1000) is pre-created in base image, tools are pre-installed
 RUN mkdir -p /app/gcode /app/uploads /app/slicers && \
     chown -R appuser:appuser /app
 
@@ -113,7 +120,10 @@ ARG GITHUB_TOKEN
 ARG _SKIP_ORCA_BINARY_BUILD=0
 WORKDIR /tmp
 
-# Note: All extraction tools (curl, jq, p7zip-full, squashfs-tools, etc.) are pre-installed in base image
+# Install AppImage/tooling stack (matches upgraded base image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Download and extract OrcaSlicer binaries with robust error handling
 RUN set -e; \
@@ -247,7 +257,15 @@ RUN set -e; \
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
 WORKDIR /app
 
-# Note: All runtime dependencies (libgtk-3-0, xvfb, fuse, etc.) and appuser are pre-installed in base image
+# Install OrcaSlicer runtime deps (matches upgraded aspnet image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates \
+        libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 \
+        xvfb fuse squashfs-tools file p7zip-full \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
 
 # Create necessary directories and set ownership for appuser
 RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
@@ -339,6 +357,9 @@ RUN VITE_API_BASE_URL=${VITE_API_BASE_URL} \
 FROM nginx:${NGINX_TAG} AS frontend-runtime
 WORKDIR /usr/share/nginx/html
 
+# Ensure curl present for health checks when using standard nginx tag
+RUN apk update && apk add --no-cache curl && rm -rf /var/cache/apk/*
+
 # Copy built React app
 COPY --from=frontend-build /app/dist .
 
@@ -363,8 +384,10 @@ CMD ["nginx", "-g", "daemon off;"]
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
 WORKDIR /app
 
+# Install curl for health checks (standard base images don't have it)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Create discovery user (different from appuser for service isolation)
-# Note: curl and other tools are pre-installed in base image
 RUN groupadd -r discovery && useradd -r -g discovery discovery && \
     chown -R discovery:discovery /app
 
