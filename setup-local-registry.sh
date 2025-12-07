@@ -4,7 +4,7 @@
 
 set -e
 
-REGISTRY_PORT=${REGISTRY_PORT:-5000}
+REGISTRY_PORT=${REGISTRY_PORT:-5001}  # macOS AirPlay uses 5000, so default to 5001
 REGISTRY_DATA_DIR=${REGISTRY_DATA_DIR:-"$HOME/docker-registry-data"}
 REGISTRY_NAME="local-registry"
 

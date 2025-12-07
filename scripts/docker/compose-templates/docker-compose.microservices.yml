@@ -6,7 +6,7 @@
 services:
   # Database (configurable via environment - supports PostgreSQL, SQL Server, MySQL)
   database:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine-upgraded}
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     container_name: printfarmer-database
     environment:
       # PostgreSQL (default)
@@ -42,6 +42,12 @@ services:
       context: .
       dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: api-runtime
+      args:
+        SDK_TAG: ${SDK_TAG:-9.0}
+        ASPNET_TAG: ${ASPNET_TAG:-9.0-bookworm-slim}
+        NODE_TAG: ${NODE_TAG:-22-alpine}
+        NGINX_TAG: ${NGINX_TAG:-alpine}
+        UBUNTU_TAG: ${UBUNTU_TAG:-24.04}
     image: printfarmer-api
     container_name: printfarmer-api
     ports:
@@ -80,34 +86,6 @@ services:
         condition: service_healthy
     healthcheck: *api-healthcheck
 
-  # OrcaSlicer Worker - Distributed slicing microservice with multi-stage build
-  orcaslicer-worker:
-    build:
-      <<: *orcaslicer-build
-    image: printfarmer-orcaslicer-worker
-    networks:
-      - printfarmer-network
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - Worker__StorageEndpoint=http://api:5245
-      - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
-      - Worker__WorkerId=orcaslicer-worker-1
-      - Worker__QueueName=orcaslicer-jobs
-      - Logging__LogLevel__Default=Information
-      - Worker__MaxConcurrentJobs=1
-      - Worker__MaxMemoryMb=1024
-    volumes: *worker-volumes
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck: *worker-healthcheck
-    <<: *worker-security
-    deploy: *worker-deployment
-
-
-
   # React Frontend with multi-stage build
   frontend:
     build:
@@ -115,6 +93,11 @@ services:
       dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage
       target: frontend-runtime
       args:
+        SDK_TAG: ${SDK_TAG:-9.0}
+        ASPNET_TAG: ${ASPNET_TAG:-9.0-bookworm-slim}
+        NODE_TAG: ${NODE_TAG:-22-alpine}
+        NGINX_TAG: ${NGINX_TAG:-alpine}
+        UBUNTU_TAG: ${UBUNTU_TAG:-24.04}
         VITE_API_BASE_URL: /api
         VITE_SIGNALR_PRINTERS_URL: /hubs/printers
         VITE_SIGNALR_HARVEST_URL: /hubs/harvest
@@ -137,7 +120,7 @@ services:
         condition: service_healthy
     healthcheck: *frontend-healthcheck
   nginx-proxy:
-    image: ${NGINX_IMAGE:-nginx:alpine-upgraded}
+    image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: printfarmer-nginx-proxy
     ports:
       - "${HTTP_PORT:-8080}:80"

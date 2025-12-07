@@ -77,8 +77,15 @@ FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
 WORKDIR /app
 EXPOSE 5000
 
+# Install runtime tools that are present in the upgraded image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates iputils-ping iproute2 net-tools dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
+
 # Create necessary directories with proper ownership
-# Note: appuser (UID 1000) is pre-created in base image, tools are pre-installed
 RUN mkdir -p /app/gcode /app/uploads /app/slicers && \
     chown -R appuser:appuser /app
 
@@ -106,17 +113,30 @@ ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
 ############################################################
 FROM ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
+ARG ORCA_ASSET_PATH=""
 ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
 ARG ALLOW_STUB=true
 ARG GITHUB_TOKEN
+ARG _SKIP_ORCA_BINARY_BUILD=0
 WORKDIR /tmp
 
-# Note: All extraction tools (curl, jq, p7zip-full, squashfs-tools, etc.) are pre-installed in base image
+# Install AppImage/tooling stack (matches upgraded base image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Download and extract OrcaSlicer binaries with robust error handling
 RUN set -e; \
     echo "[orcaslicer-binaries] Resolving OrcaSlicer version=${ORCASLICER_VERSION}"; \
     mkdir -p /orcaslicer-dist/opt; \
+    \
+    # If _SKIP_ORCA_BINARY_BUILD=1, skip all download/extraction (using prebuilt image) \
+    if [ "${_SKIP_ORCA_BINARY_BUILD}" = "1" ]; then \
+        echo "[orcaslicer-binaries] Skipping binary build (using prebuilt image via additional_contexts)"; \
+        mkdir -p /orcaslicer-dist/opt/orcaslicer && \
+        echo "[orcaslicer-binaries] Setup complete (waiting for additional_contexts to populate /opt/orcaslicer)"; \
+        exit 0; \
+    fi; \
     \
     if [ "$ALLOW_STUB" = "true" ]; then \
         echo "[orcaslicer-binaries] ALLOW_STUB=true, will create stub if download fails"; \
@@ -124,17 +144,31 @@ RUN set -e; \
         echo "[orcaslicer-binaries] ALLOW_STUB=false, must download real binary"; \
     fi; \
     \
-    # Try to find the correct download URL dynamically \
-    dynamic_url=$(curl -H "Accept: application/vnd.github+json" \
-                      -H "User-Agent: OrcaSlicerWorker/1.0" \
-                      -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases" | \
-                  jq -r --arg ver "v${ORCASLICER_VERSION}" \
-                     '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | \
-                  head -n1 || true); \
+    # Check if AppImage is available from ORCA_ASSET_PATH (for offline builds) \
+    cached_appimage=""; \
+    if [ -n "${ORCA_ASSET_PATH}" ] && [ -d "${ORCA_ASSET_PATH}" ]; then \
+        echo "[orcaslicer-binaries] Searching for cached AppImage in ${ORCA_ASSET_PATH}"; \
+        cached_appimage=$(find "${ORCA_ASSET_PATH}" -maxdepth 1 -name "*.AppImage" -type f | head -n1 || true); \
+        if [ -n "$cached_appimage" ]; then \
+            echo "[orcaslicer-binaries] Found cached AppImage: $cached_appimage"; \
+            cp "$cached_appimage" orcaslicer.AppImage; \
+            chmod +x orcaslicer.AppImage; \
+        fi; \
+    fi; \
     \
-    if [ -n "$dynamic_url" ]; then \
-        echo "[orcaslicer-binaries] Discovered asset: $dynamic_url"; \
-        ORCASLICER_URL="$dynamic_url"; \
+    # Try to find the correct download URL dynamically (only if not using cached AppImage) \
+    if [ ! -f orcaslicer.AppImage ]; then \
+        dynamic_url=$(curl -H "Accept: application/vnd.github+json" \
+                          -H "User-Agent: OrcaSlicerWorker/1.0" \
+                          -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases" | \
+                      jq -r --arg ver "v${ORCASLICER_VERSION}" \
+                         '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | \
+                      head -n1 || true); \
+        \
+        if [ -n "$dynamic_url" ]; then \
+            echo "[orcaslicer-binaries] Discovered asset: $dynamic_url"; \
+            ORCASLICER_URL="$dynamic_url"; \
+        fi; \
     fi; \
     \
     # Download function with validation \
@@ -155,11 +189,13 @@ RUN set -e; \
         return 1; \
     }; \
     \
-    # Try multiple URL patterns \
-    try_download "${ORCASLICER_URL}" \
-    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
-    || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
-    || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+    # Try multiple URL patterns (only if not using cached AppImage) \
+    if [ ! -f orcaslicer.AppImage ]; then \
+        try_download "${ORCASLICER_URL}" \
+        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
+        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
+        || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+    fi; \
     \
     # Extract AppImage if available \
     if [ -f orcaslicer.AppImage ]; then \
@@ -221,7 +257,15 @@ RUN set -e; \
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
 WORKDIR /app
 
-# Note: All runtime dependencies (libgtk-3-0, xvfb, fuse, etc.) and appuser are pre-installed in base image
+# Install OrcaSlicer runtime deps (matches upgraded aspnet image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates \
+        libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 \
+        xvfb fuse squashfs-tools file p7zip-full \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
 
 # Create necessary directories and set ownership for appuser
 RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
@@ -313,6 +357,9 @@ RUN VITE_API_BASE_URL=${VITE_API_BASE_URL} \
 FROM nginx:${NGINX_TAG} AS frontend-runtime
 WORKDIR /usr/share/nginx/html
 
+# Ensure curl present for health checks when using standard nginx tag
+RUN apk update && apk add --no-cache curl && rm -rf /var/cache/apk/*
+
 # Copy built React app
 COPY --from=frontend-build /app/dist .
 
@@ -337,8 +384,10 @@ CMD ["nginx", "-g", "daemon off;"]
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
 WORKDIR /app
 
+# Install curl for health checks (standard base images don't have it)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Create discovery user (different from appuser for service isolation)
-# Note: curl and other tools are pre-installed in base image
 RUN groupadd -r discovery && useradd -r -g discovery discovery && \
     chown -R discovery:discovery /app
 
