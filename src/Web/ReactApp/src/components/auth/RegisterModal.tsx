@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, UserPlus } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
@@ -85,7 +85,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
     }
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (!isLoading) {
       onClose();
       setFormData({
@@ -98,7 +98,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
       });
       setValidationErrors([]);
     }
-  };
+  }, [isLoading, onClose]);
 
   const handleInputChange = (field: keyof typeof formData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -107,6 +107,20 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
       setValidationErrors([]);
     }
   };
+
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isLoading) {
+        handleClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, isLoading, handleClose]);
 
   if (!isOpen) return null;
 
@@ -276,17 +290,17 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               type="submit"
               disabled={isLoading || !formData.username || !formData.email || !formData.password}
               variant="primary"
-              className="flex items-center"
+              className="flex items-center gap-2"
             >
               {isLoading ? (
                 <>
-                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Creating Account...
+                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>Creating Account...</span>
                 </>
               ) : (
                 <>
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Create Account
+                  <UserPlus className="h-4 w-4" />
+                  <span>Create Account</span>
                 </>
               )}
             </Button>

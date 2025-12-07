@@ -47,6 +47,20 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     }
   }, [isOpen, printer, loadFiles]);
 
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   const handleQueueFile = async (fileName: string) => {
     const file = files.find(f => f.fileName === fileName);
     if (file) {
@@ -156,7 +170,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const modalContent = (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black bg-opacity-75" onClick={onClose} />
+        <div className="fixed inset-0 bg-black bg-opacity-75" />
         
         <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}

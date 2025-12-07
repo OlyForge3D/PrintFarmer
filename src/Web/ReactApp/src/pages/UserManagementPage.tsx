@@ -374,9 +374,10 @@ export function UserManagementPage() {
             setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
             setShowCreateModal(true);
           }}
+          className="flex items-center gap-2"
         >
-          <Plus className="h-4 w-4 mr-2" />
-          Add User
+          <Plus className="h-4 w-4" />
+          <span>Add User</span>
         </Button>
       }
     >

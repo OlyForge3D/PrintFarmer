@@ -276,23 +276,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(50.0);
     }
 
-    [Fact(Skip = "Factory always adds test authentication via FallbackPolicy; endpoint authorization is verified via [Authorize] attribute inspection")]
-    public async Task FileConsistencyController_RequiresAuthorization()
-    {
-        // Arrange - use an unauthenticated client
-        CustomWebApplicationFactory factoryWithoutAuth = new CustomWebApplicationFactory();
-        HttpClient clientWithoutAuth = factoryWithoutAuth.CreateClient(
-            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-
-        // Act
-        HttpResponseMessage response = await clientWithoutAuth.GetAsync("/api/fileconsistency/health/summary");
-
-        // Assert
-        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        factoryWithoutAuth.Dispose();
-        clientWithoutAuth.Dispose();
-    }
-
     // Helper methods
 
     private Model3D CreateAndPersistModel3D(string fileName, FileHealthStatus healthStatus)

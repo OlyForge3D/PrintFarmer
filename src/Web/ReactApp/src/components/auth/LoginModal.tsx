@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
 import { X, Eye, EyeOff, LogIn } from 'lucide-react';
@@ -36,13 +36,27 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
     }
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (!isLoading) {
       onClose();
       setUsername('');
       setPassword('');
     }
-  };
+  }, [isLoading, onClose]);
+
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isLoading) {
+        handleClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, isLoading, handleClose]);
 
   if (!isOpen) return null;
 
@@ -91,6 +105,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
               placeholder="Enter your username or email"
               required
               disabled={isLoading}
+              className="w-full"
             />
           </div>
 
@@ -107,6 +122,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
                 placeholder="Enter your password"
                 required
                 disabled={isLoading}
+                className="w-full pr-10"
               />
               <Button
                 onClick={() => setShowPassword(!showPassword)}
@@ -143,16 +159,17 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
               type="submit"
               disabled={isLoading || !username || !password}
               variant="primary"
+              className="flex items-center gap-2"
             >
               {isLoading ? (
                 <>
-                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Signing In...
+                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>Signing In...</span>
                 </>
               ) : (
                 <>
-                  <LogIn className="h-4 w-4 mr-2" />
-                  Sign In
+                  <LogIn className="h-4 w-4" />
+                  <span>Sign In</span>
                 </>
               )}
             </Button>

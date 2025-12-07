@@ -368,20 +368,20 @@ export function Layout() {
                           onClick={() => setUserMenuOpen(false)}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center w-full !justify-start"
+                          className="flex items-center gap-2 w-full !justify-start"
                         >
-                          <Settings className="h-4 w-4 mr-2" />
-                          Profile
+                          <Settings className="h-4 w-4" />
+                          <span>Profile</span>
                         </Button>
                         <Button
                           type="button"
                           onClick={handleLogout}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center w-full !justify-start"
+                          className="flex items-center gap-2 w-full !justify-start"
                         >
-                          <LogOut className="h-4 w-4 mr-2" />
-                          Sign out
+                          <LogOut className="h-4 w-4" />
+                          <span>Sign out</span>
                         </Button>
                       </>
                     ) : (
@@ -394,10 +394,10 @@ export function Layout() {
                           }}
                           variant="subtle"
                           size="sm"
-                          className="flex items-center w-full !justify-start"
+                          className="flex items-center gap-2 w-full !justify-start"
                         >
-                          <LogIn className="h-4 w-4 mr-2" />
-                          Sign In
+                          <LogIn className="h-4 w-4" />
+                          <span>Sign In</span>
                         </Button>
                         <Button
                           type="button"

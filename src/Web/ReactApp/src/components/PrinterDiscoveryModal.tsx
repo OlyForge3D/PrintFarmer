@@ -1,7 +1,7 @@
 if (!window.PrintFarmerDebug) {
   window.PrintFarmerDebug = {};
 }
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCancelDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
 import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
@@ -197,10 +197,24 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   // Determine if scan has been run (either completed or has results)
   const hasScanRun = isCompleted || foundPrinters.length > 0;
 
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 bg-black bg-opacity-75 transition-opacity" onClick={onClose} />
+        <div className="fixed inset-0 bg-black bg-opacity-75 transition-opacity" />
 
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
 
