@@ -220,8 +220,8 @@ namespace Farm.Web.Api.Tests.Services
             // Assert
             Assert.NotNull(result);
             Assert.Equal(2, result.Length);
-            Assert.Single(result.Where(p => p.Backend == PrinterBackend.Moonraker));
-            Assert.Single(result.Where(p => p.Backend == PrinterBackend.PrusaLink));
+            Assert.Single(result, p => p.Backend == PrinterBackend.Moonraker);
+            Assert.Single(result, p => p.Backend == PrinterBackend.PrusaLink);
         }
 
         [Fact]

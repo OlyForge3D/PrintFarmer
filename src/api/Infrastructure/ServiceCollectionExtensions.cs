@@ -420,6 +420,12 @@ public static class ServiceCollectionExtensions
         
         // Register the printer status DTO builder for centralizing DTO construction logic
         _ = services.AddScoped<Services.Printers.IPrinterStatusDtoBuilder, Services.Printers.PrinterStatusDtoBuilder>();
+        
+        // Register the printer status fallback service for timeout and circuit breaker management
+        _ = services.AddScoped<Services.Printers.IPrinterStatusFallbackService, Services.Printers.PrinterStatusFallbackService>();
+
+        // Register the multi-printer status coordinator for parallel operation orchestration
+        _ = services.AddScoped<Services.Printers.IMultiPrinterStatusCoordinator, Services.Printers.MultiPrinterStatusCoordinator>();
 
         _ = services.AddScoped<Services.Printers.IPrintersService, Services.Printers.PrintersService>();
         _ = services.AddScoped<Services.Interfaces.IMoonrakerDiagnosticsService, Services.MoonrakerDiagnosticsService>();
