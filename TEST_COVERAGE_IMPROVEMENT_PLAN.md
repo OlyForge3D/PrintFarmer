@@ -32,6 +32,112 @@
 
 ---
 
+## 🔧 Refactoring & Testability Improvements (Key to Reaching 50%+)
+
+This section tracks production code refactorings that improve testability and enable more comprehensive unit test coverage. These are legitimate architectural improvements that increase code quality, maintainability, and testability simultaneously.
+
+### Rationale for Production Code Refactoring
+- **Complex Orchestration Methods** (e.g., `GetStatusDtoAsync`, `GetAllWithStatusDtosAsync`) contain tightly coupled logic that's difficult to test in isolation
+- **Moq/Expression Tree Limitations**: Methods with optional record parameters, complex branching, and timeout logic hit C# compiler limitations when mocked
+- **Integration Test Burden**: Without refactoring, complex logic requires integration tests which are slower and less reliable than unit tests
+- **Architecture Improvement**: Extracting concerns into separate, focused methods improves code reusability and testability
+- **Testing Strategy**: Refactoring IS part of the test coverage improvement plan—it's not optional, it's essential
+
+### Phase 1 Refactoring Targets (Printer Management)
+
+#### PrintersService.cs - Status Update Orchestration (Priority: 🔴 CRITICAL)
+
+**Problem**: `GetStatusDtoAsync()` and `GetAllWithStatusDtosAsync()` are 200+ line methods with:
+- Circuit breaker per-printer logic embedded
+- 2-3 second timeout handling for each backend
+- DTO construction with complex conditional logic
+- Multiple backend client delegations (Moonraker, PrusaLink, SDCP, OctoPrint)
+- Parallel processing with race condition handling
+- Exception handling and fallback logic
+
+**Current Testability Score**: ⭐️⭐️/5 (very difficult to mock; 26 compilation errors on first test attempt)
+
+**Refactoring Plan**:
+
+1. **Extract Backend Client Abstraction Layer** (`IPrinterStatusClient`)
+   - Create interface that normalizes responses from all 4 backends
+   - Move backend-specific logic (Moonraker, PrusaLink, etc.) into separate implementations
+   - Benefits: Easier to mock, single responsibility, simpler test scenarios
+   - Expected Coverage Gain: +2-3%
+
+2. **Extract Status DTO Construction** (`PrinterStatusDtoBuilder`)
+   - Move `PrinterCompositeStatus` and `PrusaCompositeStatus` creation into dedicated builder class
+   - Break down complex conditional logic into named methods (`BuildTemperatureStatus()`, `BuildPrintStateStatus()`, etc.)
+   - Benefits: Each method becomes independently testable; easier to understand logic flow
+   - Expected Coverage Gain: +3-4%
+
+3. **Extract Timeout & Fallback Logic** (`PrinterStatusFallbackService`)
+   - Isolate circuit breaker + timeout + fallback logic into separate service
+   - Create tests for: fast timeout (< 500ms), slow response (> 2s timeout), no response (fallback to cached), circuit breaker open
+   - Benefits: Testable timeout scenarios without real async delays; clear error handling paths
+   - Expected Coverage Gain: +2-3%
+
+4. **Extract Parallel Processing Coordinator** (`MultiPrinterStatusCoordinator`)
+   - Move `GetAllWithStatusDtosAsync()` parallel processing into dedicated coordinator
+   - Break down into: prepare tasks, collect results, handle failures, aggregate results
+   - Benefits: Each step independently testable; clear separation of concerns
+   - Expected Coverage Gain: +2-3%
+
+**Test Coverage Improvements**:
+- ✅ `PrinterStatusClientTests` (8-12 tests per backend: Moonraker, PrusaLink, SDCP, OctoPrint)
+- ✅ `PrinterStatusDtoBuilderTests` (15-20 tests covering temperature states, print states, error conditions)
+- ✅ `PrinterStatusFallbackServiceTests` (12-15 tests: timeout scenarios, circuit breaker states, fallback behavior)
+- ✅ `MultiPrinterStatusCoordinatorTests` (10-15 tests: parallel execution, failure handling, aggregation)
+- ✅ `PrintersServiceTests` (refactored to test simplified orchestration)
+
+**Estimated Total Coverage Gain**: +9-15% (from +16.78% needed to reach 50%)
+
+**Timeline**: 3-4 sprint points per extracted component (4 components = 12-16 story points)
+
+---
+
+#### PrintersService.cs - Capability Discovery (Priority: 🟠 HIGH)
+
+**Problem**: `GetCapabilitiesListAsync()` and `GetCapabilitiesDictionaryAsync()` with capability detection logic
+
+**Current Testability Score**: ⭐️⭐️⭐️/5 (simpler than status; mostly repository delegation)
+
+**Refactoring Plan**:
+1. Create `PrinterCapabilityDetector` service for complex detection logic
+2. Separate printer capability caching from discovery
+3. Extract capability model building into dedicated builder
+
+**Expected Coverage Gain**: +2-3%
+
+---
+
+### Implementation Priority Order
+
+**Week 1 (This Sprint)**:
+- [ ] Extract `IPrinterStatusClient` abstraction & backend implementations
+- [ ] Add 40-50 unit tests for backend client layer
+- [ ] Expected: +3-4% coverage improvement
+
+**Week 2**:
+- [ ] Extract `PrinterStatusDtoBuilder` for DTO construction
+- [ ] Add 15-20 unit tests for builder methods
+- [ ] Expected: +2-3% coverage improvement
+
+**Week 3**:
+- [ ] Extract `PrinterStatusFallbackService` for timeout/circuit breaker logic
+- [ ] Add 12-15 unit tests for fallback scenarios
+- [ ] Expected: +2-3% coverage improvement
+
+**Week 4**:
+- [ ] Extract `MultiPrinterStatusCoordinator` for parallel processing
+- [ ] Add 10-15 unit tests for coordination logic
+- [ ] Refactor `PrintersServiceTests` to match simplified service
+- [ ] Expected: +2-3% coverage improvement
+
+**Cumulative Estimated Gain**: +9-13% toward 50% target
+
+---
+
 ## Phase 1 Completion Summary ✅
 
 **Status**: Phase 1 - Week 1 COMPLETE (4 of 4 core services tested)
