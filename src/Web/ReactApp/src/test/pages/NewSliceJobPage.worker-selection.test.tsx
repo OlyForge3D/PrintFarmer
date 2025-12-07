@@ -13,11 +13,16 @@ vi.mock('@microsoft/signalr', () => {
     stop: vi.fn().mockResolvedValue(undefined),
     on: vi.fn(),
     off: vi.fn(),
+    onclose: vi.fn(),
+    onreconnecting: vi.fn(),
+    onreconnected: vi.fn(),
+    state: 'Disconnected'
   };
 
   const mockBuilder = {
     withUrl: vi.fn().mockReturnThis(),
     withAutomaticReconnect: vi.fn().mockReturnThis(),
+    configureLogging: vi.fn().mockReturnThis(),
     build: vi.fn().mockReturnValue(mockConnection),
   };
 
@@ -52,7 +57,7 @@ function mockFetchByUrl(mapping: Record<string, MockResp>) {
         return Promise.resolve(responseLike as Response);
       }
     }
-    // Default: return empty 200
+    // Default: return empty 200 with safe body shape
     return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as Response);
   });
 }
@@ -198,6 +203,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: true, body: mockWorkers },
     });
 
@@ -223,6 +229,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: true, body: mockWorkers },
     });
 
@@ -247,6 +254,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: true, body: mockWorkers },
     });
 
@@ -281,6 +289,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: true, body: mockWorkers },
     });
 
@@ -306,6 +315,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: true, body: mockWorkers },
     });
 
@@ -324,6 +334,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: true, body: mockWorkers },
     });
 
@@ -352,6 +363,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: true, body: [] },
     });
 
@@ -371,6 +383,7 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
     mockFetchByUrl({
       '/api/3d-models': { ok: true, body: mockPrinterModels },
       'slicer-profiles': { ok: true, body: mockSlicerProfiles },
+      '/api/printers': { ok: true, body: [] },
       '/api/workers': { ok: false, status: 500 },
     });
 
@@ -410,6 +423,30 @@ describe('NewSliceJobPage - Worker Selection Flow', () => {
           ok: true,
           status: 200,
           json: async () => mockSlicerProfiles,
+        } as Response);
+      }
+      if (url.includes('/printers/') && url.includes('/details')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'printer-1',
+            name: 'Test Printer',
+            manufacturerName: 'TestCo',
+            modelName: 'Model X',
+            modelMaxX: 256,
+            modelMaxY: 256,
+            modelMaxZ: 256
+          }),
+        } as Response);
+      }
+      if (url.includes('/printers')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [
+            { id: 'printer-1', name: 'Test Printer', modelName: 'Model X', manufacturerName: 'TestCo' }
+          ],
         } as Response);
       }
       if (url.includes('/workers')) {

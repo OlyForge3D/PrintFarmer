@@ -10,6 +10,7 @@
  */
 
 /* eslint-disable local/pf-no-unguarded-console */
+import { OrcaImportWizard, orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import type { ISlicerUIRegistry, SlicerUIExports } from './SlicerUIRegistry';
 
 /**
@@ -19,22 +20,20 @@ import type { ISlicerUIRegistry, SlicerUIExports } from './SlicerUIRegistry';
  * it with the SlicerUIRegistry. Handles load failures gracefully.
  */
 export function registerOrcaSlicerUI(registry: ISlicerUIRegistry): void {
-  import("@farm/slicers-orcaslicer-v2_3_1")
-    .then((module) => {
-      const orcaExports: SlicerUIExports = {
-        slicerName: "OrcaSlicer",
-        slicerVersion: "2.3.1",
-        ImportComponent: module.OrcaImportWizard,
-        profilesService: module.orcaProfilesService,
-        types: {},
-      };
+  try {
+    const orcaExports: SlicerUIExports = {
+      slicerName: "OrcaSlicer",
+      slicerVersion: "2.3.1",
+      ImportComponent: OrcaImportWizard,
+      profilesService: orcaProfilesService,
+      types: {},
+    };
 
-      registry.registerUI("OrcaSlicer", "2.3.1", orcaExports);
-      console.info("[registerSlicerUI] Registered OrcaSlicer v2.3.1");
-    })
-    .catch((err) => {
-      console.error("[registerSlicerUI] Failed to register OrcaSlicer:", err);
-    });
+    registry.registerUI("OrcaSlicer", "2.3.1", orcaExports);
+    console.info("[registerSlicerUI] Registered OrcaSlicer v2.3.1");
+  } catch (err) {
+    console.error("[registerSlicerUI] Failed to register OrcaSlicer:", err);
+  }
 }
 
 /**

@@ -14,7 +14,7 @@ public class Printer
     public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use OriginalServerUri for typed access")]
     public string? OriginalServerUrl { get; set; } // Original URL/host (for re-resolving if IP changes)
-    public int? BackendPort { get; set; } // null for non-Moonraker, 7125 for Moonraker by default
+    public int BackendPort { get; set; } // Port for backend connection: 7125 for Moonraker, 80 for others
     public int? FrontendPort { get; set; } // null for non-Moonraker, 80 for Moonraker by default
     [NotMapped]
     public Uri? ServerUri
@@ -27,6 +27,41 @@ public class Printer
     {
         get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out Uri? u) ? u : null);
         set => OriginalServerUrl = value?.ToString();
+    }
+    
+    /// <summary>
+    /// Constructs the backend URL by combining ServerUrl with BackendPort.
+    /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
+    /// </summary>
+    [NotMapped]
+    public string BackendUrl
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ServerUrl))
+            {
+                return ServerUrl;
+            }
+            
+            try
+            {
+                Uri baseUri = new(ServerUrl);
+                int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
+                
+                // Only include port in URL if it's non-standard
+                if (BackendPort == defaultPort)
+                {
+                    return baseUri.ToString().TrimEnd('/');
+                }
+                
+                UriBuilder ub = new(baseUri) { Port = BackendPort };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                return ServerUrl;
+            }
+        }
     }
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
     public string? Notes { get; set; }

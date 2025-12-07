@@ -93,7 +93,7 @@ namespace Farm.Web.Api.Services.Printers
             else if (printer.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
                 // Get history from OctoPrint API
-                string historyJson = await _octoprint.GetHistoryListAsync(printer.ServerUrl, printer.ApiKey ?? "", limit, start).ConfigureAwait(false);
+                string historyJson = await _octoprint.GetHistoryListAsync(printer.BackendUrl, printer.ApiKey ?? "", limit, start).ConfigureAwait(false);
                 return ParseOctoPrintHistory(historyJson, printer.ServerUrl);
             }
             
@@ -130,7 +130,7 @@ namespace Farm.Web.Api.Services.Printers
             else if (printer.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
                 // Get job details from OctoPrint API
-                string jobJson = await _octoprint.GetHistoryJobAsync(printer.ServerUrl, printer.ApiKey ?? "", jobId).ConfigureAwait(false);
+                string jobJson = await _octoprint.GetHistoryJobAsync(printer.BackendUrl, printer.ApiKey ?? "", jobId).ConfigureAwait(false);
                 return ParseOctoPrintHistoryJob(jobJson, printer.ServerUrl);
             }
             
@@ -160,7 +160,7 @@ namespace Farm.Web.Api.Services.Printers
             else if (printer.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
                 // Calculate totals from OctoPrint history
-                string historyJson = await _octoprint.GetHistoryListAsync(printer.ServerUrl, printer.ApiKey ?? "", 10000, 0).ConfigureAwait(false);
+                string historyJson = await _octoprint.GetHistoryListAsync(printer.BackendUrl, printer.ApiKey ?? "", 10000, 0).ConfigureAwait(false);
                 var historyResponse = ParseOctoPrintHistory(historyJson, printer.ServerUrl);
                 return CalculateOctoPrintHistoryTotals(historyResponse.Jobs);
             }
@@ -250,22 +250,22 @@ namespace Farm.Web.Api.Services.Printers
                     if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
                     {
                         CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
-                        PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct => await _prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), fastTimeoutCts.Token);
+                        PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct => await _prusa.GetCompositeStatusAsync(p.BackendUrl, p.ApiKey, ct), fastTimeoutCts.Token);
                         // Delegate to PrusaLink client for DTO creation
                         return await _prusa.CreatePrinterDtoAsync(p, status, fastTimeoutCts.Token);
                     }
                     else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
                     {
                         CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{p.Id}");
-                        PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), fastTimeoutCts.Token);
+                        PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _sdcp.GetCompositeStatusAsync(p.BackendUrl, ct), fastTimeoutCts.Token);
                         // Delegate to SDCP client for DTO creation
                         return await _sdcp.CreatePrinterDtoAsync(p, status, fastTimeoutCts.Token);
                     }
                     else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
                     {
                         CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{p.Id}");
-                        string printerJson = await breaker.ExecuteAsync(async ct => await _octoprint.GetPrinterStateAsync(p.ServerUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
-                        string jobJson = await breaker.ExecuteAsync(async ct => await _octoprint.GetJobStatusAsync(p.ServerUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
+                        string printerJson = await breaker.ExecuteAsync(async ct => await _octoprint.GetPrinterStateAsync(p.BackendUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
+                        string jobJson = await breaker.ExecuteAsync(async ct => await _octoprint.GetJobStatusAsync(p.BackendUrl, p.ApiKey ?? string.Empty), fastTimeoutCts.Token);
                         // Delegate to OctoPrint client for DTO creation
                         return await _octoprint.CreatePrinterDtoAsync(p, printerJson, jobJson, p.ApiKey ?? string.Empty, fastTimeoutCts.Token);
                     }
@@ -310,13 +310,13 @@ namespace Farm.Web.Api.Services.Printers
                 if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
                 {
                     CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{p.Id}");
-                    PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct => await _prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct), statusCts.Token);
+                    PrusaCompositeStatus status = await breaker.ExecuteAsync(async ct => await _prusa.GetCompositeStatusAsync(p.BackendUrl, p.ApiKey, ct), statusCts.Token);
                     return new PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl);
                 }
                 else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
                 {
                     CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{p.Id}");
-                    PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _sdcp.GetCompositeStatusAsync(p.ServerUrl, ct), statusCts.Token);
+                    PrinterCompositeStatus status = await breaker.ExecuteAsync(async ct => await _sdcp.GetCompositeStatusAsync(p.BackendUrl, ct), statusCts.Token);
                     return new PrinterStatusDto(Id: p.Id, IsOnline: status.IsOnline, State: status.State, Progress: status.Progress, JobName: status.JobName, ThumbnailUrl: status.ThumbnailUrl, CameraStreamUrl: status.CameraStreamUrl, CameraSnapshotUrl: status.CameraSnapshotUrl, X: status.X, Y: status.Y, Z: status.Z, HotendTemp: status.HotendTemp, BedTemp: status.BedTemp, HotendTarget: status.HotendTarget, BedTarget: status.BedTarget);
                 }
                 else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
@@ -359,13 +359,13 @@ namespace Farm.Web.Api.Services.Printers
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
             {
                 // Delegate to PrusaLink client for DTO creation
-                PrusaCompositeStatus status = await _prusa.GetCompositeStatusAsync(p.ServerUrl, p.ApiKey, ct);
+                PrusaCompositeStatus status = await _prusa.GetCompositeStatusAsync(p.BackendUrl, p.ApiKey, ct);
                 return await _prusa.CreatePrinterDtoAsync(p, status, ct);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
                 // Delegate to SDCP client for DTO creation
-                PrinterCompositeStatus status = await _sdcp.GetCompositeStatusAsync(p.ServerUrl, ct);
+                PrinterCompositeStatus status = await _sdcp.GetCompositeStatusAsync(p.BackendUrl, ct);
                 return await _sdcp.CreatePrinterDtoAsync(p, status, ct);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
@@ -398,18 +398,18 @@ namespace Farm.Web.Api.Services.Printers
 
                 // PrusaLink camera URLs are not supported due to encoding issues
                 if (p.Backend != (int)Farm.Infrastructure.PrinterBackend.PrusaLink && 
-                    await IsCameraAvailableAsync(p.ServerUrl, p.Backend, p.FrontendPort, ct))
+                    await IsCameraAvailableAsync(p.BackendUrl, p.Backend, p.FrontendPort, ct))
                 {
                     // Delegate to backend-specific client for URL generation
                     if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker) // Moonraker
                     {
-                        streamUrl = await _moon.GetCameraStreamUrlAsync(p.ServerUrl, p.FrontendPort, ct);
-                        snapshotUrl = await _moon.GetCameraSnapshotUrlAsync(p.ServerUrl, p.FrontendPort, ct);
+                        streamUrl = await _moon.GetCameraStreamUrlAsync(p.BackendUrl, p.FrontendPort, ct);
+                        snapshotUrl = await _moon.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, ct);
                     }
                     else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP) // SDCP
                     {
-                        streamUrl = await _sdcp.GetCameraUrlAsync(p.ServerUrl, ct);
-                        snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.ServerUrl, ct);
+                        streamUrl = await _sdcp.GetCameraUrlAsync(p.BackendUrl, ct);
+                        snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.BackendUrl, ct);
                     }
                     else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint) // OctoPrint
                     {
@@ -471,7 +471,7 @@ namespace Farm.Web.Api.Services.Printers
                 PrinterBackend backend = (PrinterBackend)p.Backend;
                 string backendName = backend.ToString();
                 
-                string backendPort = p.BackendPort?.ToString() ?? "";
+                string backendPort = p.BackendPort.ToString();
                 string frontendPort = p.FrontendPort?.ToString() ?? "";
                 string apiKey = p.ApiKey ?? "";
                 string cameraStreamUrl = p.CameraStreamUrl ?? "";
@@ -512,7 +512,7 @@ namespace Farm.Web.Api.Services.Printers
             {
                 PrinterBackend backend = (PrinterBackend)p.Backend;
                 string backendName = backend.ToString();
-                string backendPort = p.BackendPort?.ToString() ?? "";
+                string backendPort = p.BackendPort.ToString();
                 string frontendPort = p.FrontendPort?.ToString() ?? "";
                 string apiKey = p.ApiKey ?? "";
                 string cameraStreamUrl = p.CameraStreamUrl ?? "";
@@ -889,8 +889,8 @@ namespace Farm.Web.Api.Services.Printers
                 DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc) : dto.DateAcquired,
                 Backend = (int)dto.Backend,
                 ApiKey = dto.ApiKey,
-                // Use provided BackendPort and FrontendPort from discovery, or leave null for defaults
-                BackendPort = dto.BackendPort,
+                // Use provided BackendPort and FrontendPort from discovery, or use defaults
+                BackendPort = dto.BackendPort ?? 80,
                 FrontendPort = dto.FrontendPort,
                 // Use provided camera URLs from discovery, or leave null
                 CameraStreamUrl = dto.CameraStreamUrl,
@@ -933,12 +933,12 @@ namespace Farm.Web.Api.Services.Printers
             // Delegate to backend-specific client for snapshot
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker) // Moonraker
             {
-                return await _moon.GetCameraSnapshotAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                return await _moon.GetCameraSnapshotAsync(p.BackendUrl, ct).ConfigureAwait(false);
             }
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink) // PrusaLink
             {
-                string? snapshotUrl = await _prusa.GetCameraSnapshotUrlAsync(p.ServerUrl, p.FrontendPort, ct).ConfigureAwait(false);
+                string? snapshotUrl = await _prusa.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, ct).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(snapshotUrl))
                 {
                     return null;
@@ -949,7 +949,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP) // SDCP
             {
-                string? snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                string? snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.BackendUrl, ct).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(snapshotUrl))
                 {
                     return null;
@@ -999,22 +999,22 @@ namespace Farm.Web.Api.Services.Printers
             // Delegate to backend-specific client for URL generation
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker) // Moonraker
             {
-                string? streamUrl = await _moon.GetCameraStreamUrlAsync(p.ServerUrl, p.FrontendPort, ct).ConfigureAwait(false);
-                string? snapshotUrl = await _moon.GetCameraSnapshotUrlAsync(p.ServerUrl, p.FrontendPort, ct).ConfigureAwait(false);
+                string? streamUrl = await _moon.GetCameraStreamUrlAsync(p.BackendUrl, p.FrontendPort, ct).ConfigureAwait(false);
+                string? snapshotUrl = await _moon.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, ct).ConfigureAwait(false);
                 return (streamUrl, snapshotUrl);
             }
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink) // PrusaLink
             {
-                string? streamUrl = await _prusa.GetCameraStreamUrlAsync(p.ServerUrl, p.FrontendPort, ct).ConfigureAwait(false);
-                string? snapshotUrl = await _prusa.GetCameraSnapshotUrlAsync(p.ServerUrl, p.FrontendPort, ct).ConfigureAwait(false);
+                string? streamUrl = await _prusa.GetCameraStreamUrlAsync(p.BackendUrl, p.FrontendPort, ct).ConfigureAwait(false);
+                string? snapshotUrl = await _prusa.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, ct).ConfigureAwait(false);
                 return (streamUrl, snapshotUrl);
             }
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP) // SDCP
             {
-                string? streamUrl = await _sdcp.GetCameraUrlAsync(p.ServerUrl, ct).ConfigureAwait(false);
-                string? snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                string? streamUrl = await _sdcp.GetCameraUrlAsync(p.BackendUrl, ct).ConfigureAwait(false);
+                string? snapshotUrl = await _sdcp.GetCameraSnapshotUrlAsync(p.BackendUrl, ct).ConfigureAwait(false);
                 return (streamUrl, snapshotUrl);
             }
 
@@ -1031,7 +1031,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.SendHomeAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+                return await _octoprint.SendHomeAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1048,7 +1048,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.HomeXYAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+                return await _octoprint.HomeXYAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1065,7 +1065,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.HomeZAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+                return await _octoprint.HomeZAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
 
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1087,7 +1087,7 @@ namespace Farm.Web.Api.Services.Printers
                 
                 if (bed.HasValue)
                 {
-                    bool bedSuccess = await _octoprint.SetBedTempAsync(p.ServerUrl, p.ApiKey ?? string.Empty, bed.Value).ConfigureAwait(false);
+                    bool bedSuccess = await _octoprint.SetBedTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, bed.Value).ConfigureAwait(false);
 #pragma warning disable S2589 // Boolean expression always evaluates to true
                     success = success && bedSuccess;
 #pragma warning restore S2589
@@ -1095,7 +1095,7 @@ namespace Farm.Web.Api.Services.Printers
                 
                 if (hotend.HasValue)
                 {
-                    bool hotendSuccess = await _octoprint.SetHotendTempAsync(p.ServerUrl, p.ApiKey ?? string.Empty, hotend.Value).ConfigureAwait(false);
+                    bool hotendSuccess = await _octoprint.SetHotendTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, hotend.Value).ConfigureAwait(false);
                     success = success && hotendSuccess;
                 }
                 
@@ -1140,11 +1140,11 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
-                return await _sdcp.PausePrintAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                return await _sdcp.PausePrintAsync(p.BackendUrl, ct).ConfigureAwait(false);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.PauseAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+                return await _octoprint.PauseAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.PauseAsync(moonrakerUrl, ct).ConfigureAwait(false);
@@ -1160,11 +1160,11 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
-                return await _sdcp.ResumePrintAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                return await _sdcp.ResumePrintAsync(p.BackendUrl, ct).ConfigureAwait(false);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.ResumeAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+                return await _octoprint.ResumeAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.ResumeAsync(moonrakerUrl, ct).ConfigureAwait(false);
@@ -1180,11 +1180,11 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
-                return await _sdcp.CancelPrintAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                return await _sdcp.CancelPrintAsync(p.BackendUrl, ct).ConfigureAwait(false);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.CancelPrintAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+                return await _octoprint.CancelPrintAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
             }
             string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             return await _moon.EmergencyStopAsync(moonrakerUrl, ct).ConfigureAwait(false);
@@ -1234,19 +1234,19 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker)
             {
-                return await _moon.StartPrintAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
+                return await _moon.StartPrintAsync(p.BackendUrl, filename, ct).ConfigureAwait(false);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
             {
-                return await _prusa.StartPrintAsync(p.ServerUrl, filename, p.ApiKey, ct).ConfigureAwait(false);
+                return await _prusa.StartPrintAsync(p.BackendUrl, filename, p.ApiKey, ct).ConfigureAwait(false);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
-                return await _sdcp.StartPrintAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
+                return await _sdcp.StartPrintAsync(p.BackendUrl, filename, ct).ConfigureAwait(false);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.StartJobAsync(p.ServerUrl, p.ApiKey ?? string.Empty, filename).ConfigureAwait(false);
+                return await _octoprint.StartJobAsync(p.BackendUrl, p.ApiKey ?? string.Empty, filename).ConfigureAwait(false);
             }
             return false;
         }
@@ -1267,7 +1267,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.Moonraker)
             {
-                return await _moon.DeleteFileAsync(p.ServerUrl, filename, ct).ConfigureAwait(false);
+                return await _moon.DeleteFileAsync(p.BackendUrl, filename, ct).ConfigureAwait(false);
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
             {
@@ -1281,7 +1281,7 @@ namespace Farm.Web.Api.Services.Printers
             }
             else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                return await _octoprint.DeleteFileAsync(p.ServerUrl, p.ApiKey ?? string.Empty, filename).ConfigureAwait(false);
+                return await _octoprint.DeleteFileAsync(p.BackendUrl, p.ApiKey ?? string.Empty, filename).ConfigureAwait(false);
             }
             return false;
         }
@@ -1296,7 +1296,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
-                return await _sdcp.EnableCameraAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                return await _sdcp.EnableCameraAsync(p.BackendUrl, ct).ConfigureAwait(false);
             }
             return false;
         }
@@ -1311,7 +1311,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
             {
-                return await _sdcp.DisableCameraAsync(p.ServerUrl, ct).ConfigureAwait(false);
+                return await _sdcp.DisableCameraAsync(p.BackendUrl, ct).ConfigureAwait(false);
             }
             return false;
         }
@@ -1331,8 +1331,8 @@ namespace Farm.Web.Api.Services.Printers
             }
             return p.Backend switch
             {
-                1 => await _prusa.UploadGcodeAsync(p.ServerUrl, filename, stream, p.ApiKey, ct).ConfigureAwait(false),
-                2 => await _sdcp.UploadGcodeAsync(p.ServerUrl, filename, stream, ct).ConfigureAwait(false),
+                1 => await _prusa.UploadGcodeAsync(p.BackendUrl, filename, stream, p.ApiKey, ct).ConfigureAwait(false),
+                2 => await _sdcp.UploadGcodeAsync(p.BackendUrl, filename, stream, ct).ConfigureAwait(false),
                 _ => false
             };
         }
@@ -1415,9 +1415,9 @@ namespace Farm.Web.Api.Services.Printers
             // For PrusaLink and SDCP, fetch file list
             string[] fileNames2 = ((PrinterBackend)p.Backend) switch
             {
-                PrinterBackend.PrusaLink => await _prusa.GetFileListAsync(p.ServerUrl, p.ApiKey, ct).ConfigureAwait(false),
-                PrinterBackend.SDCP => await _sdcp.GetFileListAsync(p.ServerUrl, ct).ConfigureAwait(false),
-                PrinterBackend.OctoPrint => await _octoprint.GetFileListAsync(p.ServerUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false),
+                PrinterBackend.PrusaLink => await _prusa.GetFileListAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false),
+                PrinterBackend.SDCP => await _sdcp.GetFileListAsync(p.BackendUrl, ct).ConfigureAwait(false),
+                PrinterBackend.OctoPrint => await _octoprint.GetFileListAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false),
                 _ => Array.Empty<string>()
             };
 
@@ -1757,7 +1757,7 @@ namespace Farm.Web.Api.Services.Printers
 
                     case (int)Farm.Infrastructure.PrinterBackend.SDCP:
                     {
-                        PrinterJob job = await _sdcp.GetJobAsync(printer.ServerUrl, ct).ConfigureAwait(false);
+                        PrinterJob job = await _sdcp.GetJobAsync(printer.BackendUrl, ct).ConfigureAwait(false);
                         if (job != null)
                         {
                             return new PrintJobStatusDto

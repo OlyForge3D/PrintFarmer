@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Line, OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { Button, Checkbox } from '@/components/ui';
+import { Button, Checkbox, Select } from '@/components/ui';
 import { Cog } from 'lucide-react';
 
 interface GCodePoint {
@@ -330,13 +330,16 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
           
           <div className="flex items-center space-x-2">
             <div className="relative">
-              <button
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
                 onClick={() => setShowSettings(!showSettings)}
-                className="p-2 rounded-md hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
+                className="p-2 rounded-md text-gray-300 hover:text-white bg-transparent border-none shadow-none focus:ring-0"
                 title="Settings"
               >
                 <Cog size={20} />
-              </button>
+              </Button>
               
               {/* Settings Dropdown */}
               {showSettings && (
@@ -349,25 +352,22 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                     <div className="space-y-2 text-sm">
                       <div>
                         <label className="text-gray-300">Quality Level</label>
-                        <select
+                        <Select
                           value={renderQuality}
                           onChange={(e) => setRenderQuality(parseInt(e.target.value))}
-                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs"
+                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs border-gray-600"
                         >
                           {RENDER_QUALITIES.map(q => (
                             <option key={q.value} value={q.value}>{q.label}</option>
                           ))}
-                        </select>
+                        </Select>
                       </div>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={hdRendering}
-                          onChange={(e) => setHdRendering(e.target.checked)}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-gray-300">HD Rendering</span>
-                      </label>
+                      <Checkbox
+                        checked={hdRendering}
+                        onChange={(e) => setHdRendering(e.currentTarget.checked)}
+                        label="HD Rendering"
+                        className="w-4 h-4"
+                      />
                     </div>
                   </div>
                   
@@ -376,34 +376,28 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                     <div className="space-y-2 text-sm">
                       <div>
                         <label className="text-gray-300">Color Mode</label>
-                        <select
+                        <Select
                           value={colorMode}
                           onChange={(e) => setColorMode(parseInt(e.target.value))}
-                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs"
+                          className="w-full bg-gray-700 text-white rounded px-2 py-1 text-xs border-gray-600"
                         >
                           {COLOR_MODES.map(m => (
                             <option key={m.id} value={m.id}>{m.label}</option>
                           ))}
-                        </select>
+                        </Select>
                       </div>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={showGrid}
-                          onChange={(e) => setShowGrid(e.target.checked)}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-gray-300">Show Grid</span>
-                      </label>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={transparency}
-                          onChange={(e) => setTransparency(e.target.checked)}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-gray-300">Transparency</span>
-                      </label>
+                      <Checkbox
+                        checked={showGrid}
+                        onChange={(e) => setShowGrid(e.currentTarget.checked)}
+                        label="Show Grid"
+                        className="w-4 h-4"
+                      />
+                      <Checkbox
+                        checked={transparency}
+                        onChange={(e) => setTransparency(e.currentTarget.checked)}
+                        label="Transparency"
+                        className="w-4 h-4"
+                      />
                     </div>
                   </div>
                   

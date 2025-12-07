@@ -92,7 +92,9 @@ export function PrintersPage() {
       ));
       setDeleteConfirmation({ isOpen: false, printers: [] });
     } catch (error) {
-      console.error('Failed to delete printers:', error);
+      if (window.PrintFarmerDebug?.printers) {
+        console.error('Failed to delete printers:', error);
+      }
     }
   };
 
@@ -108,10 +110,14 @@ export function PrintersPage() {
 
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
-      console.log(`Starting maintenance update for ${printers.length} printer(s), inMaintenance=${inMaintenance}`);
+      if (window.PrintFarmerDebug?.printers) {
+        console.log(`Starting maintenance update for ${printers.length} printer(s), inMaintenance=${inMaintenance}`);
+      }
       
       const results = await Promise.all(printers.map(async (printer) => {
-        console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
+        if (window.PrintFarmerDebug?.printers) {
+          console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
+        }
         const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/maintenance`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -120,19 +126,27 @@ export function PrintersPage() {
         
         if (!response.ok) {
           const errorData = await response.text();
-          console.error(`Failed to update maintenance for ${printer.id}:`, response.status, errorData);
+          if (window.PrintFarmerDebug?.printers) {
+            console.error(`Failed to update maintenance for ${printer.id}:`, response.status, errorData);
+          }
           throw new Error(`HTTP ${response.status}: ${errorData}`);
         }
         
         return response.json();
       }));
       
-      console.log('Maintenance status updated successfully:', results);
-      console.log('Refetching printer queries...');
+      if (window.PrintFarmerDebug?.printers) {
+        console.log('Maintenance status updated successfully:', results);
+        console.log('Refetching printer queries...');
+      }
       await queryClient.refetchQueries({ queryKey: ['printers'] });
-      console.log('Printers refetched, UI should update now');
+      if (window.PrintFarmerDebug?.printers) {
+        console.log('Printers refetched, UI should update now');
+      }
     } catch (error) {
-      console.error('Failed to update maintenance status:', error);
+      if (window.PrintFarmerDebug?.printers) {
+        console.error('Failed to update maintenance status:', error);
+      }
     }
   };
 

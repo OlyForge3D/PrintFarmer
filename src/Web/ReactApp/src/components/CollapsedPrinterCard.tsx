@@ -282,28 +282,26 @@ export function CollapsedPrinterCard({
           {/* Camera mode toggle */}
           {hasCameraUrls && displayPrinter.cameraStreamUrl && (
             <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
-              <button
+              <Button
+                type="button"
                 onClick={() => setCameraMode('snapshot')}
                 title="Snapshot"
-                className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                  cameraMode === 'snapshot'
-                    ? 'bg-pf-primary text-pf-text-primary'
-                    : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                }`}
+                variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
+                size="sm"
+                className="flex-1 p-2 flex items-center justify-center"
               >
                 <Image className="h-4 w-4" />
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
                 onClick={() => setCameraMode('stream')}
                 title="Stream"
-                className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                  cameraMode === 'stream'
-                    ? 'bg-pf-primary text-pf-text-primary'
-                    : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                }`}
+                variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
+                size="sm"
+                className="flex-1 p-2 flex items-center justify-center"
               >
                 <Video className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
           )}
           

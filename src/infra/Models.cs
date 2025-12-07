@@ -106,7 +106,7 @@ public partial record PrinterDto(
     string? OriginalServerUrl = null,
     string? IpAddress = null,
     PrinterSpoolInfoDto? SpoolInfo = null,
-    int? BackendPort = null,
+    int BackendPort = 80,
     int? FrontendPort = null);
 
 // Non-breaking typed accessors for URL-like fields (ignored in JSON)
@@ -116,6 +116,41 @@ public partial record PrinterDto
     [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out Uri? u) ? u : null);
     [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out Uri? u) ? u : null);
     [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
+    
+    /// <summary>
+    /// Constructs the backend URL by combining ServerUrl with BackendPort.
+    /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
+    /// </summary>
+    [JsonIgnore]
+    public string BackendUrl
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ServerUrl))
+            {
+                return ServerUrl;
+            }
+            
+            try
+            {
+                Uri baseUri = new(ServerUrl);
+                int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
+                
+                // Only include port in URL if it's non-standard
+                if (BackendPort == defaultPort)
+                {
+                    return baseUri.ToString().TrimEnd('/');
+                }
+                
+                UriBuilder ub = new(baseUri) { Port = BackendPort };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                return ServerUrl;
+            }
+        }
+    }
 }
 
 // Basic printer info without live status (for fast loading)
@@ -133,12 +168,47 @@ public partial record PrinterBasicDto(
     string? ApiKey = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null,
-    int? BackendPort = null,
+    int BackendPort = 80,
     int? FrontendPort = null);
 
 public partial record PrinterBasicDto
 {
     [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
+    
+    /// <summary>
+    /// Constructs the backend URL by combining ServerUrl with BackendPort.
+    /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
+    /// </summary>
+    [JsonIgnore]
+    public string BackendUrl
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ServerUrl))
+            {
+                return ServerUrl;
+            }
+            
+            try
+            {
+                Uri baseUri = new(ServerUrl);
+                int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
+                
+                // Only include port in URL if it's non-standard
+                if (BackendPort == defaultPort)
+                {
+                    return baseUri.ToString().TrimEnd('/');
+                }
+                
+                UriBuilder ub = new(baseUri) { Port = BackendPort };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                return ServerUrl;
+            }
+        }
+    }
 }
 
 // Camera URLs for all printers (static configuration without external API calls)
@@ -174,7 +244,7 @@ public partial record PrinterFastDto(
     string? ApiKey = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null,
-    int? BackendPort = null,
+    int BackendPort = 80,
     int? FrontendPort = null,
     bool InMaintenance = false,
     bool IsEnabled = true);
@@ -182,6 +252,41 @@ public partial record PrinterFastDto(
 public partial record PrinterFastDto
 {
     [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
+    
+    /// <summary>
+    /// Constructs the backend URL by combining ServerUrl with BackendPort.
+    /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
+    /// </summary>
+    [JsonIgnore]
+    public string BackendUrl
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ServerUrl))
+            {
+                return ServerUrl;
+            }
+            
+            try
+            {
+                Uri baseUri = new(ServerUrl);
+                int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
+                
+                // Only include port in URL if it's non-standard
+                if (BackendPort == defaultPort)
+                {
+                    return baseUri.ToString().TrimEnd('/');
+                }
+                
+                UriBuilder ub = new(baseUri) { Port = BackendPort };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                return ServerUrl;
+            }
+        }
+    }
 }
 
 // Live status info for a specific printer

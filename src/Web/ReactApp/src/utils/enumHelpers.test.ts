@@ -6,12 +6,12 @@ describe('enumHelpers', () => {
   describe('getPrinterBackendOptions', () => {
     it('should return all PrinterBackend enum values as options', () => {
       const options = getPrinterBackendOptions();
-      
+
       expect(options).toEqual([
-        { value: 0, label: 'Moonraker' },
-        { value: 1, label: 'PrusaLink' },
-        { value: 2, label: 'SDCP' },
-        { value: 3, label: 'OctoPrint' },
+        { value: 1, label: 'Moonraker' },
+        { value: 2, label: 'PrusaLink' },
+        { value: 3, label: 'SDCP' },
+        { value: 4, label: 'OctoPrint' },
       ]);
     });
 

@@ -77,6 +77,13 @@ export default defineConfig({
     outDir: 'dist',
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
+      onwarn(warning, defaultHandler) {
+        // Suppress upstream annotation warnings from @microsoft/signalr which are safe
+        if (warning.code === 'INVALID_ANNOTATION' && typeof warning.message === 'string' && warning.message.includes('@microsoft/signalr')) {
+          return;
+        }
+        defaultHandler(warning);
+      },
       // NOTE: Do NOT mark dependencies as external for a Vite SPA
       // External modules expect to be provided by the runtime environment
       // In a browser SPA, we need all dependencies bundled
