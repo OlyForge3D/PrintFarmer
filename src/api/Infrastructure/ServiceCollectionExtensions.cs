@@ -415,6 +415,12 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterPrinterServices(IServiceCollection services)
     {
+        // Register the printer status client factory for backend-specific status retrieval
+        _ = services.AddSingleton<Services.Printers.IPrinterStatusClientFactory, Services.Printers.PrinterStatusClientFactory>();
+        
+        // Register the printer status DTO builder for centralizing DTO construction logic
+        _ = services.AddScoped<Services.Printers.IPrinterStatusDtoBuilder, Services.Printers.PrinterStatusDtoBuilder>();
+
         _ = services.AddScoped<Services.Printers.IPrintersService, Services.Printers.PrintersService>();
         _ = services.AddScoped<Services.Interfaces.IMoonrakerDiagnosticsService, Services.MoonrakerDiagnosticsService>();
         _ = services.AddScoped<Services.Interfaces.IPrinterCapabilityDiscoveryService, Services.PrinterCapabilityDiscoveryService>();
