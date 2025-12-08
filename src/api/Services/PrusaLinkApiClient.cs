@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Services;
 /// Comprehensive PrusaLink API client based on the official OpenAPI specification
 /// https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml
 /// </summary>
-public class PrusaLinkApiClient
+public class PrusaLinkApiClient : IPrusaLinkApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;

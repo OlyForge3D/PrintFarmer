@@ -7,10 +7,23 @@ using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
-public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = null) : PrinterClientBase, IPrusaLinkClient
+public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient
 {
-    private readonly PrusaLinkApiClient _apiClient = new(http, logger ?? new NullLoggingService());
-    private readonly IUnifiedLoggingService? _logger = logger;
+    private readonly IPrusaLinkApiClient _apiClient;
+    private readonly IUnifiedLoggingService? _logger;
+
+    public PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = null)
+    {
+        _apiClient = new PrusaLinkApiClient(http, logger ?? new NullLoggingService());
+        _logger = logger;
+    }
+
+    // For testability: allow injection of mock API client
+    internal PrusaLinkClient(IPrusaLinkApiClient apiClient, IUnifiedLoggingService? logger = null)
+    {
+        _apiClient = apiClient;
+        _logger = logger;
+    }
 
     public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, string? apiKey, CancellationToken ct = default)
     {
@@ -219,7 +232,8 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
             ArgumentNullException.ThrowIfNull(fileContent);
 
             // Build a rooted path using Uri to avoid manual separators
-            string filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
+            // Note: Uri(Uri, string) requires the baseUri to be absolute
+            string filePath = new Uri(new Uri("http://localhost/"), fileName).LocalPath;
             return await _apiClient.UploadFileAsync(baseUrl, "/local", filePath, fileContent, apiKey, printAfterUpload: false, overwrite: true, ct);
         }
         catch (Exception ex)
@@ -242,7 +256,8 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
             ArgumentNullException.ThrowIfNull(fileName);
 
             // Build a rooted path using Uri to avoid manual separators
-            string filePath = new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString();
+            // Note: Uri(Uri, string) requires the baseUri to be absolute
+            string filePath = new Uri(new Uri("http://localhost/"), fileName).LocalPath;
             return await _apiClient.StartPrintAsync(baseUrl, "/local", filePath, apiKey, ct);
         }
         catch (Exception ex)
@@ -556,9 +571,9 @@ public class PrusaLinkClient(HttpClient http, IUnifiedLoggingService? logger = n
     }
 
     /// <summary>
-    /// Access the underlying comprehensive API client for advanced operations
+    /// Access the underlying API client for advanced operations
     /// </summary>
-    public PrusaLinkApiClient ApiClient => _apiClient;
+    public IPrusaLinkApiClient ApiClient => _apiClient;
 }
 
 #pragma warning disable CA1056 // URI-like properties should not be strings (transport records)

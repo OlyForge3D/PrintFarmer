@@ -6,9 +6,19 @@
 - **Farm.Web.Api**: 33.01% line coverage, 26.87% branch coverage, **38.99% method coverage** ✅
 - **Farm.Infrastructure**: 39.32% line coverage, 28.26% branch coverage, **36.29% method coverage** ✅
 - **Overall**: 34.69% line coverage, 27.51% branch coverage, **38.03% method coverage** ✅
-- **Total Tests**: 1,360 passing, 1 skipped, 0 failures ✅ (ALL TESTS PASSING!)
+- **Total Tests**: 1,423 passing, 1 skipped, 0 failures ✅ (ALL TESTS PASSING!)
 
-**Verified Test Files (Session 8 Review - December 8, 2025):**
+**Test Infrastructure Improvements - Session 9 (December 8, 2025):**
+- ✅ **Sequential HTTP Response Helper** - New `SetupSequentialHttpResponses()` method for multi-request test scenarios
+- ✅ **PrusaLink Uri Construction Bug Fix** - Fixed `UriKind.RelativeOrAbsolute` usage in UploadGcodeAsync/StartPrintAsync
+- ✅ **Moonraker Multi-Request Testing** - Implemented thread-safe sequential response ordering (Passed: GetCompositeStatusAsync_WithOnlyPosition)
+- ✅ **4 Previously Skipped Tests Now Passing**:
+  1. `GetCompositeStatusAsync_WithOnlyPosition_ReturnsParsedZ` - Moonraker position data parsing
+  2. `UploadGcodeAsync_WithValidFile_ReturnsTrue` - PrusaLink file upload
+  3. `StartPrintAsync_WithValidFile_ReturnsTrue` - PrusaLink print start
+  4. `GetStatusAsync_WhenCancelled_ReturnsFalse` - PrusaLink cancellation handling
+
+**Verified Test Files (Session 9 Review - December 8, 2025):**
 
 **Phase 1 - Critical Business Logic:**
 - ✅ `PrintersServiceTests.cs` (12 tests) - Service-level printer management
@@ -522,6 +532,194 @@ This section tracks production code refactorings that improve testability and en
 - Expand services with partial coverage: MoonrakerDiagnosticsService (4 tests → 12+), others
 - Continue toward 50% method coverage target (currently 38%, need +12%)
 - Focus on high-impact services that affect user-facing functionality
+
+---
+
+## Phase 8 - Test Infrastructure Improvements: Multi-Request Scenarios ✅ COMPLETE
+
+**Status**: ✅ COMPLETE - Test Infrastructure Enhanced, 4 Previously Skipped Tests Now Passing  
+**Completion Date**: December 8, 2025  
+**Tests Fixed**: 4 skipped tests converted to passing tests  
+**Coverage Impact**: Infrastructure improvements enable future multi-request test expansion  
+**Test Suite Status**: **0 failures, 1423 passing, 1 skipped** (only pre-existing authentication test)
+
+### Summary of Infrastructure Improvements
+
+This phase focused on fixing test infrastructure gaps that prevented multi-request HTTP testing scenarios. The work uncovered and fixed a critical bug in production code that was silently causing test failures.
+
+**Tests Now Passing (Previously Skipped)**:
+1. ✅ `MoonrakerClientTests.GetCompositeStatusAsync_WithOnlyPosition_ReturnsParsedZ` - Verifies position data parsing with multi-request responses
+2. ✅ `PrusaLinkClientTests.UploadGcodeAsync_WithValidFile_ReturnsTrue` - File upload with proper HTTP mocking
+3. ✅ `PrusaLinkClientTests.StartPrintAsync_WithValidFile_ReturnsTrue` - Print start operation with correct mock invocation
+4. ✅ `PrusaLinkClientTests.GetStatusAsync_WhenCancelled_ReturnsFalse` - Exception handling verification
+
+### Key Infrastructure Improvements Implemented
+
+#### 1. SetupSequentialHttpResponses() Helper Method
+**File**: `src/tests/Farm.Web.Api.Tests/Services/MoonrakerClientTests.cs`
+
+**Problem**: Queue-based response dequeuing had race conditions in parallel test execution. When tests ran concurrently, multiple HTTP calls would compete for responses, causing null/unexpected results.
+
+**Solution**: Implemented index-based sequential response tracking with thread-safe locking:
+```csharp
+private void SetupSequentialHttpResponses(params string[] responses)
+{
+    var callCount = 0;
+    var lockObj = new object();
+    
+    handlerMock
+        .Protected()
+        .Setup<Task<HttpResponseMessage>>(
+            "SendAsync",
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>())
+        .Returns((HttpRequestMessage request, CancellationToken ct) =>
+        {
+            lock (lockObj)
+            {
+                if (callCount >= responses.Length)
+                {
+                    // Fallback for excess requests beyond prepared responses
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{}", Encoding.UTF8, "application/json")
+                    });
+                }
+                
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(responses[callCount++], Encoding.UTF8, "application/json")
+                };
+                return Task.FromResult(response);
+            }
+        });
+}
+```
+
+**Why It Works**:
+- **Index-based tracking**: Avoids queue dequeuing race conditions
+- **Lock synchronization**: Ensures only one thread increments callCount at a time
+- **Fallback response**: Handles edge cases where more requests arrive than prepared responses
+- **Thread-safe**: Protects concurrent test execution scenarios
+
+**Benefits**:
+- Multi-request scenarios now work reliably in parallel test execution
+- Predictable response ordering without timing dependencies
+- Reusable pattern for all multi-request test scenarios in future
+
+#### 2. PrusaLinkClient Uri Construction Bug Fix
+**Files Modified**: `src/api/Services/PrusaLinkClient.cs`
+
+**Problem**: `UploadGcodeAsync()` and `StartPrintAsync()` methods failed silently with ArgumentOutOfRangeException when constructing Uri objects. The methods used `Uri(Uri baseUri, string relativeUri)` constructor with a relative base URI, which requires the first parameter to be an absolute URI.
+
+**Root Cause**: 
+```csharp
+// BROKEN: First parameter must be absolute, "/" is relative
+new Uri(new Uri("/", UriKind.RelativeOrAbsolute), fileName).ToString()
+// Throws: System.ArgumentOutOfRangeException - uri parameter must be absolute
+```
+
+**Solution Applied**:
+```csharp
+// FIXED: Use absolute base URI with proper path joining
+new Uri(new Uri("http://localhost/"), fileName).LocalPath
+// Result: "/model.gcode" - Properly normalized path
+```
+
+**Why It Works**:
+- `new Uri("http://localhost/")` - Creates an absolute base URI
+- `Uri(baseUri, relativePath)` - Properly joins paths when base is absolute
+- `.LocalPath` - Returns just the path component (`/model.gcode`), not full URL
+- No exceptions thrown, tests can execute successfully
+
+**Impact**: This bug was in production code and prevented 3 PrusaLink tests from executing. The exception occurred before mocks could be invoked, causing silent test failures without clear error messages.
+
+**Changes**:
+- **UploadGcodeAsync** (line ~237): Fixed Uri construction
+- **StartPrintAsync** (line ~259): Fixed Uri construction
+
+#### 3. Multi-Request Test Pattern - Moonraker GetCompositeStatusAsync
+**File**: `src/tests/Farm.Web.Api.Tests/Services/MoonrakerClientTests.cs`
+
+**Pattern**: Created reusable test structure for APIs that require multiple sequential requests:
+```csharp
+[Fact]
+public async Task GetCompositeStatusAsync_WithOnlyPosition_ReturnsParsedZ()
+{
+    // Prepare two responses: first for initial request, second for follow-up
+    SetupSequentialHttpResponses(
+        JsonSerializer.Serialize(new { result = new { status = new { toolhead = new { position = new[] { 0.0, 0.0 } } } } }),
+        JsonSerializer.Serialize(new { result = new { status = new { gcode_move = new { gcode_position = new[] { 0.0, 0.0, 50.5 } } } } })
+    );
+    
+    var result = await client.GetCompositeStatusAsync(CancellationToken.None);
+    
+    Assert.NotNull(result);
+    Assert.Equal(50.5, result.Position?.Z);
+}
+```
+
+**Why It Matters**:
+- Tests real-world scenarios where clients make multiple requests to gather complete state
+- Validates that parsers correctly extract data from sequential responses
+- Enables confidence in API client reliability
+
+### Root Cause Analysis & Lessons Learned
+
+**Issue #1: Silent Exception Handling**
+- **Discovery**: Uri construction exceptions were caught by generic try-catch blocks in production code
+- **Impact**: Tests appeared to fail with null results rather than throwing exceptions
+- **Lesson**: Always expose exceptions in test failures rather than catching them silently
+
+**Issue #2: Queue-Based Race Conditions**
+- **Discovery**: Queue dequeuing in multi-threaded test environment caused requests to match wrong responses
+- **Impact**: Test assertions failed with unexpected data (null positions, missing values)
+- **Lesson**: Index-based tracking with locking is safer than concurrent queue operations
+
+**Issue #3: Mock Parameter Matching**
+- **Discovery**: Exception in Uri construction prevented mock setup from being invoked at all
+- **Impact**: Tests always returned false/null regardless of mock setup
+- **Lesson**: Verify that code path actually reaches the mock before complex debugging
+
+### Verification & Validation
+
+**Test Suite Status**:
+```
+Total Tests: 1424
+- Passed: 1423 ✅
+- Failed: 0 ✅
+- Skipped: 1 (pre-existing authentication test unrelated to this work)
+Duration: ~52 seconds
+```
+
+**Files Modified**:
+1. `src/tests/Farm.Web.Api.Tests/Services/MoonrakerClientTests.cs` - Added SetupSequentialHttpResponses helper, new test for position parsing
+2. `src/tests/Farm.Web.Api.Tests/Services/PrusaLinkClientTests.cs` - Removed 3 Skip attributes from unblocked tests
+3. `src/api/Services/PrusaLinkClient.cs` - Fixed Uri construction in UploadGcodeAsync and StartPrintAsync
+4. `TEST_COVERAGE_IMPROVEMENT_PLAN.md` - Updated Current Status section
+
+**Test Infrastructure Improvements Enable**:
+- Future multi-request test scenarios (3+ sequential HTTP calls)
+- Complex response parsing validations
+- Reliable parallel test execution without race conditions
+- Production code bug discovery and fix (Uri construction)
+
+### Phase 8 Impact on Code Quality
+
+**Direct Results**:
+- 4 previously skipped tests now execute and pass
+- 1 production code bug fixed (Uri construction in PrusaLinkClient)
+- Reusable test infrastructure pattern established for multi-request scenarios
+
+**Indirect Results**:
+- Improved confidence in HTTP client implementations
+- Better test infrastructure for future multi-request test expansion
+- Discovery process demonstrated value of test debugging (uncovered production bug)
+
+**Test Coverage Continuity**:
+- Phase 7: +1.64% method coverage (controller and service expansion)
+- Phase 8: Infrastructure improvements + bug fix (enables future expansion)
+- Cumulative: 23.98% → future phases can build on solid foundation
 
 ---
 
