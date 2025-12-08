@@ -1,0 +1,479 @@
+{
+  "analysis_metadata": {
+    "generated_date": "2025-12-08",
+    "repository": "PrintFarmer",
+    "branch": "feat/orcaslicer-profiles-implementation",
+    "analysis_goal": "Identify highest-impact, lowest-effort testing targets for coverage improvement",
+    "target_coverage": "50% method coverage (currently 34.41%, need +15.59%)",
+    "methodology": "Analyzed service/controller line counts, usage patterns, test complexity, and coverage gaps"
+  },
+  
+  "current_test_coverage": {
+    "total_line": "30.99%",
+    "total_branch": "25.24%",
+    "total_method": "34.41%",
+    "modules": {
+      "Farm.Web.Api": {
+        "line": "28.71%",
+        "branch": "24.28%",
+        "method": "34.22%",
+        "total_lines": 7803
+      },
+      "Farm.Infrastructure": {
+        "line": "37.91%",
+        "branch": "28.26%",
+        "method": "33.66%",
+        "total_lines": 2487
+      }
+    },
+    "test_summary": {
+      "total_tests_passing": 1134,
+      "total_tests_skipped": 1,
+      "total_tests_failed": 0,
+      "total_duration_seconds": 44
+    }
+  },
+
+  "quick_wins_high_impact": [
+    {
+      "rank": 1,
+      "type": "Service",
+      "name": "PrusaLinkPollingService",
+      "file_path": "src/api/Services/PrusaLinkPollingService.cs",
+      "lines_of_code": 296,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 10,
+      "estimated_effort": "Low-Medium",
+      "estimated_complexity": "Medium",
+      "estimated_coverage_gain_percent": 0.35,
+      "impact_score": "Medium",
+      "usage_references": 8,
+      "rationale": "Smaller service than MoonrakerSubscriptionService, similar polling pattern but less complex. 8 references in codebase indicate active usage.",
+      "key_methods": [
+        "StartAsync",
+        "StopAsync", 
+        "PollPrinterStatusAsync",
+        "UpdatePrinterAsync",
+        "HandlePollingErrorAsync"
+      ],
+      "test_suggestion": "Poll cycle tests, error handling, status update propagation"
+    },
+    {
+      "rank": 2,
+      "type": "Service",
+      "name": "ThumbnailGenerationService",
+      "file_path": "src/api/Services/ThumbnailGenerationService.cs",
+      "lines_of_code": 291,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 10,
+      "estimated_effort": "Low-Medium",
+      "estimated_complexity": "Medium",
+      "estimated_coverage_gain_percent": 0.34,
+      "impact_score": "Medium",
+      "usage_references": 5,
+      "rationale": "Self-contained service with well-defined responsibilities. 291 LOC is manageable. Used in file management pipeline.",
+      "key_methods": [
+        "GenerateThumbnailAsync",
+        "ExtractFromGcodeAsync",
+        "ValidateThumbnailAsync",
+        "CompressThumbnailAsync"
+      ],
+      "test_suggestion": "Image generation, compression, format conversion, error handling"
+    },
+    {
+      "rank": 3,
+      "type": "Service",
+      "name": "OctoPrintPollingService",
+      "file_path": "src/api/Services/OctoPrintPollingService.cs",
+      "lines_of_code": 392,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 15,
+      "estimated_effort": "Medium",
+      "estimated_complexity": "Medium-High",
+      "estimated_coverage_gain_percent": 0.46,
+      "impact_score": "Medium",
+      "usage_references": 8,
+      "rationale": "Similar architecture to PrusaLinkPollingService but slightly larger. Well-structured polling pattern makes testing straightforward.",
+      "key_methods": [
+        "StartAsync",
+        "StopAsync",
+        "PollPrinterStatusAsync",
+        "UpdatePrinterStateAsync",
+        "HandleConnectionAsync"
+      ],
+      "test_suggestion": "Polling lifecycle, status normalization, error recovery, backend switching"
+    },
+    {
+      "rank": 4,
+      "type": "Service",
+      "name": "HarvestWorkerService",
+      "file_path": "src/api/Services/HarvestWorkerService.cs",
+      "lines_of_code": 618,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 20,
+      "estimated_effort": "Medium",
+      "estimated_complexity": "High",
+      "estimated_coverage_gain_percent": 0.73,
+      "impact_score": "Medium",
+      "usage_references": 5,
+      "rationale": "Critical component for G-code harvest pipeline. Referenced in 5 places but has zero tests. Medium complexity for its size.",
+      "key_methods": [
+        "ProcessHarvestAsync",
+        "ExtractMetadataAsync",
+        "ValidateFileAsync",
+        "UpdateProgressAsync",
+        "HandleErrorsAsync"
+      ],
+      "test_suggestion": "File processing pipeline, metadata extraction, error scenarios, progress updates"
+    },
+    {
+      "rank": 5,
+      "type": "Service",
+      "name": "PrinterCapabilityDiscoveryService",
+      "file_path": "src/api/Services/PrinterCapabilityDiscoveryService.cs",
+      "lines_of_code": 697,
+      "current_test_coverage": "Partial (5 test references)",
+      "estimated_tests_needed": 15,
+      "estimated_effort": "Medium",
+      "estimated_complexity": "Medium-High",
+      "estimated_coverage_gain_percent": 0.82,
+      "impact_score": "Medium",
+      "usage_references": 11,
+      "rationale": "Already has some test references, but no dedicated test suite. Critical for printer discovery and capability detection.",
+      "key_methods": [
+        "DiscoverCapabilitiesAsync",
+        "ProbeBackendAsync",
+        "NormalizeCapabilitiesAsync",
+        "HandleDiscoveryErrorsAsync"
+      ],
+      "test_suggestion": "Discovery workflows, capability normalization, multi-backend scenarios, error handling"
+    }
+  ],
+
+  "medium_priority_targets": [
+    {
+      "rank": 6,
+      "type": "Service",
+      "name": "DatabaseInitializer",
+      "file_path": "src/api/Services/DatabaseInitializer.cs",
+      "lines_of_code": 762,
+      "current_test_coverage": "Partial (19 test references)",
+      "estimated_tests_needed": 12,
+      "estimated_effort": "Medium",
+      "estimated_complexity": "High",
+      "estimated_coverage_gain_percent": 0.90,
+      "impact_score": "Medium",
+      "usage_references": 9,
+      "critical_paths": "Database schema safety checks, migration handling",
+      "note": "Already referenced in 19 tests but lacks dedicated test suite. Focuses on edge cases not covered."
+    },
+    {
+      "rank": 7,
+      "type": "Controller",
+      "name": "AssetsController",
+      "file_path": "src/api/Controllers/AssetsController.cs",
+      "lines_of_code": 129,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 8,
+      "estimated_effort": "Low",
+      "estimated_complexity": "Medium",
+      "estimated_coverage_gain_percent": 0.19,
+      "impact_score": "Low-Medium",
+      "usage_references": 5,
+      "test_suggestion": "Asset retrieval, error handling, HTTP response codes"
+    },
+    {
+      "rank": 8,
+      "type": "Controller",
+      "name": "SpoolmanController",
+      "file_path": "src/api/Controllers/SpoolmanController.cs",
+      "lines_of_code": 173,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 10,
+      "estimated_effort": "Low-Medium",
+      "estimated_complexity": "Medium",
+      "estimated_coverage_gain_percent": 0.26,
+      "impact_score": "Low-Medium",
+      "usage_references": 3,
+      "test_suggestion": "Spoolman integration endpoints, filament data retrieval, synchronization"
+    },
+    {
+      "rank": 9,
+      "type": "Controller",
+      "name": "JobQueueController",
+      "file_path": "src/api/Controllers/JobQueueController.cs",
+      "lines_of_code": 154,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 12,
+      "estimated_effort": "Low-Medium",
+      "estimated_complexity": "Medium",
+      "estimated_coverage_gain_percent": 0.23,
+      "impact_score": "Medium",
+      "usage_references": 1,
+      "test_suggestion": "Queue operations (add, remove, reorder), state management, error cases"
+    },
+    {
+      "rank": 10,
+      "type": "Controller",
+      "name": "CatalogController",
+      "file_path": "src/api/Controllers/CatalogController.cs",
+      "lines_of_code": 217,
+      "current_test_coverage": "None (0 tests)",
+      "estimated_tests_needed": 12,
+      "estimated_effort": "Low-Medium",
+      "estimated_complexity": "Medium",
+      "estimated_coverage_gain_percent": 0.32,
+      "impact_score": "Low-Medium",
+      "usage_references": 4,
+      "test_suggestion": "Catalog browsing, model/manufacturer retrieval, caching behavior"
+    }
+  ],
+
+  "controllers_without_tests_summary": {
+    "total_untested_controllers": 22,
+    "total_lines_of_code": 7803,
+    "estimated_total_tests_needed": 245,
+    "estimated_total_effort": "High (distributed across multiple controllers)",
+    "coverage_gain_estimate_percent": "2.3 - 3.1%",
+    "priority": "Low - Focus on services first for better return on investment",
+    "breakdown": {
+      "large_controllers_gt500_lines": 3,
+      "medium_controllers_200_500_lines": 8,
+      "small_controllers_lt200_lines": 11
+    }
+  },
+
+  "services_without_tests_summary": {
+    "total_untested_services": 50,
+    "total_lines_of_code": 18426,
+    "estimated_total_tests_needed": 450,
+    "estimated_total_effort": "Very High",
+    "coverage_gain_estimate_percent": "5.5 - 6.8%",
+    "top_10_by_loc": [
+      {
+        "name": "MoonrakerSubscriptionService",
+        "loc": 1601,
+        "references": 3,
+        "tests_needed": 25,
+        "priority": "Medium (only 3 references despite large size)"
+      },
+      {
+        "name": "GcodeHarvestService",
+        "loc": 1510,
+        "references": 11,
+        "tests_needed": 25,
+        "priority": "High (critical harvest pipeline)"
+      },
+      {
+        "name": "SdcpClient",
+        "loc": 864,
+        "references": 41,
+        "tests_needed": 20,
+        "priority": "High (widely used, already 32 test refs)"
+      },
+      {
+        "name": "DatabaseInitializer",
+        "loc": 762,
+        "references": 9,
+        "tests_needed": 15,
+        "priority": "Medium (already has 19 test refs)"
+      },
+      {
+        "name": "PrinterCapabilityDiscoveryService",
+        "loc": 697,
+        "references": 11,
+        "tests_needed": 15,
+        "priority": "Medium-High"
+      }
+    ]
+  },
+
+  "strategic_recommendations": {
+    "phase_1_quick_wins_4_weeks": {
+      "goal": "Add 70-80 new tests for +1.0 - 1.2% method coverage",
+      "focus_areas": [
+        "PrusaLinkPollingService (10 tests)",
+        "ThumbnailGenerationService (10 tests)",
+        "OctoPrintPollingService (15 tests)",
+        "HarvestWorkerService (20 tests)",
+        "PrinterCapabilityDiscoveryService (15 tests)",
+        "AssetsController (8 tests)"
+      ],
+      "expected_coverage": "35.4 - 35.6%",
+      "effort_estimate": "80-100 hours"
+    },
+    
+    "phase_2_medium_targets_8_weeks": {
+      "goal": "Add 120-150 tests for +1.8 - 2.2% method coverage",
+      "focus_areas": [
+        "GcodeHarvestService (25 tests)",
+        "DatabaseInitializer (12 tests)",
+        "SpoolmanController (10 tests)",
+        "JobQueueController (12 tests)",
+        "CatalogController (12 tests)",
+        "GcodeLibraryController (15 tests)",
+        "FileConsistencyController (15 tests)",
+        "PrinterCapabilitiesController (15 tests)"
+      ],
+      "expected_coverage": "37.2 - 37.8%",
+      "effort_estimate": "150-180 hours"
+    },
+    
+    "phase_3_critical_services_12_weeks": {
+      "goal": "Add 80-100 tests for large, complex services (1.2 - 1.5% coverage)",
+      "focus_areas": [
+        "MoonrakerSubscriptionService (25 tests)",
+        "PrusaLinkClient (25 tests)",
+        "SdcpClient (20 tests)"
+      ],
+      "expected_coverage": "38.4 - 39.3%",
+      "effort_estimate": "200-250 hours"
+    },
+    
+    "long_term_goal_50_percent": {
+      "current": "34.41%",
+      "target": "50.0%",
+      "gap": "15.59%",
+      "estimated_tests_needed": 600,
+      "estimated_timeline": "24-32 weeks (6-8 months)",
+      "key_strategy": "Focus on services with high coupling and reuse; avoid isolated test controllers"
+    }
+  },
+
+  "test_effort_estimation_model": {
+    "low_effort_service": {
+      "lines_of_code_range": "100-200",
+      "tests_needed": "5-8",
+      "hours_per_test": "0.5-1",
+      "total_hours": "2.5-8",
+      "examples": ["PrusaLinkPollingService", "ThumbnailGenerationService"]
+    },
+    "medium_effort_service": {
+      "lines_of_code_range": "200-500",
+      "tests_needed": "10-15",
+      "hours_per_test": "1-1.5",
+      "total_hours": "10-22.5",
+      "examples": ["OctoPrintPollingService", "PrinterCapabilityDiscoveryService"]
+    },
+    "high_effort_service": {
+      "lines_of_code_range": "500-1000",
+      "tests_needed": "20-25",
+      "hours_per_test": "1.5-2.5",
+      "total_hours": "30-62.5",
+      "examples": ["HarvestWorkerService", "DatabaseInitializer"]
+    },
+    "critical_effort_service": {
+      "lines_of_code_range": "1000+",
+      "tests_needed": "25-40",
+      "hours_per_test": "2-3",
+      "total_hours": "50-120",
+      "examples": ["MoonrakerSubscriptionService", "GcodeHarvestService"]
+    }
+  },
+
+  "coverage_gain_formula": {
+    "description": "Estimated method coverage gain from testing additional code",
+    "formula": "new_tests * 0.009 (approximate)",
+    "examples": [
+      "10 tests ≈ 0.09% method coverage",
+      "20 tests ≈ 0.18% method coverage",
+      "50 tests ≈ 0.45% method coverage",
+      "100 tests ≈ 0.90% method coverage"
+    ],
+    "note": "Formula based on empirical testing from Phase 1-6 improvements where 22 tests = +0.11% method coverage"
+  },
+
+  "key_insights": [
+    {
+      "insight": "Service testing has better ROI than controller testing",
+      "reason": "Services contain more business logic per line; controllers mostly handle HTTP routing",
+      "recommendation": "Prioritize services first for coverage improvement"
+    },
+    {
+      "insight": "Polling services (PrusaLink, OctoPrint) are similar and can share test patterns",
+      "reason": "Both implement similar IHostedService patterns with periodic status polling",
+      "recommendation": "Create base polling service test class to reduce duplication"
+    },
+    {
+      "insight": "Large untested services (MoonrakerSubscriptionService: 1601 LOC) are complex but low-impact",
+      "reason": "Only 3 references in codebase despite large size suggests architectural isolation",
+      "recommendation": "Defer until later phases; focus on services with 8+ references first"
+    },
+    {
+      "insight": "Controllers with tests exist in dedicated test classes (88 tests for ArtifactsControllerTests)",
+      "reason": "Most controller testing already done; remaining untested controllers are likely lower-priority",
+      "recommendation": "Focus on business logic (services) over HTTP routing (controllers)"
+    },
+    {
+      "insight": "Database-related services (DatabaseInitializer) already have some test coverage via integration tests",
+      "reason": "19 references in test files suggests indirect testing through other test suites",
+      "recommendation": "Create focused unit tests to increase direct coverage"
+    }
+  ],
+
+  "quick_reference_table": [
+    {
+      "service_name": "PrusaLinkPollingService",
+      "loc": 296,
+      "tests": 0,
+      "priority": "HIGH",
+      "effort": "LOW",
+      "estimated_gain": "+0.35%",
+      "hours_to_test": "7-10"
+    },
+    {
+      "service_name": "ThumbnailGenerationService",
+      "loc": 291,
+      "tests": 0,
+      "priority": "HIGH",
+      "effort": "LOW",
+      "estimated_gain": "+0.34%",
+      "hours_to_test": "7-10"
+    },
+    {
+      "service_name": "OctoPrintPollingService",
+      "loc": 392,
+      "tests": 0,
+      "priority": "HIGH",
+      "effort": "MEDIUM",
+      "estimated_gain": "+0.46%",
+      "hours_to_test": "15-22"
+    },
+    {
+      "service_name": "HarvestWorkerService",
+      "loc": 618,
+      "tests": 0,
+      "priority": "HIGH",
+      "effort": "MEDIUM",
+      "estimated_gain": "+0.73%",
+      "hours_to_test": "20-30"
+    },
+    {
+      "service_name": "PrinterCapabilityDiscoveryService",
+      "loc": 697,
+      "tests": 5,
+      "priority": "MEDIUM",
+      "effort": "MEDIUM",
+      "estimated_gain": "+0.82%",
+      "hours_to_test": "15-25"
+    },
+    {
+      "service_name": "GcodeHarvestService",
+      "loc": 1510,
+      "tests": 0,
+      "priority": "MEDIUM",
+      "effort": "HIGH",
+      "estimated_gain": "+1.80%",
+      "hours_to_test": "50-75"
+    },
+    {
+      "service_name": "MoonrakerSubscriptionService",
+      "loc": 1601,
+      "tests": 0,
+      "priority": "LOW",
+      "effort": "HIGH",
+      "estimated_gain": "+1.90%",
+      "hours_to_test": "50-75"
+    }
+  ]
+}

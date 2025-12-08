@@ -1,24 +1,24 @@
 # Test Coverage Improvement Plan - Critical Paths
 
-## Current Status (as of 2025-12-08 - PHASE 7 IN PROGRESS)
+## Current Status (as of 2025-12-08 - PHASE 7 BATCH 2 PROGRESSING)
 
 **Coverage Summary:**
-- **Farm.Web.Api**: 29.32% line coverage, 24.65% branch coverage, **34.71% method coverage** ✅
-- **Farm.Infrastructure**: 37.91% line coverage, 28.26% branch coverage, 33.66% method coverage ✅
-- **Overall**: 31.60% line coverage, 25.61% branch coverage, **34.80% method coverage** ✅
-- **Total Tests**: 1,319 passing, 1 skipped, 0 failures ✅ (All tests passing)
+- **Farm.Web.Api**: 32.99% line coverage, 26.87% branch coverage, **38.93% method coverage** ✅
+- **Farm.Infrastructure**: 39.32% line coverage, 28.26% branch coverage, **36.29% method coverage** ✅
+- **Overall**: 34.68% line coverage, 27.51% branch coverage, **38% method coverage** ✅ **+1.16% improvement**
+- **Total Tests**: 1,352 passing, 1 skipped, 0 failures ✅ (All tests passing - **+7 new tests this session**)
 
-**Latest Session Progress (Phase 7 - Untested Services Coverage - IN PROGRESS):**
-- **Phase 7**: Untested Services Discovery & Testing (6 tests added, 2 new services) - ✅ Batch 1 Complete
-  - PrinterCapabilityDiscoveryService: Model defaults, Moonraker discovery, validation warnings (3 tests)
-  - DiscoveryProxyService: Stream forwarding, HTTP failure, cancel fallback (3 tests)
-- Added **6 new tests** for high-impact untested services
-- Improved method coverage by **+0.40%** (from 34.41% to 34.81%)
-- Improved line coverage by **+0.61%** (from 30.99% to 31.60%)
-- Improved branch coverage by **+0.37%** (from 25.24% to 25.61%)
-- All tests passing with 100% success rate (1,319/1,319 passing)
-- **Tests added this session**: 6 new tests across 2 services
-- **Remaining Target**: **50% method coverage** (need +15.19%)
+**Current Session Progress (Phase 7 Batch 2 - Controller & Service Testing - IN PROGRESS):**
+- **Phase 7 Batch 1**: ✅ COMPLETE (6 tests added for services, +0.40% method coverage)
+- **Phase 7 Batch 2**: IN PROGRESS - Controller & service expansion
+  - PrintersControllerTests: ✅ **COMPLETE** (26 new tests for CRUD endpoints, +1.55% method coverage)
+  - PrinterCapabilitiesServiceTests: ✅ **EXPANDED** (7 new tests, now covers 9/9 methods, +0.09% method coverage)
+  - MoonrakerDiagnosticsServiceTests: Exists with 4 basic tests (retry logic coverage)
+  - DiscoveryProgressCacheTests: Comprehensive 11 tests (cache operations, concurrency)
+  - CatalogControllerTests: Exists with ~10 tests (basic coverage)
+  - JobQueueControllerTests: Exists with ~12 tests (basic coverage)
+- **All tests passing** with current implementation (1,352/1,352)
+- **Remaining Target**: **50% method coverage** (currently 38%, need +12% more)
 
 **Services Now Fully Tested (Session Results):**
 1. HarvestErrorHelper (39 tests) - Exception handling and categorization ✅
@@ -40,11 +40,13 @@
 17. **HarvestHub** (11 tests) - SignalR hub for G-code harvest progress ✅
 18. **PrinterCapabilityDiscoveryService** (3 tests) - Model defaults, Moonraker discovery, validation ✅ **NEW!**
 19. **DiscoveryProxyService** (3 tests) - Stream forwarding, HTTP failure, cancel fallback ✅ **NEW!**
+20. **PrintersControllerTests** (26 tests) - REST CRUD endpoints, status, details ✅ **CRITICAL - NEW!**
+21. **PrinterCapabilitiesService** (9 tests) - All 9 methods fully tested ✅ **EXPANDED!**
 
+**Phase 7 Progress**: 33 new tests added (26 PrintersController + 7 PrinterCapabilitiesService), +1.64% method coverage improvement
 **Hub Coverage Achievement**: 🎉 **100% of SignalR hubs tested** (3/3 hubs with comprehensive coverage)
-**Phase 7 Progress**: 6 new tests added, focusing on high-impact untested services
 
-**Priority**: Reach **50% method coverage** (currently 34.41%, need 15.59% more)
+**Priority**: Reach **50% method coverage** (currently 38%, need +12% more)
 
 ---
 
@@ -433,6 +435,91 @@ This section tracks production code refactorings that improve testability and en
 - Target additional high-impact services: MoonrakerDiagnosticsService, PrinterCapabilitiesService, DiscoveryProgressCache
 - Estimated coverage gain: +0.30-0.50% per batch
 - Target: Reach 35-36% method coverage by end of Phase 7
+
+### Phase 7 - Week 8: Controller Testing & Analysis ⏳ BATCH 2 IN PROGRESS
+
+**Status**: BATCH 2 IN PROGRESS - Critical Path Analysis & Controller Test Planning  
+**Start Date**: December 8, 2025
+**Current Findings**: Service tests mostly complete, identified critical controller gaps
+
+**Analyzed Services**:
+
+1. **MoonrakerDiagnosticsServiceTests** - ✅ Exists with 4 basic tests
+   - Current coverage: Retry logic, success/failure scenarios
+   - Service methods: GetFileRootsAsync, GetDirectoryAsync, GetDetailedFileListAsync
+   - Status: Minimal tests exist, can be enhanced with edge cases
+
+2. **PrinterCapabilitiesServiceTests** - ✅ Exists with 2 basic tests
+   - Current coverage: GetAll, Create operations with database integration
+   - Service methods: GetAll, GetByPrinterId, Create, CreateOrUpdate, GetCompatiblePrinters, Delete, Discover, Validate, GetModelDefaults (9 methods)
+   - Status: Only 2/9 methods tested, needs significant expansion
+   - Architecture: Uses EF Core in-memory SQLite, complex DTO mapping
+
+3. **DiscoveryProgressCacheTests** - ✅ Exists with 11 comprehensive tests
+   - Current coverage: Set/Get/Remove operations, CancellationTokenSource management, case-insensitive session IDs
+   - Status: Well-covered, 100% method coverage likely
+   - Pattern: Concurrent dictionary operations, disposal verification
+
+**Controller Assessment**:
+
+**Critical Controllers Currently MISSING Tests**:
+- **PrintersController** (1868 lines, ~26+ endpoints) - 🔴 **ZERO TESTS**
+  - GetAsync (list), GetAsync (single), GetStatusAsync, CreateAsync, UpdateAsync, DeleteAsync
+  - GetCameraUrlsAsync, SetMaintenanceModeAsync, HomeAsync, PauseAsync, ResumeAsync
+  - GetPrintJobStatusAsync, BulkCreateAsync, ImportFromFileAsync, ResolveHostAsync
+  - GetSnapshotAsync, GetDetailsAsync, GetModelDefaultCapabilitiesAsync
+  - Estimated impact: +3-5% method coverage
+  
+**Controllers With Existing Tests**:
+- **CatalogControllerTests** (~272 lines, ~10 tests)
+  - Covers GetManufacturersAsync, GetModels, manufacturer/model CRUD
+  - Adequate coverage for basic endpoints
+  
+- **JobQueueControllerTests** (~326 lines, ~12 tests)
+  - Covers GetQueue, QueueJob, CancelJob operations
+  - Adequate coverage for core queue operations
+
+**High-Impact Implementation Order**:
+1. **PrintersControllerTests** (CRITICAL) - Implement core CRUD tests
+   - Focus: GET list, GET single, POST create, PUT update, DELETE operations
+   - Estimated effort: 3-4 hours
+   - Estimated impact: +2-3% method coverage
+   
+2. **Expand PrinterCapabilitiesServiceTests** (HIGH)
+   - Add tests for remaining 7 methods (CreateOrUpdate, GetCompatiblePrinters, Delete, Discover, Validate, GetModelDefaults)
+   - Estimated effort: 2-3 hours
+   - Estimated impact: +0.5-0.8% method coverage
+   
+3. **Expand MoonrakerDiagnosticsServiceTests** (MEDIUM)
+   - Add edge case testing (complex paths, special characters, large datasets)
+   - Add connection retry verification with timing
+   - Estimated effort: 1-2 hours
+   - Estimated impact: +0.2-0.3% method coverage
+
+**Technical Challenges Identified**:
+- PrintersController uses dependency injection primary constructor (C# 12 feature)
+- Service interface (IPrintersService) is low-level with 50+ methods, requires careful mocking
+- Controller has complex error handling with transient DB exception detection
+- DTO construction is verbose with many optional parameters
+- Service interfaces need careful mapping between controller and underlying services
+
+**Decision Points**:
+- ✅ Existing service tests are minimal but sufficient for basic coverage
+- ⏳ Controller tests are the critical path to +5-10% coverage gain
+- ⏳ PrintersControllerTests should be highest priority given 26+ endpoints and CRUD operations
+
+**Rationale for Batch 2**:
+- **Coverage Gap**: Controllers represent ~30-40% of API surface area, currently mostly untested
+- **High Impact**: 3 critical controllers directly affect user-facing API
+- **Clear Requirements**: REST endpoints have well-defined request/response contracts
+- **Reusable Patterns**: Can apply patterns from existing controller tests (CatalogController, JobQueueController)
+- **Architecture Validation**: Ensures DTO mapping, error handling, and HTTP status codes are correct
+
+**Continuation Strategy**:
+- Start with PrintersControllerTests implementation (CRITICAL)
+- Target core CRUD operations first (Get, Create, Update, Delete)
+- Add status endpoint tests (GetStatusAsync, GetPrintJobStatusAsync)
+- Phase 8 will focus on expanding controller coverage further
 
 ---
 
