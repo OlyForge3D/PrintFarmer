@@ -10,7 +10,7 @@ public interface IGcodeUploadSettings
 
 public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
 {
-    private readonly ConcurrentDictionary<string, byte> _extensions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _extensions = new(StringComparer.Ordinal);
 
     public InMemoryGcodeUploadSettings()
     {
@@ -32,7 +32,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
             .Where(e => !string.IsNullOrWhiteSpace(e))
             .Select(e => e.Trim())
             .Select(e => e.StartsWith('.') ? e : "." + e)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
         _extensions.Clear();
         foreach (string? e in cleaned)
@@ -70,10 +70,11 @@ public class InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 
                 continue;
             }
             long newTotal = current.bytes + bytes;
+            bool isFirstForDay = current.bytes == 0;
             if (_usage.TryUpdate(key, (today, newTotal), current))
             {
                 usedBytes = newTotal;
-                return newTotal <= _dailyLimitBytes;
+                return isFirstForDay && newTotal <= _dailyLimitBytes;
             }
         }
     }

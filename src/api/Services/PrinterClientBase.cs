@@ -31,7 +31,11 @@ public abstract class PrinterClientBase
         try
         {
             UriBuilder ub = new(trimmed);
-            if (ub.Port == -1)
+            bool isHttp = string.Equals(ub.Scheme, "http", StringComparison.OrdinalIgnoreCase);
+            int schemeDefaultPort = string.Equals(ub.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80;
+            bool hadExplicitDefaultPort = trimmed.Contains($":{schemeDefaultPort}", StringComparison.Ordinal);
+
+            if (isHttp && (ub.Port == -1 || (ub.Uri.IsDefaultPort && !hadExplicitDefaultPort)))
             {
                 ub.Port = defaultPort;
             }
@@ -47,7 +51,7 @@ public abstract class PrinterClientBase
     {
         ArgumentNullException.ThrowIfNull(url);
         UriBuilder ub = new(url);
-        if (ub.Port == -1)
+        if (string.Equals(ub.Scheme, "http", StringComparison.OrdinalIgnoreCase) && (ub.Port == -1 || ub.Uri.IsDefaultPort))
         {
             ub.Port = defaultPort;
         }
@@ -65,7 +69,9 @@ public abstract class PrinterClientBase
         }
 
         string s = url!.Trim();
-        if (Uri.TryCreate(s, UriKind.Absolute, out Uri? abs))
+        if (Uri.TryCreate(s, UriKind.Absolute, out Uri? abs)
+            && (string.Equals(abs.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(abs.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
         {
             try
             {
@@ -86,9 +92,13 @@ public abstract class PrinterClientBase
         }
 
         // Relative or scheme-relative URL -> resolve against base using Uri composition
+        if (s.StartsWith('/'))
+        {
+            return baseNorm.TrimEnd('/') + s;
+        }
         try
         {
-            Uri baseUri = new(baseNorm);
+            Uri baseUri = new(baseNorm.EndsWith('/') ? baseNorm : baseNorm + "/");
             Uri combined = new(baseUri, s);
             return combined.ToString();
         }
