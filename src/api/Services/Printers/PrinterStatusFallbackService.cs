@@ -38,9 +38,9 @@ namespace Farm.Web.Api.Services.Printers
             CancellationToken ct)
             where TResult : class
         {
-            if (printer == null) throw new ArgumentNullException(nameof(printer));
-            if (operation == null) throw new ArgumentNullException(nameof(operation));
-            if (fallbackFactory == null) throw new ArgumentNullException(nameof(fallbackFactory));
+            ArgumentNullException.ThrowIfNull(printer);
+            ArgumentNullException.ThrowIfNull(operation);
+            ArgumentNullException.ThrowIfNull(fallbackFactory);
 
             try
             {
@@ -89,10 +89,11 @@ namespace Farm.Web.Api.Services.Printers
             CancellationToken ct)
             where TResult : class
         {
-            if (printer == null) throw new ArgumentNullException(nameof(printer));
-            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentNullException(nameof(circuitBreakerKey));
-            if (operation == null) throw new ArgumentNullException(nameof(operation));
-            if (fallbackFactory == null) throw new ArgumentNullException(nameof(fallbackFactory));
+            ArgumentNullException.ThrowIfNull(printer);
+            ArgumentNullException.ThrowIfNull(circuitBreakerKey);
+            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
+            ArgumentNullException.ThrowIfNull(operation);
+            ArgumentNullException.ThrowIfNull(fallbackFactory);
 
             // Get or create circuit breaker for this printer backend
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
@@ -137,7 +138,8 @@ namespace Farm.Web.Api.Services.Printers
 
         public bool IsCircuitBreakerOpen(string circuitBreakerKey)
         {
-            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentNullException(nameof(circuitBreakerKey));
+            ArgumentNullException.ThrowIfNull(circuitBreakerKey);
+            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
 
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
             return breaker.State == CircuitState.Open;
@@ -145,7 +147,8 @@ namespace Farm.Web.Api.Services.Printers
 
         public CircuitBreaker? GetCircuitBreakerState(string circuitBreakerKey)
         {
-            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentNullException(nameof(circuitBreakerKey));
+            ArgumentNullException.ThrowIfNull(circuitBreakerKey);
+            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
 
             try
             {

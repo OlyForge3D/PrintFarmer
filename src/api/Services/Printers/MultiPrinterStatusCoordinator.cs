@@ -13,7 +13,8 @@ namespace Farm.Web.Api.Services.Printers
 
         public MultiPrinterStatusCoordinator(IUnifiedLoggingService logger)
         {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            ArgumentNullException.ThrowIfNull(logger);
+            _logger = logger;
         }
 
         public async Task<TResult?[]> ExecuteParallelAsync<TResult>(
@@ -32,9 +33,9 @@ namespace Farm.Web.Api.Services.Printers
             CancellationToken ct)
             where TResult : class
         {
-            if (printers == null) throw new ArgumentNullException(nameof(printers));
-            if (operation == null) throw new ArgumentNullException(nameof(operation));
-            if (onError == null) throw new ArgumentNullException(nameof(onError));
+            ArgumentNullException.ThrowIfNull(printers);
+            ArgumentNullException.ThrowIfNull(operation);
+            ArgumentNullException.ThrowIfNull(onError);
 
             var printerList = printers as List<Printer> ?? printers.ToList();
             if (printerList.Count == 0)
@@ -80,10 +81,10 @@ namespace Farm.Web.Api.Services.Printers
             CancellationToken ct)
             where TResult : class
         {
-            if (printers == null) throw new ArgumentNullException(nameof(printers));
-            if (operation == null) throw new ArgumentNullException(nameof(operation));
-            if (onTimeout == null) throw new ArgumentNullException(nameof(onTimeout));
-            if (onError == null) throw new ArgumentNullException(nameof(onError));
+            ArgumentNullException.ThrowIfNull(printers);
+            ArgumentNullException.ThrowIfNull(operation);
+            ArgumentNullException.ThrowIfNull(onTimeout);
+            ArgumentNullException.ThrowIfNull(onError);
 
             var printerList = printers as List<Printer> ?? printers.ToList();
             if (printerList.Count == 0)

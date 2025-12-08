@@ -3,6 +3,7 @@ using Farm.Infrastructure;
 
 namespace Farm.Web.Api.Services.Printers
 {
+    #pragma warning disable CA1040 // Marker interface intentionally empty
     /// <summary>
     /// Marker interface for all backend-specific client implementations.
     /// Implemented by IMoonrakerClient, IPrusaLinkClient, ISdcpClient, and IOctoPrintClient
@@ -12,6 +13,7 @@ namespace Farm.Web.Api.Services.Printers
     {
         // Marker interface - no methods defined
     }
+    #pragma warning restore CA1040
 
     /// <summary>
     /// Factory interface for accessing backend-specific client implementations.

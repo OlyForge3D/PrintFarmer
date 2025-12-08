@@ -25,17 +25,18 @@ namespace Farm.Web.Api.Services.Printers
             ICircuitBreakerService circuitBreaker,
             IUnifiedLoggingService logger)
         {
-            _client = client ?? throw new ArgumentNullException(nameof(client));
-            _circuitBreaker = circuitBreaker ?? throw new ArgumentNullException(nameof(circuitBreaker));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            ArgumentNullException.ThrowIfNull(client);
+            ArgumentNullException.ThrowIfNull(circuitBreaker);
+            ArgumentNullException.ThrowIfNull(logger);
+
+            _client = client;
+            _circuitBreaker = circuitBreaker;
+            _logger = logger;
         }
 
         public async Task<PrinterStatusDto> GetPrinterStatusAsync(Printer printer, CancellationToken ct)
         {
-            if (printer == null)
-            {
-                throw new ArgumentNullException(nameof(printer));
-            }
+            ArgumentNullException.ThrowIfNull(printer);
 
             try
             {
@@ -68,10 +69,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<PrinterDto> GetPrinterDtoAsync(Printer printer, CancellationToken ct)
         {
-            if (printer == null)
-            {
-                throw new ArgumentNullException(nameof(printer));
-            }
+            ArgumentNullException.ThrowIfNull(printer);
 
             try
             {
@@ -96,10 +94,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)
         {
-            if (printer == null)
-            {
-                throw new ArgumentNullException(nameof(printer));
-            }
+            ArgumentNullException.ThrowIfNull(printer);
 
             // OctoPrint camera support would be implemented here
             _logger.LogWarning($"[OctoPrint] Camera stream URLs not yet implemented for printer {printer.Id}");
@@ -109,10 +104,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<string?> GetCameraSnapshotUrlAsync(Printer printer, CancellationToken ct)
         {
-            if (printer == null)
-            {
-                throw new ArgumentNullException(nameof(printer));
-            }
+            ArgumentNullException.ThrowIfNull(printer);
 
             // OctoPrint camera support would be implemented here
             _logger.LogWarning($"[OctoPrint] Camera snapshot URLs not yet implemented for printer {printer.Id}");
@@ -122,10 +114,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<bool> IsCameraAvailableAsync(Printer printer, CancellationToken ct)
         {
-            if (printer == null)
-            {
-                throw new ArgumentNullException(nameof(printer));
-            }
+            ArgumentNullException.ThrowIfNull(printer);
 
             // OctoPrint camera support not yet implemented
             await Task.CompletedTask;

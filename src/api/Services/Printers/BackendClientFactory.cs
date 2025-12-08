@@ -23,12 +23,13 @@ namespace Farm.Web.Api.Services.Printers
             IOctoPrintClient octoPrintClient,
             IUnifiedLoggingService logger)
         {
-            if (moonrakerClient == null) throw new ArgumentNullException(nameof(moonrakerClient));
-            if (prusaLinkClient == null) throw new ArgumentNullException(nameof(prusaLinkClient));
-            if (sdcpClient == null) throw new ArgumentNullException(nameof(sdcpClient));
-            if (octoPrintClient == null) throw new ArgumentNullException(nameof(octoPrintClient));
+            ArgumentNullException.ThrowIfNull(moonrakerClient);
+            ArgumentNullException.ThrowIfNull(prusaLinkClient);
+            ArgumentNullException.ThrowIfNull(sdcpClient);
+            ArgumentNullException.ThrowIfNull(octoPrintClient);
+            ArgumentNullException.ThrowIfNull(logger);
 
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger;
 
             // Store all backend clients in a registry
             // Each backend client implements IBackendClient, enabling type-safe access

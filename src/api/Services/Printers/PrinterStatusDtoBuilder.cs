@@ -14,10 +14,11 @@ namespace Farm.Web.Api.Services.Printers
 
         public PrinterStatusDtoBuilder(IUnifiedLoggingService logger)
         {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            ArgumentNullException.ThrowIfNull(logger);
+            _logger = logger;
         }
 
-        public async Task<PrinterDto> BuildMoonrakerDtoAsync(
+        public Task<PrinterDto> BuildMoonrakerDtoAsync(
             Printer printer,
             PrinterCompositeStatus status,
             string? cameraStreamUrl,
@@ -25,8 +26,8 @@ namespace Farm.Web.Api.Services.Printers
             PrinterSpoolInfoDto? spoolInfo,
             CancellationToken ct = default)
         {
-            if (printer == null) throw new ArgumentNullException(nameof(printer));
-            if (status == null) throw new ArgumentNullException(nameof(status));
+            ArgumentNullException.ThrowIfNull(printer);
+            ArgumentNullException.ThrowIfNull(status);
 
             // Extract common data
             var temps = ExtractTemperatureData(status);
@@ -34,7 +35,7 @@ namespace Farm.Web.Api.Services.Printers
             var job = ExtractJobData(status);
 
             // Build with Moonraker-specific details
-            return new PrinterDto(
+            return Task.FromResult(new PrinterDto(
                 Id: printer.Id,
                 Name: printer.Name,
                 ServerUrl: printer.ServerUrl,
@@ -62,20 +63,20 @@ namespace Farm.Web.Api.Services.Printers
                 SpoolInfo: spoolInfo,
                 BackendPort: printer.BackendPort,
                 FrontendPort: printer.FrontendPort
-            );
+            ));
         }
 
-        public async Task<PrinterDto> BuildPrusaLinkDtoAsync(
+        public Task<PrinterDto> BuildPrusaLinkDtoAsync(
             Printer printer,
             PrusaCompositeStatus status,
             CancellationToken ct = default)
         {
-            if (printer == null) throw new ArgumentNullException(nameof(printer));
-            if (status == null) throw new ArgumentNullException(nameof(status));
+            ArgumentNullException.ThrowIfNull(printer);
+            ArgumentNullException.ThrowIfNull(status);
 
             // PrusaLink provides different data structure - map accordingly
             // Note: PrusaLink doesn't provide temperature or position data in CompositeStatus
-            return new PrinterDto(
+            return Task.FromResult(new PrinterDto(
                 Id: printer.Id,
                 Name: printer.Name,
                 ServerUrl: printer.ServerUrl,
@@ -103,18 +104,18 @@ namespace Farm.Web.Api.Services.Printers
                 SpoolInfo: null, // PrusaLink doesn't have integrated spool tracking
                 BackendPort: printer.BackendPort,
                 FrontendPort: printer.FrontendPort
-            );
+            ));
         }
 
-        public async Task<PrinterDto> BuildSdcpDtoAsync(
+        public Task<PrinterDto> BuildSdcpDtoAsync(
             Printer printer,
             PrinterCompositeStatus status,
             string? cameraStreamUrl,
             string? cameraSnapshotUrl,
             CancellationToken ct = default)
         {
-            if (printer == null) throw new ArgumentNullException(nameof(printer));
-            if (status == null) throw new ArgumentNullException(nameof(status));
+            ArgumentNullException.ThrowIfNull(printer);
+            ArgumentNullException.ThrowIfNull(status);
 
             // Extract common data
             var temps = ExtractTemperatureData(status);
@@ -122,7 +123,7 @@ namespace Farm.Web.Api.Services.Printers
             var job = ExtractJobData(status);
 
             // Build with SDCP-specific details
-            return new PrinterDto(
+            return Task.FromResult(new PrinterDto(
                 Id: printer.Id,
                 Name: printer.Name,
                 ServerUrl: printer.ServerUrl,
@@ -150,23 +151,25 @@ namespace Farm.Web.Api.Services.Printers
                 SpoolInfo: null, // SDCP doesn't have integrated spool tracking
                 BackendPort: printer.BackendPort,
                 FrontendPort: printer.FrontendPort
-            );
+            ));
         }
 
-        public async Task<PrinterDto> BuildOctoPrintDtoAsync(
+        public Task<PrinterDto> BuildOctoPrintDtoAsync(
             Printer printer,
             string printerJson,
             string jobJson,
             string apiKey,
             CancellationToken ct = default)
         {
-            if (printer == null) throw new ArgumentNullException(nameof(printer));
-            if (string.IsNullOrWhiteSpace(printerJson)) throw new ArgumentNullException(nameof(printerJson));
-            if (string.IsNullOrWhiteSpace(jobJson)) throw new ArgumentNullException(nameof(jobJson));
+            ArgumentNullException.ThrowIfNull(printer);
+            ArgumentNullException.ThrowIfNull(printerJson);
+            ArgumentNullException.ThrowIfNull(jobJson);
+            if (string.IsNullOrWhiteSpace(printerJson)) throw new ArgumentException("Printer JSON cannot be empty", nameof(printerJson));
+            if (string.IsNullOrWhiteSpace(jobJson)) throw new ArgumentException("Job JSON cannot be empty", nameof(jobJson));
 
             // Note: OctoPrint JSON parsing not yet fully implemented
             // For now, return offline status
-            return new PrinterDto(
+            return Task.FromResult(new PrinterDto(
                 Id: printer.Id,
                 Name: printer.Name,
                 ServerUrl: printer.ServerUrl,
@@ -194,7 +197,7 @@ namespace Farm.Web.Api.Services.Printers
                 SpoolInfo: null,
                 BackendPort: printer.BackendPort,
                 FrontendPort: printer.FrontendPort
-            );
+            ));
         }
 
         public PrinterDto BuildBasePrinterDto(
@@ -205,8 +208,8 @@ namespace Farm.Web.Api.Services.Printers
             string? cameraSnapshotUrl = null,
             PrinterSpoolInfoDto? spoolInfo = null)
         {
-            if (printer == null) throw new ArgumentNullException(nameof(printer));
-            if (status == null) throw new ArgumentNullException(nameof(status));
+            ArgumentNullException.ThrowIfNull(printer);
+            ArgumentNullException.ThrowIfNull(status);
 
             // Extract all data
             var temps = ExtractTemperatureData(status);
@@ -247,7 +250,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public (double? HotendTemp, double? BedTemp, double? HotendTarget, double? BedTarget) ExtractTemperatureData(PrinterCompositeStatus status)
         {
-            if (status == null) throw new ArgumentNullException(nameof(status));
+            ArgumentNullException.ThrowIfNull(status);
 
             return (
                 HotendTemp: status.HotendTemp,
@@ -259,7 +262,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public (double? X, double? Y, double? Z) ExtractPositionData(PrinterCompositeStatus status)
         {
-            if (status == null) throw new ArgumentNullException(nameof(status));
+            ArgumentNullException.ThrowIfNull(status);
 
             return (
                 X: status.X,
@@ -270,7 +273,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public (string? JobName, double? Progress, string? State, string? ThumbnailUrl) ExtractJobData(PrinterCompositeStatus status)
         {
-            if (status == null) throw new ArgumentNullException(nameof(status));
+            ArgumentNullException.ThrowIfNull(status);
 
             return (
                 JobName: status.JobName,

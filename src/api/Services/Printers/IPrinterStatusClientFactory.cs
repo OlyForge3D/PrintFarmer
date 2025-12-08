@@ -52,13 +52,14 @@ namespace Farm.Web.Api.Services.Printers
             ICircuitBreakerService circuitBreaker,
             IUnifiedLoggingService logger)
         {
-            if (moonrakerClient == null) throw new ArgumentNullException(nameof(moonrakerClient));
-            if (prusaLinkClient == null) throw new ArgumentNullException(nameof(prusaLinkClient));
-            if (sdcpClient == null) throw new ArgumentNullException(nameof(sdcpClient));
-            if (octoPrintClient == null) throw new ArgumentNullException(nameof(octoPrintClient));
-            if (circuitBreaker == null) throw new ArgumentNullException(nameof(circuitBreaker));
+            ArgumentNullException.ThrowIfNull(moonrakerClient);
+            ArgumentNullException.ThrowIfNull(prusaLinkClient);
+            ArgumentNullException.ThrowIfNull(sdcpClient);
+            ArgumentNullException.ThrowIfNull(octoPrintClient);
+            ArgumentNullException.ThrowIfNull(circuitBreaker);
+            ArgumentNullException.ThrowIfNull(logger);
 
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger;
 
             // Initialize status clients for each backend
             _clients = new Dictionary<PrinterBackend, IPrinterStatusClient>
