@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Services.Printers;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
@@ -8,7 +9,7 @@ namespace Farm.Web.Api.Services.Interfaces;
 /// Supports printer status monitoring, job control, camera operations, and file management for Elegoo and other SDCP printers.
 /// Implements IDisposable to properly cleanup WebSocket connections.
 /// </summary>
-public interface ISdcpClient : IDisposable
+public interface ISdcpClient : IBackendClient, IDisposable
 {
     /// <summary>
     /// Gets the basic status information from an SDCP printer.

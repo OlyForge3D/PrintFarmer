@@ -415,6 +415,11 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterPrinterServices(IServiceCollection services)
     {
+        // Register the backend client factory for unified access to all backend clients
+        // This eliminates the need to pass individual backend clients (Moon, Prusa, SDCP, OctoPrint)
+        // to PrintersService, making it easier to add new backends without modifying the constructor
+        _ = services.AddSingleton<Services.Printers.IBackendClientFactory, Services.Printers.BackendClientFactory>();
+        
         // Register the printer status client factory for backend-specific status retrieval
         _ = services.AddSingleton<Services.Printers.IPrinterStatusClientFactory, Services.Printers.PrinterStatusClientFactory>();
         

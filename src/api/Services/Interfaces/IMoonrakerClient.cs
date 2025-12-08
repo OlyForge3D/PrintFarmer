@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Services.Printers;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
@@ -8,7 +9,7 @@ namespace Farm.Web.Api.Services.Interfaces;
 /// Interface for Moonraker client providing communication with Moonraker/Klipper 3D printer firmware.
 /// Supports printer status monitoring, job control, file management, history tracking, and Spoolman integration.
 /// </summary>
-public interface IMoonrakerClient
+public interface IMoonrakerClient : IBackendClient
 {
     #region Status and Job Information
 

@@ -329,17 +329,21 @@ namespace Farm.Web.Api.Tests.Services
             MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
             
-            // Create mocks for new extracted services
+            // Create the backend client factory mock
+            var backendFactoryMock = new Mock<IBackendClientFactory>();
+            backendFactoryMock.Setup(f => f.GetClient(PrinterBackend.Moonraker)).Returns((IBackendClient)(object)moonMock.Object);
+            backendFactoryMock.Setup(f => f.GetClient(PrinterBackend.PrusaLink)).Returns((IBackendClient)(object)prusaMock.Object);
+            backendFactoryMock.Setup(f => f.GetClient(PrinterBackend.SDCP)).Returns((IBackendClient)(object)sdcpMock.Object);
+            backendFactoryMock.Setup(f => f.GetClient(PrinterBackend.OctoPrint)).Returns((IBackendClient)(object)octoMock.Object);
+            
+            // Create mocks for other extracted services
             var dtoBuilderMock = new Mock<IPrinterStatusDtoBuilder>();
             var coordinatorMock = new Mock<IMultiPrinterStatusCoordinator>();
             var fallbackServiceMock = new Mock<IPrinterStatusFallbackService>();
 
             return new PrintersService(
                 repo,
-                moonMock.Object,
-                prusaMock.Object,
-                sdcpMock.Object,
-                octoMock.Object,
+                backendFactoryMock.Object,
                 circuitMock.Object,
                 capDiscoveryMock.Object,
                 defaultCatalogMock.Object,

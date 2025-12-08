@@ -3,10 +3,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Services.Printers;
 
 namespace Farm.Web.Api.Services.Interfaces
 {
-    public interface IOctoPrintClient
+    public interface IOctoPrintClient : IBackendClient
     {
         Task<bool> TestConnectionAsync(string baseUrl, string apiKey);
         Task<string> GetPrinterStateAsync(string baseUrl, string apiKey);
