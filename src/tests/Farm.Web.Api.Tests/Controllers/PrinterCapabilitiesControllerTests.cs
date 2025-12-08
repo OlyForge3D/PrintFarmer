@@ -281,7 +281,7 @@ public class PrinterCapabilitiesControllerTests
         var printerId = Guid.NewGuid();
         var request = new UpdatePrinterCapabilitiesDto(NozzleDiameter: 0.4);
         _svcMock.Setup(s => s.CreateOrUpdateAsync(printerId, request, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrinterCapabilitiesDto?)null);
+            .ReturnsAsync((PrinterCapabilitiesDto?)null!);
 
         // Act
         var result = await _controller.CreateOrUpdateCapabilitiesAsync(printerId, request);
@@ -318,7 +318,7 @@ public class PrinterCapabilitiesControllerTests
         // Arrange
         var gcodeFileId = Guid.NewGuid();
         _svcMock.Setup(s => s.GetCompatiblePrintersAsync(gcodeFileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IReadOnlyList<PrinterDto>?)null);
+            .ReturnsAsync((IReadOnlyList<PrinterDto>?)null!);
 
         // Act
         var result = await _controller.GetCompatiblePrintersAsync(gcodeFileId);
@@ -333,7 +333,7 @@ public class PrinterCapabilitiesControllerTests
     {
         // Arrange
         _svcMock.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
-            .Throws(new Exception("Database error"));
+            .Throws(new InvalidOperationException("Database error"));
 
         // Act
         var result = await _controller.GetAllCapabilitiesAsync();
@@ -349,7 +349,7 @@ public class PrinterCapabilitiesControllerTests
         // Arrange
         var request = new CreatePrinterCapabilitiesDto(PrinterId: Guid.NewGuid());
         _svcMock.Setup(s => s.CreateAsync(request, It.IsAny<CancellationToken>()))
-            .Throws(new Exception("Database error"));
+            .Throws(new InvalidOperationException("Database error"));
 
         // Act
         var result = await _controller.CreateCapabilitiesAsync(request);

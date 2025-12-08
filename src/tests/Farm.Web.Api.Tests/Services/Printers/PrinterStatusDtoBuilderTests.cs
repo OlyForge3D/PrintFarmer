@@ -362,14 +362,14 @@ namespace Farm.Web.Api.Tests.Services.Printers
         }
 
         [Fact]
-        public async Task BuildOctoPrintDtoAsync_WithEmptyPrinterJson_ThrowsArgumentNullException()
+        public async Task BuildOctoPrintDtoAsync_WithEmptyPrinterJson_ThrowsArgumentException()
         {
             // Arrange
             var builder = CreateBuilder();
             var printer = CreateTestPrinter();
 
             // Act & Assert
-            await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            await Assert.ThrowsAsync<ArgumentException>(() =>
                 builder.BuildOctoPrintDtoAsync(printer, "", "{}", "key"));
         }
 
@@ -386,14 +386,14 @@ namespace Farm.Web.Api.Tests.Services.Printers
         }
 
         [Fact]
-        public async Task BuildOctoPrintDtoAsync_WithEmptyJobJson_ThrowsArgumentNullException()
+        public async Task BuildOctoPrintDtoAsync_WithEmptyJobJson_ThrowsArgumentException()
         {
             // Arrange
             var builder = CreateBuilder();
             var printer = CreateTestPrinter();
 
             // Act & Assert
-            await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            await Assert.ThrowsAsync<ArgumentException>(() =>
                 builder.BuildOctoPrintDtoAsync(printer, "{}", "", "key"));
         }
 

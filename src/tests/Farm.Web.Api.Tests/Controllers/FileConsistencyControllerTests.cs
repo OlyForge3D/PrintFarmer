@@ -54,7 +54,7 @@ public class FileConsistencyControllerTests
     {
         // Arrange
         _repoMock.Setup(r => r.CountModel3DFilesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Database error"));
+            .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
         var result = await _controller.GetHealthSummaryAsync(CancellationToken.None);
@@ -101,7 +101,7 @@ public class FileConsistencyControllerTests
     {
         // Arrange
         _repoMock.Setup(r => r.GetRecentAuditsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Database error"));
+            .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
         var result = await _controller.GetAuditHistoryAsync(20, CancellationToken.None);
@@ -163,7 +163,7 @@ public class FileConsistencyControllerTests
     {
         // Arrange
         _repoMock.Setup(r => r.GetModel3DFilesWithIssueAsync(It.IsAny<FileHealthStatus>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Database error"));
+            .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
         var result = await _controller.GetFilesWithIssuesAsync(CancellationToken.None);

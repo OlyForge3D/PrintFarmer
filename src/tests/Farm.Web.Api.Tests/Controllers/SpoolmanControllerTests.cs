@@ -118,7 +118,7 @@ namespace Farm.Web.Api.Tests.Controllers
             // Arrange
             _spoolmanServiceMock
                 .Setup(s => s.GetConfig())
-                .Returns((SpoolmanConfigDto?)null);
+                .Returns((SpoolmanConfigDto?)null!);
 
             // Act
             var result = _controller.GetConfig();
@@ -146,7 +146,7 @@ namespace Farm.Web.Api.Tests.Controllers
             var parameters = methodInfo?.GetParameters();
             Assert.NotNull(parameters);
             Assert.Single(parameters);
-            Assert.True(parameters![0].ParameterType.Name.Contains("SpoolmanConfigDto"));
+            Assert.Contains("SpoolmanConfigDto", parameters![0].ParameterType.Name);
         }
 
         [Fact]
@@ -326,7 +326,7 @@ namespace Farm.Web.Api.Tests.Controllers
             // Arrange
             _settingsServiceMock
                 .Setup(s => s.Get<NetworkDiscoverySettings>())
-                .Returns((NetworkDiscoverySettings?)null);
+                .Returns((NetworkDiscoverySettings?)null!);
 
             _spoolmanServiceMock
                 .Setup(s => s.ScanNetworkForSpoolmanAsync(It.IsAny<List<string>>(), It.IsAny<CancellationToken>()))

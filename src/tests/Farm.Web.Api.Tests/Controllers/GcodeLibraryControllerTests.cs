@@ -72,7 +72,7 @@ public class GcodeLibraryControllerTests
         // Arrange
         _gcodeServiceMock
             .Setup(s => s.QueryLibraryAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<double?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Database error"));
+            .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
         var result = await _controller.GetLibraryAsync();

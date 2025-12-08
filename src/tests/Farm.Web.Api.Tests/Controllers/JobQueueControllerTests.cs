@@ -66,7 +66,7 @@ public class JobQueueControllerTests
         // Arrange
         _queueServiceMock
             .Setup(s => s.GetQueueOverviewAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Test exception"));
+            .ThrowsAsync(new InvalidOperationException("Test exception"));
 
         // Act
         var result = await _controller.GetQueueAsync();
@@ -313,7 +313,7 @@ public class JobQueueControllerTests
 
         _queueServiceMock
             .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Test exception"));
+            .ThrowsAsync(new InvalidOperationException("Test exception"));
 
         // Act
         var result = await _controller.DeleteJobAsync(jobId);

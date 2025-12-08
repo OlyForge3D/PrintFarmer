@@ -116,9 +116,9 @@ public class GcodeUploadSettingsTests
         // Assert
         Assert.Equal(3, result.Count);
         // Note: May be normalized to lower or keep original case, but should be present
-        Assert.True(result.Any(e => e.Equals(".gcode", StringComparison.OrdinalIgnoreCase)));
-        Assert.True(result.Any(e => e.Equals(".g", StringComparison.OrdinalIgnoreCase)));
-        Assert.True(result.Any(e => e.Equals(".nc", StringComparison.OrdinalIgnoreCase)));
+        Assert.Contains(result, e => e.Equals(".gcode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result, e => e.Equals(".g", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result, e => e.Equals(".nc", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
