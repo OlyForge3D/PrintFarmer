@@ -44,7 +44,7 @@ namespace Farm.Web.Api.Tests.Services
             MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
 
-            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
+            PrintersService svc = CreatePrintersService(repoMock.Object);
 
             Printer? printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
@@ -75,7 +75,7 @@ namespace Farm.Web.Api.Tests.Services
             MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
 
-            PrintersService svc = new PrintersService(repoMock.Object, moonMock.Object, prusaMock.Object, sdcpMock.Object, octoMock.Object, circuitMock.Object, capDiscoveryMock.Object, defaultCatalogMock.Object, catalogMock.Object, httpClientFactoryMock.Object, loggerMock.Object, mapper, hubContextMock.Object);
+            PrintersService svc = CreatePrintersService(repoMock.Object);
 
             Printer? printer = await svc.FindByIdWithIncludesAsync(id, CancellationToken.None);
 
@@ -328,6 +328,11 @@ namespace Farm.Web.Api.Tests.Services
 
             MapperConfiguration mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile(new Mapping.PrinterMappingProfile()));
             IMapper mapper = mapperConfig.CreateMapper();
+            
+            // Create mocks for new extracted services
+            var dtoBuilderMock = new Mock<IPrinterStatusDtoBuilder>();
+            var coordinatorMock = new Mock<IMultiPrinterStatusCoordinator>();
+            var fallbackServiceMock = new Mock<IPrinterStatusFallbackService>();
 
             return new PrintersService(
                 repo,
@@ -342,7 +347,10 @@ namespace Farm.Web.Api.Tests.Services
                 httpClientFactoryMock.Object,
                 loggerMock.Object,
                 mapper,
-                hubContextMock.Object);
+                hubContextMock.Object,
+                dtoBuilderMock.Object,
+                coordinatorMock.Object,
+                fallbackServiceMock.Object);
         }
     }
 }
