@@ -1,25 +1,35 @@
 # Test Coverage Improvement Plan - Critical Paths
 
-## Current Status (as of 2025-12-09 - VERIFIED & UPDATED)
+## Current Status (as of 2025-12-09 - PHASE 18 COMPLETE)
 
-**Coverage Summary (Latest Test Run - Phase 16 Complete):**
-- **Farm.Web.Api**: 35.4% line coverage, 28.39% branch coverage, **43.58% method coverage** ✅
-- **Farm.Infrastructure**: 39.51% line coverage, 28.26% branch coverage, **36.74% method coverage** ✅
-- **Overall**: 36.65% line coverage, 28.84% branch coverage, **40.44% method coverage** ✅
-- **Total Tests**: 1,664 passing, 1 skipped, 0 failures ✅ (ALL TESTS PASSING!)
+**Coverage Summary (Latest Test Run - Phase 18 Complete):**
+- **Farm.Web.Api**: 36.29% line coverage, 29.17% branch coverage, **44.19% method coverage** ✅
+- **Farm.Infrastructure**: 39.8% line coverage, 28.26% branch coverage, **37.43% method coverage** ✅
+- **Overall**: 37.41% line coverage, 29.52% branch coverage, **41.09% method coverage** ✅
+- **Total Tests**: 1,714 passing, 1 skipped, 0 failures ✅ (ALL TESTS PASSING!)
 
-**Session 11 Progress (December 9, 2025 - CURRENT - Phases 12-16):**
+**Session 11 Progress (December 9, 2025 - PHASES 12-18 - ONGOING):**
 - ✅ **Phase 12: SliceJobEventService** - Added 15 comprehensive tests for slicing job event service
 - ✅ **Phase 13: SlicerServiceMetrics** - Added 41 comprehensive tests for metrics tracking service (+0.32%)
 - ✅ **Phase 14: ProfileParsingService** - Investigated (service had critical JsonNode parent conflict bug)
 - ✅ **Phase 15: InMemoryRateLimitService** - Added 34 comprehensive tests for rate limiting service (+0.03%)
-- ✅ **Phase 16: ProfileParsingService Bug Fix & Tests** - Fixed critical bug, added 36 comprehensive tests ✅ NEW!
+- ✅ **Phase 16: ProfileParsingService Bug Fix & Tests** - Fixed critical bug, added 36 comprehensive tests
   - **Bug Fixed**: 'The node already has a parent' error in JsonNode hierarchy reordering
   - **Solution**: Implemented CloneJsonNode() recursive deep cloning utility
-  - **Tests Added**: 36 comprehensive tests covering parsing, metadata extraction, volatile key removal, deterministic ordering, hashing
-- ✅ **Test Count Increased**: 1446 → 1664 tests (+218 new tests total!)
-- ✅ **Coverage Improvement**: 39.0% → 40.44% method coverage (+1.44% this session!)
-- ✅ **All 126 New Tests Passing**: SliceJobEventService, SlicerServiceMetrics, InMemoryRateLimitService, ProfileParsingService all validated
+  - **Coverage**: +0.06% method coverage (40.38% → 40.44%)
+- ✅ **Phase 17: SetupService** - Added 22 comprehensive tests
+  - Tests cover: NeedsSetupAsync (2), CreateInitialAdminAsync (20)
+  - Password policy validation: length, uppercase, lowercase, digit, symbol requirements
+  - Duplicate detection, role validation, error cases
+  - Coverage: +0.22% method coverage (40.44% → 40.66%)
+- ✅ **Phase 18: TagService** - Added 28 comprehensive tests ✅ NEW!
+  - Tests cover: GetAllTagsAsync (3), GetTagByIdAsync (2), CreateTagAsync (9), DeleteTagAsync (2)
+  - Additional: AssignTagsToModelAsync (4), RemoveTagFromModelAsync (2), GetModelTagsAsync (2), BulkAssignTagsAsync (2)
+  - Complex logic: tag normalization to PascalCase, race conditions, cascade behavior, bulk operations
+  - Coverage: +0.43% method coverage (40.66% → 41.09%)
+- ✅ **Test Count Increased**: 1446 → 1714 tests (+268 new tests total!)
+- ✅ **Coverage Improvement**: 40.38% → 41.09% method coverage (+0.71% this session!)
+- ✅ **All 268 New Tests Passing**: All phases (12-18) validated and committed
 
 **Session 10 Progress (December 9, 2025):**
 - ✅ **Phase 10: OctoPrint & Moonraker Services** - Added 14 comprehensive tests for two critical background services
@@ -86,6 +96,33 @@
   - Whitespace handling (2 tests)
   - SHA256 hash validation (3 tests)
   - Type handling for metadata (3 tests)
+
+**Phase 17 - Setup Service (NEW):**
+- ✅ `SetupServiceTests.cs` (22 tests) - Initial admin creation and setup validation
+  - NeedsSetupAsync: 2 tests (admin exists, doesn't exist)
+  - CreateInitialAdminAsync: 20 tests
+    * Validation: null request, empty username/email/password (4 tests)
+    * Password policy: min length, uppercase, lowercase, digit, symbol (5 tests)
+    * Duplicate detection: username, email (2 tests)
+    * Setup completion: admin exists, duplicate user, idempotency (3 tests)
+    * Success path: full admin creation with token generation (1 test)
+    * Role validation: role not found (1 test)
+    * Configuration options: database providers, network ranges, ports (3 tests)
+
+**Phase 18 - Tag Service (NEW - COMPLETED):**
+- ✅ `TagServiceTests.cs` (28 tests) - Tag management and model-tag relationships
+  - GetAllTagsAsync: 3 tests (empty, multiple, error handling)
+  - GetTagByIdAsync: 2 tests (valid ID, non-existent)
+  - CreateTagAsync: 9 tests
+    * Validation: null DTO, empty/whitespace name (2 tests)
+    * Normalization: lowercase→PascalCase, spaces, underscores, dashes (4 tests)
+    * Duplicate handling: existing tag, race condition (2 tests)
+    * Success: valid new tag (1 test)
+  - DeleteTagAsync: 2 tests (success, not found)
+  - AssignTagsToModelAsync: 4 tests (success, non-existent model, non-existent tag, empty list)
+  - RemoveTagFromModelAsync: 2 tests (success, not found)
+  - GetModelTagsAsync: 2 tests (empty, multiple tags)
+  - BulkAssignTagsAsync: 2 tests (multiple models, empty list)
 
 **Additional Infrastructure Tests:**
 - ✅ `PrinterCapabilitiesServiceTests.cs` (9 tests) - All capability methods
