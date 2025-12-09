@@ -12,10 +12,10 @@ namespace Farm.Web.Api.Tests.Integration;
 /// <summary>
 /// Integration tests for SlicersService
 /// Tests slicer registration, deregistration, heartbeat, API key rotation, and Worker synchronization
+/// Fast executing (~2 seconds for 20 tests) - suitable for CI/CD pipelines
 /// </summary>
-[Trait("Category", "DbHeavy")]
-[Collection("DbHeavySerial")]
-[TestTiming]
+[Trait("Category", "Integration")]
+[Collection("Integration")]
 public class SlicersServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
