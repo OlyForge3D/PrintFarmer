@@ -244,6 +244,9 @@ public static class ServiceCollectionExtensions
 
         // Model repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Model.IModelRepository, Farm.Infrastructure.Repositories.Model.EfModelRepository>();
+
+        // Authentication audit repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Authentication.IAuthAuditLogRepository, Farm.Infrastructure.Repositories.Authentication.EfAuthAuditLogRepository>();
     }
 
     #endregion

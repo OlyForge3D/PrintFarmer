@@ -1,8 +1,7 @@
 ﻿using System.Text.Json;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Authentication;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Authentication;
 
@@ -11,32 +10,20 @@ namespace Farm.Web.Api.Services.Authentication;
 /// </summary>
 public class AuthAuditService : IAuthAuditService
 {
-    private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly IAuthAuditLogRepository _auditRepository;
     private readonly IUnifiedLoggingService _logging;
 
-    public AuthAuditService(IDbContextFactory<AppDbContext> dbFactory, IUnifiedLoggingService logging)
+    public AuthAuditService(IAuthAuditLogRepository auditRepository, IUnifiedLoggingService logging)
     {
-        _dbFactory = dbFactory;
+        _auditRepository = auditRepository;
         _logging = logging;
     }
 
-    // Centralized save helper so writes always use a factory-created context
+    // Centralized save helper
     private async Task SaveAuditAsync(AuthAuditLog auditLog, CancellationToken cancellationToken = default)
     {
-        using AppDbContext ctx = _dbFactory.CreateDbContext();
-        _ = ctx.AuthAuditLogs.Add(auditLog);
-        _ = await ctx.SaveChangesAsync(cancellationToken);
+        await _auditRepository.AddAsync(auditLog, cancellationToken);
         _logging.LogInformation($"[AuthAudit] Saved audit {auditLog.EventType} Id={auditLog.Id}");
-        try
-        {
-            string? provider = ctx.Database.ProviderName;
-            string? conn = null;
-            try
-            { conn = ctx.Database.GetConnectionString(); }
-            catch { }
-            Console.WriteLine($"[AuthAuditService] Saved audit Id={auditLog.Id} Provider={provider} Conn={conn} EventType={auditLog.EventType}");
-        }
-        catch { }
     }
 
     public async Task LogLoginAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -262,42 +249,16 @@ public class AuthAuditService : IAuthAuditService
 
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)
     {
-        using AppDbContext ctx = _dbFactory.CreateDbContext();
-        return await ctx.AuthAuditLogs
-            .Where(aal => aal.UserId == userId)
-            .OrderByDescending(aal => aal.Timestamp)
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
+        return await _auditRepository.GetByUserIdAsync(userId, pageSize, pageNumber, cancellationToken);
     }
 
     public async Task<List<AuthAuditLog>> GetRecentFailedLoginsAsync(int count = 100, CancellationToken cancellationToken = default)
     {
-        using AppDbContext ctx = _dbFactory.CreateDbContext();
-        return await ctx.AuthAuditLogs
-            .Where(aal => aal.EventType == AuthEventType.LoginFailed)
-            .OrderByDescending(aal => aal.Timestamp)
-            .Take(count)
-            .ToListAsync(cancellationToken);
+        return await _auditRepository.GetRecentFailedLoginsAsync(count, cancellationToken);
     }
 
     public async Task<List<AuthAuditLog>> GetSecurityEventsAsync(DateTime? since = null, int pageSize = 100, CancellationToken cancellationToken = default)
     {
-        using AppDbContext ctx = _dbFactory.CreateDbContext();
-        IQueryable<AuthAuditLog> query = ctx.AuthAuditLogs
-            .Where(aal => aal.EventType == AuthEventType.AccountLocked ||
-                         aal.EventType == AuthEventType.AccountUnlocked ||
-                         aal.EventType == AuthEventType.PasswordReset ||
-                         aal.EventType == AuthEventType.TokenRevoked);
-
-        if (since.HasValue)
-        {
-            query = query.Where(aal => aal.Timestamp >= since.Value);
-        }
-
-        return await query
-            .OrderByDescending(aal => aal.Timestamp)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
+        return await _auditRepository.GetSecurityEventsAsync(since, pageSize, cancellationToken);
     }
 }
