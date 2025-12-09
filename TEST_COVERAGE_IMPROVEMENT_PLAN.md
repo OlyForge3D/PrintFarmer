@@ -2030,6 +2030,116 @@ Track weekly progress:
 
 ---
 
+## Next Phases to Implement - Remaining Services
+
+**Priority 1 - User-Requested Services (CRITICAL - Must be completed):**
+
+### Phase 21: AuthenticationService ⏳ NOT STARTED
+- **Location**: `src/api/Services/Authentication/AuthenticationService.cs`
+- **Purpose**: User login, registration, password reset, token management
+- **Methods to Test**:
+  - `RegisterUserAsync()` - User registration with validation
+  - `LoginAsync()` - User login with password verification, lockout checks
+  - `RefreshTokenAsync()` - Token refresh and rotation
+  - `ResetPasswordAsync()` - Password reset flow
+  - `ConfirmEmailAsync()` - Email confirmation
+  - `ChangePasswordAsync()` - Password change with current password verification
+  - `RevokeTokenAsync()` - Token revocation
+- **Dependencies**: IAuthAuditService, IAccountLockoutService, IPasswordHashingService, ITokenRevocationService
+- **Test Count Target**: 25-30 tests
+- **Critical Paths**: Registration validation, login lockout after failures, token expiry, password policy enforcement
+
+### Phase 22: SlicersService ⏳ NOT STARTED
+- **Location**: `src/api/Services/Slicing/ISlicersService.cs` (interface-based, multiple implementations)
+- **Purpose**: Slicer registration, profile management, slicing job submission
+- **Key Methods**:
+  - `RegisterSlicerAsync()` - Register a new slicer worker
+  - `UnregisterSlicerAsync()` - Unregister slicer
+  - `GetSlicersAsync()` - Get available slicers
+  - `GetSlicerAsync(id)` - Get specific slicer
+  - `UpdateSlicerAsync()` - Update slicer configuration
+  - `GetProfilesAsync()` - Get available profiles
+  - `SubmitSliceJobAsync()` - Submit slicing job
+- **Dependencies**: SignalR hubs, job queue service, profile service
+- **Test Count Target**: 20-25 tests
+- **Critical Paths**: Slicer registration/unregistration, profile loading, job submission
+
+### Phase 23: JobDispatchingService ⏳ NOT STARTED
+- **Location**: `src/api/Services/Slicing/JobDispatcherService.cs`
+- **Purpose**: Dispatch slicing jobs to available slicer workers, load balancing
+- **Methods to Test**:
+  - `DispatchJobAsync()` - Assign job to best available slicer
+  - `SelectBestSlicerAsync()` - Load balancing algorithm
+  - `CheckJobStatusAsync()` - Monitor job progress
+  - `CancelJobAsync()` - Cancel in-progress job
+  - `GetJobResultAsync()` - Retrieve completed job result
+- **Dependencies**: Job queue, slicer registry, SignalR
+- **Test Count Target**: 18-22 tests
+- **Critical Paths**: Load balancing (least busy slicer), job timeout handling, result retrieval
+
+### Phase 24: GcodeLibraryService ⏳ NOT STARTED
+- **Location**: `src/api/Services/GcodeLibrary/IGcodeLibraryService.cs`
+- **Purpose**: G-code file management, metadata extraction, file organization
+- **Key Methods**:
+  - `UploadGcodeAsync()` - Upload and store G-code file
+  - `DeleteGcodeAsync()` - Delete file from library
+  - `GetGcodeMetadataAsync()` - Extract file metadata (layer count, print time, etc.)
+  - `SearchGcodesAsync()` - Search/filter library
+  - `GetGcodesAsync()` - List files with pagination
+  - `UpdateGcodeMetadataAsync()` - Update file properties
+- **Dependencies**: File storage, metadata extraction, search indexing
+- **Test Count Target**: 20-25 tests
+- **Critical Paths**: File upload/deletion, metadata extraction accuracy, search functionality
+
+### Phase 25: GcodeFilesService ⏳ NOT STARTED
+- **Location**: `src/api/Services/Files/GcodeFilesService.cs`
+- **Purpose**: Low-level G-code file operations, storage, retrieval
+- **Methods to Test**:
+  - `SaveGcodeAsync()` - Save file to storage
+  - `GetGcodeAsync()` - Retrieve file content
+  - `DeleteGcodeAsync()` - Remove file
+  - `ExistsAsync()` - Check file existence
+  - `GetFileSizeAsync()` - Get file size
+  - `ValidateGcodeAsync()` - Validate G-code syntax
+- **Dependencies**: File system/blob storage, chunked upload service
+- **Test Count Target**: 15-20 tests
+- **Critical Paths**: File I/O operations, validation logic, error handling
+
+### Phase 26: GcodeThumbnailExtractorService ⏳ NOT STARTED
+- **Location**: `src/api/Services/Files/GcodeThumbnailExtractorService.cs`
+- **Purpose**: Extract preview images from G-code files (embedded PNG/JPG)
+- **Methods to Test**:
+  - `ExtractThumbnailAsync()` - Extract thumbnail from G-code
+  - `GenerateThumbnailAsync()` - Generate thumbnail if missing
+  - `IsThumbnailPresentAsync()` - Check if thumbnail exists
+  - `GetThumbnailAsync()` - Retrieve thumbnail
+  - `ParseEmbeddedImagesAsync()` - Parse embedded image data
+- **Dependencies**: File service, image processing library
+- **Test Count Target**: 12-15 tests
+- **Critical Paths**: Image extraction, format validation, fallback handling
+
+---
+
+## Session Planning Guide
+
+**When starting a new session:**
+1. Check this section: "Next Phases to Implement - Remaining Services"
+2. Pick the next phase in order (Phase 21, 22, 23, etc.)
+3. Update status: Change `⏳ NOT STARTED` → `🔄 IN PROGRESS` → `✅ COMPLETED`
+4. Add test results to the phase entry
+5. Commit with phase number in message
+6. Update test count and coverage metrics at top of document
+
+**Avoid rediscovery work** by maintaining this list as the source of truth for:
+- What needs coverage
+- What's been done
+- What's in progress
+- Test count targets per service
+
+---
+
+
+
 ## Files to Create
 
 **Priority 1 (Critical Business Logic):**
