@@ -121,14 +121,17 @@ public class EfAuthAuditLogRepository : IAuthAuditLogRepository
         using var context = _dbContextFactory.CreateDbContext();
         var cutoffTime = DateTime.UtcNow - timeWindow;
 
-        var query = context.AuthAuditLogs
-            .Where(x => x.EventType == AuthEventType.LoginFailed && x.Timestamp >= cutoffTime);
+        // Load all matching records first (required for SQLite compatibility with string Contains)
+        var allLogs = await context.AuthAuditLogs
+            .Where(x => x.EventType == AuthEventType.LoginFailed && x.Timestamp >= cutoffTime)
+            .ToListAsync(cancellationToken);
 
+        // Apply client-side filtering for username/email search
         if (!string.IsNullOrEmpty(usernameOrEmail))
         {
-            query = query.Where(x => x.Metadata != null && x.Metadata.Contains(usernameOrEmail));
+            return allLogs.Count(x => x.Metadata != null && x.Metadata.Contains(usernameOrEmail, StringComparison.Ordinal));
         }
 
-        return await query.CountAsync(cancellationToken);
+        return allLogs.Count;
     }
 }

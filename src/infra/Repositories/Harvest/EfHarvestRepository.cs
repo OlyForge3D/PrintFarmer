@@ -139,34 +139,41 @@ public class EfHarvestRepository : IHarvestRepository
 
     public async Task<int> GetDiscoveredFilesCountWithSearchAsync(Guid operationId, string search, CancellationToken ct = default)
     {
-        IQueryable<HarvestDiscoveredFile> query = _db.HarvestDiscoveredFiles
-            .Where(d => d.HarvestOperationId == operationId);
+        // Load all files with the operation ID first (required for SQLite compatibility with case-insensitive Contains)
+        List<HarvestDiscoveredFile> allFiles = await _db.HarvestDiscoveredFiles
+            .Where(d => d.HarvestOperationId == operationId)
+            .ToListAsync(ct);
 
+        // Apply client-side filtering for case-insensitive search
         if (!string.IsNullOrWhiteSpace(search))
         {
-            string term = search.Trim();
-            query = query.Where(d => d.FileName.Contains(term, StringComparison.OrdinalIgnoreCase));
+            string term = search.Trim().ToLowerInvariant();
+            return allFiles.Count(d => d.FileName.Contains(term, StringComparison.OrdinalIgnoreCase));
         }
 
-        return await query.CountAsync(ct);
+        return allFiles.Count;
     }
 
     public async Task<List<HarvestDiscoveredFile>> GetDiscoveredFilesPagedAsync(Guid operationId, int page, int pageSize, string? search, CancellationToken ct = default)
     {
-        IQueryable<HarvestDiscoveredFile> query = _db.HarvestDiscoveredFiles
-            .Where(d => d.HarvestOperationId == operationId);
+        // Load all files with the operation ID first (required for SQLite compatibility with case-insensitive Contains)
+        List<HarvestDiscoveredFile> allFiles = await _db.HarvestDiscoveredFiles
+            .Where(d => d.HarvestOperationId == operationId)
+            .ToListAsync(ct);
 
+        // Apply client-side filtering for case-insensitive search
+        var query = allFiles.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(search))
         {
-            string term = search.Trim();
+            string term = search.Trim().ToLowerInvariant();
             query = query.Where(d => d.FileName.Contains(term, StringComparison.OrdinalIgnoreCase));
         }
 
-        return await query
+        return query
             .OrderBy(d => d.FileName)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync(ct);
+            .ToList();
     }
 
     public Task AddDiscoveredFileAsync(HarvestDiscoveredFile file, CancellationToken ct = default)
