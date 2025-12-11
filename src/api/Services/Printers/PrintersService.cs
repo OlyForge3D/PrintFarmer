@@ -42,6 +42,7 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IPrinterStatusDtoBuilder _dtoBuilder;
         private readonly IMultiPrinterStatusCoordinator _coordinator;
         private readonly IPrinterStatusFallbackService _fallbackService;
+        private readonly IPrinterStatusClientFactory _statusClientFactory;
 
         public PrintersService(
             Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo,
@@ -56,7 +57,8 @@ namespace Farm.Web.Api.Services.Printers
             IHubContext<Hubs.PrinterHub> hubContext,
             IPrinterStatusDtoBuilder dtoBuilder,
             IMultiPrinterStatusCoordinator coordinator,
-            IPrinterStatusFallbackService fallbackService)
+            IPrinterStatusFallbackService fallbackService,
+            IPrinterStatusClientFactory statusClientFactory)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
@@ -71,6 +73,7 @@ namespace Farm.Web.Api.Services.Printers
             _dtoBuilder = dtoBuilder ?? throw new ArgumentNullException(nameof(dtoBuilder));
             _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
             _fallbackService = fallbackService ?? throw new ArgumentNullException(nameof(fallbackService));
+            _statusClientFactory = statusClientFactory ?? throw new ArgumentNullException(nameof(statusClientFactory));
         }
 
         /// <summary>
@@ -393,111 +396,21 @@ namespace Farm.Web.Api.Services.Printers
 
             try
             {
-                if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.PrusaLink)
-                {
-                    PrusaCompositeStatus? status = await _fallbackService.ExecuteWithCircuitBreakerAsync<PrusaCompositeStatus>(
-                        p,
-                        $"prusalink-{p.Id}",
-                        async timeoutCt => await GetBackendClient<IPrusaLinkClient>(PrinterBackend.PrusaLink).GetCompositeStatusAsync(p.BackendUrl, p.ApiKey, timeoutCt),
-                        TimeSpan.FromSeconds(3),
-                        () => null,
-                        ct);
-
-                    if (status == null)
-                        return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: null);
-
-                    return new PrinterStatusDto(
-                        Id: p.Id,
-                        IsOnline: status.IsOnline,
-                        State: status.State,
-                        Progress: status.Progress,
-                        JobName: status.JobName,
-                        ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
-                        CameraSnapshotUrl: status.CameraSnapshotUrl);
-                }
-                else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.SDCP)
-                {
-                    PrinterCompositeStatus? status = await _fallbackService.ExecuteWithCircuitBreakerAsync<PrinterCompositeStatus>(
-                        p,
-                        $"sdcp-{p.Id}",
-                        async timeoutCt => await GetBackendClient<ISdcpClient>(PrinterBackend.SDCP).GetCompositeStatusAsync(p.BackendUrl, timeoutCt),
-                        TimeSpan.FromSeconds(3),
-                        () => null,
-                        ct);
-
-                    if (status == null)
-                        return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: null);
-
-                    return new PrinterStatusDto(
-                        Id: p.Id,
-                        IsOnline: status.IsOnline,
-                        State: status.State,
-                        Progress: status.Progress,
-                        JobName: status.JobName,
-                        ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
-                        CameraSnapshotUrl: status.CameraSnapshotUrl,
-                        X: status.X,
-                        Y: status.Y,
-                        Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget);
-                }
-                else if (p.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
-                {
-                    // OctoPrint support
-                    return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: 0);
-                }
-                else // Moonraker
-                {
-                    PrinterCompositeStatus? status = await _fallbackService.ExecuteWithCircuitBreakerAsync<PrinterCompositeStatus>(
-                        p,
-                        $"moonraker-{p.Id}",
-                        async timeoutCt =>
-                        {
-                            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                            return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).GetCompositeStatusAsync(moonrakerUrl, timeoutCt);
-                        },
-                        TimeSpan.FromSeconds(3),
-                        () => null,
-                        ct);
-
-                    if (status == null)
-                        return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: null);
-
-                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                    PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(moonrakerUrl, ct);
-                    return new PrinterStatusDto(
-                        Id: p.Id,
-                        IsOnline: status.IsOnline,
-                        State: status.State,
-                        Progress: status.Progress,
-                        JobName: status.JobName,
-                        ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
-                        CameraSnapshotUrl: status.CameraSnapshotUrl,
-                        X: status.X,
-                        Y: status.Y,
-                        Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget,
-                        SpoolInfo: spoolInfo);
-                }
+                // Delegate to the appropriate backend status client
+                // Each backend client is responsible for creating the PrinterStatusDto
+                var statusClient = _statusClientFactory.GetStatusClient(p.Backend);
+                return await statusClient.GetPrinterStatusAsync(p, ct);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            catch (ArgumentException)
             {
-                _logger.LogWarning($"Status timeout for printer {p.Id}");
-                return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
+                // Unsupported backend type
+                _logger.LogWarning($"Unsupported printer backend {p.Backend} for printer {p.Id}");
+                return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Unsupported", Progress: null);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error getting status for printer {p.Id}: {ex.Message}");
-                return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
+                _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}");
+                return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: null);
             }
         }
 #pragma warning restore CS8603

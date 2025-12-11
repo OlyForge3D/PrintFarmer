@@ -340,6 +340,7 @@ namespace Farm.Web.Api.Tests.Services
             var dtoBuilderMock = new Mock<IPrinterStatusDtoBuilder>();
             var coordinatorMock = new Mock<IMultiPrinterStatusCoordinator>();
             var fallbackServiceMock = new Mock<IPrinterStatusFallbackService>();
+            var statusClientFactoryMock = new Mock<IPrinterStatusClientFactory>();
 
             return new PrintersService(
                 repo,
@@ -354,7 +355,8 @@ namespace Farm.Web.Api.Tests.Services
                 hubContextMock.Object,
                 dtoBuilderMock.Object,
                 coordinatorMock.Object,
-                fallbackServiceMock.Object);
+                fallbackServiceMock.Object,
+                statusClientFactoryMock.Object);
         }
     }
 }
