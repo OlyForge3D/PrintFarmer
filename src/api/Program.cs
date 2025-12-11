@@ -704,7 +704,6 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 // Network discovery settings now available via UnifiedSettingsController:
 // GET /api/settings/network-discovery  
 // POST /api/settings/network-discovery
-// (Legacy endpoints removed - use unified controller instead)
 app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettings body) =>
 {
     NetworkValidationResult validation = NetworkValidationService.ValidateSettings(body);
@@ -720,7 +719,6 @@ app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "Req
 // SignalR settings now available via UnifiedSettingsController:
 // GET /api/settings/signalr
 // POST /api/settings/signalr
-// (Legacy endpoints removed - use unified controller instead)
 app.MapPost("/api/network-discovery/auto-detect", [Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
 app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "RequireAdmin")] ([FromServices] ISettingsService settingsService) =>
 {
@@ -736,24 +734,6 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
-app.MapGet("/diagnostics/temp-root", ([FromServices] IWebHostEnvironment env, [FromServices] ITempPathProvider provider) =>
-    env.IsProduction()
-        ? Results.StatusCode(StatusCodes.Status404NotFound)
-        : Results.Ok(new { tempRoot = provider.GetTempRoot() })
-);
-// Combined diagnostics (non-sensitive) for UI consumption
-app.MapGet("/api/diagnostics/summary", ([FromServices] ISpoolmanService spoolmanSvc, [FromServices] ISettingsService settingsService) =>
-{
-    SpoolmanConfigDto? spoolCfg = spoolmanSvc.GetConfig();
-    NetworkDiscoverySettings discovery = settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
-    return Results.Ok(new
-    {
-        spoolman = new { configured = spoolCfg is not null && !string.IsNullOrWhiteSpace(spoolCfg.BaseUrl), baseUrl = spoolCfg?.BaseUrl },
-        discovery
-    });
-});
-// Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
-app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
 // Final log just before entering host run loop (diagnostic)
 app.Logger.LogInformation("[Startup] Reached app.Run() - binding to configured URLs");

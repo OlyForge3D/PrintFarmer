@@ -10,18 +10,6 @@ namespace Farm.Infrastructure;
 public static class SlicingJobStatusExtensions
 {
     /// <summary>
-    /// Convert legacy status to new processing status
-    /// </summary>
-    public static SlicingJobStatus ToProcessingStatus(this SlicingJobStatus status)
-    {
-        return status switch
-        {
-            SlicingJobStatus.Slicing => SlicingJobStatus.Slicing, // Processing equivalent
-            _ => status
-        };
-    }
-
-    /// <summary>
     /// Check if status indicates job is in progress
     /// </summary>
     public static bool IsInProgress(this SlicingJobStatus status)
@@ -222,28 +210,6 @@ public class DistributedSlicingJob : SlicingJobDto
         EstimatedPrintTime = baseJob.EstimatedPrintTime;
         EstimatedFilamentUsed = baseJob.EstimatedFilamentUsed;
         LayerCount = baseJob.LayerCount;
-    }
-
-    // Convert to base SlicingJobDto for legacy compatibility  
-    public SlicingJobDto ToBase()
-    {
-        return new SlicingJobDto
-        {
-            JobId = JobId,
-            Status = Status,
-            Progress = Progress,
-            Message = ErrorMessage,
-            SlicerEngine = EngineType.ToString(),
-            PrinterId = PrinterId,
-            ModelFilePath = ModelFileUrl.ToString(), // Legacy field mapping expects string
-            GcodeFilePath = ResultFileUrl?.ToString(),
-            Profile = Profile,
-            CreatedAt = CreatedAt,
-            CompletedAt = CompletedAt,
-            EstimatedPrintTime = (int?)EstimatedPrintTimeSeconds,
-            EstimatedFilamentUsed = EstimatedFilamentUsageGrams,
-            LayerCount = LayerCount
-        };
     }
 }
 

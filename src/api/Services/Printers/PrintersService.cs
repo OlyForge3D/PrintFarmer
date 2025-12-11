@@ -1405,11 +1405,7 @@ namespace Farm.Web.Api.Services.Printers
             return false;
         }
 
-        public async Task<bool> StartPrintAsync(Guid id, string filename, CancellationToken ct)
-        {
-            // alias for StartPrintFromFileAsync - keep compatibility
-            return await StartPrintFromFileAsync(id, filename, ct).ConfigureAwait(false);
-        }
+
 
         public async Task<bool> DeletePrinterFileAsync(Guid id, string filename, CancellationToken ct)
         {

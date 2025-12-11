@@ -206,7 +206,7 @@ Graceful shutdown: workers finish active jobs then exit (shutdown timeout manage
 
 ## Key API Endpoints
 
-- `GET /healthz` (alias: `/api/healthz`) — Basic health check
+- `GET /healthz` — Basic health check
 - `GET /health` (alias: `/api/health`) — Comprehensive health status
   - Health JSON reflects provider + background service status; SignalR fan-out indirectly validated via connection stats endpoint used in container health checks.
 - `GET /api/printers` — List all configured printers  
@@ -809,7 +809,7 @@ Future Enhancements (tracked separately):
 
 **"External service unavailable"**
 - API server not running or wrong port
-- Check: `curl http://localhost:5245/healthz` (or `curl http://localhost:5245/api/healthz`)
+- Check: `curl http://localhost:5245/healthz`
 
 **Network discovery not finding printers**
 - Configure correct IP ranges in settings

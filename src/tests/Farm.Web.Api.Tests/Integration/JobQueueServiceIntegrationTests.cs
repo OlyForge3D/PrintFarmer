@@ -55,7 +55,7 @@ public class JobQueueServiceIntegrationTests : IClassFixture<CustomWebApplicatio
             ManufacturerId = manufacturer.Id,
             DefaultNozzleDiameter = 0.4
         };
-        context.PrinterModels.Add(printerModel);
+        context.Models.Add(printerModel);
         await context.SaveChangesAsync();
         
         // Create printer

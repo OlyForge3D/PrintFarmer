@@ -25,22 +25,15 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
     /// <summary>
     /// Override to provide backend-specific validation with confidence scoring.
     /// Returns (isValid, confidenceScore, reason).
-    /// Default implementation delegates to IsValidResponseAsync for backward compatibility.
     /// </summary>
-    protected virtual async Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
+    protected virtual Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
-        // Default: delegate to legacy IsValidResponseAsync
-        // Subclasses should override this method to provide scoring
-        bool isValid = await IsValidResponseAsync(response, content);
-        return isValid ? (true, 100, "Response valid") : (false, 0, "Response invalid");
+        // Default: check success status
+        return Task.FromResult(response.IsSuccessStatusCode 
+            ? (true, 100, "Response valid") 
+            : (false, 0, "Response invalid"));
     }
-
-    /// <summary>
-    /// Legacy validation method. Override ValidateResponseAsync for new code.
-    /// </summary>
-    protected virtual Task<bool> IsValidResponseAsync(HttpResponseMessage response, string content)
-        => Task.FromResult(response.IsSuccessStatusCode);
 
     public virtual async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
     {
