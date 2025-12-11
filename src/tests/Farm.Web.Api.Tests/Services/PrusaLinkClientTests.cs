@@ -38,7 +38,12 @@ public class PrusaLinkClientTests
         // Arrange
         var statusInfo = new StatusInfo
         {
-            Printer = new StatusPrinterInfo { State = "Operational" }
+            Printer = new StatusPrinterInfo 
+            { 
+                State = "Operational",
+                StatusPrinter = new PrinterStatusInfo { Ok = true },
+                StatusConnect = new PrinterStatusInfo { Ok = true }
+            }
         };
         _mockApiClient
             .Setup(x => x.GetStatusAsync(
@@ -260,7 +265,12 @@ public class PrusaLinkClientTests
         // Arrange
         var statusInfo = new StatusInfo
         {
-            Printer = new StatusPrinterInfo { State = "Printing" }
+            Printer = new StatusPrinterInfo 
+            { 
+                State = "Printing",
+                StatusPrinter = new PrinterStatusInfo { Ok = true },
+                StatusConnect = new PrinterStatusInfo { Ok = true }
+            }
         };
         var job = new Job
         {
@@ -297,7 +307,12 @@ public class PrusaLinkClientTests
         // Arrange
         var statusInfo = new StatusInfo
         {
-            Printer = new StatusPrinterInfo { State = "Idle" }
+            Printer = new StatusPrinterInfo 
+            { 
+                State = "Idle",
+                StatusPrinter = new PrinterStatusInfo { Ok = true },
+                StatusConnect = new PrinterStatusInfo { Ok = true }
+            }
         };
         _mockApiClient
             .Setup(x => x.GetStatusAsync(
@@ -598,7 +613,12 @@ public class PrusaLinkClientTests
         // Arrange
         var statusInfo = new StatusInfo
         {
-            Printer = new StatusPrinterInfo { State = "Operational" }
+            Printer = new StatusPrinterInfo 
+            { 
+                State = "Operational",
+                StatusPrinter = new PrinterStatusInfo { Ok = true },
+                StatusConnect = new PrinterStatusInfo { Ok = true }
+            }
         };
         _mockApiClient
             .Setup(x => x.GetStatusAsync(

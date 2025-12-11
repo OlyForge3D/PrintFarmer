@@ -32,6 +32,11 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient
             StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
             Job? job = await _apiClient.GetJobAsync(baseUrl, apiKey, ct);
 
+            // Determine if printer is online: check if we got a valid status response with working printer and connection
+            bool isOnline = status != null && 
+                           status.Printer.StatusPrinter?.Ok == true && 
+                           status.Printer.StatusConnect?.Ok == true;
+
             // Extract thumbnail URL from job file refs if available
             string? thumbnailUrl = job?.File?.Refs?.Thumbnail;
             if (!string.IsNullOrEmpty(thumbnailUrl) && !thumbnailUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -41,7 +46,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient
             }
 
             return new PrusaCompositeStatus(
-                status?.Printer != null,
+                isOnline,
                 status?.Printer?.State,
                 job?.Progress,
                 job?.File?.Name,
@@ -69,7 +74,13 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient
         try
         {
             StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
-            return new PrusaStatus(status?.Printer != null, status?.Printer?.State);
+            
+            // Determine if printer is online: check if we got a valid status response with working printer and connection
+            bool isOnline = status != null && 
+                           status.Printer.StatusPrinter?.Ok == true && 
+                           status.Printer.StatusConnect?.Ok == true;
+            
+            return new PrusaStatus(isOnline, status?.Printer?.State);
         }
         catch (Exception ex)
         {
