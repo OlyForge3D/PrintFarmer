@@ -10,6 +10,8 @@ using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
+#pragma warning disable CS1066 // Default value for optional parameter not enforced for interface members
+
 /// <summary>
 /// SDCP (Smart Device Control Protocol) Client for communicating with printers using SDCP 3.0 over WebSockets.
 /// Designed primarily for the Elegoo Centauri Carbon printer but may work with other SDCP-compatible printers.
@@ -114,7 +116,9 @@ public class SdcpAckResult
 }
 
 
-public sealed class SdcpClient : PrinterClientBase, ISdcpClient
+public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
+    ISupportsFileList,
+    ISupportsCamera
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IUnifiedLoggingService _logger;
@@ -861,4 +865,26 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient
     {
         // No resources to dispose in this implementation
     }
+
+    // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
+
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        var files = await GetFileListAsync(baseUrl, ct);
+        return files?.Select(f => new PrinterFileInfo { Name = f, Path = f }).ToList() ?? new();
+    }
+
+    Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        // SDCP doesn't expose camera URLs directly - would need implementation in derived SDCP support
+        return Task.FromResult<string?>(null);
+    }
+
+    Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        // SDCP doesn't expose camera URLs directly - would need implementation in derived SDCP support
+        return Task.FromResult<string?>(null);
+    }
 }
+
+#pragma warning restore CS1066

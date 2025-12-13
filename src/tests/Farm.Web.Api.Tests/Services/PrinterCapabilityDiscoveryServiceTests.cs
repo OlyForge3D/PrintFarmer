@@ -5,6 +5,7 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
+using Farm.Web.Api.Services.Printers;
 using Moq;
 using Xunit;
 
@@ -16,8 +17,7 @@ public class PrinterCapabilityDiscoveryServiceTests
     public async Task GetModelDefaultCapabilitiesAsync_ReturnsDefaultsAndManufacturerFallbacks()
     {
         Mock<IPrintersRepository> printersRepository = new Mock<IPrintersRepository>();
-        Mock<IMoonrakerClient> moonrakerClient = new Mock<IMoonrakerClient>();
-        Mock<IPrusaLinkClient> prusaClient = new Mock<IPrusaLinkClient>();
+        Mock<IBackendCapabilityFactory> capabilityFactory = new Mock<IBackendCapabilityFactory>();
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         Guid printerId = Guid.NewGuid();
@@ -45,7 +45,7 @@ public class PrinterCapabilityDiscoveryServiceTests
             .ReturnsAsync(printerFromRepository);
 
         Printer printer = new Printer { Id = printerId };
-        PrinterCapabilityDiscoveryService service = new(printersRepository.Object, moonrakerClient.Object, prusaClient.Object, logger.Object);
+        PrinterCapabilityDiscoveryService service = new(printersRepository.Object, capabilityFactory.Object, logger.Object);
 
         Farm.Infrastructure.Domain.PrinterCapabilities? capabilities = await service.GetModelDefaultCapabilitiesAsync(printer);
 
@@ -64,9 +64,11 @@ public class PrinterCapabilityDiscoveryServiceTests
     public async Task DiscoverCapabilitiesAsync_UsesMoonrakerConfigValues()
     {
         Mock<IPrintersRepository> printersRepository = new Mock<IPrintersRepository>();
-        Mock<IMoonrakerClient> moonrakerClient = new Mock<IMoonrakerClient>();
-        Mock<IPrusaLinkClient> prusaClient = new Mock<IPrusaLinkClient>();
+        Mock<IBackendCapabilityFactory> capabilityFactory = new Mock<IBackendCapabilityFactory>();
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
+        
+        // Setup capability factory to return a mock Moonraker client
+        var moonrakerClientMock = new Mock<IMoonrakerClient>();
 
         Guid printerId = Guid.NewGuid();
         PrinterModel model = new PrinterModel
@@ -99,11 +101,19 @@ max_temp: 290
 max_temp: 280
 """;
 
-        _ = moonrakerClient.Setup(c => c.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        moonrakerClientMock.Setup(c => c.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Encoding.UTF8.GetBytes(config));
+        
+        // Setup factory to return the Moonraker client when requested
+        capabilityFactory.Setup(f => f.TryGetFileDownloadClient(PrinterBackend.Moonraker, out It.Ref<IBackendClient?>.IsAny))
+            .Returns((PrinterBackend backend, out IBackendClient? client) =>
+            {
+                client = moonrakerClientMock.Object as IBackendClient;
+                return true;
+            });
 
         Printer printer = new Printer { Id = printerId, Name = "Test", ServerUrl = "http://moonraker.local", Backend = (int)PrinterBackend.Moonraker };
-        PrinterCapabilityDiscoveryService service = new(printersRepository.Object, moonrakerClient.Object, prusaClient.Object, logger.Object);
+        PrinterCapabilityDiscoveryService service = new(printersRepository.Object, capabilityFactory.Object, logger.Object);
 
         Farm.Infrastructure.Domain.PrinterCapabilities? capabilities = await service.DiscoverCapabilitiesAsync(printer, CancellationToken.None);
 
@@ -122,8 +132,7 @@ max_temp: 280
     public async Task ValidateCapabilitiesAsync_FlagsOutOfRangeValues()
     {
         Mock<IPrintersRepository> printersRepository = new Mock<IPrintersRepository>();
-        Mock<IMoonrakerClient> moonrakerClient = new Mock<IMoonrakerClient>();
-        Mock<IPrusaLinkClient> prusaClient = new Mock<IPrusaLinkClient>();
+        Mock<IBackendCapabilityFactory> capabilityFactory = new Mock<IBackendCapabilityFactory>();
         Mock<IUnifiedLoggingService> logger = new Mock<IUnifiedLoggingService>();
 
         Guid printerId = Guid.NewGuid();
@@ -151,7 +160,7 @@ max_temp: 280
         };
 
         Printer printer = new Printer { Id = printerId };
-        PrinterCapabilityDiscoveryService service = new(printersRepository.Object, moonrakerClient.Object, prusaClient.Object, logger.Object);
+        PrinterCapabilityDiscoveryService service = new(printersRepository.Object, capabilityFactory.Object, logger.Object);
 
         CapabilityValidationResult result = await service.ValidateCapabilitiesAsync(capabilities, printer);
 

@@ -32,9 +32,6 @@ public partial class GcodeHarvestService(
     IHarvestRepository harvestRepo,
     IPrintersRepository printersRepo,
     IGcodeRepository gcodeRepo,
-    IMoonrakerClient moonraker,
-    IPrusaLinkClient prusa,
-    ISdcpClient sdcp,
     IUnifiedLoggingService logger,
     IServiceScopeFactory serviceScopeFactory,
     IHarvestQueue harvestQueue,
@@ -43,7 +40,7 @@ public partial class GcodeHarvestService(
     StorageManagement.IStoragePathService storagePathService,
     FileManagement.IGcodeThumbnailExtractorService thumbnailExtractor,
     IOptions<GcodeHarvestSettings> harvestOptions,
-    IBackendClientFactory backendClientFactory) : IGcodeHarvestService
+    Printers.IBackendCapabilityFactory capabilityFactory) : IGcodeHarvestService
 {
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
     {
@@ -114,9 +111,6 @@ public partial class GcodeHarvestService(
     private readonly IHarvestRepository _harvestRepo = harvestRepo;
     private readonly IPrintersRepository _printersRepo = printersRepo;
     private readonly IGcodeRepository _gcodeRepo = gcodeRepo;
-    private readonly IMoonrakerClient _moonraker = moonraker;
-    private readonly IPrusaLinkClient _prusa = prusa;
-    private readonly ISdcpClient _sdcp = sdcp;
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly IHarvestQueue _harvestQueue = harvestQueue;
@@ -126,7 +120,7 @@ public partial class GcodeHarvestService(
     private readonly StorageManagement.IStoragePathService _storagePathService = storagePathService;
     private readonly FileManagement.IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor;
     private readonly GcodeHarvestSettings _harvestSettings = harvestOptions.Value;
-    private readonly IBackendClientFactory _backendClientFactory = backendClientFactory;
+    private readonly Printers.IBackendCapabilityFactory _capabilityFactory = capabilityFactory;
 
     private static readonly string[] sourceArray = { "gcode" };
 
@@ -252,17 +246,14 @@ public partial class GcodeHarvestService(
             List<PrinterFileInfo> fileList = new();
             try
             {
-                IBackendClient client = _backendClientFactory.GetClient(backend);
-                
-                // Check if the client supports file listings and call the appropriate method
-                // The marker interface tells us the capability exists; actual method call depends on client type
-                if (client is ISupportsFileList)
+                // Check if the backend supports file listing using capability factory
+                if (_capabilityFactory.TryGetFileListClient(backend, out _))
                 {
                     fileList = backend switch
                     {
-                        PrinterBackend.Moonraker => await GetMoonrakerFilesAsync(printer.ServerUrl, _moonraker, scopedLogger),
-                        PrinterBackend.PrusaLink => await GetPrusaLinkFilesAsync(printer.ServerUrl, printer.ApiKey, _prusa, scopedLogger),
-                        PrinterBackend.SDCP => await GetSdcpFilesAsync(printer.ServerUrl, _sdcp, scopedLogger),
+                        PrinterBackend.Moonraker => await GetMoonrakerFilesAsync(printer.ServerUrl, scopedLogger),
+                        PrinterBackend.PrusaLink => await GetPrusaLinkFilesAsync(printer.ServerUrl, printer.ApiKey, scopedLogger),
+                        PrinterBackend.SDCP => await GetSdcpFilesAsync(printer.ServerUrl, scopedLogger),
                         _ => new List<PrinterFileInfo>()
                     };
                 }
@@ -429,17 +420,31 @@ public partial class GcodeHarvestService(
         IUnifiedLoggingService log = _logger;
         try
         {
-            // Get the backend client and check capability-based support
-            // The marker interface tells us if download is supported
-            IBackendClient client = _backendClientFactory.GetClient(backend);
-            
-            if (client is ISupportsFileDownload)
+            // Check if the backend supports file downloads using capability factory
+            if (_capabilityFactory.TryGetFileDownloadClient(backend, out _))
             {
                 // Moonraker is the only client that currently supports DownloadFileAsync
-                return backend == PrinterBackend.Moonraker
-                    ? await ConvertBytesToMemoryStreamAsync(
-                        await _moonraker.DownloadFileAsync(printer.ServerUrl, filePath))
-                    : null;
+                if (backend == PrinterBackend.Moonraker)
+                {
+                    // Retrieve Moonraker client from factory when needed
+                    if (!_capabilityFactory.TryGetFileDownloadClient(PrinterBackend.Moonraker, out var downloadClient))
+                    {
+                        log.LogWarning("Moonraker backend does not support file downloads");
+                        return null;
+                    }
+
+                    var moonrakerClient = downloadClient as IMoonrakerClient;
+                    if (moonrakerClient == null)
+                    {
+                        log.LogError("Failed to retrieve Moonraker client from factory");
+                        return null;
+                    }
+
+                    return await ConvertBytesToMemoryStreamAsync(
+                        await moonrakerClient.DownloadFileAsync(printer.ServerUrl, filePath));
+                }
+
+                return null;
             }
             
             // For backends that don't support downloads, return null
@@ -1029,15 +1034,28 @@ public partial class GcodeHarvestService(
 
     // (moved below to be adjacent to the other overload)
 
-    private async Task<MemoryStream?> DownloadMoonrakerFileAsync(string serverUrl, string filePath, IMoonrakerClient? moonraker = null, IUnifiedLoggingService? logger = null)
+    private async Task<MemoryStream?> DownloadMoonrakerFileAsync(string serverUrl, string filePath, IUnifiedLoggingService? logger = null)
     {
         IUnifiedLoggingService log = logger ?? _logger;
-        IMoonrakerClient client = moonraker ?? _moonraker;
 
         try
         {
+            // Retrieve Moonraker client from factory when needed
+            if (!_capabilityFactory.TryGetFileDownloadClient(PrinterBackend.Moonraker, out var downloadClient))
+            {
+                log.LogWarning("Moonraker backend does not support file downloads");
+                return null;
+            }
+
+            var moonrakerClient = downloadClient as IMoonrakerClient;
+            if (moonrakerClient == null)
+            {
+                log.LogError("Failed to retrieve Moonraker client from factory");
+                return null;
+            }
+
             log.LogInformation("Downloading file {FilePath} from Moonraker at {ServerUrl}", filePath, serverUrl);
-            byte[]? bytes = await client.DownloadFileAsync(serverUrl, filePath);
+            byte[]? bytes = await moonrakerClient.DownloadFileAsync(serverUrl, filePath);
             if (bytes != null)
             {
                 log.LogInformation("Successfully downloaded {FilePath} ({Size} bytes)", filePath, bytes.Length);
@@ -1105,20 +1123,33 @@ public partial class GcodeHarvestService(
     }
 
     // Helper methods for different printer backends
-    private async Task<List<PrinterFileInfo>> GetMoonrakerFilesAsync(string serverUrl, IMoonrakerClient? moonraker = null, IUnifiedLoggingService? logger = null)
+    private async Task<List<PrinterFileInfo>> GetMoonrakerFilesAsync(string serverUrl, IUnifiedLoggingService? logger = null)
     {
-        IMoonrakerClient client = moonraker ?? _moonraker;
         IUnifiedLoggingService log = logger ?? _logger;
 
         try
         {
+            // Retrieve Moonraker client from factory when needed
+            if (!_capabilityFactory.TryGetFileListClient(PrinterBackend.Moonraker, out var baseClient))
+            {
+                log.LogWarning("Backend Moonraker does not support file listing");
+                return new List<PrinterFileInfo>();
+            }
+
+            var moonrakerClient = baseClient as IMoonrakerClient;
+            if (moonrakerClient == null)
+            {
+                log.LogError("Failed to retrieve Moonraker client from factory");
+                return new List<PrinterFileInfo>();
+            }
+
             log.LogInformation("GetMoonrakerFilesAsync starting for {ServerUrl} with retry logic", serverUrl);
             List<PrinterFileInfo> files = new();
 
             // Get the gcodes directory listing with retry
             log.LogInformation("Calling GetDirectoryAsync for gcodes directory with retry");
             MoonrakerDir? directoryInfo = await RetryPolicyHelper.ExecuteWithRetryAsync(
-                () => client.GetDirectoryAsync(serverUrl, "gcodes", extended: true),
+                () => moonrakerClient.GetDirectoryAsync(serverUrl, "gcodes", extended: true),
                 logger: null,
                 operationName: $"GetDirectoryAsync for gcodes directory at {serverUrl}");
 
@@ -1131,7 +1162,7 @@ public partial class GcodeHarvestService(
                 log.LogInformation($"🔍 Directory has {fileCount} files and {dirCount} subdirectories");
 
                 log.LogInformation($"🚀 Starting CollectFilesRecursivelyWithRetryAsync with empty list (current count: {files.Count})");
-                await CollectFilesRecursivelyWithRetryAsync(files, directoryInfo, "gcodes", serverUrl, client, log);
+                await CollectFilesRecursivelyWithRetryAsync(files, directoryInfo, "gcodes", serverUrl, moonrakerClient, log);
                 log.LogInformation($"✅ Completed CollectFilesRecursivelyWithRetryAsync, list now has {files.Count} files");
             }
 
@@ -1263,41 +1294,9 @@ public partial class GcodeHarvestService(
     // Simple overload kept adjacent for analyzer friendliness
     private async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, MoonrakerDir directory, string basePath, string serverUrl)
     {
-        // Add files from current directory
-        if (directory.Files != null)
-        {
-            foreach (MoonrakerFileInfo file in directory.Files)
-            {
-                files.Add(new PrinterFileInfo
-                {
-                    Name = Path.GetFileName(file.Path),
-                    Path = file.Path,
-                    Size = file.Size,
-                    ModifiedAt = DateTimeOffset.FromUnixTimeSeconds((long)file.Modified).DateTime
-                });
-            }
-        }
-
-        // Recursively process subdirectories
-        if (directory.Dirs != null)
-        {
-            foreach (MoonrakerDir subDir in directory.Dirs)
-            {
-                try
-                {
-                    string subDirPath = $"{basePath}/{subDir.Path}";
-                    MoonrakerDir? subDirectoryInfo = await _moonraker.GetDirectoryAsync(serverUrl, subDirPath, extended: true);
-                    if (subDirectoryInfo != null)
-                    {
-                        await CollectFilesRecursivelyAsync(files, subDirectoryInfo, subDirPath, serverUrl);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to access subdirectory {SubDirPath}", subDir.Path);
-                }
-            }
-        }
+        // NOTE: This overload is deprecated and kept for compatibility
+        // It should not be called - use the version with explicit moonraker client instead
+        throw new NotSupportedException("This overload should not be called; use CollectFilesRecursivelyWithRetryAsync instead.");
     }
 
     private static async Task CollectFilesRecursivelyAsync(List<PrinterFileInfo> files, MoonrakerDir directory, string basePath, string serverUrl, IMoonrakerClient moonraker, IUnifiedLoggingService logger)
@@ -1339,14 +1338,27 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private async Task<List<PrinterFileInfo>> GetPrusaLinkFilesAsync(string serverUrl, string? apiKey, IPrusaLinkClient? prusa = null, IUnifiedLoggingService? logger = null)
+    private async Task<List<PrinterFileInfo>> GetPrusaLinkFilesAsync(string serverUrl, string? apiKey, IUnifiedLoggingService? logger = null)
     {
-        IPrusaLinkClient client = prusa ?? _prusa;
         IUnifiedLoggingService log = logger ?? _logger;
 
         try
         {
-            string[] fileNames = await client.GetFileListAsync(serverUrl, apiKey);
+            // Retrieve PrusaLink client from factory when needed
+            if (!_capabilityFactory.TryGetFileListClient(PrinterBackend.PrusaLink, out var baseClient))
+            {
+                log.LogWarning("Backend PrusaLink does not support file listing");
+                return new List<PrinterFileInfo>();
+            }
+
+            var prusaLinkClient = baseClient as IPrusaLinkClient;
+            if (prusaLinkClient == null)
+            {
+                log.LogError("Failed to retrieve PrusaLink client from factory");
+                return new List<PrinterFileInfo>();
+            }
+
+            string[] fileNames = await prusaLinkClient.GetFileListAsync(serverUrl, apiKey);
             List<PrinterFileInfo> files = fileNames.Select(fileName => new PrinterFileInfo
             {
                 Name = fileName,
@@ -1380,13 +1392,6 @@ public partial class GcodeHarvestService(
             log.LogError(ex, "Failed to get file list from SDCP at {ServerUrl}", serverUrl);
             return new List<PrinterFileInfo>();
         }
-    }
-
-    // Overload to satisfy call sites expecting a client and pass-through logger
-    private Task<List<PrinterFileInfo>> GetSdcpFilesAsync(string serverUrl, ISdcpClient? sdcp, IUnifiedLoggingService? logger = null)
-    {
-        _ = sdcp; // explicitly discard unused
-        return GetSdcpFilesAsync(serverUrl, logger);
     }
 
     private static GcodeHarvestOperationDto MapToDto(GcodeHarvestOperation operation)

@@ -37,7 +37,54 @@ public interface ISupportsStartPrint { }
 public interface ISupportsControlOperations { }
 ```
 
-These are pure marker interfaces - they define no methods. Their purpose is to serve as capability indicators.
+### Why Marker Interfaces (Not Method-Defining Interfaces)?
+
+You might ask: "Shouldn't these interfaces define the actual methods?" The answer involves a real-world constraint:
+
+**Different backends have incompatible method signatures.** For example:
+
+```csharp
+// Moonraker returns detailed file information
+Task<List<PrinterFileInfo>> GetFileListAsync(string baseUrl, string? apiKey = null, ...)
+
+// PrusaLink returns simple string array of filenames  
+Task<string[]> GetFileListAsync(string baseUrl, string? apiKey = null, ...)
+
+// They have the same method name but DIFFERENT return types!
+```
+
+If `ISupportsFileList` defined `GetFileListAsync`, we couldn't have both Moonraker and PrusaLink implement it with their respective return types - C# doesn't allow covariant return types for interface implementations.
+
+**Solution: Use marker interfaces as capability indicators only.** Services that need file lists check `if (client is ISupportsFileList)` and then dispatch to backend-specific code paths that know the actual return type. The interface documents what method should exist, but doesn't enforce an identical signature.
+
+This is a pragmatic trade-off:
+- ✅ We still get the benefits of capability checking
+- ✅ Existing backend clients don't need to change
+- ✅ Each backend can use its native data structures and signatures
+- ⚠️ We lose compile-time enforcement of the method signatures (mitigated by XML documentation)
+
+### Method Documentation Within Marker Interfaces
+
+Each capability interface includes detailed XML documentation specifying what methods implementing classes MUST provide:
+
+```csharp
+/// <summary>
+/// Capability marker interface for file downloads.
+/// Implementing classes MUST provide a DownloadFileAsync method.
+/// 
+/// Example:
+///   Task<byte[]?> DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct = default)
+/// </summary>
+public interface ISupportsFileDownload
+{
+    // This documents the capability. The actual method is in the implementing class.
+}
+```
+
+This allows developers to:
+1. Check capabilities at runtime with `is` pattern matching
+2. Look at the interface documentation to understand what methods exist
+3. Use their IDE's intelligence to navigate to the actual implementations
 
 ## Implementation
 

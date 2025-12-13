@@ -7,7 +7,14 @@ using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services;
 
-public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient
+#pragma warning disable CS1066 // Default value for optional parameter not enforced for interface members
+
+public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
+    ISupportsFileList,
+    ISupportsFileUpload,
+    ISupportsStartPrint,
+    ISupportsCamera,
+    ISupportsPrinterInformation
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly IUnifiedLoggingService? _logger;
@@ -529,24 +536,24 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient
     {
         try
         {
-            PrinterInfo info = await _apiClient.GetInfoAsync(baseUrl, apiKey, ct);
-            VersionInfo version = await _apiClient.GetVersionAsync(baseUrl, apiKey, ct);
+            var printerInfo = await _apiClient.GetInfoAsync(baseUrl, apiKey, ct);
+            var versionInfo = await _apiClient.GetVersionAsync(baseUrl, apiKey, ct);
 
             return new PrinterInformation
             {
-                Name = info.Name,
-                Location = info.Location,
-                Serial = info.Serial,
-                Hostname = info.Hostname,
-                FirmwareVersion = version.Firmware,
-                PrusaLinkVersion = version.Version,
-                ApiVersion = version.Api,
-                NozzleDiameter = info.NozzleDiameter,
-                MinExtrusionTemp = info.MinExtrusionTemp,
-                HasMmu = info.Mmu,
-                SdCardReady = info.SdReady,
-                HasActiveCamera = info.ActiveCamera,
-                SupportsUploadByPut = version.Capabilities.TryGetValue("upload-by-put", out object? flagObj)
+                Name = printerInfo.Name,
+                Location = printerInfo.Location,
+                Serial = printerInfo.Serial,
+                Hostname = printerInfo.Hostname,
+                FirmwareVersion = versionInfo.Firmware,
+                PrusaLinkVersion = versionInfo.Version,
+                ApiVersion = versionInfo.Api,
+                NozzleDiameter = printerInfo.NozzleDiameter,
+                MinExtrusionTemp = printerInfo.MinExtrusionTemp,
+                HasMmu = printerInfo.Mmu,
+                SdCardReady = printerInfo.SdReady,
+                HasActiveCamera = printerInfo.ActiveCamera,
+                SupportsUploadByPut = versionInfo.Capabilities.TryGetValue("upload-by-put", out object? flagObj)
                     && bool.TryParse(Convert.ToString(flagObj, System.Globalization.CultureInfo.InvariantCulture), out bool flag)
                     && flag
             };
@@ -591,6 +598,65 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient
     /// Access the underlying API client for advanced operations
     /// </summary>
     public IPrusaLinkApiClient ApiClient => _apiClient;
+
+    // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
+
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        var files = await GetFileListAsync(baseUrl, apiKey, ct);
+        return files?.Select(f => new PrinterFileInfo { Name = f, Path = f }).ToList() ?? new();
+    }
+
+    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+        => await UploadGcodeAsync(baseUrl, fileName, fileContent, apiKey, ct);
+
+    async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
+        => await StartPrintAsync(baseUrl, fileName, apiKey, ct);
+
+    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            // PrusaLink doesn't expose camera URLs directly through main API
+            // Would need custom implementation if camera is configured
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            // PrusaLink doesn't expose camera URLs directly through main API
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var info = await GetPrinterInformationAsync(baseUrl, apiKey, ct);
+            return new StandardPrinterInfo
+            {
+                Name = info?.Name ?? "Unknown",
+                Firmware = info?.FirmwareVersion ?? "Unknown",
+                Model = "Prusa MK" // PrusaLink doesn't expose model info directly
+            };
+        }
+        catch
+        {
+            return new StandardPrinterInfo { Name = "Unknown", Firmware = "Unknown", Model = "Unknown" };
+        }
+    }
 }
 
 #pragma warning disable CA1056 // URI-like properties should not be strings (transport records)
@@ -703,3 +769,5 @@ public class PrusaLinkException : Exception
     }
     public PrusaLinkException() { }
 }
+
+#pragma warning restore CS1066

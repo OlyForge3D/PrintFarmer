@@ -423,6 +423,11 @@ public static class ServiceCollectionExtensions
         // to PrintersService, making it easier to add new backends without modifying the constructor
         _ = services.AddSingleton<Services.Printers.IBackendClientFactory, Services.Printers.BackendClientFactory>();
         
+        // Register the backend capability factory for capability-aware client retrieval
+        // This provides a cleaner API for checking if a backend supports a specific capability
+        // without needing to use "is ISupportsFileList" checks everywhere in services
+        _ = services.AddSingleton<Services.Printers.IBackendCapabilityFactory, Services.Printers.BackendCapabilityFactory>();
+        
         // Register the printer status client factory for backend-specific status retrieval
         _ = services.AddSingleton<Services.Printers.IPrinterStatusClientFactory, Services.Printers.PrinterStatusClientFactory>();
         

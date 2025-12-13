@@ -341,10 +341,12 @@ namespace Farm.Web.Api.Tests.Services
             var coordinatorMock = new Mock<IMultiPrinterStatusCoordinator>();
             var fallbackServiceMock = new Mock<IPrinterStatusFallbackService>();
             var statusClientFactoryMock = new Mock<IPrinterStatusClientFactory>();
+            var capabilityFactoryMock = new Mock<IBackendCapabilityFactory>();
 
             return new PrintersService(
                 repo,
                 backendFactoryMock.Object,
+                capabilityFactoryMock.Object,
                 circuitMock.Object,
                 capDiscoveryMock.Object,
                 defaultCatalogMock.Object,

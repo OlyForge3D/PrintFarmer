@@ -812,3 +812,5 @@ public interface IMoonrakerClient : IBackendClient, ISupportsFileDownload, ISupp
 
     #endregion
 }
+
+#pragma warning restore CS0108

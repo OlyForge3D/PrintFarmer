@@ -30,7 +30,18 @@ public record PrinterCompositeStatus(
     double? BedTarget = null);
 #pragma warning restore CA1056 // URI-like properties should not be strings
 
-public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : PrinterClientBase, IMoonrakerClient
+public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : PrinterClientBase, IMoonrakerClient,
+    ISupportsFileDownload,
+    ISupportsFileList,
+    ISupportsFileUpload,
+    ISupportsStartPrint,
+    ISupportsControlOperations,
+    ISupportsCamera,
+    ISupportsFileMetadata,
+    ISupportsMovement,
+    ISupportsTemperatureControl,
+    ISupportsPrinterInformation,
+    ISupportsHistory
 {
     private readonly HttpClient _http = http;
     private readonly IUnifiedLoggingService _logger = logger;
@@ -1975,6 +1986,127 @@ public partial class MoonrakerClient(HttpClient http, IUnifiedLoggingService log
     {
         return await SpoolmanProxyRequestAsync(baseUrl, "GET", "/api/v1/external", ct: ct);
     }
+
+    // Explicit interface implementations for capability markers
+    
+    /// <summary>
+    /// ISupportsFileDownload implementation - downloads a file from the printer.
+    /// </summary>
+    async Task<byte[]?> ISupportsFileDownload.DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct)
+        => await DownloadFileAsync(baseUrl, filePath, ct);
+
+    /// <summary>
+    /// ISupportsFileList implementation - gets the list of files on the printer.
+    /// </summary>
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        // Moonraker returns string array, convert to PrinterFileInfo list
+        var files = await GetFileListAsync(baseUrl, ct);
+        return files?.Select(f => new PrinterFileInfo { Name = f, Path = f }).ToList() ?? new();
+    }
+
+#pragma warning disable S1006 // Default parameters in explicit interface implementation
+#pragma warning disable CA1033 // Type implements interfaces that specify default parameter values
+
+    /// <summary>
+    /// ISupportsFileUpload implementation - uploads a G-code file to the printer.
+    /// </summary>
+    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+        => await UploadGcodeAsync(baseUrl, fileName, fileContent, ct);
+
+    /// <summary>
+    /// ISupportsStartPrint implementation - starts a print job for the specified file.
+    /// </summary>
+    async Task<bool> ISupportsStartPrint.StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default)
+        => await StartPrintAsync(baseUrl, fileName, ct);
+
+    /// <summary>
+    /// ISupportsControlOperations implementations - pause, resume, and cancel operations.
+    /// </summary>
+    async Task<bool> ISupportsControlOperations.PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await PauseAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsControlOperations.ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await ResumeAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsControlOperations.CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await EmergencyStopAsync(baseUrl, ct);
+
+    /// <summary>
+    /// ISupportsCamera implementations - get camera stream and snapshot URLs.
+    /// </summary>
+    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetCameraStreamUrlAsync(baseUrl, frontendPort, ct: ct);
+
+    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetCameraSnapshotUrlAsync(baseUrl, ct: ct);
+
+    /// <summary>
+    /// ISupportsFileMetadata implementation - gets metadata for a file on the printer.
+    /// </summary>
+    async Task<PrinterFileMetadata?> ISupportsFileMetadata.GetFileMetadataAsync(string baseUrl, string filePath, string? apiKey = null, CancellationToken ct = default)
+    {
+        var metadata = await GetFileMetadataAsync(baseUrl, filePath, ct);
+        if (metadata == null) return null;
+
+        return new PrinterFileMetadata
+        {
+            FilePath = filePath,
+            PrintTime = metadata.EstimatedTime != null ? metadata.EstimatedTime.Value / 60.0 : null,
+            LayerHeight = metadata.LayerHeight,
+            FirstLayerExtrTemp = metadata.FirstLayerExtrTemp,
+            FirstLayerBedTemp = metadata.FirstLayerBedTemp,
+            ObjectHeight = metadata.ObjectHeight,
+            ExtrUsedFilament = metadata.FilamentTotal
+        };
+    }
+
+
+    /// <summary>
+    /// ISupportsMovement implementations - home and move operations.
+    /// </summary>
+    async Task<bool> ISupportsMovement.HomeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await SendHomeAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsMovement.MoveAsync(string baseUrl, double x, double y, double z, string? apiKey = null, CancellationToken ct = default)
+        => await MoveAsync(baseUrl, x, y, z, ct: ct);
+
+    /// <summary>
+    /// ISupportsTemperatureControl implementation - set temperatures.
+    /// </summary>
+    async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
+        => await SetTempsAsync(baseUrl, hotendTemp, bedTemp, ct);
+
+    /// <summary>
+    /// ISupportsHistory implementations - get and manage print history.
+    /// </summary>
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryListAsync(baseUrl, limit, start, ct: ct);
+
+    async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryJobAsync(baseUrl, jobId, ct);
+
+    async Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryTotalsAsync(baseUrl, ct);
+
+    async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+        => await DeleteHistoryJobAsync(baseUrl, jobId, ct);
+
+    /// <summary>
+    /// ISupportsPrinterInformation implementation - get detailed printer information.
+    /// </summary>
+    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        var info = await GetPrinterInfoAsync(baseUrl, ct);
+        return new StandardPrinterInfo
+        {
+            Name = info?.Hostname ?? "Unknown",
+            Firmware = info?.SoftwareVersion ?? "Unknown",
+            Model = info?.ConfigFile ?? "Unknown"
+        };
+    }
+#pragma warning restore CA1033
+#pragma warning restore S1006
 }
 
 /// <summary>

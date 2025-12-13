@@ -11,6 +11,8 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services;
 
+#pragma warning disable CS1066 // Default value for optional parameter not enforced for interface members
+
 /// <summary>
 /// OctoPrint printer state DTO - encapsulates parsed /api/printer response.
 /// </summary>
@@ -34,7 +36,14 @@ public sealed class OctoPrintJobStatus
     public Dictionary<string, object>? Filament { get; set; }
 }
 
-public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null) : IOctoPrintClient
+public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null) : IOctoPrintClient,
+    ISupportsFileDownload,
+    ISupportsFileList,
+    ISupportsFileUpload,
+    ISupportsCamera,
+    ISupportsPrinterInformation,
+    ISupportsHistory,
+    ISupportsTemperatureControl
 {
     private readonly HttpClient _httpClient = httpClient;
     private readonly ILogger<OctoPrintClient>? _logger = logger;
@@ -562,6 +571,96 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             LogError("Get history job failed", ex);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Gets history totals (wrapper for interface compatibility)
+    /// </summary>
+    public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, string apiKey)
+    {
+        baseUrl = NormalizeBaseUrl(baseUrl);
+        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history?limit=0");
+        request.Headers.Add("X-Api-Key", apiKey);
+        
+        try
+        {
+            HttpResponseMessage response = await SendWithRetryAsync(request);
+            string content = await response.Content.ReadAsStringAsync();
+            var historyList = ParseOctoPrintHistoryList(content);
+            if (historyList == null)
+                return null;
+
+            // Calculate totals from the job list
+            double totalPrintTime = 0;
+            double totalFilamentUsed = 0;
+            int jobCount = 0;
+
+            foreach (var job in historyList.Jobs)
+            {
+                if (job.Status == "Completed")
+                {
+                    totalPrintTime += job.PrintDuration;
+                    totalFilamentUsed += job.FilamentUsed;
+                    jobCount++;
+                }
+            }
+
+            return new HistoryTotals
+            {
+                JobTotals = new JobTotals
+                {
+                    TotalJobs = jobCount,
+                    TotalPrintTime = totalPrintTime,
+                    TotalFilamentUsed = totalFilamentUsed
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            LogError("Get history totals failed", ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Deletes a job from history (wrapper for interface compatibility)
+    /// </summary>
+    public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string apiKey, string jobId)
+    {
+        baseUrl = NormalizeBaseUrl(baseUrl);
+        HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
+        request.Headers.Add("X-Api-Key", apiKey);
+        
+        try
+        {
+            HttpResponseMessage response = await SendWithRetryAsync(request);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            LogError("Delete history job failed", ex);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Sets temperatures (unified method for both bed and hotend temperatures)
+    /// </summary>
+    public async Task<bool> SetTemperaturesAsync(string baseUrl, string apiKey, double? hotendTemp = null, double? bedTemp = null)
+    {
+        bool success = true;
+
+        if (bedTemp.HasValue)
+        {
+            success = await SetBedTempAsync(baseUrl, apiKey, bedTemp.Value) && success;
+        }
+
+        if (hotendTemp.HasValue)
+        {
+            success = await SetHotendTempAsync(baseUrl, apiKey, hotendTemp.Value) && success;
+        }
+
+        return success;
     }
 
     public async Task<bool> SendGcodeAsync(string baseUrl, string apiKey, string gcode)
@@ -1518,6 +1617,104 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             return null;
         }
     }
+
+    // ========== CAPABILITY INTERFACE IMPLEMENTATIONS ==========
+
+    async Task<byte[]?> ISupportsFileDownload.DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct = default)
+    {
+        try
+        {
+            var url = $"{baseUrl.TrimEnd('/')}/api/files/local/{Uri.EscapeDataString(filePath)}";
+            var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseContentRead, ct);
+            
+            if (!response.IsSuccessStatusCode)
+                return null;
+            
+            return await response.Content.ReadAsByteArrayAsync(ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        var files = await GetFileListAsync(baseUrl, apiKey ?? "");
+        return files?.Select(f => new PrinterFileInfo { Name = Path.GetFileName(f), Path = f }).ToList() ?? new();
+    }
+
+    async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
+    {
+        // Convert Stream to byte array for the existing UploadFileAsync method
+        if (fileContent is MemoryStream ms)
+        {
+            return await UploadFileAsync(baseUrl, apiKey ?? "", ms.ToArray(), fileName, null, false);
+        }
+        
+        using var memoryStream = new MemoryStream();
+        await fileContent.CopyToAsync(memoryStream, ct);
+        return await UploadFileAsync(baseUrl, apiKey ?? "", memoryStream.ToArray(), fileName, null, false);
+    }
+
+    async Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        return await GetCameraStreamUrlAsync(baseUrl, apiKey ?? "");
+    }
+
+    async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            // OctoPrint snapshot is typically /webcam/?action=snapshot
+            return $"{baseUrl.TrimEnd('/')}/webcam/?action=snapshot";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    async Task<StandardPrinterInfo> ISupportsPrinterInformation.GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var state = await GetPrinterStateAsync(baseUrl, apiKey ?? "");
+            return new StandardPrinterInfo
+            {
+                Name = "OctoPrint Printer",
+                Firmware = "OctoPrint",
+                Model = "Unknown"
+            };
+        }
+        catch
+        {
+            return new StandardPrinterInfo { Name = "Unknown", Firmware = "Unknown", Model = "Unknown" };
+        }
+    }
+
+    /// <summary>
+    /// ISupportsHistory implementations - get and manage print history.
+    /// </summary>
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryListAsync(baseUrl, apiKey ?? "", limit, start);
+
+    async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryJobAsync(baseUrl, apiKey ?? "", jobId);
+
+    async Task<HistoryTotals?> ISupportsHistory.GetHistoryTotalsAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+        => await GetHistoryTotalsAsync(baseUrl, apiKey ?? "");
+
+    async Task<bool> ISupportsHistory.DeleteHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default)
+        => await DeleteHistoryJobAsync(baseUrl, apiKey ?? "", jobId);
+
+    /// <summary>
+    /// ISupportsTemperatureControl implementation - set temperatures.
+    /// </summary>
+    async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default)
+        => await SetTemperaturesAsync(baseUrl, apiKey ?? "", hotendTemp, bedTemp);
 }
+
+#pragma warning restore CS1066
 
 

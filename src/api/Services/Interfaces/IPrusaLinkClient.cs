@@ -4,6 +4,8 @@ using Farm.Web.Api.Services.Printers;
 
 namespace Farm.Web.Api.Services.Interfaces;
 
+#pragma warning disable CS0108 // Member hides inherited member; use new keyword if hiding was intended
+
 /// <summary>
 /// Interface for PrusaLink client providing communication with Prusa printers via PrusaLink API.
 /// Supports printer status monitoring, job control, file management, and basic printer operations.
