@@ -62,8 +62,14 @@ export const PrinterDashboard: React.FC = () => {
     const total = userPrinters.length;
     const online = userPrinters.filter(p => {
       const status = getPrinterStatus?.(p.id);
-      const s = (status?.state ?? p.state ?? '') as string;
-      return (s && (s.toLowerCase().includes('operational') || s.toLowerCase().includes('ready') || s.toLowerCase().includes('idle'))) || !!p.isOnline;
+      // If we have real-time status from SignalR, use it. Otherwise use cached state.
+      if (status) {
+        const s = status.state ?? '';
+        return (s && (s.toLowerCase().includes('operational') || s.toLowerCase().includes('ready') || s.toLowerCase().includes('idle'))) || status.isOnline;
+      }
+      // Fallback to cached state if no real-time status yet
+      const s = (p.state ?? '') as string;
+      return s && (s.toLowerCase().includes('operational') || s.toLowerCase().includes('ready') || s.toLowerCase().includes('idle'));
     }).length;
     const printing = userPrinters.filter(p => ((getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string).toLowerCase().includes('printing')).length;
     const paused = userPrinters.filter(p => ((getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string).toLowerCase().includes('paused')).length;

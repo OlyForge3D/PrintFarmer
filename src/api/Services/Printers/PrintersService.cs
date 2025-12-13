@@ -506,7 +506,57 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
-            return items.Select(p => new PrinterFastDto(Id: p.Id, Name: p.Name, ServerUrl: p.ServerUrl, Notes: p.Notes, IsOnline: false, State: null, ManufacturerName: p.Manufacturer?.Name, ModelName: p.Model?.Name, Backend: MapBackendEnum(p.Backend), ApiKey: p.ApiKey, OriginalServerUrl: p.OriginalServerUrl, IpAddress: p.IpAddress, BackendPort: p.BackendPort, FrontendPort: p.FrontendPort, InMaintenance: p.InMaintenance, IsEnabled: p.IsEnabled)).ToArray();
+            var dtos = new List<PrinterFastDto>();
+            
+            foreach (var p in items)
+            {
+                try
+                {
+                    // Get real-time status for each printer
+                    PrinterStatusDto status = await GetStatusDtoAsync(p.Id, ct);
+                    dtos.Add(new PrinterFastDto(
+                        Id: p.Id, 
+                        Name: p.Name, 
+                        ServerUrl: p.ServerUrl, 
+                        Notes: p.Notes, 
+                        IsOnline: status.IsOnline,
+                        State: status.State,
+                        ManufacturerName: p.Manufacturer?.Name, 
+                        ModelName: p.Model?.Name, 
+                        Backend: MapBackendEnum(p.Backend), 
+                        ApiKey: p.ApiKey, 
+                        OriginalServerUrl: p.OriginalServerUrl, 
+                        IpAddress: p.IpAddress, 
+                        BackendPort: p.BackendPort, 
+                        FrontendPort: p.FrontendPort, 
+                        InMaintenance: p.InMaintenance, 
+                        IsEnabled: p.IsEnabled));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}. Using offline status.");
+                    // Fallback to offline status if retrieval fails
+                    dtos.Add(new PrinterFastDto(
+                        Id: p.Id, 
+                        Name: p.Name, 
+                        ServerUrl: p.ServerUrl, 
+                        Notes: p.Notes, 
+                        IsOnline: false,
+                        State: null,
+                        ManufacturerName: p.Manufacturer?.Name, 
+                        ModelName: p.Model?.Name, 
+                        Backend: MapBackendEnum(p.Backend), 
+                        ApiKey: p.ApiKey, 
+                        OriginalServerUrl: p.OriginalServerUrl, 
+                        IpAddress: p.IpAddress, 
+                        BackendPort: p.BackendPort, 
+                        FrontendPort: p.FrontendPort, 
+                        InMaintenance: p.InMaintenance, 
+                        IsEnabled: p.IsEnabled));
+                }
+            }
+            
+            return dtos.ToArray();
         }
 
         /// <summary>
