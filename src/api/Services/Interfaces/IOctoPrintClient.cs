@@ -10,11 +10,11 @@ namespace Farm.Web.Api.Services.Interfaces
     public interface IOctoPrintClient : IBackendClient
     {
         Task<bool> TestConnectionAsync(string baseUrl, string apiKey);
-        Task<string> GetPrinterStateAsync(string baseUrl, string apiKey);
-        Task<string> GetJobStatusAsync(string baseUrl, string apiKey);
+        Task<OctoPrintPrinterState?> GetPrinterStateAsync(string baseUrl, string apiKey);
+        Task<OctoPrintJobStatus?> GetJobStatusAsync(string baseUrl, string apiKey);
         Task<bool> StartJobAsync(string baseUrl, string apiKey, string fileName);
         Task<bool> CancelJobAsync(string baseUrl, string apiKey);
-        Task<string> GetCameraStreamUrlAsync(string baseUrl, string apiKey);
+        Task<string?> GetCameraStreamUrlAsync(string baseUrl, string apiKey);
 
         /// <summary>
         /// Gets the list of available gcode files on the printer.

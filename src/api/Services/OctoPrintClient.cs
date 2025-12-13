@@ -11,6 +11,29 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services;
 
+/// <summary>
+/// OctoPrint printer state DTO - encapsulates parsed /api/printer response.
+/// </summary>
+public sealed class OctoPrintPrinterState
+{
+    public bool Operational { get; set; }
+    public bool Printing { get; set; }
+    public string State { get; set; } = string.Empty;
+    public Dictionary<string, object>? Temperatures { get; set; }
+}
+
+/// <summary>
+/// OctoPrint job status DTO - encapsulates parsed /api/job response.
+/// </summary>
+public sealed class OctoPrintJobStatus
+{
+    public string? Filename { get; set; }
+    public double? Progress { get; set; }
+    public double? PrintTime { get; set; }
+    public double? PrintTimeLeft { get; set; }
+    public Dictionary<string, object>? Filament { get; set; }
+}
+
 public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null) : IOctoPrintClient
 {
     private readonly HttpClient _httpClient = httpClient;
@@ -183,7 +206,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
-    public async Task<string> GetPrinterStateAsync(string baseUrl, string apiKey)
+    public async Task<OctoPrintPrinterState?> GetPrinterStateAsync(string baseUrl, string apiKey)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/printer");
@@ -192,16 +215,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
-            return await response.Content.ReadAsStringAsync();
+            string content = await response.Content.ReadAsStringAsync();
+            return ParsePrinterState(content);
         }
         catch (Exception ex)
         {
             LogError("Get printer state failed", ex);
-            throw;
+            return null;
         }
     }
 
-    public async Task<string> GetJobStatusAsync(string baseUrl, string apiKey)
+    public async Task<OctoPrintJobStatus?> GetJobStatusAsync(string baseUrl, string apiKey)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/job");
@@ -210,12 +234,13 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
-            return await response.Content.ReadAsStringAsync();
+            string content = await response.Content.ReadAsStringAsync();
+            return ParseJobStatus(content);
         }
         catch (Exception ex)
         {
             LogError("Get job status failed", ex);
-            throw;
+            return null;
         }
     }
 
@@ -262,12 +287,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
     }
 
-    public Task<string> GetCameraStreamUrlAsync(string baseUrl, string apiKey)
+    public Task<string?> GetCameraStreamUrlAsync(string baseUrl, string apiKey)
     {
         // OctoPrint camera stream is typically a static URL, not an API call
         // This can be constructed from the baseUrl or stored in the printer config
         baseUrl = NormalizeBaseUrl(baseUrl);
-        return Task.FromResult($"{baseUrl}/webcam/?action=stream");
+        return Task.FromResult<string?>($"{baseUrl}/webcam/?action=stream");
     }
 
     public async Task<string[]> GetFileListAsync(string baseUrl, string apiKey)
@@ -1387,6 +1412,106 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
             // The actual job data is in the root (not nested under "result")
             return ParseOctoPrintJobElement(root);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses OctoPrint /api/printer response into OctoPrintPrinterState.
+    /// </summary>
+    private static OctoPrintPrinterState? ParsePrinterState(string json)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json);
+            JsonElement root = doc.RootElement;
+
+            var state = new OctoPrintPrinterState();
+
+            if (root.TryGetProperty("state", out JsonElement stateObj))
+            {
+                if (stateObj.TryGetProperty("text", out JsonElement textProp))
+                {
+                    state.State = textProp.GetString() ?? string.Empty;
+                }
+                if (stateObj.TryGetProperty("flags", out JsonElement flagsProp))
+                {
+                    if (flagsProp.TryGetProperty("operational", out JsonElement opProp))
+                    {
+                        state.Operational = opProp.GetBoolean();
+                    }
+                    if (flagsProp.TryGetProperty("printing", out JsonElement printProp))
+                    {
+                        state.Printing = printProp.GetBoolean();
+                    }
+                }
+            }
+
+            if (root.TryGetProperty("temperature", out JsonElement tempObj))
+            {
+                state.Temperatures = new Dictionary<string, object>();
+                foreach (var prop in tempObj.EnumerateObject())
+                {
+                    state.Temperatures[prop.Name] = prop.Value.GetRawText();
+                }
+            }
+
+            return state;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses OctoPrint /api/job response into OctoPrintJobStatus.
+    /// </summary>
+    private static OctoPrintJobStatus? ParseJobStatus(string json)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json);
+            JsonElement root = doc.RootElement;
+
+            var status = new OctoPrintJobStatus();
+
+            if (root.TryGetProperty("job", out JsonElement jobObj))
+            {
+                if (jobObj.TryGetProperty("file", out JsonElement fileObj) && fileObj.TryGetProperty("name", out JsonElement nameProp))
+                {
+                    status.Filename = nameProp.GetString();
+                }
+                if (jobObj.TryGetProperty("filament", out JsonElement filamentObj))
+                {
+                    status.Filament = new Dictionary<string, object>();
+                    foreach (var prop in filamentObj.EnumerateObject())
+                    {
+                        status.Filament[prop.Name] = prop.Value.GetRawText();
+                    }
+                }
+            }
+
+            if (root.TryGetProperty("progress", out JsonElement progressObj))
+            {
+                if (progressObj.TryGetProperty("completion", out JsonElement completionProp) && completionProp.ValueKind != JsonValueKind.Null)
+                {
+                    status.Progress = completionProp.GetDouble(); // OctoPrint sends 0-100, keep as-is
+                }
+                if (progressObj.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
+                {
+                    status.PrintTime = printTimeProp.GetDouble();
+                }
+                if (progressObj.TryGetProperty("printTimeLeft", out JsonElement leftProp) && leftProp.ValueKind != JsonValueKind.Null)
+                {
+                    status.PrintTimeLeft = leftProp.GetDouble();
+                }
+            }
+
+            return status;
         }
         catch
         {

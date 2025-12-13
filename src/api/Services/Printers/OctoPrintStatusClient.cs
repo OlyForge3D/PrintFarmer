@@ -43,33 +43,43 @@ namespace Farm.Web.Api.Services.Printers
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{printer.Id}");
                 
-                // Retrieve both printer state and job status
-                string printerJson = await breaker.ExecuteAsync(
+                // Retrieve both printer state and job status - now returns typed objects
+                OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
                     async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
                 
-                string jobJson = await breaker.ExecuteAsync(
+                OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
                     async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
                 
-                // Parse the JSON response into status data
-                var status = ParseOctoPrintStatus(printerJson, jobJson);
-                
-                if (status != null)
+                // Create status DTO from typed objects
+                if (printerState != null && jobStatus != null)
                 {
                     return new PrinterStatusDto(
                         Id: printer.Id,
-                        IsOnline: status.IsOnline,
-                        State: status.State,
-                        Progress: status.Progress,
-                        JobName: status.JobName,
-                        ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
-                        CameraSnapshotUrl: status.CameraSnapshotUrl);
+                        IsOnline: printerState.Operational,
+                        State: printerState.State,
+                        Progress: jobStatus.Progress ?? 0,
+                        JobName: jobStatus.Filename,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        CameraSnapshotUrl: null);
+                }
+                else if (printerState != null)
+                {
+                    return new PrinterStatusDto(
+                        Id: printer.Id,
+                        IsOnline: printerState.Operational,
+                        State: printerState.State,
+                        Progress: 0,
+                        JobName: null,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        CameraSnapshotUrl: null);
                 }
                 else
                 {
-                    _logger.LogWarning($"[OctoPrint] Failed to parse status for printer {printer.Id}");
+                    _logger.LogWarning($"[OctoPrint] Failed to retrieve status for printer {printer.Id}");
                     return CreateOfflineStatus(printer.Id);
                 }
             }
@@ -93,15 +103,50 @@ namespace Farm.Web.Api.Services.Printers
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{printer.Id}");
                 
-                string printerJson = await breaker.ExecuteAsync(
+                OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
                     async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
                 
-                string jobJson = await breaker.ExecuteAsync(
+                OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
                     async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
                 
-                return await _client.CreatePrinterDtoAsync(printer, printerJson, jobJson, printer.ApiKey ?? string.Empty, ct);
+                // Build PrinterDto from typed objects
+                if (printerState != null)
+                {
+                    return new PrinterDto(
+                        Id: printer.Id,
+                        Name: printer.Name,
+                        ServerUrl: printer.ServerUrl,
+                        Notes: printer.Notes,
+                        IsOnline: printerState.Operational,
+                        State: printerState.State,
+                        ManufacturerName: printer.Manufacturer?.Name,
+                        ModelName: printer.Model?.Name,
+                        Progress: jobStatus?.Progress ?? 0,
+                        JobName: jobStatus?.Filename,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        CameraSnapshotUrl: null,
+                        X: null,
+                        Y: null,
+                        Z: null,
+                        HotendTemp: null,
+                        BedTemp: null,
+                        HotendTarget: null,
+                        BedTarget: null,
+                        Backend: (PrinterBackend)printer.Backend,
+                        ApiKey: printer.ApiKey,
+                        OriginalServerUrl: printer.OriginalServerUrl,
+                        IpAddress: printer.IpAddress,
+                        SpoolInfo: null,
+                        BackendPort: printer.BackendPort,
+                        FrontendPort: printer.FrontendPort);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
+                }
             }
             catch (Exception ex)
             {

@@ -50,7 +50,11 @@ public class OctoPrintClientTests
             _ = req.RequestUri!.AbsolutePath.Should().Be("/api/printer");
             return Json(new
             {
-                state = "Operational",
+                state = new
+                {
+                    text = "Operational",
+                    flags = new { operational = true, printing = false }
+                },
                 temperature = new
                 {
                     tool0 = new { actual = 210.5, target = 215.0 },
@@ -58,10 +62,10 @@ public class OctoPrintClientTests
                 }
             });
         });
-        string json = await client.GetPrinterStateAsync("http://octo", "key");
-        JsonDocument doc = JsonDocument.Parse(json);
-        _ = doc.RootElement.GetProperty("state").GetString().Should().Be("Operational");
-        _ = doc.RootElement.GetProperty("temperature").GetProperty("tool0").GetProperty("actual").GetDouble().Should().Be(210.5);
+        OctoPrintPrinterState? state = await client.GetPrinterStateAsync("http://octo", "key");
+        _ = state.Should().NotBeNull();
+        _ = state!.State.Should().Be("Operational");
+        _ = state.Operational.Should().BeTrue();
     }
 
     [Fact]
@@ -76,9 +80,10 @@ public class OctoPrintClientTests
                 progress = new { completion = 42.0 }
             });
         });
-        string json = await client.GetJobStatusAsync("http://octo", "key");
-        JsonDocument doc = JsonDocument.Parse(json);
-        _ = doc.RootElement.GetProperty("job").GetProperty("file").GetProperty("name").GetString().Should().Be("test.gcode");
+        OctoPrintJobStatus? status = await client.GetJobStatusAsync("http://octo", "key");
+        _ = status.Should().NotBeNull();
+        _ = status!.Filename.Should().Be("test.gcode");
+        _ = status.Progress.Should().Be(42.0);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -90,8 +91,8 @@ namespace Farm.Web.Api.Services.Printers
                     async ct => await _client.GetCompositeStatusAsync(moonrakerUrl, ct),
                     ct);
                 
-                // NOTE: Spoolman integration is handled at the service level, not in the status client
-                PrinterSpoolInfoDto? spoolInfo = null;
+                // Get Spoolman integration info for Moonraker
+                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(moonrakerUrl, ct);
                 
                 return await _client.CreatePrinterDtoAsync(printer, status, spoolInfo, ct);
             }
@@ -99,6 +100,52 @@ namespace Farm.Web.Api.Services.Printers
             {
                 _logger.LogError($"[Moonraker] Error getting printer DTO for {printer.Id}: {ex.Message}");
                 throw;
+            }
+        }
+
+        private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
+        {
+            try
+            {
+                int? activeSpoolId = await _client.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
+                if (activeSpoolId == null)
+                {
+                    return new PrinterSpoolInfoDto(HasActiveSpool: false);
+                }
+
+                string? spoolDetailsJson = await _client.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
+                if (string.IsNullOrWhiteSpace(spoolDetailsJson))
+                {
+                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
+                }
+
+                try
+                {
+                    using JsonDocument doc = JsonDocument.Parse(spoolDetailsJson);
+                    JsonElement root = doc.RootElement;
+                    string? spoolName = root.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
+                    string? material = root.TryGetProperty("material", out JsonElement matEl) ? matEl.GetString() : null;
+                    string? colorHex = root.TryGetProperty("color_hex", out JsonElement colorEl) ? colorEl.GetString() : null;
+                    double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == JsonValueKind.Number ? weightEl.GetDouble() : (double?)null;
+
+                    return new PrinterSpoolInfoDto(
+                        HasActiveSpool: true,
+                        ActiveSpoolId: activeSpoolId,
+                        SpoolName: spoolName,
+                        Material: material,
+                        ColorHex: colorHex,
+                        RemainingWeightG: remainingWeight);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"[Moonraker] Failed to parse spool details: {ex.Message}");
+                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug($"[Moonraker] Error getting spool info: {ex.Message}");
+                return null;
             }
         }
 

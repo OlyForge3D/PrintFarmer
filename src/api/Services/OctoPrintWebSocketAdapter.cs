@@ -265,15 +265,19 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
                 return null;
             }
 
-            string printerState = await _octoPrintClient.GetPrinterStateAsync(_printer.ServerUrl, _printer.ApiKey);
-            string jobStatus = await _octoPrintClient.GetJobStatusAsync(_printer.ServerUrl, _printer.ApiKey);
+            OctoPrintPrinterState? printerState = await _octoPrintClient.GetPrinterStateAsync(_printer.ServerUrl, _printer.ApiKey);
+            OctoPrintJobStatus? jobStatus = await _octoPrintClient.GetJobStatusAsync(_printer.ServerUrl, _printer.ApiKey);
 
-            var stateData = ParsePrinterState(printerState);
-            var jobData = ParseJobStatus(jobStatus);
+            if (printerState == null || jobStatus == null)
+            {
+                _consecutiveFailures++;
+                _logger.LogWarning($"OctoPrint HTTP Fallback {_printerId}: Failed to retrieve status (attempt {_consecutiveFailures})");
+                return null;
+            }
 
-            bool isOnline = stateData.IsOnline && stateData.Operational;
-            string? currentState = isOnline ? stateData.State : null;
-            double? currentProgress = isOnline ? jobData.Progress : null;
+            bool isOnline = printerState.Operational;
+            string? currentState = isOnline ? printerState.State : null;
+            double? currentProgress = isOnline ? jobStatus.Progress : null;
 
             _lastHttpPoll = DateTime.UtcNow;
             _apiState = "responding";
@@ -281,24 +285,24 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
 
             _logger.LogDebug(
                 $"OctoPrint HTTP Fallback {_printerId}: Got status - Online={isOnline}, State={currentState}, " +
-                $"Progress={currentProgress}, JobName={jobData.JobName}");
+                $"Progress={currentProgress}, JobName={jobStatus.Filename}");
 
             return new OctoPrintStatusData
             {
                 IsOnline = isOnline,
-                Operational = stateData.Operational,
+                Operational = printerState.Operational,
                 State = currentState,
                 Progress = currentProgress,
-                JobName = jobData.JobName,
-                X = stateData.X,
-                Y = stateData.Y,
-                Z = stateData.Z,
-                HotendTemp = stateData.HotendTemp,
-                BedTemp = stateData.BedTemp,
-                HotendTarget = stateData.HotendTarget,
-                BedTarget = stateData.BedTarget,
-                ThumbnailUrl = stateData.ThumbnailUrl,
-                CameraStreamUrl = stateData.CameraStreamUrl
+                JobName = jobStatus.Filename,
+                X = null,
+                Y = null,
+                Z = null,
+                HotendTemp = null,
+                BedTemp = null,
+                HotendTarget = null,
+                BedTarget = null,
+                ThumbnailUrl = null,
+                CameraStreamUrl = null
             };
         }
         catch (Exception ex)
