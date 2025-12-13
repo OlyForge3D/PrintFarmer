@@ -7,7 +7,7 @@ using Farm.Web.Api.Services.Printers;
 
 namespace Farm.Web.Api.Services.Interfaces
 {
-    public interface IOctoPrintClient : IBackendClient
+    public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupportsFileList, ISupportsFileUpload
     {
         Task<bool> TestConnectionAsync(string baseUrl, string apiKey);
         Task<OctoPrintPrinterState?> GetPrinterStateAsync(string baseUrl, string apiKey);

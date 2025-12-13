@@ -18,6 +18,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
+using Farm.Web.Api.Services.Printers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using MoonrakerDir = Farm.Infrastructure.Contracts.Printers.Moonraker.MoonrakerDirectoryInfo;
@@ -41,7 +42,8 @@ public partial class GcodeHarvestService(
     IGcodeMetadataExtractorService metadataExtractor,
     StorageManagement.IStoragePathService storagePathService,
     FileManagement.IGcodeThumbnailExtractorService thumbnailExtractor,
-    IOptions<GcodeHarvestSettings> harvestOptions) : IGcodeHarvestService
+    IOptions<GcodeHarvestSettings> harvestOptions,
+    IBackendClientFactory backendClientFactory) : IGcodeHarvestService
 {
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
     {
@@ -124,6 +126,7 @@ public partial class GcodeHarvestService(
     private readonly StorageManagement.IStoragePathService _storagePathService = storagePathService;
     private readonly FileManagement.IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor;
     private readonly GcodeHarvestSettings _harvestSettings = harvestOptions.Value;
+    private readonly IBackendClientFactory _backendClientFactory = backendClientFactory;
 
     private static readonly string[] sourceArray = { "gcode" };
 
@@ -242,31 +245,35 @@ public partial class GcodeHarvestService(
         {
             scopedLogger.LogInformation($"Starting file discovery in scoped context for operation {operation.Id} on printer {printer.Name}");
 
-            // Get file list from printer based on backend type
+            // Get file list from printer using capability-based abstraction
             PrinterBackend backend = (PrinterBackend)printer.Backend;
             scopedLogger.LogInformation($"Calling file discovery for backend {backend} on printer {printer.Name} at {printer.ServerUrl}");
 
-            List<PrinterFileInfo> fileList;
-
-            // Depending on printer backend, call the appropriate method to get files
-            switch (backend)
+            List<PrinterFileInfo> fileList = new();
+            try
             {
-                case PrinterBackend.Moonraker:
-                    scopedLogger.LogInformation($"Getting files from Moonraker backend at {printer.ServerUrl}");
-                    fileList = await GetMoonrakerFilesAsync(printer.ServerUrl, scopedMoonraker, scopedLogger);
-                    break;
-                case PrinterBackend.PrusaLink:
-                    scopedLogger.LogInformation($"Getting files from PrusaLink backend at {printer.ServerUrl}");
-                    fileList = await GetPrusaLinkFilesAsync(printer.ServerUrl, printer.ApiKey, scopedPrusa, scopedLogger);
-                    break;
-                case PrinterBackend.SDCP:
-                    scopedLogger.LogInformation($"Getting files from SDCP backend at {printer.ServerUrl}");
-                    fileList = await GetSdcpFilesAsync(printer.ServerUrl, scopedSdcp, scopedLogger);
-                    break;
-                default:
-                    scopedLogger.LogWarning($"Unsupported printer backend {backend}");
-                    fileList = new List<PrinterFileInfo>();
-                    break;
+                IBackendClient client = _backendClientFactory.GetClient(backend);
+                
+                // Check if the client supports file listings and call the appropriate method
+                // The marker interface tells us the capability exists; actual method call depends on client type
+                if (client is ISupportsFileList)
+                {
+                    fileList = backend switch
+                    {
+                        PrinterBackend.Moonraker => await GetMoonrakerFilesAsync(printer.ServerUrl, _moonraker, scopedLogger),
+                        PrinterBackend.PrusaLink => await GetPrusaLinkFilesAsync(printer.ServerUrl, printer.ApiKey, _prusa, scopedLogger),
+                        PrinterBackend.SDCP => await GetSdcpFilesAsync(printer.ServerUrl, _sdcp, scopedLogger),
+                        _ => new List<PrinterFileInfo>()
+                    };
+                }
+                else
+                {
+                    scopedLogger.LogWarning($"Backend {backend} does not support file listing");
+                }
+            }
+            catch (Exception ex)
+            {
+                scopedLogger.LogError(ex, $"Error discovering files for backend {backend}");
             }
 
             scopedLogger.LogInformation($"Discovered {fileList.Count} files for operation {operation.Id}");
@@ -417,34 +424,47 @@ public partial class GcodeHarvestService(
         }
     }
 
-    private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath, IMoonrakerClient? moonraker, IPrusaLinkClient? prusa, ISdcpClient? sdcp)
+    private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath)
     {
         IUnifiedLoggingService log = _logger;
         try
         {
-            return backend switch
+            // Get the backend client and check capability-based support
+            // The marker interface tells us if download is supported
+            IBackendClient client = _backendClientFactory.GetClient(backend);
+            
+            if (client is ISupportsFileDownload)
             {
-                PrinterBackend.Moonraker => await DownloadMoonrakerFileAsync(printer.ServerUrl, filePath, moonraker, log),
-                PrinterBackend.PrusaLink => await DownloadPrusaLinkFileAsync(printer.ServerUrl, printer.ApiKey, filePath, prusa, log),
-                PrinterBackend.SDCP => await DownloadSdcpFileAsync(printer.ServerUrl, filePath, sdcp, log),
-                _ => null
-            };
+                // Moonraker is the only client that currently supports DownloadFileAsync
+                return backend == PrinterBackend.Moonraker
+                    ? await ConvertBytesToMemoryStreamAsync(
+                        await _moonraker.DownloadFileAsync(printer.ServerUrl, filePath))
+                    : null;
+            }
+            
+            // For backends that don't support downloads, return null
+            log.LogWarning($"Backend {backend} does not support file downloads for {filePath}");
+            return null;
         }
         catch (Exception ex)
         {
-            log.LogWarning(ex, "Failed to download file {FilePath} from printer {PrinterName}",
-                filePath, printer.Name);
+            log.LogWarning(ex, $"Failed to download file {filePath} from {backend} printer {printer.Name}");
             return null;
         }
     }
 
-    // Overload for ImportSelectedFilesAsync that uses instance clients
-    private async Task<MemoryStream?> DownloadFileAsync(PrinterBackend backend, Printer printer, string filePath)
+    /// <summary>
+    /// Helper to convert byte array to MemoryStream
+    /// </summary>
+    private static async Task<MemoryStream?> ConvertBytesToMemoryStreamAsync(byte[]? bytes)
     {
-        return await DownloadFileAsync(backend, printer, filePath, _moonraker, _prusa, _sdcp);
-    }
-
-    public async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream gcodeStream, CancellationToken ct = default)
+        if (bytes == null || bytes.Length == 0)
+            return null;
+        
+        var ms = new MemoryStream(bytes);
+        ms.Seek(0, SeekOrigin.Begin);
+        return await Task.FromResult(ms);
+    }    public async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream gcodeStream, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(gcodeStream);
         GcodeMetadataDto metadata = new();

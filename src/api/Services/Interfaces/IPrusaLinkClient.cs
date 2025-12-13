@@ -8,7 +8,7 @@ namespace Farm.Web.Api.Services.Interfaces;
 /// Interface for PrusaLink client providing communication with Prusa printers via PrusaLink API.
 /// Supports printer status monitoring, job control, file management, and basic printer operations.
 /// </summary>
-public interface IPrusaLinkClient : IBackendClient
+public interface IPrusaLinkClient : IBackendClient, ISupportsFileList, ISupportsFileUpload, ISupportsStartPrint
 {
     /// <summary>
     /// Gets comprehensive status information combining printer state, job progress, and camera information.
