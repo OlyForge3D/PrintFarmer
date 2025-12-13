@@ -23,13 +23,15 @@ namespace Farm.Web.Api.Services.Interfaces
 
         /// <summary>
         /// Gets the list of completed print jobs from OctoPrint history.
+        /// Returns null if history is not available or API call fails.
         /// </summary>
-        Task<string> GetHistoryListAsync(string baseUrl, string apiKey, int? limit = null, int? start = null);
+        Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, string apiKey, int? limit = null, int? start = null);
 
         /// <summary>
         /// Gets details for a specific print job from OctoPrint history.
+        /// Returns null if the job is not found or API call fails.
         /// </summary>
-        Task<string> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId);
+        Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId);
 
         /// <summary>
         /// Creates a PrinterDto from OctoPrint printer entity and status information.

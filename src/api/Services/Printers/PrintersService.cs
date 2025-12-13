@@ -117,9 +117,30 @@ namespace Farm.Web.Api.Services.Printers
             }
             else if (printer.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                // Get history from OctoPrint API
-                string historyJson = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).GetHistoryListAsync(printer.BackendUrl, printer.ApiKey ?? "", limit, start).ConfigureAwait(false);
-                return ParseOctoPrintHistory(historyJson, printer.ServerUrl);
+                // Get history from OctoPrint API - client handles parsing
+                try
+                {
+                    HistoryListResponse? response = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).GetHistoryListAsync(printer.BackendUrl, printer.ApiKey ?? "", limit, start).ConfigureAwait(false);
+                    if (response == null)
+                    {
+                        _logger.LogWarning($"[OctoPrint History] No response from OctoPrint history API for printer {printerId}");
+                        return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+                    }
+
+                    _logger.LogInformation($"[OctoPrint History] Got {response.Count} jobs from OctoPrint");
+                    // Set thumbnail URLs if available
+                    foreach (var job in response.Jobs)
+                    {
+                        job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
+                    }
+
+                    return response;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[OctoPrint History] Failed to retrieve history from OctoPrint at {printer.BackendUrl}: {ex.Message}");
+                    return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+                }
             }
             
             _logger.LogWarning($"[History] Printer {printerId} backend {printer.Backend} does not support history");
@@ -154,9 +175,22 @@ namespace Farm.Web.Api.Services.Printers
             }
             else if (printer.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                // Get job details from OctoPrint API
-                string jobJson = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).GetHistoryJobAsync(printer.BackendUrl, printer.ApiKey ?? "", jobId).ConfigureAwait(false);
-                return ParseOctoPrintHistoryJob(jobJson, printer.ServerUrl);
+                // Get job details from OctoPrint API - client handles parsing
+                try
+                {
+                    HistoryJob? job = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).GetHistoryJobAsync(printer.BackendUrl, printer.ApiKey ?? "", jobId).ConfigureAwait(false);
+                    if (job == null)
+                    {
+                        throw new KeyNotFoundException($"History job {jobId} not found");
+                    }
+                    job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
+                    return job;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[OctoPrint History] Failed to retrieve job {jobId} from OctoPrint at {printer.BackendUrl}: {ex.Message}");
+                    throw new KeyNotFoundException($"History job {jobId} not found", ex);
+                }
             }
             
             throw new InvalidOperationException("History is only available for Moonraker and OctoPrint printers");
@@ -184,10 +218,21 @@ namespace Farm.Web.Api.Services.Printers
             }
             else if (printer.Backend == (int)Farm.Infrastructure.PrinterBackend.OctoPrint)
             {
-                // Calculate totals from OctoPrint history
-                string historyJson = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).GetHistoryListAsync(printer.BackendUrl, printer.ApiKey ?? "", 10000, 0).ConfigureAwait(false);
-                var historyResponse = ParseOctoPrintHistory(historyJson, printer.ServerUrl);
-                return CalculateOctoPrintHistoryTotals(historyResponse.Jobs);
+                // Calculate totals from OctoPrint history - client handles parsing
+                try
+                {
+                    HistoryListResponse? response = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).GetHistoryListAsync(printer.BackendUrl, printer.ApiKey ?? "", 10000, 0).ConfigureAwait(false);
+                    if (response == null)
+                    {
+                        return new HistoryTotals { JobTotals = new JobTotals() };
+                    }
+                    return CalculateOctoPrintHistoryTotals(response.Jobs);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[OctoPrint History] Failed to calculate totals from OctoPrint at {printer.BackendUrl}: {ex.Message}");
+                    return new HistoryTotals { JobTotals = new JobTotals() };
+                }
             }
 
             return new HistoryTotals { JobTotals = new JobTotals() };
@@ -2158,203 +2203,6 @@ namespace Farm.Web.Api.Services.Printers
             }
         }
 
-        /// <summary>
-        /// Parses OctoPrint history JSON response and returns a HistoryListResponse.
-        /// </summary>
-#pragma warning disable S1172 // Parameter is intentionally unused - kept for method signature compatibility
-        private static HistoryListResponse ParseOctoPrintHistory(string historyJson, string _)
-        {
-            try
-            {
-                using JsonDocument doc = JsonDocument.Parse(historyJson);
-                JsonElement root = doc.RootElement;
-
-                if (!root.TryGetProperty("success", out JsonElement successProp) || !successProp.GetBoolean())
-                {
-                    return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
-                }
-
-                List<HistoryJob> jobs = new();
-
-                if (root.TryGetProperty("results", out JsonElement resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (JsonElement jobElement in resultsProp.EnumerateArray())
-                    {
-                        var job = ParseOctoPrintJobElement(jobElement);
-                        if (job != null)
-                        {
-                            jobs.Add(job);
-                        }
-                    }
-                }
-
-                int count = jobs.Count;
-                if (root.TryGetProperty("count", out JsonElement countProp))
-                {
-                    count = countProp.GetInt32();
-                }
-
-                return new HistoryListResponse { Count = count, Jobs = jobs.ToArray() };
-            }
-            catch
-            {
-                return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
-            }
-        }
-
-        /// <summary>
-        /// Parses a single OctoPrint job element into a HistoryJob object.
-        /// </summary>
-        private static HistoryJob? ParseOctoPrintJobElement(JsonElement jobElement)
-        {
-            try
-            {
-                var job = new HistoryJob();
-
-                // Extract basic job information
-                if (jobElement.TryGetProperty("name", out JsonElement nameProp))
-                {
-                    job.Filename = nameProp.GetString() ?? string.Empty;
-                    job.JobId = job.Filename;
-                }
-
-                if (jobElement.TryGetProperty("success", out JsonElement successProp))
-                {
-                    job.Status = successProp.GetBoolean() ? "Completed" : "Failed";
-                }
-
-                if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
-                {
-                    job.PrintDuration = printTimeProp.GetDouble();
-                }
-
-                if (jobElement.TryGetProperty("filament", out JsonElement filamentProp) && filamentProp.ValueKind == JsonValueKind.Object)
-                {
-                    if (filamentProp.TryGetProperty("length", out JsonElement lengthProp) && lengthProp.ValueKind != JsonValueKind.Null)
-                    {
-                        job.FilamentUsed = lengthProp.GetDouble();
-                    }
-                }
-
-                if (jobElement.TryGetProperty("startTime", out JsonElement startTimeProp) && startTimeProp.ValueKind != JsonValueKind.Null)
-                {
-                    job.StartTime = startTimeProp.GetDouble();
-                }
-
-                if (jobElement.TryGetProperty("endTime", out JsonElement endTimeProp) && endTimeProp.ValueKind != JsonValueKind.Null)
-                {
-                    job.EndTime = endTimeProp.GetDouble();
-                }
-
-                if (jobElement.TryGetProperty("notes", out JsonElement notesProp))
-                {
-                    job.User = notesProp.GetString() ?? string.Empty;
-                }
-
-                // Calculate total duration
-                if (job.StartTime > 0 && job.EndTime.HasValue && job.EndTime.Value > 0)
-                {
-                    job.TotalDuration = job.EndTime.Value - job.StartTime;
-                }
-                else
-                {
-                    job.TotalDuration = job.PrintDuration;
-                }
-
-                return job;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-#pragma warning restore S1172
-
-        /// <summary>
-        /// Parses a single OctoPrint job detail JSON response into a HistoryJob object.
-        /// </summary>
-        private static HistoryJob ParseOctoPrintHistoryJob(string jobJson, string printerUrl)
-        {
-            try
-            {
-                using JsonDocument doc = JsonDocument.Parse(jobJson);
-                JsonElement root = doc.RootElement;
-
-                var job = new HistoryJob();
-
-                if (root.TryGetProperty("name", out JsonElement nameProp))
-                {
-                    job.Filename = nameProp.GetString() ?? string.Empty;
-                    job.JobId = job.Filename;
-                }
-
-                if (root.TryGetProperty("success", out JsonElement successProp))
-                {
-                    job.Status = successProp.GetBoolean() ? "Completed" : "Failed";
-                }
-
-                if (root.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
-                {
-                    job.PrintDuration = printTimeProp.GetDouble();
-                }
-
-                if (root.TryGetProperty("filament", out JsonElement filamentProp) && filamentProp.ValueKind == JsonValueKind.Object)
-                {
-                    if (filamentProp.TryGetProperty("length", out JsonElement lengthProp) && lengthProp.ValueKind != JsonValueKind.Null)
-                    {
-                        job.FilamentUsed = lengthProp.GetDouble();
-                    }
-                }
-
-                if (root.TryGetProperty("startTime", out JsonElement startTimeProp) && startTimeProp.ValueKind != JsonValueKind.Null)
-                {
-                    job.StartTime = startTimeProp.GetDouble();
-                }
-
-                if (root.TryGetProperty("endTime", out JsonElement endTimeProp) && endTimeProp.ValueKind != JsonValueKind.Null)
-                {
-                    job.EndTime = endTimeProp.GetDouble();
-                }
-
-                if (root.TryGetProperty("notes", out JsonElement notesProp))
-                {
-                    job.User = notesProp.GetString() ?? string.Empty;
-                }
-
-                if (root.TryGetProperty("thumbnails", out JsonElement thumbnailsProp) && thumbnailsProp.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (JsonElement thumb in thumbnailsProp.EnumerateArray())
-                    {
-                        if (thumb.TryGetProperty("url", out JsonElement urlProp))
-                        {
-                            string? url = urlProp.GetString();
-                            if (!string.IsNullOrEmpty(url))
-                            {
-                                job.ThumbnailUrl = url.StartsWith("http") ? url : $"{printerUrl.TrimEnd('/')}/{url}";
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Calculate total duration
-                if (job.StartTime > 0 && job.EndTime.HasValue && job.EndTime.Value > 0)
-                {
-                    job.TotalDuration = job.EndTime.Value - job.StartTime;
-                }
-                else
-                {
-                    job.TotalDuration = job.PrintDuration;
-                }
-
-                job.Exists = true;
-                return job;
-            }
-            catch
-            {
-                return new HistoryJob { Status = "Unknown" };
-            }
-        }
 
         /// <summary>
         /// Calculates aggregate statistics from OctoPrint history jobs.

@@ -489,7 +489,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         return SendWithRetryAsync(request, cancellationToken: cancellationToken);
     }
 
-    public async Task<string> GetHistoryListAsync(string baseUrl, string apiKey, int? limit = null, int? start = null)
+    public async Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, string apiKey, int? limit = null, int? start = null)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history");
@@ -510,16 +510,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
-            return await response.Content.ReadAsStringAsync();
+            string content = await response.Content.ReadAsStringAsync();
+            return ParseOctoPrintHistoryList(content);
         }
         catch (Exception ex)
         {
             LogError("Get history list failed", ex);
-            throw;
+            return null;
         }
     }
 
-    public async Task<string> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId)
+    public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string apiKey, string jobId)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
@@ -528,12 +529,13 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
-            return await response.Content.ReadAsStringAsync();
+            string content = await response.Content.ReadAsStringAsync();
+            return ParseOctoPrintHistoryJob(content);
         }
         catch (Exception ex)
         {
             LogError("Get history job failed", ex);
-            throw;
+            return null;
         }
     }
 
@@ -1266,6 +1268,129 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         {
             LogError("Load file failed", ex);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Parses OctoPrint history JSON response into a HistoryListResponse object.
+    /// </summary>
+    private static HistoryListResponse? ParseOctoPrintHistoryList(string historyJson)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(historyJson);
+            JsonElement root = doc.RootElement;
+
+            // Check if the response indicates success
+            if (!root.TryGetProperty("success", out JsonElement successProp) || !successProp.GetBoolean())
+            {
+                return null;
+            }
+
+            List<HistoryJob> jobs = new();
+
+            // Parse the results array
+            if (root.TryGetProperty("results", out JsonElement resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement jobElement in resultsProp.EnumerateArray())
+                {
+                    var job = ParseOctoPrintJobElement(jobElement);
+                    if (job != null)
+                    {
+                        jobs.Add(job);
+                    }
+                }
+            }
+
+            int count = jobs.Count;
+            if (root.TryGetProperty("count", out JsonElement countProp))
+            {
+                count = countProp.GetInt32();
+            }
+
+            return new HistoryListResponse { Count = count, Jobs = jobs.ToArray() };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses a single OctoPrint job element into a HistoryJob object.
+    /// </summary>
+    private static HistoryJob? ParseOctoPrintJobElement(JsonElement jobElement)
+    {
+        try
+        {
+            var job = new HistoryJob();
+
+            // Extract basic job information
+            if (jobElement.TryGetProperty("name", out JsonElement nameProp))
+            {
+                job.Filename = nameProp.GetString() ?? string.Empty;
+                job.JobId = job.Filename;
+            }
+
+            if (jobElement.TryGetProperty("success", out JsonElement successProp))
+            {
+                job.Status = successProp.GetBoolean() ? "Completed" : "Failed";
+            }
+
+            if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
+            {
+                job.PrintDuration = printTimeProp.GetDouble();
+            }
+
+            if (jobElement.TryGetProperty("filament", out JsonElement filamentProp) && filamentProp.ValueKind == JsonValueKind.Object)
+            {
+                if (filamentProp.TryGetProperty("length", out JsonElement lengthProp))
+                {
+                    job.FilamentUsed = lengthProp.GetDouble() / 1000.0; // Convert from mm to m
+                }
+            }
+
+            // Extract timestamp information
+            if (jobElement.TryGetProperty("timestamp", out JsonElement timestampProp))
+            {
+                job.StartTime = timestampProp.GetDouble();
+            }
+
+            if (jobElement.TryGetProperty("completionTime", out JsonElement completionProp) && completionProp.ValueKind != JsonValueKind.Null)
+            {
+                job.EndTime = completionProp.GetDouble();
+            }
+
+            return job;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses an OctoPrint history job detail JSON response into a HistoryJob object.
+    /// </summary>
+    private static HistoryJob? ParseOctoPrintHistoryJob(string jobJson)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(jobJson);
+            JsonElement root = doc.RootElement;
+
+            // Check if the response indicates success
+            if (!root.TryGetProperty("success", out JsonElement successProp) || !successProp.GetBoolean())
+            {
+                return null;
+            }
+
+            // The actual job data is in the root (not nested under "result")
+            return ParseOctoPrintJobElement(root);
+        }
+        catch
+        {
+            return null;
         }
     }
 }
