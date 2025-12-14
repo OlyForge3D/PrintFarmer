@@ -19,6 +19,8 @@ using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.Printers;
+using Farm.SignalR.Hubs;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Http;
@@ -39,8 +41,7 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
         private readonly AutoMapper.IMapper _mapper;
-        private readonly IHubContext<Hubs.PrinterHub> _hubContext;
-        private readonly IPrinterStatusDtoBuilder _dtoBuilder;
+        private readonly IHubContext<PrinterHub> _hubContext;
         private readonly IMultiPrinterStatusCoordinator _coordinator;
         private readonly IPrinterStatusFallbackService _fallbackService;
         private readonly IPrinterStatusClientFactory _statusClientFactory;
@@ -56,8 +57,7 @@ namespace Farm.Web.Api.Services.Printers
             IHttpClientFactory httpClientFactory,
             Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger,
             AutoMapper.IMapper mapper,
-            IHubContext<Hubs.PrinterHub> hubContext,
-            IPrinterStatusDtoBuilder dtoBuilder,
+            IHubContext<PrinterHub> hubContext,
             IMultiPrinterStatusCoordinator coordinator,
             IPrinterStatusFallbackService fallbackService,
             IPrinterStatusClientFactory statusClientFactory)
@@ -73,7 +73,6 @@ namespace Farm.Web.Api.Services.Printers
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
             _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
-            _dtoBuilder = dtoBuilder ?? throw new ArgumentNullException(nameof(dtoBuilder));
             _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
             _fallbackService = fallbackService ?? throw new ArgumentNullException(nameof(fallbackService));
             _statusClientFactory = statusClientFactory ?? throw new ArgumentNullException(nameof(statusClientFactory));
@@ -81,11 +80,20 @@ namespace Farm.Web.Api.Services.Printers
 
         /// <summary>
         /// Gets the appropriate backend client for a printer based on its backend type.
-        /// Uses the factory to retrieve and cast to the specific client interface.
+        /// Returns the generic IBackendClient which should be cast to capability interfaces as needed.
         /// </summary>
-        private T GetBackendClient<T>(PrinterBackend backend) where T : class
+        private IBackendClient GetBackendClient(PrinterBackend backend)
         {
-            return (T)(object)_backendFactory.GetClient(backend);
+            return _backendFactory.GetClient(backend);
+        }
+
+        /// <summary>
+        /// Gets a backend client and casts it to a capability interface if supported.
+        /// </summary>
+        private T GetBackendCapability<T>(PrinterBackend backend) where T : class
+        {
+            var client = GetBackendClient(backend);
+            return client as T ?? throw new NotSupportedException($"Backend {backend} does not support capability {typeof(T).Name}");
         }
 
         // History helpers moved from controller: delegate to appropriate backend client
@@ -434,6 +442,21 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct)
         {
             return await _repo.ExistsByNameOrServerUrlAsync(name, serverUrl, ct);
+        }
+
+        /// <summary>
+        /// Check if a printer with the same IP address already exists.
+        /// Extracts IP from ServerUrl input and compares against stored IpAddress.
+        /// </summary>
+        public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
+        {
+            // Extract IP address from ServerUrl (format: http://ip or http://hostname)
+            // Strip http/https and port (if any) to get just the host
+            string inputHost = serverUrl.Replace("http://", "").Replace("https://", "").Split(':')[0];
+            
+            List<Printer> printers = await _repo.GetAllAsync(ct).ConfigureAwait(false);
+            // Compare input host against stored IpAddress (which contains the resolved IP)
+            return printers.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.IpAddress) && p.IpAddress == inputHost);
         }
 
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
@@ -870,13 +893,19 @@ namespace Farm.Web.Api.Services.Printers
         {
             try
             {
-                int? activeSpoolId = await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).GetSpoolmanActiveSpoolAsync(serverUrl, ct);
+                var client = GetBackendClient(PrinterBackend.Moonraker);
+                if (client is not ISupportsSpoolman spoolman)
+                {
+                    return null;
+                }
+
+                int? activeSpoolId = await spoolman.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
                 if (activeSpoolId == null)
                 {
                     return new PrinterSpoolInfoDto(HasActiveSpool: false);
                 }
 
-                string? spoolDetailsJson = await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
+                string? spoolDetailsJson = await spoolman.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
                 if (string.IsNullOrWhiteSpace(spoolDetailsJson))
                 {
                     return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
@@ -916,13 +945,8 @@ namespace Farm.Web.Api.Services.Printers
 
         public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
         {
-            // Check for duplicate printer by serverUrl or name
-            int defaultPort = PrinterBackendHelpers.GetDefaultPort(dto.Backend);
-            string normalizedUrl = NormalizeServerUrl(dto.ServerUrl, defaultPort);
-            List<Printer> existingPrinters = await _repo.GetAllAsync(ct).ConfigureAwait(false);
-            Printer? duplicate = existingPrinters.FirstOrDefault(p =>
-                NormalizeServerUrl(p.ServerUrl, defaultPort) == normalizedUrl ||
-                p.IpAddress == normalizedUrl.Replace("http://", "").Replace("https://", "").Split(':')[0]);
+            // Check for duplicate printer by IP address
+            Printer? duplicate = await FindByIpAddressAsync(dto.ServerUrl, ct).ConfigureAwait(false);
 
             if (duplicate != null)
             {
@@ -992,13 +1016,13 @@ namespace Farm.Web.Api.Services.Printers
                 }
             }
 
-            // defaultPort was already calculated at the start for duplicate checking
-            string normalizedInput = NormalizeServerUrl(dto.ServerUrl, defaultPort);
-            string resolvedBase = normalizedInput;
+            // Use ServerUrl directly - it should already be in http://host format
+            string inputUrl = dto.ServerUrl;
+            string resolvedBase = inputUrl;
             string? resolvedIp = null;
             try
             {
-                Uri uri = new(normalizedInput);
+                Uri uri = new(inputUrl);
                 if (!IPAddress.TryParse(uri.Host, out _))
                 {
                     string hostToResolve = EnsureLocalSuffix(uri.Host);
@@ -1018,10 +1042,9 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch { }
 
-            // ServerUrl is already normalized without explicit port by NormalizeServerUrl()
             // Port is managed separately via BackendPort field
             string serverUrlForStorage = resolvedBase;
-            string originalUrlForStorage = normalizedInput;
+            string originalUrlForStorage = inputUrl;
 
             Printer p = new()
             {
@@ -1036,8 +1059,8 @@ namespace Farm.Web.Api.Services.Printers
                 DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc) : dto.DateAcquired,
                 Backend = (int)dto.Backend,
                 ApiKey = dto.ApiKey,
-                // Use provided BackendPort and FrontendPort from discovery, or use defaults
-                BackendPort = dto.BackendPort ?? 80,
+                // BackendPort MUST be set by discovery probes (always includes actual port, even if standard)
+                BackendPort = dto.BackendPort ?? throw new InvalidOperationException($"BackendPort is required - discovery probes must always set it for backend {dto.Backend}"),
                 FrontendPort = dto.FrontendPort,
                 // Use provided camera URLs from discovery, or leave null
                 CameraStreamUrl = dto.CameraStreamUrl,
@@ -1081,22 +1104,15 @@ namespace Farm.Web.Api.Services.Printers
             {
                 // Use capability factory for polymorphic camera snapshot retrieval
                 var backendEnum = (PrinterBackend)p.Backend;
-                if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out var cameraClient))
+                if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out var cameraClient) && cameraClient != null)
                 {
-                    // For Moonraker, try direct snapshot retrieval first
-                    if (backendEnum == PrinterBackend.Moonraker && 
-                        _capabilityFactory.TryGetCameraClient(backendEnum, out var baseClient) && 
-                        baseClient is IMoonrakerClient moonrakerClient)
-                    {
-                        var snapshotBytes = await moonrakerClient.GetCameraSnapshotAsync(p.BackendUrl, ct).ConfigureAwait(false);
-                        if (snapshotBytes != null)
-                        {
-                            return snapshotBytes;
-                        }
-                    }
-
-                    // Fallback to URL-based snapshot retrieval for all backends
-                    string? snapshotUrl = await cameraClient!.GetCameraSnapshotUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
+                    // Try to get camera snapshot URL from the client
+                    string snapUrl = backendEnum == PrinterBackend.Moonraker 
+                        ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
+                        : p.BackendUrl;
+                    
+                    // Get camera snapshot URL using capability interface
+                    string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
                     if (!string.IsNullOrWhiteSpace(snapshotUrl))
                     {
                         return await FetchBytesFromUrlAsync(snapshotUrl, p.ApiKey, ct).ConfigureAwait(false);
@@ -1178,21 +1194,21 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
                 
-                // Verify backend supports movement before attempting
-                if (!_capabilityFactory.TryGetMovementClient(backend, out _))
+                if (client is not ISupportsMovement movement)
                 {
                     return false;
                 }
 
-                // Use specific client for backend-specific home methods
+                // Use capability interface for movement
                 if (backend == PrinterBackend.OctoPrint)
                 {
-                    return await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).SendHomeAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
+                    return await movement.HomeAsync(p.BackendUrl, p.ApiKey).ConfigureAwait(false);
                 }
 
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).SendHomeAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return await movement.SendHomeAsync(moonrakerUrl, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1212,20 +1228,15 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
                 
-                // Verify backend supports movement
-                if (!_capabilityFactory.TryGetMovementClient(backend, out _))
+                if (client is ISupportsMovement movement)
                 {
-                    return false;
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    return await movement.HomeXYAsync(moonrakerUrl, ct).ConfigureAwait(false);
                 }
 
-                if (backend == PrinterBackend.OctoPrint)
-                {
-                    return await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).HomeXYAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
-                }
-
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).HomeXYAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return false;
             }
             catch (Exception ex)
             {
@@ -1245,20 +1256,15 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
                 
-                // Verify backend supports movement
-                if (!_capabilityFactory.TryGetMovementClient(backend, out _))
+                if (client is ISupportsMovement movement)
                 {
-                    return false;
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    return await movement.HomeZAsync(moonrakerUrl, ct).ConfigureAwait(false);
                 }
 
-                if (backend == PrinterBackend.OctoPrint)
-                {
-                    return await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).HomeZAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false);
-                }
-
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).HomeZAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return false;
             }
             catch (Exception ex)
             {
@@ -1278,37 +1284,43 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
-                
-                // Verify backend supports temperature control
-                if (!_capabilityFactory.TryGetTemperatureControlClient(backend, out _))
-                {
-                    return false;
-                }
+                var client = GetBackendClient(backend);
 
                 if (backend == PrinterBackend.OctoPrint)
                 {
-                    // OctoPrint: Use native API for both bed and hotend temperatures
-                    bool success = true;
-                    
-                    if (bed.HasValue)
+                    // OctoPrint: Use backend-specific temperature API
+                    if (client is ISupportsOctoPrintTemperature octoPrintTemp)
                     {
-                        bool bedSuccess = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).SetBedTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, bed.Value).ConfigureAwait(false);
+                        bool success = true;
+                        
+                        if (bed.HasValue)
+                        {
+                            bool bedSuccess = await octoPrintTemp.SetBedTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, bed.Value, ct).ConfigureAwait(false);
 #pragma warning disable S2589 // Boolean expression always evaluates to true
-                        success = success && bedSuccess;
+                            success = success && bedSuccess;
 #pragma warning restore S2589
+                        }
+                        
+                        if (hotend.HasValue)
+                        {
+                            bool hotendSuccess = await octoPrintTemp.SetHotendTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, hotend.Value, "tool0", ct).ConfigureAwait(false);
+                            success = success && hotendSuccess;
+                        }
+                        
+                        return success;
                     }
-                    
-                    if (hotend.HasValue)
-                    {
-                        bool hotendSuccess = await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).SetHotendTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, hotend.Value).ConfigureAwait(false);
-                        success = success && hotendSuccess;
-                    }
-                    
-                    return success;
+
+                    return false;
                 }
 
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).SetTempsAsync(moonrakerUrl, hotend, bed, ct).ConfigureAwait(false);
+                // Moonraker, PrusaLink, SDCP: use generic temperature control
+                if (client is ISupportsTemperatureControl tempControl)
+                {
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.ApiKey, ct).ConfigureAwait(false);
+                }
+
+                return false;
             }
             catch (Exception ex)
             {
@@ -1325,8 +1337,24 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
-            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).MoveAsync(moonrakerUrl, x, y, z, f, ct).ConfigureAwait(false);
+            try
+            {
+                var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
+
+                if (client is ISupportsMovement movement)
+                {
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    return await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to move printer {id}");
+                return false;
+            }
         }
 
         public async Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
@@ -1337,8 +1365,24 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
-            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).MoveToAsync(moonrakerUrl, x, y, z, f, ct).ConfigureAwait(false);
+            try
+            {
+                var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
+
+                if (client is ISupportsMovement movement)
+                {
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, ct).ConfigureAwait(false);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to move to position on printer {id}");
+                return false;
+            }
         }
 
         public async Task<bool> PauseAsync(Guid id, CancellationToken ct)
@@ -1430,14 +1474,24 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
-            var backend = (PrinterBackend)p.Backend;
-            if (backend != PrinterBackend.Moonraker)
+            try
             {
-                return false; // only moonraker supports firmware restart
-            }
+                var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
 
-            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).FirmwareRestartAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                if (client is ISupportsControlRestart controlRestart)
+                {
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    return await controlRestart.FirmwareRestartAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to firmware restart printer {id}");
+                return false;
+            }
         }
 
         public async Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct)
@@ -1448,14 +1502,24 @@ namespace Farm.Web.Api.Services.Printers
                 return false;
             }
 
-            var backend = (PrinterBackend)p.Backend;
-            if (backend != PrinterBackend.Moonraker)
+            try
             {
-                return false; // only moonraker supports motor disable
-            }
+                var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
 
-            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            return await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).SendGcodeAsync(moonrakerUrl, "M84", ct).ConfigureAwait(false);
+                if (client is ISupportsGcodeExecution gcodeClient)
+                {
+                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
+                    return await gcodeClient.SendGcodeAsync(moonrakerUrl, "M84", ct).ConfigureAwait(false);
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to disable motors on printer {id}");
+                return false;
+            }
         }
 
         public async Task<bool> StartPrintFromFileAsync(Guid id, string filename, CancellationToken ct)
@@ -1558,115 +1622,75 @@ namespace Farm.Web.Api.Services.Printers
                 return Array.Empty<PrinterFileDto>();
             }
 
-            // For Moonraker, use GetFileListAsync to get file info with metadata
-            if (((PrinterBackend)p.Backend) == PrinterBackend.Moonraker)
+            try
             {
-                try
+                var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
+
+                // Check if backend supports file list
+                if (client is not ISupportsFileList fileListClient)
                 {
-                    string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                    string[] fileNames = await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).GetFileListAsync(moonrakerUrl, ct).ConfigureAwait(false);
-                    
-                    if (fileNames.Length == 0)
-                    {
-                        return Array.Empty<PrinterFileDto>();
-                    }
+                    return Array.Empty<PrinterFileDto>();
+                }
 
-                    // Get detailed metadata for each file
+                string baseUrl = backend == PrinterBackend.Moonraker
+                    ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
+                    : p.BackendUrl;
+
+                // Get file list with standardized PrinterFileInfo objects
+                List<PrinterFileInfo> fileInfos = await fileListClient.GetFileListAsync(baseUrl, p.ApiKey, ct).ConfigureAwait(false);
+                
+                if (fileInfos.Count == 0)
+                {
+                    return Array.Empty<PrinterFileDto>();
+                }
+
+                // For Moonraker, try to get additional metadata
+                if (backend == PrinterBackend.Moonraker && client is ISupportsFileMetadata metadataClient)
+                {
                     List<PrinterFileDto> result = new();
-                    foreach (string fileName in fileNames)
+                    foreach (var fileInfo in fileInfos)
                     {
-                        string? thumbnailUrl = null;
-                        long? modified = null;
-                        long? sizeBytes = null;
-
-                        try
-                        {
-                            GCodeMetadata? metadata = await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).GetFileMetadataAsync(
-                                moonrakerUrl,
-                                fileName,
-                                ct)
-                                .ConfigureAwait(false);
-
-                            if (metadata != null)
-                            {
-                                // Capture file metadata
-                                modified = (long)metadata.Modified;
-                                sizeBytes = metadata.Size;
-
-                                if (metadata.Thumbnails.Length > 0)
-                                {
-                                    // Get the largest thumbnail
-                                    ThumbnailInfo? largestThumb = metadata.Thumbnails
-                                        .OrderByDescending(t => t.Width * t.Height)
-                                        .FirstOrDefault();
-
-                                    if (largestThumb != null)
-                                    {
-                                        // Build full URL for thumbnail
-                                        thumbnailUrl = $"{p.ServerUrl.TrimEnd('/')}/server/files/gcodes/{Uri.EscapeDataString(largestThumb.RelativePath)}";
-                                    }
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            // Silently ignore metadata fetch errors, still add file to list
-                        }
-
-                        result.Add(new PrinterFileDto(fileName, thumbnailUrl, modified, sizeBytes));
+                        // For now, return file info without metadata details
+                        // TODO: Extend PrinterFileMetadata or ISupportsFileMetadata to support thumbnails
+                        result.Add(new PrinterFileDto(fileInfo.Name, null, fileInfo.Modified?.Ticks, fileInfo.Size));
                     }
 
                     return result.ToArray();
                 }
-                catch
-                {
-                    // Fallback if Moonraker file list fails
-                    return Array.Empty<PrinterFileDto>();
-                }
+
+                // For other backends, convert PrinterFileInfo to PrinterFileDto
+                return fileInfos
+                    .Select(f => new PrinterFileDto(f.Name, null, f.Modified?.Ticks, f.Size))
+                    .ToArray();
+
+                // For PrusaLink and SDCP, no metadata available currently
+                // PrusaLink: thumbnail retrieval requires Digest Authentication
+                // According to PrusaLink OpenAPI spec, v1 endpoints (/api/v1/files/{storage}/{path})
+                // require Digest Auth, NOT X-Api-Key header authentication.
+                // The legacy /api/files endpoint (OctoPrint compatible) works with X-Api-Key
+                // but doesn't include thumbnail metadata in the response.
+                // TODO: Implement Digest Authentication support for PrusaLink to enable v1 API access
+                // SDCP: no metadata API currently exposed
             }
-
-            // For PrusaLink and SDCP, fetch file list
-            string[] fileNames2 = ((PrinterBackend)p.Backend) switch
+            catch (Exception ex)
             {
-                PrinterBackend.PrusaLink => await GetBackendClient<IPrusaLinkClient>(PrinterBackend.PrusaLink).GetFileListAsync(p.BackendUrl, p.ApiKey, ct).ConfigureAwait(false),
-                PrinterBackend.SDCP => await GetBackendClient<ISdcpClient>(PrinterBackend.SDCP).GetFileListAsync(p.BackendUrl, ct).ConfigureAwait(false),
-                PrinterBackend.OctoPrint => await GetBackendClient<IOctoPrintClient>(PrinterBackend.OctoPrint).GetFileListAsync(p.BackendUrl, p.ApiKey ?? string.Empty).ConfigureAwait(false),
-                _ => Array.Empty<string>()
-            };
-
-            if (fileNames2.Length == 0)
-            {
+                _logger.LogWarning(ex, $"Failed to get file list for printer {id}");
                 return Array.Empty<PrinterFileDto>();
             }
-
-            // For PrusaLink and SDCP, no metadata available currently
-            // PrusaLink: thumbnail retrieval requires Digest Authentication
-            // According to PrusaLink OpenAPI spec, v1 endpoints (/api/v1/files/{storage}/{path})
-            // require Digest Auth, NOT X-Api-Key header authentication.
-            // The legacy /api/files endpoint (OctoPrint compatible) works with X-Api-Key
-            // but doesn't include thumbnail metadata in the response.
-            // TODO: Implement Digest Authentication support for PrusaLink to enable v1 API access
-            // SDCP: no metadata API currently exposed
-            List<PrinterFileDto> result2 = new();
-            foreach (string fileName in fileNames2)
-            {
-                result2.Add(new PrinterFileDto(fileName, null, null, null));
-            }
-
-            return result2.ToArray();
         }
 
         public async Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct)
         {
-            // First normalize with port for internal operations (URL comparison, parsing)
-            int defaultPort = PrinterBackendHelpers.GetDefaultPort(backend);
-            string normalizedWithPort = NormalizeServerUrl(serverUrl, defaultPort);
+            // Normalize the input: ensure scheme and remove port (port is stored separately in BackendPort)
+            Uri uri = new(serverUrl);
+            string normalizedInputUrl = $"{uri.Scheme}://{uri.Host}";
 
+            // Parse ServerUrl to resolve hostname and extract IP
             string? resolvedIp = null;
-            string resolvedBase = normalizedWithPort;
+            string resolvedBase = normalizedInputUrl;
             try
             {
-                Uri uri = new(normalizedWithPort);
                 if (!IPAddress.TryParse(uri.Host, out _))
                 {
                     string hostToResolve = EnsureLocalSuffix(uri.Host);
@@ -1686,9 +1710,8 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch { }
 
-            // ServerUrl is already normalized without explicit port by NormalizeServerUrl()
-            // Port is managed separately via FrontendPort field
-            return new ResolveHostnameResponse(normalizedWithPort, resolvedIp, resolvedBase);
+            // Port is managed separately via BackendPort field
+            return new ResolveHostnameResponse(normalizedInputUrl, resolvedIp, resolvedBase);
         }
 
         public string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
@@ -1755,12 +1778,7 @@ namespace Farm.Web.Api.Services.Printers
             return null;
         }
 
-        public async Task<HashSet<string>> GetAllNormalizedServerUrlsAsync(int defaultPort, CancellationToken ct)
-        {
-            List<Printer> items = await _repo.GetAllAsync(ct).ConfigureAwait(false);
-            HashSet<string> normalized = items.Select(p => NormalizeServerUrl(p.ServerUrl, defaultPort)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return normalized;
-        }
+
 
         private static string EnsureLocalSuffix(string host)
         {
@@ -1773,38 +1791,7 @@ namespace Farm.Web.Api.Services.Printers
                 host.Contains('.', StringComparison.Ordinal) ? host : host + ".local";
         }
 
-        public string NormalizeServerUrl(string? input, int defaultPort)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-            {
-                return string.Empty;
-            }
 
-            string trimmed = input.Trim();
-            // Ensure scheme
-            if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                trimmed = "http://" + trimmed;
-            }
-
-            try
-            {
-                Uri uri = new Uri(trimmed);
-                // Build URL without explicit port (use default ports)
-                UriBuilder ub = new UriBuilder(uri)
-                {
-                    Port = -1,  // -1 means use default port, not explicitly shown
-                    Path = string.Empty,  // Remove any paths
-                    Query = string.Empty
-                };
-                // Return without trailing slash for stable comparisons
-                return ub.Uri.ToString().TrimEnd('/');
-            }
-            catch
-            {
-                return trimmed;
-            }
-        }
 
         /// <summary>
         /// Bulk creates multiple printers with duplicate handling.
@@ -1831,30 +1818,22 @@ namespace Farm.Web.Api.Services.Printers
                     string? reason = null;
                     PrinterDto? createdDto = null;
 
-                    // Check for duplicates
-                    bool exists = await ExistsByNameOrServerUrlAsync(printerDto.Name, printerDto.ServerUrl, ct);
-                    if (exists)
+                    // Check for duplicates by IP address
+                    Printer? existingByIp = await FindByIpAddressAsync(printerDto.ServerUrl, ct);
+                    if (existingByIp != null)
                     {
                         if ((duplicateHandling ?? "skip") == "skip")
                         {
-                            _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name}");
+                            _logger.LogInformation($"[BulkCreate] Skipping duplicate printer: {printerDto.Name} (IP: {existingByIp.IpAddress})");
                             skippedCount++;
                             status = "Skipped";
-                            reason = $"Duplicate printer already exists";
+                            reason = $"Printer with IP {existingByIp.IpAddress} already exists";
                         }
                         else if ((duplicateHandling ?? "skip") == "overwrite")
                         {
-                            // Find and delete existing printer
-                            List<Printer> allPrinters = await GetAllAsync(ct);
-                            Printer? existing = allPrinters.FirstOrDefault(p =>
-                                p.Name == printerDto.Name ||
-                                p.ServerUrl == printerDto.ServerUrl);
-                            if (existing != null)
-                            {
-                                _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existing.Name}");
-                                await RemoveAsync(existing, ct);
-                                await SaveChangesAsync(ct);
-                            }
+                            _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (IP: {existingByIp.IpAddress})");
+                            await RemoveAsync(existingByIp, ct);
+                            await SaveChangesAsync(ct);
                             createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
                             await SaveChangesAsync(ct);
                             createdPrinters.Add(createdDto);
@@ -1863,7 +1842,7 @@ namespace Farm.Web.Api.Services.Printers
                         else if ((duplicateHandling ?? "skip") == "error")
                         {
                             status = "Failed";
-                            reason = $"Duplicate printer: {printerDto.Name} already exists";
+                            reason = $"Printer with IP {existingByIp.IpAddress} already exists";
                             errorResults[i] = reason;
                         }
                     }
@@ -1940,54 +1919,33 @@ namespace Farm.Web.Api.Services.Printers
 
                 _logger.LogInformation($"[PrintJobStatus] Getting print job status for printer {printer.Name} (Backend: {printer.Backend})");
 
-                // Route to appropriate client based on backend
-                switch (printer.Backend)
+                var backend = (PrinterBackend)printer.Backend;
+                var client = GetBackendClient(backend);
+
+                if (client is not ISupportsJobControl jobClient)
                 {
-                    case (int)Farm.Infrastructure.PrinterBackend.Moonraker:
-                    {
-                        string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
-                        PrinterJob? job = await GetBackendClient<IMoonrakerClient>(PrinterBackend.Moonraker).GetJobAsync(moonrakerUrl, ct).ConfigureAwait(false);
-                        if (job != null)
-                        {
-                            return new PrintJobStatusDto
-                            {
-                                State = job.PrintState,
-                                Progress = job.Progress,
-                                JobName = job.JobName,
-                                ThumbnailUrl = job.ThumbnailUrl
-                            };
-                        }
-                        return null;
-                    }
-
-                    case (int)Farm.Infrastructure.PrinterBackend.PrusaLink:
-                    {
-                        // Note: PrusaLink client may not have GetJobStatusAsync yet
-                        // Fallback to null for now - implementation can be added later
-                        _logger.LogInformation($"[PrintJobStatus] PrusaLink print job status not yet implemented");
-                        return null;
-                    }
-
-                    case (int)Farm.Infrastructure.PrinterBackend.SDCP:
-                    {
-                        PrinterJob job = await GetBackendClient<ISdcpClient>(PrinterBackend.SDCP).GetJobAsync(printer.BackendUrl, ct).ConfigureAwait(false);
-                        if (job != null)
-                        {
-                            return new PrintJobStatusDto
-                            {
-                                State = job.PrintState,
-                                Progress = job.Progress,
-                                JobName = job.JobName,
-                                ThumbnailUrl = job.ThumbnailUrl
-                            };
-                        }
-                        return null;
-                    }
-
-                    default:
-                        _logger.LogWarning($"[PrintJobStatus] Unknown backend type {printer.Backend}");
-                        return null;
+                    _logger.LogWarning($"[PrintJobStatus] Backend {backend} does not support job control");
+                    return null;
                 }
+
+                string url = backend == PrinterBackend.Moonraker
+                    ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+                    : printer.BackendUrl;
+
+                PrinterJob? job = await jobClient.GetJobAsync(url, printer.ApiKey, ct).ConfigureAwait(false);
+                
+                if (job != null)
+                {
+                    return new PrintJobStatusDto
+                    {
+                        State = job.PrintState,
+                        Progress = job.Progress,
+                        JobName = job.JobName,
+                        ThumbnailUrl = job.ThumbnailUrl
+                    };
+                }
+
+                return null;
             }
             catch (OperationCanceledException)
             {
@@ -2127,10 +2085,15 @@ namespace Farm.Web.Api.Services.Printers
                                 continue;
                             }
 
-                            // Build ServerUrl from IpAddress and backend
+                            // Build ServerUrl from IpAddress 
                             string ipAddress = values[ipAddressIdx];
-                            int defaultPort = PrinterBackendHelpers.GetDefaultPort(backendEnum);
-                            string serverUrl = $"http://{ipAddress}:{defaultPort}";
+                            // Get BackendPort from CSV - MUST be provided
+                            if (backendPortIdx < 0 || backendPortIdx >= values.Length || string.IsNullOrWhiteSpace(values[backendPortIdx]) || !int.TryParse(values[backendPortIdx], out int backendPort))
+                            {
+                                errors.Add($"Line {lineNumber}: BackendPort is required and must be a valid integer");
+                                continue;
+                            }
+                            string serverUrl = $"http://{ipAddress}";
 
                             CreatePrinterDto printer = new CreatePrinterDto
                             {
@@ -2142,7 +2105,7 @@ namespace Farm.Web.Api.Services.Printers
                                 ApiKey = apiKeyIdx >= 0 && apiKeyIdx < values.Length ? values[apiKeyIdx] : null,
                                 Notes = notesIdx >= 0 && notesIdx < values.Length ? values[notesIdx] : null,
                                 IsEnabled = isEnabledIdx >= 0 && isEnabledIdx < values.Length && bool.TryParse(values[isEnabledIdx], out bool ie) ? ie : true,
-                                BackendPort = backendPortIdx >= 0 && backendPortIdx < values.Length && int.TryParse(values[backendPortIdx], out int bp) ? bp : null,
+                                BackendPort = backendPort,
                                 FrontendPort = frontendPortIdx >= 0 && frontendPortIdx < values.Length && int.TryParse(values[frontendPortIdx], out int fp) ? fp : null,
                                 CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
                                 CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,

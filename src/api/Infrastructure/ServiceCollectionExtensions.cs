@@ -7,6 +7,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Thumbnails;
@@ -193,7 +194,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IStartupStatus, StartupStatus>();
 
         // Discovery progress cache for real-time updates
-        _ = services.AddSingleton<Services.IDiscoveryProgressCache, Services.DiscoveryProgressCache>();
+        _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
         _ = services.AddScoped<Services.Interfaces.IDiscoveryProxyService, Services.DiscoveryProxyService>();
@@ -421,9 +422,17 @@ public static class ServiceCollectionExtensions
     private static void RegisterPrinterServices(IServiceCollection services)
     {
         // Register the backend client factory for unified access to all backend clients
+        // The factory dynamically discovers clients from plugins via IBackendPluginRegistry
         // This eliminates the need to pass individual backend clients (Moon, Prusa, SDCP, OctoPrint)
         // to PrintersService, making it easier to add new backends without modifying the constructor
-        _ = services.AddSingleton<Services.Printers.IBackendClientFactory, Services.Printers.BackendClientFactory>();
+        _ = services.AddSingleton<Services.Printers.IBackendClientFactory>(provider =>
+        {
+            var serviceProvider = provider;
+            var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            
+            return new Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, logger);
+        });
         
         // Register the backend capability factory for capability-aware client retrieval
         // This factory now integrates with the plugin registry for backend metadata
@@ -437,12 +446,7 @@ public static class ServiceCollectionExtensions
             return new Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
         });
 
-        // Register status clients (now handled by plugins via RegisterAdditionalServices)
-        // The factory will discover these from the plugin registry
-        RegisterStatusClientsFromPlugins(services);
-        
-        // Register the printer status client factory for backend-specific status retrieval
-        // This factory now uses plugin registry to discover status clients
+        // Register the factory for getting printer status clients from plugins
         _ = services.AddSingleton<Services.Printers.IPrinterStatusClientFactory>(provider =>
         {
             var serviceProvider = provider;
@@ -452,9 +456,6 @@ public static class ServiceCollectionExtensions
             return new Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
         });
         
-        // Register the printer status DTO builder for centralizing DTO construction logic
-        _ = services.AddScoped<Services.Printers.IPrinterStatusDtoBuilder, Services.Printers.PrinterStatusDtoBuilder>();
-        
         // Register the printer status fallback service for timeout and circuit breaker management
         _ = services.AddScoped<Services.Printers.IPrinterStatusFallbackService, Services.Printers.PrinterStatusFallbackService>();
 
@@ -462,7 +463,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.Printers.IMultiPrinterStatusCoordinator, Services.Printers.MultiPrinterStatusCoordinator>();
 
         _ = services.AddScoped<Services.Printers.IPrintersService, Services.Printers.PrintersService>();
-        _ = services.AddScoped<Services.Interfaces.IMoonrakerDiagnosticsService, Services.MoonrakerDiagnosticsService>();
         _ = services.AddScoped<Services.Interfaces.IPrinterCapabilityDiscoveryService, Services.PrinterCapabilityDiscoveryService>();
         _ = services.AddScoped<Services.PrinterCapabilities.IPrinterCapabilitiesService, Services.PrinterCapabilities.PrinterCapabilitiesService>();
     }

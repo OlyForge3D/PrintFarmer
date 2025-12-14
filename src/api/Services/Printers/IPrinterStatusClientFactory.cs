@@ -39,8 +39,9 @@ namespace Farm.Web.Api.Services.Printers
 
     /// <summary>
     /// Default implementation of IPrinterStatusClientFactory.
-    /// Manages backend-specific printer status clients using plugin registry.
-    /// Dynamically discovers status clients from registered plugins.
+    /// Manages backend-specific printer status clients using plugin discovery with BackendId.
+    /// This maintains extensibility by discovering status clients from the plugin registry
+    /// rather than hardcoding individual client injections.
     /// </summary>
     public class PrinterStatusClientFactory : IPrinterStatusClientFactory
     {
@@ -59,48 +60,90 @@ namespace Farm.Web.Api.Services.Printers
             _logger = logger;
             _clients = new Dictionary<PrinterBackend, IPrinterStatusClient>();
 
-            // Discover status clients from plugins
             DiscoverStatusClientsFromPlugins(serviceProvider, pluginRegistry);
         }
 
         /// <summary>
-        /// Discovers status clients from all registered plugins and caches them.
+        /// Discovers and registers status clients from the plugin registry.
+        /// Reads BackendId from the BackendPluginAttribute for unique identification.
+        /// Detects and logs duplicate BackendIds as errors.
         /// </summary>
         private void DiscoverStatusClientsFromPlugins(IServiceProvider serviceProvider, IBackendPluginRegistry pluginRegistry)
         {
             try
             {
-                foreach (var plugin in pluginRegistry.GetAllExtendedPlugins())
+                var plugins = pluginRegistry.GetAllExtendedPlugins();
+                var discoveredCount = 0;
+                var duplicateIds = new HashSet<int>();
+
+                foreach (var plugin in plugins)
                 {
+                    if (plugin.StatusClientType == null)
+                    {
+                        _logger.LogDebug($"Plugin {plugin.DisplayName} has no status client type, skipping.");
+                        continue;
+                    }
+
                     try
                     {
-                        // Skip plugins without status clients
-                        if (plugin.StatusClientType == null || plugin.StatusClientInterfaceType == null)
+                        // Read BackendId from the BackendPluginAttribute on the plugin's assembly
+                        var pluginAssembly = plugin.GetType().Assembly;
+                        var backendAttr = pluginAssembly.GetCustomAttributes(typeof(Farm.Backend.Plugin.Core.BackendPluginAttribute), false)
+                            .FirstOrDefault() as Farm.Backend.Plugin.Core.BackendPluginAttribute;
+
+                        if (backendAttr == null)
                         {
+                            _logger.LogWarning($"Plugin {plugin.DisplayName} assembly is missing BackendPluginAttribute, skipping.");
                             continue;
                         }
 
-                        // Try to get the status client from the service provider
-                        var statusClient = serviceProvider.GetService(plugin.StatusClientInterfaceType);
+                        var backendId = (PrinterBackend)backendAttr.BackendId;
+
+                        // Check for duplicate BackendId
+                        if (_clients.ContainsKey(backendId))
+                        {
+                            _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.DisplayName} has BackendId={backendAttr.BackendId} but it's already registered. This will cause incorrect backend routing.");
+                            duplicateIds.Add(backendAttr.BackendId);
+                            continue;
+                        }
+
+                        var statusClient = serviceProvider.GetService(plugin.StatusClientType);
                         if (statusClient is IPrinterStatusClient printerStatusClient)
                         {
-                            // Map the backend type string to PrinterBackend enum
-                            if (Enum.TryParse<PrinterBackend>(plugin.BackendType, ignoreCase: true, out var backend))
-                            {
-                                _clients[backend] = printerStatusClient;
-                                _logger.LogInformation($"Registered status client for backend: {plugin.BackendType}");
-                            }
+                            // Register with BackendId as the unique key
+                            _clients[backendId] = printerStatusClient;
+                            discoveredCount++;
+                            _logger.LogInformation($"✓ Registered status client: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.StatusClientType.Name})");
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"Plugin {plugin.DisplayName} status client type {plugin.StatusClientType.Name} does not implement IPrinterStatusClient.");
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"Failed to register status client for plugin {plugin.BackendType}: {ex.Message}");
+                        _logger.LogWarning($"Failed to instantiate status client for plugin {plugin.DisplayName}: {ex.Message}");
                     }
+                }
+
+                if (discoveredCount == 0)
+                {
+                    _logger.LogWarning("No status clients were discovered from plugins. Factory will not have any backends registered.");
+                }
+                else
+                {
+                    _logger.LogInformation($"PrinterStatusClientFactory initialized with {discoveredCount} status client(s): {string.Join(", ", _clients.Keys)}");
+                }
+
+                if (duplicateIds.Count > 0)
+                {
+                    throw new InvalidOperationException($"Duplicate BackendIds detected: {string.Join(", ", duplicateIds)}. Each plugin must have a unique BackendId.");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error discovering status clients from plugins");
+                _logger.LogError($"Error discovering status clients from plugins: {ex.Message}");
+                throw;
             }
         }
 

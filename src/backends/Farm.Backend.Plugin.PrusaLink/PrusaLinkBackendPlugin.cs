@@ -1,21 +1,16 @@
 namespace Farm.Backend.Plugin.PrusaLink;
 
 using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 /// <summary>
 /// Plugin descriptor for PrusaLink backend client support.
-/// The actual client implementation lives in Farm.Web.Api.Services.
-/// This plugin now supports extended functionality for status clients and additional services.
+/// All PrusaLink-specific implementations (client, status client, services) are contained within this plugin.
 /// </summary>
 public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
 {
-    private const string ClientTypeName = "Farm.Web.Api.Services.PrusaLinkClient";
-    private const string InterfaceTypeName = "Farm.Web.Api.Services.Interfaces.IPrusaLinkClient";
-    private const string StatusClientTypeName = "Farm.Web.Api.Services.Printers.PrusaLinkStatusClient";
-    private const string StatusClientInterfaceTypeName = "Farm.Web.Api.Services.Printers.IPrinterStatusClient";
-
     /// <summary>
     /// Gets the unique identifier for this backend client plugin.
     /// </summary>
@@ -34,48 +29,22 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
     /// <summary>
     /// Gets the backend client type provided by this plugin.
     /// </summary>
-    public Type ClientType => GetTypeFromApi(ClientTypeName);
+    public Type ClientType => typeof(PrusaLinkClient);
 
     /// <summary>
     /// Gets the backend client interface type that this plugin implements.
     /// </summary>
-    public Type ClientInterfaceType => GetTypeFromApi(InterfaceTypeName);
+    public Type ClientInterfaceType => typeof(IPrusaLinkClient);
 
     /// <summary>
     /// Gets the status client type for real-time printer status updates.
     /// </summary>
-    public Type? StatusClientType
-    {
-        get
-        {
-            try
-            {
-                return GetTypeFromApi(StatusClientTypeName);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-    }
+    public Type? StatusClientType => typeof(PrusaLinkStatusClient);
 
     /// <summary>
-    /// Gets the status client interface type.
+    /// Gets the interface type for the status client.
     /// </summary>
-    public Type? StatusClientInterfaceType
-    {
-        get
-        {
-            try
-            {
-                return GetTypeFromApi(StatusClientInterfaceTypeName);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-    }
+    public Type? StatusClientInterfaceType => typeof(IPrinterStatusClient);
 
     /// <summary>
     /// Gets the version of this plugin.
@@ -98,103 +67,23 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
-        // Register the status client for this backend
-        // Status clients are instantiated on-demand by the PrinterStatusClientFactory
-        try
+        // Register the PrusaLink API client (internal helper)
+        services.AddScoped<IPrusaLinkApiClient, PrusaLinkApiClient>();
+
+        // Register the PrusaLink client interface with its implementation
+        // The HTTP client factory handles creation with proper timeout
+        services.AddHttpClient<IPrusaLinkClient, PrusaLinkClient>(client =>
         {
-            // Get the status client type
-            if (StatusClientType != null && StatusClientInterfaceType != null)
-            {
-                // Register the status client with the interface
-                // We use AddSingleton because status clients are stateless (they use injected clients)
-                var statusClientType = StatusClientType;
-                var statusClientInterfaceType = StatusClientInterfaceType;
-                
-                services.AddSingleton(statusClientInterfaceType, serviceProvider =>
-                {
-                    // Dynamically create an instance of the status client using reflection
-                    // The status client constructor should take dependencies from the service provider
-                    var constructors = statusClientType.GetConstructors();
-                    if (constructors.Length > 0)
-                    {
-                        var constructor = constructors[0];
-                        var parameters = constructor.GetParameters();
-                        var paramInstances = new object?[parameters.Length];
-                        
-                        for (int i = 0; i < parameters.Length; i++)
-                        {
-                            paramInstances[i] = serviceProvider.GetService(parameters[i].ParameterType);
-                        }
-                        
-                        return Activator.CreateInstance(statusClientType, paramInstances)
-                            ?? throw new InvalidOperationException($"Failed to create instance of {statusClientType.Name}");
-                    }
-                    
-                    throw new InvalidOperationException($"No public constructors found for {statusClientType.Name}");
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Error registering status client for PrusaLink: {ex.Message}");
-        }
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+
+        // Register the PrusaLink status client for real-time status updates
+        // Status clients implement IPrinterStatusClient and are instantiated by the PrinterStatusClientFactory
+        services.AddSingleton<IPrinterStatusClient, PrusaLinkStatusClient>();
 
         // Register the PrusaLinkPollingService hosted service
         // This service polls PrusaLink printers for status updates every 5 seconds
-        try
-        {
-            var pollingServiceTypeName = "Farm.Web.Api.Services.PrusaLinkPollingService";
-            var pollingServiceType = GetTypeFromApi(pollingServiceTypeName);
-            
-            // Register as hosted service (IHostedService will be implemented)
-            services.AddHostedService(sp =>
-            {
-                var constructors = pollingServiceType.GetConstructors();
-                if (constructors.Length > 0)
-                {
-                    var constructor = constructors[0];
-                    var parameters = constructor.GetParameters();
-                    var paramInstances = new object?[parameters.Length];
-                    
-                    for (int i = 0; i < parameters.Length; i++)
-                    {
-                        paramInstances[i] = sp.GetService(parameters[i].ParameterType);
-                    }
-                    
-                    var instance = Activator.CreateInstance(pollingServiceType, paramInstances)
-                        ?? throw new InvalidOperationException($"Failed to create instance of {pollingServiceType.Name}");
-                    
-                    return (IHostedService)instance;
-                }
-                
-                throw new InvalidOperationException($"No public constructors found for {pollingServiceType.Name}");
-            });
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Error registering PrusaLinkPollingService: {ex.Message}");
-        }
-
-        // Register the HTTP client for PrusaLink backend
-        // This allows the PrusaLinkClient to make HTTP requests with proper timeout handling
-        try
-        {
-            var prusaLinkClientInterfaceTypeName = "Farm.Web.Api.Services.Interfaces.IPrusaLinkClient";
-            var prusaLinkClientTypeName = "Farm.Web.Api.Services.PrusaLinkClient";
-            
-            var clientInterfaceType = GetTypeFromApi(prusaLinkClientInterfaceTypeName);
-            var clientType = GetTypeFromApi(prusaLinkClientTypeName);
-            
-            // Register HTTP client with 10-second timeout
-            services.AddHttpClientFromPlugin(clientInterfaceType, clientType, client =>
-            {
-                client.Timeout = TimeSpan.FromSeconds(10);
-            });
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Error registering HTTP client for PrusaLink: {ex.Message}");
-        }
+        services.AddSingleton<IHostedService, PrusaLinkPollingService>();
     }
 
     /// <summary>
@@ -203,23 +92,14 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
     /// <returns>An enumerable of capability interface types.</returns>
     public IEnumerable<Type> GetCapabilities()
     {
-        var capabilityNames = new[]
+        return new[]
         {
-            "ISupportsFileList",
-            "ISupportsFileUpload",
-            "ISupportsStartPrint",
-            "ISupportsHistory",
-            "ISupportsTemperatureControl",
-            "ISupportsControlOperations",
-            "ISupportsCamera",
-            "ISupportsFileMetadata"
+            typeof(ISupportsFileList),
+            typeof(ISupportsFileUpload),
+            typeof(ISupportsStartPrint),
+            typeof(ISupportsCamera),
+            typeof(ISupportsPrinterInformation)
         };
-
-        return capabilityNames
-            .Select(name => GetTypeFromApi($"Farm.Web.Api.Services.Interfaces.{name}"))
-            .Where(t => t != null)
-            .Cast<Type>()
-            .ToList();
     }
 
     /// <summary>
@@ -229,20 +109,5 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
     public IEnumerable<string> GetConfigurationSections()
     {
         return new[] { "PrusaLink" };
-    }
-
-    private static Type GetTypeFromApi(string fullyQualifiedTypeName)
-    {
-        var assembly = AppDomain.CurrentDomain.GetAssemblies()
-            .FirstOrDefault(a => a.GetName().Name == "Farm.Web.Api");
-
-        if (assembly == null)
-            throw new InvalidOperationException($"Assembly Farm.Web.Api not found");
-
-        var type = assembly.GetType(fullyQualifiedTypeName);
-        if (type == null)
-            throw new InvalidOperationException($"Type {fullyQualifiedTypeName} not found in Farm.Web.Api assembly");
-
-        return type;
     }
 }

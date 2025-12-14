@@ -1,6 +1,7 @@
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 

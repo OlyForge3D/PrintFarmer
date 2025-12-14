@@ -1,5 +1,5 @@
 using Farm.Infrastructure;
-using Farm.Web.Api.Services;
+using Farm.Infrastructure.Services;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services;

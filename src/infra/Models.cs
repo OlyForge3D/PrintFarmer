@@ -106,7 +106,7 @@ public partial record PrinterDto(
     string? OriginalServerUrl = null,
     string? IpAddress = null,
     PrinterSpoolInfoDto? SpoolInfo = null,
-    int BackendPort = 80,
+    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint), 8080 (SDCP). See PrinterBackendHelpers.GetDefaultPort()
     int? FrontendPort = null);
 
 // Non-breaking typed accessors for URL-like fields (ignored in JSON)
@@ -168,7 +168,7 @@ public partial record PrinterBasicDto(
     string? ApiKey = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null,
-    int BackendPort = 80,
+    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint), 8080 (SDCP). See PrinterBackendHelpers.GetDefaultPort()
     int? FrontendPort = null);
 
 public partial record PrinterBasicDto

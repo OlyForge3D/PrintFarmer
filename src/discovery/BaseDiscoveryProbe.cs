@@ -69,8 +69,7 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
                 DiscoveredPrinterDto dto = new DiscoveredPrinterDto
                 {
                     IpAddress = ipAddress,
-                    // Only store BackendPort if it differs from the default port for this backend
-                    BackendPort = port == PrinterBackendHelpers.GetDefaultPort(Backend) ? null : port,
+                    BackendPort = port,
                     Backend = Backend,
                     ServerUrl = $"http://{ipAddress}",
                     Name = hostName ?? PrinterName

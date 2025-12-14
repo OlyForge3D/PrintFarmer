@@ -1,4 +1,5 @@
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Services.Interfaces;
 
 namespace Farm.Web.Api.Services.Printers;

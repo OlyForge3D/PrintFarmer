@@ -19,6 +19,7 @@ namespace Farm.Web.Api.Services.Printers
         Task SaveCapabilitiesAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, CancellationToken ct);
         Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct);
         Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct);
+        Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
         Task<Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities>> GetCapabilitiesDictionaryAsync(Guid[]? ids, CancellationToken ct);
         Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct);
         Task<Farm.Infrastructure.Domain.PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct);
@@ -45,9 +46,7 @@ namespace Farm.Web.Api.Services.Printers
         string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl);
 
         // Return normalized server URLs for all printers (for discovery exclusion checks)
-        Task<HashSet<string>> GetAllNormalizedServerUrlsAsync(int defaultPort, CancellationToken ct);
-        // Normalize a server URL (ensures scheme and default port) for stable comparisons
-        string NormalizeServerUrl(string? input, int defaultPort);
+
 
         // High-level printer operations that previously lived in controllers
         Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct);

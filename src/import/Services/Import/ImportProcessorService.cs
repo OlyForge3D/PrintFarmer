@@ -185,10 +185,9 @@ public class ImportProcessorService : IImportProcessorService
             }
         }
 
-        int defaultPort = PrinterBackendHelpers.GetDefaultPort(dto.Backend);
         string normalizedInput = dto.ServerUrl ?? string.Empty;
 
-        // Strip port from ServerUrl - port is managed via FrontendPort field, not stored in ServerUrl
+        // Strip port from ServerUrl - port is managed via BackendPort field, not stored in ServerUrl
         string serverUrlWithoutPort = StripPortFromServerUrl(normalizedInput);
 
         var p = new Farm.Infrastructure.Domain.Printer

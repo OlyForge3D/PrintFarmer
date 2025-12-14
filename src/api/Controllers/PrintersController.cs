@@ -553,16 +553,14 @@ public class PrintersController(
             {
                 _logger.LogInformation(
                     $"Processing discovered printer: {discovered.Name} " +
-                    $"({discovered.IpAddress}:{discovered.BackendPort ?? 80}) - Backend: {discovered.Backend}");
+                    $"({discovered.IpAddress}:{discovered.BackendPort}) - Backend: {discovered.Backend}");
 
-                // Check if printer already exists by normalized server URL
-                string normalizedUrl = _printersService.NormalizeServerUrl(discovered.ServerUrl, discovered.BackendPort ?? 80);
-                Printer? existing = (await _printersService.GetAllAsync(ct))
-                    .FirstOrDefault(p => _printersService.NormalizeServerUrl(p.ServerUrl, 80) == normalizedUrl);
+                // Check if printer already exists by IP address
+                Printer? existing = await _printersService.FindByIpAddressAsync(discovered.ServerUrl, ct);
 
                 if (existing != null)
                 {
-                    _logger.LogInformation($"Printer already registered: {existing.Name}");
+                    _logger.LogInformation($"Printer already registered: {existing.Name} (IP: {existing.IpAddress})");
                     PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
@@ -730,8 +728,6 @@ public class PrintersController(
         }
 
         p.Name = dto.Name;
-        PrinterBackend backendForPort = dto.Backend ?? (PrinterBackend)p.Backend;
-        int defaultPort = PrinterBackendHelpers.GetDefaultPort(backendForPort);
 
         // Delegate normalization and optional hostname resolution to the PrintersService
         PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
@@ -869,7 +865,6 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
         // Delegate hostname normalization and resolution to the service
-        int defaultPort = PrinterBackendHelpers.GetDefaultPort(body.Backend);
         try
         {
             ResolveHostnameResponse resp = await _printersService.ResolveHostnameAsync(body.ServerUrl, body.Backend, ct);

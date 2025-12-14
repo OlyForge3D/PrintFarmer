@@ -82,72 +82,7 @@ namespace Farm.Web.Api.Tests.Services
             Assert.Null(printer);
         }
 
-        #region URL Normalization Tests
-
-        /// <summary>
-        /// Tests that NormalizeServerUrl removes explicit port numbers and returns only scheme + host
-        /// This ensures ServerUrl is stored cleanly without port information
-        /// </summary>
-        [Theory]
-        [InlineData("http://192.168.1.100:7125", 7125, "http://192.168.1.100")]
-        [InlineData("http://printer.local:7125", 7125, "http://printer.local")]
-        [InlineData("http://192.168.1.100", 7125, "http://192.168.1.100")]
-        [InlineData("https://printer.local:443", 443, "https://printer.local")]
-        [InlineData("https://192.168.1.100:8443", 8443, "https://192.168.1.100")]
-        [InlineData("http://192.168.1.100:80", 80, "http://192.168.1.100")]
-        [InlineData("http://192.168.1.100:80/api/path?query=1", 80, "http://192.168.1.100")]
-        public void NormalizeServerUrl_RemovesPortAndPath_ReturnsSchemeAndHostOnly(string input, int defaultPort, string expected)
-        {
-            // Arrange
-            PrintersService service = CreatePrintersService();
-
-            // Act
-            string result = service.NormalizeServerUrl(input, defaultPort);
-
-            // Assert
-            Assert.Equal(expected, result);
-        }
-
-        /// <summary>
-        /// Tests that NormalizeServerUrl handles URLs without explicit ports correctly
-        /// Port -1 in UriBuilder means "use default, don't show in URL"
-        /// </summary>
-        [Theory]
-        [InlineData("192.168.1.100", 7125, "http://192.168.1.100")]
-        [InlineData("printer.local", 7125, "http://printer.local")]
-        [InlineData("http://192.168.1.100", 7125, "http://192.168.1.100")]
-        public void NormalizeServerUrl_AddsScheme_ReturnsNormalizedUrl(string input, int defaultPort, string expected)
-        {
-            // Arrange
-            PrintersService service = CreatePrintersService();
-
-            // Act
-            string result = service.NormalizeServerUrl(input, defaultPort);
-
-            // Assert
-            Assert.Equal(expected, result);
-        }
-
-        /// <summary>
-        /// Tests that NormalizeServerUrl handles edge cases and invalid input gracefully
-        /// </summary>
-        [Theory]
-        [InlineData(null, 7125)]
-        [InlineData("", 7125)]
-        [InlineData("   ", 7125)]
-        public void NormalizeServerUrl_NullOrWhitespace_ReturnsEmptyString(string? input, int defaultPort)
-        {
-            // Arrange
-            PrintersService service = CreatePrintersService();
-
-            // Act
-            string result = service.NormalizeServerUrl(input, defaultPort);
-
-            // Assert
-            Assert.Equal(string.Empty, result);
-        }
-
-        /// <summary>
+        #region
         /// Tests that ResolveHostnameAsync returns normalized URLs without ports
         /// Ensures that even after DNS resolution, ports are not added to ServerUrl
         /// </summary>

@@ -7,10 +7,12 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
+using Farm.Web.Api.Services.Printers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -96,9 +98,7 @@ public partial class HarvestWorkerService(
         IHarvestRepository harvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
         IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
         IGcodeRepository gcodeRepo = scope.ServiceProvider.GetRequiredService<IGcodeRepository>();
-        IMoonrakerClient moonraker = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
-        IPrusaLinkClient prusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
-        ISdcpClient sdcp = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
+        IBackendClientFactory backendClientFactory = scope.ServiceProvider.GetRequiredService<IBackendClientFactory>();
 
         _logger.LogDebug($"Processing file job: {job}", null, null);
 
@@ -181,7 +181,7 @@ public partial class HarvestWorkerService(
             {
                 // Download and process file
                 PrinterBackend backend = (PrinterBackend)printer.Backend;
-                using MemoryStream? fileContent = await DownloadFileAsync(backend, printer, job.FilePath, moonraker, prusa, sdcp);
+                using MemoryStream? fileContent = await DownloadFileAsync(backend, printer, job.FilePath, backendClientFactory);
 
                 if (fileContent != null)
                 {
@@ -355,94 +355,38 @@ public partial class HarvestWorkerService(
         PrinterBackend backend,
         Printer printer,
         string filePath,
-        IMoonrakerClient moonraker,
-        IPrusaLinkClient prusa,
-        ISdcpClient sdcp)
+        IBackendClientFactory backendClientFactory)
     {
         try
         {
-            return backend switch
+            IBackendClient client = backendClientFactory.GetBackendClient(backend);
+            
+            // Only Moonraker currently supports file downloads
+            if (client is ISupportsFileDownload downloadClient)
             {
-                PrinterBackend.Moonraker => await DownloadMoonrakerFileAsync(printer.ServerUrl, filePath, moonraker),
-                PrinterBackend.PrusaLink => await DownloadPrusaLinkFileAsync(printer.ServerUrl, printer.ApiKey, filePath, prusa),
-                PrinterBackend.SDCP => await DownloadSdcpFileAsync(printer.ServerUrl, filePath, sdcp),
-                _ => null
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Failed to download file {filePath} from {printer.ServerUrl}", null, null);
-            return null;
-        }
-    }
+                string backendUrl = backend == PrinterBackend.Moonraker
+                    ? $"{printer.ServerUrl}:{printer.FrontendPort}"
+                    : printer.BackendUrl;
+                
+                byte[]? bytes = await downloadClient.DownloadFileAsync(backendUrl, filePath);
+                if (bytes != null)
+                {
+                    return new MemoryStream(bytes);
+                }
 
-    private async Task<MemoryStream?> DownloadMoonrakerFileAsync(string serverUrl, string filePath, IMoonrakerClient moonraker)
-    {
-        try
-        {
-            byte[]? bytes = await moonraker.DownloadFileAsync(serverUrl, filePath);
-            if (bytes != null)
-            {
-                return new MemoryStream(bytes);
+                _logger.LogWarning($"Failed to download file {filePath} from {backend} at {backendUrl}", null, null);
+                return null;
             }
 
-            _logger.LogWarning($"Failed to download file {filePath} from Moonraker at {serverUrl}", null, null);
+            _logger.LogWarning($"Backend {backend} does not support file downloads for {filePath}", null, null);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to download file {filePath} from Moonraker at {serverUrl}", null, null);
+            _logger.LogError(ex, $"Failed to download file {filePath} from {backend}", null, null);
             return null;
         }
     }
-
-    private async Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string filePath)
-    {
-        try
-        {
-            // PrusaLink file download implementation would go here
-            _logger.LogInformation($"PrusaLink file download not yet implemented for {filePath} at {serverUrl}", null, null);
-            await Task.Delay(1); // Prevent compiler warning
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Failed to download file {filePath} from PrusaLink at {serverUrl}", null, null);
-            return null;
-        }
-    }
-
-    // Wrapper to satisfy call sites expecting apiKey and client parameters (currently unused)
-#pragma warning disable S1172 // Remove this unused method parameter
-    private Task<MemoryStream?> DownloadPrusaLinkFileAsync(string serverUrl, string? apiKey, string filePath, IPrusaLinkClient prusa)
-        => DownloadPrusaLinkFileAsync(serverUrl, filePath);
-#pragma warning restore S1172
-
-    // Note: No wrapper overload needed; use the primary method above.
-
-    private async Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath)
-    {
-        try
-        {
-            // SDCP file download implementation would go here
-            _logger.LogInformation($"SDCP file download not yet implemented for {filePath} at {serverUrl}", null, null);
-            await Task.Delay(1); // Prevent compiler warning
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Failed to download file {filePath} from SDCP at {serverUrl}", null, null);
-            return null;
-        }
-    }
-
-    // Wrapper to satisfy call sites expecting a client parameter (currently unused)
-#pragma warning disable S1172 // Remove this unused method parameter
-    private Task<MemoryStream?> DownloadSdcpFileAsync(string serverUrl, string filePath, ISdcpClient sdcp)
-        => DownloadSdcpFileAsync(serverUrl, filePath);
-#pragma warning restore S1172
-
-    // Note: No wrapper overload needed; use the primary method above.
 
     private static async Task<string> CalculateFileHashAsync(Stream stream)
     {
