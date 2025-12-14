@@ -79,19 +79,53 @@ public class PrintersControllerTests
                 Backend: PrinterBackend.PrusaLink)
         };
 
+        var completePrinters = printers.Select(p => new CompletePrinterDto(
+            // Static config
+            Id: p.Id,
+            Name: p.Name,
+            ServerUrl: p.ServerUrl,
+            Notes: p.Notes,
+            ManufacturerName: p.ManufacturerName,
+            ModelName: p.ModelName,
+            Backend: p.Backend,
+            ApiKey: p.ApiKey,
+            OriginalServerUrl: p.OriginalServerUrl,
+            IpAddress: p.IpAddress,
+            BackendPort: p.BackendPort,
+            FrontendPort: p.FrontendPort,
+            InMaintenance: p.InMaintenance,
+            IsEnabled: p.IsEnabled,
+            // Live status
+            IsOnline: p.IsOnline,
+            State: p.State,
+            Progress: null,
+            JobName: null,
+            ThumbnailUrl: null,
+            CameraStreamUrl: null,
+            X: null,
+            Y: null,
+            Z: null,
+            HotendTemp: null,
+            BedTemp: null,
+            HotendTarget: null,
+            BedTarget: null,
+            HomedAxes: null,
+            SpoolInfo: null
+        )).ToArray();
+
         _printersServiceMock
-            .Setup(s => s.GetAllFastDtosAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(printers.ToArray());
+            .Setup(s => s.GetAllCompleteDtosAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(completePrinters);
 
         // Act
         var result = await _controller.GetAsync(CancellationToken.None, false);
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedPrinters = Assert.IsAssignableFrom<IEnumerable<PrinterFastDto>>(okResult.Value);
+        var returnedPrinters = Assert.IsAssignableFrom<IEnumerable<CompletePrinterDto>>(okResult.Value);
         Assert.Equal(2, returnedPrinters.Count());
 
-        _printersServiceMock.Verify(s => s.GetAllFastDtosAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _printersServiceMock.Verify(s => s.GetAllCompleteDtosAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -99,15 +133,15 @@ public class PrintersControllerTests
     {
         // Arrange
         _printersServiceMock
-            .Setup(s => s.GetAllFastDtosAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<PrinterFastDto>());
+            .Setup(s => s.GetAllCompleteDtosAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<CompletePrinterDto>());
 
         // Act
         var result = await _controller.GetAsync(CancellationToken.None, false);
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedPrinters = Assert.IsAssignableFrom<IEnumerable<PrinterFastDto>>(okResult.Value);
+        var returnedPrinters = Assert.IsAssignableFrom<IEnumerable<CompletePrinterDto>>(okResult.Value);
         Assert.Empty(returnedPrinters);
     }
 
@@ -116,7 +150,7 @@ public class PrintersControllerTests
     {
         // Arrange
         _printersServiceMock
-            .Setup(s => s.GetAllFastDtosAsync(It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetAllCompleteDtosAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("no such table"));
 
         // Act
@@ -124,7 +158,7 @@ public class PrintersControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedPrinters = Assert.IsAssignableFrom<IEnumerable<PrinterFastDto>>(okResult.Value);
+        var returnedPrinters = Assert.IsAssignableFrom<IEnumerable<CompletePrinterDto>>(okResult.Value);
         Assert.Empty(returnedPrinters);
     }
 

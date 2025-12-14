@@ -88,6 +88,7 @@ export interface Printer {
   bedTemp?: number;
   hotendTarget?: number;
   bedTarget?: number;
+  homedAxes?: string;
   backend: PrinterBackend;
   apiKey?: string;
   originalServerUrl?: string;

@@ -28,6 +28,8 @@ namespace Farm.Web.Api.Services.Printers
         Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct);
         Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct);
         Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct);
+        // Get complete printer DTOs with live status merged in (replaces GetAllFastDtosAsync for new API)
+        Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct);
         // Export helpers: build CSV bytes or stream export directly
         Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct);
         Task StreamExportToResponseAsync(Guid[]? ids, string format, HttpResponse response, CancellationToken ct);

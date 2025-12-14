@@ -35,16 +35,6 @@ export function usePrinterDisplay(printer: Printer): PrinterDisplay {
   const { printerStatuses } = usePrinterStatusUpdates();
   const signalRStatus = printerStatuses.get(printer.id);
 
-  // DEBUG: Log what we're getting
-  if (printer.name === 'Moonraker' || printer.name.includes('Moonraker')) {
-    console.log(`[usePrinterDisplay] ${printer.name}:`, {
-      apiIsOnline: printer.isOnline,
-      signalRIsOnline: signalRStatus?.isOnline,
-      hasSignalR: signalRStatus !== undefined,
-      signalRStatus: signalRStatus
-    });
-  }
-
   // Compute display values - prefer SignalR, fall back to API
   return useMemo(() => {
     const isRealtimeStatus = signalRStatus !== undefined;

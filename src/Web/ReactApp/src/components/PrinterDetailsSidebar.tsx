@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, FileText, History } from 'lucide-react';
-import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 import { usePrinter } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
@@ -79,9 +78,6 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
   const { data: printer, isLoading, refetch } = usePrinter(printerId || '');
   
-  // Get display printer data (merged API + real-time SignalR)
-  const displayPrinter = printer ? usePrinterDisplay(printer) : null;
-  
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [hotendTemp, setHotendTemp] = useState<number | ''>('');
@@ -118,6 +114,9 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   if (!printerId) {
     return null;
   }
+  
+  // API now returns complete printer DTO with status merged in - no client-side merge needed
+  const displayPrinter = printer;
   
   // Update refs when display printer changes - refs don't trigger re-renders
   if (displayPrinter) {
@@ -705,41 +704,41 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           <div className="mt-4 pt-4 border-t border-pf-border">
             <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-2">Spool</div>
             <div className="space-y-2 text-xs">
-              {status.spoolInfo.vendor && (
+              {displayPrinter.spoolInfo.vendor && (
                 <div className="flex justify-between">
                   <span className="text-pf-text-secondary">Vendor:</span>
-                  <span className="text-pf-text-primary font-medium">{status.spoolInfo.vendor}</span>
+                  <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.vendor}</span>
                 </div>
               )}
-              {status.spoolInfo.material && (
+              {displayPrinter.spoolInfo.material && (
                 <div className="flex justify-between">
                   <span className="text-pf-text-secondary">Material:</span>
-                  <span className="text-pf-text-primary font-medium">{status.spoolInfo.material}</span>
+                  <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.material}</span>
                 </div>
               )}
-              {status.spoolInfo.colorHex && (
+              {displayPrinter.spoolInfo.colorHex && (
                 <div className="flex justify-between items-center">
                   <span className="text-pf-text-secondary">Color:</span>
                   <div className="flex items-center gap-2">
                     <div 
                       className="w-3 h-3 rounded border border-pf-border"
-                      style={{ backgroundColor: status.spoolInfo.colorHex }}
-                      title={status.spoolInfo.colorHex}
+                      style={{ backgroundColor: displayPrinter.spoolInfo.colorHex }}
+                      title={displayPrinter.spoolInfo.colorHex}
                     />
-                    <span className="text-pf-text-primary font-medium">{status.spoolInfo.colorHex}</span>
+                    <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.colorHex}</span>
                   </div>
                 </div>
               )}
-              {status.spoolInfo.spoolName && (
+              {displayPrinter.spoolInfo.spoolName && (
                 <div className="flex justify-between">
                   <span className="text-pf-text-secondary">Spool:</span>
-                  <span className="text-pf-text-primary font-medium">{status.spoolInfo.spoolName}</span>
+                  <span className="text-pf-text-primary font-medium">{displayPrinter.spoolInfo.spoolName}</span>
                 </div>
               )}
-              {status.spoolInfo.remainingWeightG !== undefined && status.spoolInfo.remainingWeightG !== null && (
+              {displayPrinter.spoolInfo.remainingWeightG !== undefined && displayPrinter.spoolInfo.remainingWeightG !== null && (
                 <div className="flex justify-between">
                   <span className="text-pf-text-secondary">Remaining:</span>
-                  <span className="text-pf-text-primary font-medium">{Math.round(status.spoolInfo.remainingWeightG)}g</span>
+                  <span className="text-pf-text-primary font-medium">{Math.round(displayPrinter.spoolInfo.remainingWeightG)}g</span>
                 </div>
               )}
             </div>

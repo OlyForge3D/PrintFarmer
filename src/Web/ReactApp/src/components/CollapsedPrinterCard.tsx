@@ -6,7 +6,7 @@ import { PauseIcon, PlayIcon, EmergencyStopIcon } from '@/components/icons/MdiIc
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/components/PrinterFilesModal';
-import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
+import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
 import { PrinterBackend, type Printer } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
@@ -64,18 +64,19 @@ export function CollapsedPrinterCard({
   const [showFiles, setShowFiles] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
-  // Get display printer data (merged API + real-time SignalR)
-  const displayPrinter = usePrinterDisplay(printer);
+  // Get real-time status updates from SignalR
+  const { printerStatuses } = usePrinterStatusUpdates();
+  const realtimeStatus = printerStatuses.get(printer.id);
   
-  // State helpers
-  const isOnline = displayPrinter.isOnline ?? false;
-  const state = displayPrinter.state ?? 'Unknown';
+  // Merge API data with real-time SignalR status (prefer SignalR when available)
+  const isOnline = realtimeStatus?.isOnline ?? printer.isOnline ?? false;
+  const state = realtimeStatus?.state ?? printer.state ?? 'Unknown';
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
   // Only support cameras for Moonraker and OctoPrint backends
   const supportsCameras = printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint;
-  const hasCameraUrls = supportsCameras && !!displayPrinter.cameraSnapshotUrl;
+  const hasCameraUrls = supportsCameras && !!(realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl);
 
   // State color classes
   const getStateColorClasses = (isOnline: boolean, state: string): string => {
@@ -247,18 +248,18 @@ export function CollapsedPrinterCard({
       </div>
 
       {/* Progress bar for active prints */}
-      {isOnline && displayPrinter.progress !== undefined && displayPrinter.progress > 0 && (
+      {isOnline && (realtimeStatus?.progress ?? printer.progress) !== undefined && (realtimeStatus?.progress ?? printer.progress) > 0 && (
         <div className="mt-3">
           <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-            <span className="truncate flex-1">{displayPrinter.jobName || 'Printing...'}</span>
-            <span className="font-semibold ml-2">{Math.round(displayPrinter.progress)}%</span>
+            <span className="truncate flex-1">{(realtimeStatus?.jobName ?? printer.jobName) || 'Printing...'}</span>
+            <span className="font-semibold ml-2">{Math.round(realtimeStatus?.progress ?? printer.progress)}%</span>
           </div>
           <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
             <div
               ref={collapsedProgressRef}
               className="bg-pf-success h-2 rounded-full transition-all duration-300"
             >
-              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, displayPrinter.progress))) }%</span>
+              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, realtimeStatus?.progress ?? printer.progress))) }%</span>
             </div>
           </div>
         </div>

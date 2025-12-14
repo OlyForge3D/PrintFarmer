@@ -42,7 +42,7 @@ namespace Farm.Web.Api.Services.Printers
 
             try
             {
-                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.BackendPort);
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
                 
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
@@ -84,7 +84,7 @@ namespace Farm.Web.Api.Services.Printers
 
             try
             {
-                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.BackendPort);
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
                 
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
@@ -212,10 +212,10 @@ namespace Farm.Web.Api.Services.Printers
                 SpoolInfo: null);
         }
 
-        private static string BuildMoonrakerUrl(string serverUrl, int? frontendPort)
+        private static string BuildMoonrakerUrl(string serverUrl, int? port)
         {
-            return frontendPort.HasValue
-                ? $"{serverUrl}:{frontendPort}"
+            return port.HasValue
+                ? $"{serverUrl}:{port}"
                 : serverUrl;
         }
     }

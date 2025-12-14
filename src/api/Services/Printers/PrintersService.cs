@@ -492,6 +492,95 @@ namespace Farm.Web.Api.Services.Printers
             return dtos.ToArray();
         }
 
+        public async Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct)
+        {
+            List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
+            var dtos = new List<CompletePrinterDto>();
+            
+            foreach (var p in items)
+            {
+                try
+                {
+                    // Get real-time status for each printer
+                    PrinterStatusDto status = await GetStatusDtoAsync(p.Id, ct);
+                    dtos.Add(new CompletePrinterDto(
+                        // Static configuration from database
+                        Id: p.Id, 
+                        Name: p.Name, 
+                        ServerUrl: p.ServerUrl, 
+                        Notes: p.Notes, 
+                        ManufacturerName: p.Manufacturer?.Name, 
+                        ModelName: p.Model?.Name, 
+                        Backend: MapBackendEnum(p.Backend), 
+                        ApiKey: p.ApiKey, 
+                        OriginalServerUrl: p.OriginalServerUrl, 
+                        IpAddress: p.IpAddress, 
+                        BackendPort: p.BackendPort, 
+                        FrontendPort: p.FrontendPort, 
+                        InMaintenance: p.InMaintenance, 
+                        IsEnabled: p.IsEnabled,
+                        
+                        // Live status merged from real-time source
+                        IsOnline: status.IsOnline,
+                        State: status.State,
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        X: status.X,
+                        Y: status.Y,
+                        Z: status.Z,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        HomedAxes: null, // Will be filled by PrinterStatusUpdate via SignalR
+                        SpoolInfo: status.SpoolInfo
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}. Using offline status.");
+                    // Fallback to offline status if retrieval fails
+                    dtos.Add(new CompletePrinterDto(
+                        Id: p.Id, 
+                        Name: p.Name, 
+                        ServerUrl: p.ServerUrl, 
+                        Notes: p.Notes, 
+                        ManufacturerName: p.Manufacturer?.Name, 
+                        ModelName: p.Model?.Name, 
+                        Backend: MapBackendEnum(p.Backend), 
+                        ApiKey: p.ApiKey, 
+                        OriginalServerUrl: p.OriginalServerUrl, 
+                        IpAddress: p.IpAddress, 
+                        BackendPort: p.BackendPort, 
+                        FrontendPort: p.FrontendPort, 
+                        InMaintenance: p.InMaintenance, 
+                        IsEnabled: p.IsEnabled,
+                        
+                        // Offline status
+                        IsOnline: false,
+                        State: null,
+                        Progress: null,
+                        JobName: null,
+                        ThumbnailUrl: null,
+                        CameraStreamUrl: null,
+                        X: null,
+                        Y: null,
+                        Z: null,
+                        HotendTemp: null,
+                        BedTemp: null,
+                        HotendTarget: null,
+                        BedTarget: null,
+                        HomedAxes: null,
+                        SpoolInfo: null
+                    ));
+                }
+            }
+            
+            return dtos.ToArray();
+        }
+
         /// <summary>
         /// Maps an integer backend value to the PrinterBackend enum.
         /// </summary>

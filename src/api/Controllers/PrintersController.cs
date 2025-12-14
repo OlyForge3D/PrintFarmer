@@ -84,16 +84,16 @@ public class PrintersController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <param name="includeDisabled">Return disabled printers as well (admin-only)</param>
-    /// <returns>A lightweight list of all printers with basic information</returns>
-    /// <response code="200">Returns the list of lightweight printer data</response>
+    /// <returns>A complete list of all printers with configuration and live status merged</returns>
+    /// <response code="200">Returns the list of complete printer data with live status</response>
     [HttpGet]
-    [ProducesResponseType(typeof(IEnumerable<PrinterFastDto>), 200)]
+    [ProducesResponseType(typeof(IEnumerable<CompletePrinterDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<PrinterFastDto>>> GetAsync(CancellationToken ct, [FromQuery] bool includeDisabled = false)
+    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(CancellationToken ct, [FromQuery] bool includeDisabled = false)
     {
         try
         {
-            PrinterFastDto[] dtos = await _printersService.GetAllFastDtosAsync(ct);
+            CompletePrinterDto[] dtos = await _printersService.GetAllCompleteDtosAsync(ct);
             bool isAdmin = User.IsInRole("farm_admin");
             if (isAdmin)
             {
@@ -106,13 +106,13 @@ public class PrintersController(
             }
 
             // Filter to only enabled printers for normal users
-            List<PrinterFastDto> enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
+            List<CompletePrinterDto> enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
             return Ok(enabledDtos);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
             _logger.LogWarning($"[GET] Startup DB exception in /api/printers. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
-            return Ok(Array.Empty<PrinterFastDto>());
+            return Ok(Array.Empty<CompletePrinterDto>());
         }
         catch (Exception ex)
         {

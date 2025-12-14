@@ -4,7 +4,7 @@ import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import styles from './PrinterTableView.module.css';
 import { Printer, PrinterBackend } from '@/types/api';
-import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
+import { usePrinterDisplays } from '@/hooks/usePrinterDisplay';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Trash2, Edit, CheckCircle2, Circle, AlertTriangle, Wrench, Check, X } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
@@ -24,6 +24,7 @@ export function PrinterTableView({
   onBulkSetMaintenance
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
+  const displayPrinters = usePrinterDisplays(printers);
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
 
@@ -208,8 +209,8 @@ export function PrinterTableView({
             </tr>
           </thead>
           <tbody className="divide-y divide-pf-border">
-            {printers.map((printer) => {
-              const displayPrinter = usePrinterDisplay(printer);
+            {printers.map((printer, index) => {
+              const displayPrinter = displayPrinters[index];
 
               return (
                 <tr 

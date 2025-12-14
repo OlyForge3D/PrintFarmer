@@ -57,9 +57,11 @@ export function usePrinterStatusUpdates(
   const [printerStatuses, setPrinterStatuses] = useState<Map<string, PrinterStatusUpdate>>(() => {
     try {
       const cached = printerSignalRService.getLastStatuses();
-      if (!printerIds || printerIds.length === 0) return cached;
-      return new Map(Array.from(cached.entries()).filter(([id]) => printerIds.includes(id)));
-    } catch {
+      if (!cached?.size) return new Map();
+      if (!printerIds?.length) return cached;
+      return new Map(Array.from(cached.entries()).filter(([id]) => printerIds!.includes(id)));
+    } catch (e) {
+      console.error('[usePrinterStatusUpdates] Failed to initialize from cache:', e);
       return new Map();
     }
   });
