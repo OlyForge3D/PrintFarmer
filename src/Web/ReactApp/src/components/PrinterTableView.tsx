@@ -4,7 +4,7 @@ import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import styles from './PrinterTableView.module.css';
 import { Printer, PrinterBackend } from '@/types/api';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
+import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Trash2, Edit, CheckCircle2, Circle, AlertTriangle, Wrench, Check, X } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
@@ -24,7 +24,6 @@ export function PrinterTableView({
   onBulkSetMaintenance
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
-  const { getPrinterStatus } = usePrinterStatusUpdates();
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
 
@@ -210,30 +209,7 @@ export function PrinterTableView({
           </thead>
           <tbody className="divide-y divide-pf-border">
             {printers.map((printer) => {
-              const realtimeStatus = getPrinterStatus(printer.id);
-              const currentStatus = {
-                isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
-                state: realtimeStatus?.state ?? printer.state,
-                progress: realtimeStatus?.progress ?? printer.progress,
-                jobName: realtimeStatus?.jobName ?? printer.jobName,
-                hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
-                bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
-                hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
-                bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
-              };
-
-              // Conditional debug logging for realtime updates (guarded)
-              if (typeof window !== 'undefined') {
-                const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
-                if (win.PrintFarmerDebug?.printerRealtime) {
-                  console.log('[PrintFarmer] PrinterTableView realtime:', {
-                    printerId: printer.id,
-                    printerName: printer.name,
-                    currentStatus,
-                    realtimeStatus
-                  });
-                }
-              }
+              const displayPrinter = usePrinterDisplay(printer);
 
               return (
                 <tr 
@@ -281,27 +257,27 @@ export function PrinterTableView({
 
                   {/* Status */}
                   <td className="px-4 py-4">
-                    <div className={`text-sm font-medium ${getStatusColor(currentStatus.isOnline, currentStatus.state)}`}>
-                      {currentStatus.isOnline ? (currentStatus.state || 'Unknown') : 'Offline'}
+                    <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline, displayPrinter.state)}`}>
+                      {displayPrinter.isOnline ? (displayPrinter.state || 'Unknown') : 'Offline'}
                     </div>
-                    {currentStatus.jobName && (
+                    {displayPrinter.jobName && (
                       <div className="text-xs text-pf-text-tertiary truncate max-w-32">
-                        {currentStatus.jobName}
+                        {displayPrinter.jobName}
                       </div>
                     )}
                   </td>
 
                   {/* Progress */}
                   <td className="px-4 py-4">
-                    {currentStatus.progress !== undefined && currentStatus.progress > 0 ? (
+                    {displayPrinter.progress !== undefined && displayPrinter.progress > 0 ? (
                       <div className="flex items-center space-x-2">
                         <div className="w-12 bg-pf-border-dark rounded-full h-2">
                           <div
-                            className={`bg-pf-success ${styles['pf-progress-bar']} ${styles[`w-${Math.min(100, Math.max(0, Math.round(currentStatus.progress / 5) * 5))}`]}`}
+                            className={`bg-pf-success ${styles['pf-progress-bar']} ${styles[`w-${Math.min(100, Math.max(0, Math.round(displayPrinter.progress / 5) * 5))}`]}`}
                           />
                         </div>
                         <span className="text-sm text-pf-text-primary">
-                          {Math.round(currentStatus.progress)}%
+                          {Math.round(displayPrinter.progress)}%
                         </span>
                       </div>
                     ) : (
@@ -312,8 +288,8 @@ export function PrinterTableView({
                   {/* Temperatures */}
                   <td className="px-4 py-4">
                     <div className="text-sm text-pf-text-primary">
-                      <div>H: {formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}</div>
-                      <div>B: {formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}</div>
+                      <div>H: {formatTemperature(displayPrinter.hotendTemp, displayPrinter.hotendTarget)}</div>
+                      <div>B: {formatTemperature(displayPrinter.bedTemp, displayPrinter.bedTarget)}</div>
                     </div>
                   </td>
 

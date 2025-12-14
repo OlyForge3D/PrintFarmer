@@ -33,6 +33,11 @@ COPY src/worker-shared/*.csproj ./worker-shared/
 COPY src/orcaslicer-worker/*.csproj ./orcaslicer-worker/
 COPY src/printer-discovery/*.csproj ./printer-discovery/
 COPY src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/*.csproj ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/
+COPY src/backends/Farm.Backend.Plugin.Core/*.csproj ./backends/Farm.Backend.Plugin.Core/
+COPY src/backends/Farm.Backend.Plugin.Moonraker/*.csproj ./backends/Farm.Backend.Plugin.Moonraker/
+COPY src/backends/Farm.Backend.Plugin.PrusaLink/*.csproj ./backends/Farm.Backend.Plugin.PrusaLink/
+COPY src/backends/Farm.Backend.Plugin.OctoPrint/*.csproj ./backends/Farm.Backend.Plugin.OctoPrint/
+COPY src/backends/Farm.Backend.Plugin.Sdcp/*.csproj ./backends/Farm.Backend.Plugin.Sdcp/
 # Place proto at filesystem root so ../../proto from /src/api resolves
 COPY proto /proto
 
@@ -53,21 +58,36 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
     dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
     echo "Publishing API..." && \
     dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing OrcaSlicer Worker..." && \
     dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Printer Discovery..." && \
-    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
+    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Building backend plugins..." && \
+    dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
 
 # Verify critical runtime files exist and fail immediately if any are missing
 RUN echo "Checking published artifacts..." && \
     echo "API publish directory:" && ls -lah /app/publish/api/ 2>&1 | head -20 && \
     echo "OrcaSlicer Worker publish directory:" && ls -lah /app/publish/orcaslicer-worker/ 2>&1 | head -20 && \
     echo "Printer Discovery publish directory:" && ls -lah /app/publish/printer-discovery/ 2>&1 | head -20 && \
+    echo "Checking for plugin DLLs in API directory:" && ls -lah /app/publish/api/Farm.Backend.Plugin.*.dll 2>&1 && \
     ([ -f /app/publish/api/Farm.Web.Api.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Web.Api.dll"; exit 1)) && \
     ([ -f /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll ] || (echo "✗ MISSING: /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll"; exit 1)) && \
     ([ -f /app/publish/printer-discovery/PrinterDiscoveryService.dll ] || (echo "✗ MISSING: /app/publish/printer-discovery/PrinterDiscoveryService.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Core.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Core.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Moonraker.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Moonraker.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Sdcp.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Sdcp.dll"; exit 1)) && \
     echo "✓ All .NET builds completed successfully"
 
 ############################################################

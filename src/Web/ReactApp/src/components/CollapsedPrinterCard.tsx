@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw, FileText, Image, Video
 } from 'lucide-react';
@@ -6,7 +6,7 @@ import { PauseIcon, PlayIcon, EmergencyStopIcon } from '@/components/icons/MdiIc
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/components/PrinterFilesModal';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
+import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
 import { PrinterBackend, type Printer } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
@@ -64,22 +64,8 @@ export function CollapsedPrinterCard({
   const [showFiles, setShowFiles] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
-  // Real-time status updates
-  const { printerStatuses } = usePrinterStatusUpdates();
-  const status = printerStatuses.get(printer.id);
-  
-  // Merge SignalR status updates with printer data
-  // Only override camera URLs if status provides them, otherwise keep original printer values
-  const displayPrinter = status ? {
-    ...printer,
-    isOnline: status.isOnline,
-    state: status.state,
-    progress: status.progress,
-    jobName: status.jobName,
-    thumbnailUrl: status.thumbnailUrl,
-    cameraStreamUrl: status.cameraStreamUrl ?? printer.cameraStreamUrl,
-    cameraSnapshotUrl: status.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
-  } : printer;
+  // Get display printer data (merged API + real-time SignalR)
+  const displayPrinter = usePrinterDisplay(printer);
   
   // State helpers
   const isOnline = displayPrinter.isOnline ?? false;
@@ -261,18 +247,18 @@ export function CollapsedPrinterCard({
       </div>
 
       {/* Progress bar for active prints */}
-      {isOnline && status?.progress !== undefined && status.progress > 0 && (
+      {isOnline && displayPrinter.progress !== undefined && displayPrinter.progress > 0 && (
         <div className="mt-3">
           <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-            <span className="truncate flex-1">{status.jobName || 'Printing...'}</span>
-            <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
+            <span className="truncate flex-1">{displayPrinter.jobName || 'Printing...'}</span>
+            <span className="font-semibold ml-2">{Math.round(displayPrinter.progress)}%</span>
           </div>
           <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
             <div
               ref={collapsedProgressRef}
               className="bg-pf-success h-2 rounded-full transition-all duration-300"
             >
-              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, status.progress))) }%</span>
+              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, displayPrinter.progress))) }%</span>
             </div>
           </div>
         </div>

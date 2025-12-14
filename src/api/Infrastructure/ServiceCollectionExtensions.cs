@@ -12,6 +12,7 @@ using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
@@ -149,11 +150,12 @@ public static class ServiceCollectionExtensions
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
         RegisterSlicingServices(services, configuration);
-        RegisterPrinterServices(services);
+        RegisterBackendClientPlugins(services);  // Register backend client plugins FIRST - they register HTTP clients
+        RegisterHttpClients(services);
+        RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
         RegisterArtifactServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
-        RegisterHttpClients(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
 
         return services;
@@ -424,12 +426,31 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Services.Printers.IBackendClientFactory, Services.Printers.BackendClientFactory>();
         
         // Register the backend capability factory for capability-aware client retrieval
-        // This provides a cleaner API for checking if a backend supports a specific capability
-        // without needing to use "is ISupportsFileList" checks everywhere in services
-        _ = services.AddSingleton<Services.Printers.IBackendCapabilityFactory, Services.Printers.BackendCapabilityFactory>();
+        // This factory now integrates with the plugin registry for backend metadata
+        // while maintaining backward compatibility with reflection-based detection
+        _ = services.AddSingleton<Services.Printers.IBackendCapabilityFactory>(provider =>
+        {
+            var clientFactory = provider.GetRequiredService<Services.Printers.IBackendClientFactory>();
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            var pluginRegistry = provider.GetService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            
+            return new Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
+        });
+
+        // Register status clients (now handled by plugins via RegisterAdditionalServices)
+        // The factory will discover these from the plugin registry
+        RegisterStatusClientsFromPlugins(services);
         
         // Register the printer status client factory for backend-specific status retrieval
-        _ = services.AddSingleton<Services.Printers.IPrinterStatusClientFactory, Services.Printers.PrinterStatusClientFactory>();
+        // This factory now uses plugin registry to discover status clients
+        _ = services.AddSingleton<Services.Printers.IPrinterStatusClientFactory>(provider =>
+        {
+            var serviceProvider = provider;
+            var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            
+            return new Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
+        });
         
         // Register the printer status DTO builder for centralizing DTO construction logic
         _ = services.AddScoped<Services.Printers.IPrinterStatusDtoBuilder, Services.Printers.PrinterStatusDtoBuilder>();
@@ -511,33 +532,28 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
     }
 
+    private static void RegisterBackendClientPlugins(IServiceCollection services)
+    {
+        // Discover and register all backend client plugins
+        // This will scan all loaded assemblies for IBackendClientPlugin implementations
+        services.AddBackendClientPlugins();
+    }
+
     #endregion
 
     #region HTTP Clients
 
     private static void RegisterHttpClients(IServiceCollection services)
     {
-        _ = services.AddHttpClient<IMoonrakerClient, MoonrakerClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
+        // Backend-specific HTTP clients are now registered by their respective plugins
+        // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:
+        // - Moonraker HTTP client (10s timeout)
+        // - PrusaLink HTTP client (10s timeout)
+        // - OctoPrint HTTP client (10s timeout)
+        // - SDCP HTTP client (10s timeout)
+        // This keeps backend-specific HTTP client configuration encapsulated in plugins
 
-        _ = services.AddHttpClient<IPrusaLinkClient, PrusaLinkClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        _ = services.AddHttpClient<IOctoPrintClient, OctoPrintClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        _ = services.AddHttpClient<ISdcpClient, SdcpClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        // Spoolman Integration
+        // Spoolman Integration (not backend-specific, registered centrally)
         _ = services.AddHttpClient<ISpoolmanService, SpoolmanService>("SpoolmanService", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
@@ -552,23 +568,28 @@ public static class ServiceCollectionExtensions
     {
         if (!disableBackgroundServices)
         {
-            // System log cleanup
+            // System log cleanup (common service, not plugin-specific)
             _ = services.AddHostedService<SystemLogCleanupService>();
 
-            // Realtime update service for Klipper/Moonraker printers
-            _ = services.AddHostedService<MoonrakerSubscriptionService>();
-
-            // Polling update service for PrusaLink printers (HTTP polling every 5 seconds)
-            _ = services.AddHostedService<PrusaLinkPollingService>();
-
-            // Polling update service for OctoPrint printers (HTTP polling every 10 seconds)
-            _ = services.AddHostedService<OctoPrintPollingService>();
+            // Backend-specific background services are now registered by their respective plugins
+            // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:
+            // - MoonrakerSubscriptionService (real-time WebSocket subscriptions)
+            // - PrusaLinkPollingService (HTTP polling every 5 seconds)
+            // - OctoPrintPollingService (HTTP polling every 10 seconds)
+            // This keeps backend-specific logic encapsulated in plugins
         }
     }
 
     #endregion
 
     #region Helpers
+
+    private static void RegisterStatusClientsFromPlugins(IServiceCollection services)
+    {
+        // Status clients are now registered by their respective plugins via RegisterAdditionalServices
+        // This method is a placeholder for any common status client setup if needed in the future
+        // For now, plugins handle all status client registration independently
+    }
 
     private static bool ShouldDisableBackgroundServices()
     {

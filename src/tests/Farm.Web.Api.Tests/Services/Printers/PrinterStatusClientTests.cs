@@ -1,11 +1,13 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Printers;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
@@ -18,6 +20,75 @@ namespace Farm.Web.Api.Tests.Services.Printers
     public class PrinterStatusClientTests
     {
         #region Helper Methods
+
+        private static PrinterStatusClientFactory CreateFactoryWithClients(
+            IMoonrakerClient moonrakerClient,
+            IPrusaLinkClient prusaLinkClient,
+            ISdcpClient sdcpClient,
+            IOctoPrintClient octoPrintClient,
+            ICircuitBreakerService circuitBreaker,
+            IUnifiedLoggingService logger)
+        {
+            // Create status clients directly
+            var moonrakerStatusClient = new MoonrakerStatusClient(moonrakerClient, circuitBreaker, logger);
+            var prusaLinkStatusClient = new PrusaLinkStatusClient(prusaLinkClient, circuitBreaker, logger);
+            var sdcpStatusClient = new SdcpStatusClient(sdcpClient, circuitBreaker, logger);
+            var octoPrintStatusClient = new OctoPrintStatusClient(octoPrintClient, circuitBreaker, logger);
+
+            // Create a service collection and register all dependencies
+            var services = new ServiceCollection();
+            services.AddSingleton(logger);
+            services.AddSingleton(circuitBreaker);
+            services.AddSingleton(moonrakerClient);
+            services.AddSingleton(prusaLinkClient);
+            services.AddSingleton(sdcpClient);
+            services.AddSingleton(octoPrintClient);
+            
+            // Register status clients - plugins would register these by their concrete type or a factory interface
+            services.AddSingleton(moonrakerStatusClient);
+            services.AddSingleton(prusaLinkStatusClient);
+            services.AddSingleton(sdcpStatusClient);
+            services.AddSingleton(octoPrintStatusClient);
+
+            var serviceProvider = services.BuildServiceProvider();
+
+            // Create mock extended plugins that will return the correct status client types
+            var mockMoonrakerPlugin = new Mock<IExtendedBackendPlugin>();
+            mockMoonrakerPlugin.Setup(p => p.BackendType).Returns("Moonraker");
+            mockMoonrakerPlugin.Setup(p => p.StatusClientType).Returns(typeof(MoonrakerStatusClient));
+            mockMoonrakerPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(MoonrakerStatusClient));
+            
+            var mockPrusaLinkPlugin = new Mock<IExtendedBackendPlugin>();
+            mockPrusaLinkPlugin.Setup(p => p.BackendType).Returns("PrusaLink");
+            mockPrusaLinkPlugin.Setup(p => p.StatusClientType).Returns(typeof(PrusaLinkStatusClient));
+            mockPrusaLinkPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(PrusaLinkStatusClient));
+            
+            var mockSdcpPlugin = new Mock<IExtendedBackendPlugin>();
+            mockSdcpPlugin.Setup(p => p.BackendType).Returns("SDCP");
+            mockSdcpPlugin.Setup(p => p.StatusClientType).Returns(typeof(SdcpStatusClient));
+            mockSdcpPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(SdcpStatusClient));
+            
+            var mockOctoPrintPlugin = new Mock<IExtendedBackendPlugin>();
+            mockOctoPrintPlugin.Setup(p => p.BackendType).Returns("OctoPrint");
+            mockOctoPrintPlugin.Setup(p => p.StatusClientType).Returns(typeof(OctoPrintStatusClient));
+            mockOctoPrintPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(OctoPrintStatusClient));
+
+            // Create mock plugin registry that returns all extended plugins
+            var mockPluginRegistry = new Mock<IBackendPluginRegistry>();
+            mockPluginRegistry.Setup(r => r.GetAllExtendedPlugins())
+                .Returns(new[]
+                {
+                    mockMoonrakerPlugin.Object,
+                    mockPrusaLinkPlugin.Object,
+                    mockSdcpPlugin.Object,
+                    mockOctoPrintPlugin.Object
+                });
+
+            // Create the factory with mocked plugin registry and service provider
+            var factory = new PrinterStatusClientFactory(serviceProvider, mockPluginRegistry.Object, logger);
+
+            return factory;
+        }
 
         private static (Mock<IMoonrakerClient> moonraker, Mock<ICircuitBreakerService> breaker, Mock<IUnifiedLoggingService> logger)
             CreateMoonrakerMocks()
@@ -290,7 +361,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = new PrinterStatusClientFactory(
+            var factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -318,7 +389,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = new PrinterStatusClientFactory(
+            var factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -346,7 +417,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = new PrinterStatusClientFactory(
+            var factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -374,7 +445,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = new PrinterStatusClientFactory(
+            var factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -402,7 +473,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = new PrinterStatusClientFactory(
+            var factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -429,7 +500,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = new PrinterStatusClientFactory(
+            var factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,
@@ -455,7 +526,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             var mockCircuitBreaker = new Mock<ICircuitBreakerService>();
             var mockLogger = new Mock<IUnifiedLoggingService>();
 
-            var factory = new PrinterStatusClientFactory(
+            var factory = CreateFactoryWithClients(
                 mockMoonraker.Object,
                 mockPrusa.Object,
                 mockSdcp.Object,

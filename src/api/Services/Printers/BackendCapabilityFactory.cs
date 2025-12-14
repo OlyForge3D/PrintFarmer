@@ -1,4 +1,5 @@
 using System.Reflection;
+using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
@@ -7,13 +8,14 @@ namespace Farm.Web.Api.Services.Printers;
 
 /// <summary>
 /// Implementation of IBackendCapabilityFactory.
-/// Wraps IBackendClientFactory and adds capability-aware retrieval methods.
-/// Uses reflection-based capability detection: clients that implement capability marker interfaces
-/// (e.g., ISupportsFileDownload, ISupportsFileList) are automatically registered with those capabilities.
+/// Integrates with the plugin registry for backend client discovery while maintaining
+/// backward compatibility with reflection-based capability detection.
+/// Capabilities are detected via plugin metadata and/or reflection on client implementations.
 /// </summary>
 public class BackendCapabilityFactory : IBackendCapabilityFactory
 {
     private readonly IBackendClientFactory _clientFactory;
+    private readonly IBackendPluginRegistry? _pluginRegistry;
     private readonly IUnifiedLoggingService _logger;
 
     // Map of capability marker interfaces to their corresponding BackendCapabilities flags
@@ -37,24 +39,31 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
     public BackendCapabilityFactory(
         IBackendClientFactory clientFactory,
-        IUnifiedLoggingService logger)
+        IUnifiedLoggingService logger,
+        IBackendPluginRegistry? pluginRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(clientFactory);
         ArgumentNullException.ThrowIfNull(logger);
 
         _clientFactory = clientFactory;
         _logger = logger;
+        _pluginRegistry = pluginRegistry;
 
-        // Initialize capabilities through reflection-based detection
+        // Initialize capabilities through reflection-based detection and plugin registry
         _capabilitiesCache = DiscoverBackendCapabilities();
 
         _logger.LogInformation($"BackendCapabilityFactory initialized with capability mappings for {_capabilitiesCache.Count} backends");
+        
+        if (_pluginRegistry != null)
+        {
+            var registeredPlugins = _pluginRegistry.GetAllPlugins().Count();
+            _logger.LogInformation($"Plugin registry integrated: {registeredPlugins} backend client plugins registered");
+        }
     }
 
     /// <summary>
-    /// Discovers backend capabilities by using reflection to check which capability marker interfaces
-    /// each backend client implements. This is self-documenting: capabilities are declared by the client
-    /// implementations themselves, not hardcoded in a central registry.
+    /// Discovers backend capabilities by checking the plugin registry and/or 
+    /// using reflection to detect capability marker interfaces on client implementations.
     /// </summary>
     private Dictionary<PrinterBackend, BackendCapabilities> DiscoverBackendCapabilities()
     {
@@ -65,14 +74,28 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         {
             try
             {
-                var client = _clientFactory.GetClient(backend);
-                var clientType = client.GetType();
-                var capabilities = DetectCapabilitiesFromInterfaces(clientType);
+                var backendType = GetBackendTypeName(backend);
+                var capabilities = BackendCapabilities.None;
+                var capabilitySource = "reflection";
+
+                // First, try to get capabilities from plugin registry
+                if (_pluginRegistry?.IsRegistered(backendType) == true)
+                {
+                    capabilities = GetCapabilitiesFromPlugin(backendType);
+                    capabilitySource = "plugin registry";
+                }
+                else
+                {
+                    // Fall back to reflection-based detection
+                    var client = _clientFactory.GetClient(backend);
+                    var clientType = client.GetType();
+                    capabilities = DetectCapabilitiesFromInterfaces(clientType);
+                }
 
                 discovered.Add(backend, capabilities);
 
-                var implementedCapabilities = GetImplementedCapabilityNames(clientType);
-                _logger.LogDebug($"Backend {backend} ({clientType.Name}) detected capabilities: {string.Join(", ", implementedCapabilities)}");
+                var implementedCapabilities = GetCapabilityNames(capabilities);
+                _logger.LogDebug($"Backend {backend} ({backendType}) detected capabilities from {capabilitySource}: {string.Join(", ", implementedCapabilities)}");
             }
             catch (Exception ex)
             {
@@ -82,6 +105,41 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         }
 
         return discovered;
+    }
+
+    /// <summary>
+    /// Converts a PrinterBackend enum value to the backend type string used by plugins.
+    /// </summary>
+    private static string GetBackendTypeName(PrinterBackend backend) => backend switch
+    {
+        PrinterBackend.Moonraker => "moonraker",
+        PrinterBackend.OctoPrint => "octoprint",
+        PrinterBackend.PrusaLink => "prusalink",
+        PrinterBackend.SDCP => "sdcp",
+        _ => backend.ToString().ToLowerInvariant()
+    };
+
+    /// <summary>
+    /// Gets capabilities from the plugin registry by examining the plugin's supported capability types.
+    /// </summary>
+    private BackendCapabilities GetCapabilitiesFromPlugin(string backendType)
+    {
+        var plugin = _pluginRegistry?.GetPlugin(backendType);
+        if (plugin == null)
+            return BackendCapabilities.None;
+
+        var capabilities = BackendCapabilities.None;
+        var pluginCapabilities = plugin.GetCapabilities();
+
+        foreach (var (interfaceType, capabilityFlag) in CapabilityInterfaceMap)
+        {
+            if (pluginCapabilities.Contains(interfaceType))
+            {
+                capabilities |= capabilityFlag;
+            }
+        }
+
+        return capabilities;
     }
 
     /// <summary>
@@ -106,6 +164,25 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
     /// <summary>
     /// Helper to get human-readable names of implemented capabilities for logging.
+    /// </summary>
+    private static List<string> GetCapabilityNames(BackendCapabilities capabilities)
+    {
+        var names = new List<string>();
+
+        foreach (var (interfaceType, capabilityFlag) in CapabilityInterfaceMap)
+        {
+            if ((capabilities & capabilityFlag) == capabilityFlag && capabilityFlag != BackendCapabilities.None)
+            {
+                names.Add(capabilityFlag.ToString());
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Legacy helper - kept for backward compatibility if needed elsewhere.
+    /// Now delegates to GetCapabilityNames(BackendCapabilities).
     /// </summary>
     private static List<string> GetImplementedCapabilityNames(Type clientType)
     {

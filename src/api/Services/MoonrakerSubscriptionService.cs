@@ -52,6 +52,9 @@ public sealed class MoonrakerSubscriptionService(
     // Track polling strategy per printer based on Klippy state
     private readonly ConcurrentDictionary<Guid, PollingMode> _pollingModes = new();
 
+    // Track Klippy ready state per printer (for IsOnline determination)
+    private readonly ConcurrentDictionary<Guid, bool> _klippyReadyState = new();
+
     private enum PollingMode
     {
         WebSocketRealTime,  // Use WebSocket for real-time updates (normal operation)
@@ -838,17 +841,20 @@ public sealed class MoonrakerSubscriptionService(
 
             case "notify_klippy_disconnected":
                 _logger.LogWarning("Klippy disconnected for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
+                _klippyReadyState[printer.Id] = false;
                 SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy disconnected");
                 await SendOfflineStatusAsync(printer.Id, ct);
                 break;
 
             case "notify_klippy_ready":
                 _logger.LogInformation("Klippy ready for printer {PrinterName}, switching to WebSocket real-time mode", printer.Name);
+                _klippyReadyState[printer.Id] = true;
                 SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
                 break;
 
             case "notify_klippy_shutdown":
                 _logger.LogWarning("Klippy shutdown for printer {PrinterName}, switching to HTTP polling mode", printer.Name);
+                _klippyReadyState[printer.Id] = false;
                 SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy shutdown");
                 await SendShutdownStatusAsync(printer.Id, ct);
                 break;
@@ -1187,7 +1193,7 @@ public sealed class MoonrakerSubscriptionService(
     /// <summary>
     /// Emits a consolidated printer status update containing all accumulated state.
     /// Includes position, temperatures, state, progress, homed axes, and spool information.
-    /// Broadcasts via SignalR "printerupdated" event with IsOnline=true.
+    /// Broadcasts via SignalR "printerupdated" event with IsOnline based on actual Klippy ready state.
     /// </summary>
     /// <param name="printerId">The ID of the printer.</param>
     /// <param name="state">The persistent printer state containing all accumulated values.</param>
@@ -1197,10 +1203,14 @@ public sealed class MoonrakerSubscriptionService(
     {
         try
         {
+            // Determine online status based on Klippy ready state
+            // Default to false if not yet tracked (prevents false positives)
+            bool isOnline = _klippyReadyState.TryGetValue(printerId, out var ready) && ready;
+
             // Send consolidated update for offline status and overall state sync
             var update = new PrinterStatusUpdate(
                 printerId,
-                true, // IsOnline
+                isOnline,
                 PrinterStateNormalizer.NormalizeState(state.State),
                 state.Progress,
                 state.JobName,
@@ -1215,7 +1225,7 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: spoolInfo
             );
 
-            _logger.LogDebug($"Emitting consolidated status for printer {printerId}: X={state.X}, Y={state.Y}, Z={state.Z}, HotendTemp={state.HotendTemp}, HotendTarget={state.HotendTarget}, BedTemp={state.BedTemp}, BedTarget={state.BedTarget}, HomedAxes={state.HomedAxes}");
+            _logger.LogDebug($"Emitting consolidated status for printer {printerId}: IsOnline={isOnline}, X={state.X}, Y={state.Y}, Z={state.Z}, HotendTemp={state.HotendTemp}, HotendTarget={state.HotendTarget}, BedTemp={state.BedTemp}, BedTarget={state.BedTarget}, HomedAxes={state.HomedAxes}");
 
             await hub!.Clients.All.SendAsync("printerupdated", update, ct);
         }

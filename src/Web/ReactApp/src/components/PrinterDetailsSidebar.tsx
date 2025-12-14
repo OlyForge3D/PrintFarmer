@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, FileText, History } from 'lucide-react';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
+import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 import { usePrinter } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
@@ -78,7 +78,9 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // Call hooks first before any early returns (React Rules of Hooks)
   // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
   const { data: printer, isLoading, refetch } = usePrinter(printerId || '');
-  const { printerStatuses } = usePrinterStatusUpdates();
+  
+  // Get display printer data (merged API + real-time SignalR)
+  const displayPrinter = printer ? usePrinterDisplay(printer) : null;
   
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -116,16 +118,14 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   if (!printerId) {
     return null;
   }
-
-  const status = printerStatuses.get(printerId);
   
-  // Update refs when status changes - refs don't trigger re-renders
-  if (status) {
-    if (status.hotendTemp !== undefined) lastKnownHotendTempRef.current = status.hotendTemp;
-    if (status.bedTemp !== undefined) lastKnownBedTempRef.current = status.bedTemp;
-    if (status.x !== undefined) lastKnownXRef.current = status.x;
-    if (status.y !== undefined) lastKnownYRef.current = status.y;
-    if (status.z !== undefined) lastKnownZRef.current = status.z;
+  // Update refs when display printer changes - refs don't trigger re-renders
+  if (displayPrinter) {
+    if (displayPrinter.hotendTemp !== undefined) lastKnownHotendTempRef.current = displayPrinter.hotendTemp;
+    if (displayPrinter.bedTemp !== undefined) lastKnownBedTempRef.current = displayPrinter.bedTemp;
+    if (displayPrinter.x !== undefined) lastKnownXRef.current = displayPrinter.x;
+    if (displayPrinter.y !== undefined) lastKnownYRef.current = displayPrinter.y;
+    if (displayPrinter.z !== undefined) lastKnownZRef.current = displayPrinter.z;
   }
 
   // Show loading state while fetching printer data
@@ -137,9 +137,9 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     );
   }
 
-  // State helpers - safe to access printer now
-  const isOnline = status?.isOnline ?? printer.isOnline ?? false;
-  const rawState = status?.state ?? printer.state ?? 'unknown';
+  // State helpers - safe to access displayPrinter now (guaranteed by printer != null)
+  const isOnline = displayPrinter?.isOnline ?? false;
+  const rawState = displayPrinter?.state ?? 'unknown';
   const state = formatPrinterState(rawState);
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
@@ -156,18 +156,18 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
   // Check if axes are homed based on homedAxes string from Moonraker
   // homedAxes is a string like "xyz", "xy", "z", or "" if not homed
-  const homedAxes = (status?.homedAxes ?? '').toLowerCase();
+  const homedAxes = (displayPrinter?.homedAxes ?? '').toLowerCase();
   
   // Guarded debug logging - only log if enabled in window.PrintFarmerDebug
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
     console.log('PrinterDetailsSidebar - Status update:', {
       printerId,
-      homedAxesRaw: status?.homedAxes,
+      homedAxesRaw: displayPrinter?.homedAxes,
       homedAxesLower: homedAxes,
-      status: status?.state,
-      x: status?.x,
-      y: status?.y,
-      z: status?.z
+      status: displayPrinter?.state,
+      x: displayPrinter?.x,
+      y: displayPrinter?.y,
+      z: displayPrinter?.z
     });
   }
   
@@ -250,7 +250,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     if (e.key !== 'Enter' || hotendTemp === '') return;
     
     try {
-      const currentBedTemp = bedTemp === '' ? (status?.bedTarget ?? printer.bedTarget ?? 0) : bedTemp;
+      const currentBedTemp = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : bedTemp;
       const result = await apiClient.setTemperatures(printer.id, { 
         hotend: Number(hotendTemp),
         bed: Number(currentBedTemp)
@@ -268,7 +268,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
     if (e.key !== 'Enter' || bedTemp === '') return;
     
     try {
-      const currentHotendTemp = hotendTemp === '' ? (status?.hotendTarget ?? printer.hotendTarget ?? 0) : hotendTemp;
+      const currentHotendTemp = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : hotendTemp;
       const result = await apiClient.setTemperatures(printer.id, { 
         hotend: Number(currentHotendTemp),
         bed: Number(bedTemp)
@@ -663,12 +663,12 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
           {/* Hotend Temperature Row */}
           <div className="flex items-center gap-2 py-1">
-            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(status?.hotendTarget ?? printer.hotendTarget ?? 0) > 0} />
+            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />
             <span className="text-xs text-pf-text-secondary min-w-16">Hotend</span>
             <span className="text-xs text-slate-400 flex-1">
               {formatTempWithTarget(
-                status?.hotendTemp ?? printer.hotendTemp,
-                status?.hotendTarget ?? printer.hotendTarget,
+                displayPrinter?.hotendTemp,
+                displayPrinter?.hotendTarget,
                 lastKnownHotendTempRef.current
               )}
             </span>
@@ -682,12 +682,12 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
           {/* Bed Temperature Row */}
           <div className="flex items-center gap-2 py-1">
-            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(status?.bedTarget ?? printer.bedTarget ?? 0) > 0} />
+            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />
             <span className="text-xs text-pf-text-secondary min-w-16">Bed</span>
             <span className="text-xs text-slate-400 flex-1">
               {formatTempWithTarget(
-                status?.bedTemp ?? printer.bedTemp,
-                status?.bedTarget ?? printer.bedTarget,
+                displayPrinter?.bedTemp,
+                displayPrinter?.bedTarget,
                 lastKnownBedTempRef.current
               )}
             </span>
@@ -701,7 +701,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
         </div>
 
         {/* Spool Info Section - Display if available */}
-        {status?.spoolInfo && status.spoolInfo.hasActiveSpool && (
+        {displayPrinter?.spoolInfo && displayPrinter.spoolInfo.hasActiveSpool && (
           <div className="mt-4 pt-4 border-t border-pf-border">
             <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-2">Spool</div>
             <div className="space-y-2 text-xs">

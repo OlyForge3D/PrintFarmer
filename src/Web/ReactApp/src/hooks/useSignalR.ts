@@ -54,7 +54,15 @@ export function usePrinterStatusUpdates(
   printerIds?: string[]
 ) {
   const [latestUpdate, setLatestUpdate] = useState<PrinterStatusUpdate | null>(null);
-  const [printerStatuses, setPrinterStatuses] = useState<Map<string, PrinterStatusUpdate>>(new Map());
+  const [printerStatuses, setPrinterStatuses] = useState<Map<string, PrinterStatusUpdate>>(() => {
+    try {
+      const cached = printerSignalRService.getLastStatuses();
+      if (!printerIds || printerIds.length === 0) return cached;
+      return new Map(Array.from(cached.entries()).filter(([id]) => printerIds.includes(id)));
+    } catch {
+      return new Map();
+    }
+  });
   const onUpdateRef = useRef(onUpdate);
   const printerIdsRef = useRef(printerIds);
 
@@ -68,6 +76,22 @@ export function usePrinterStatusUpdates(
 
   useEffect(() => {
     printerSignalRService.connect();
+
+    // Seed from any cached statuses (helps components that mount later).
+    try {
+      const cached = printerSignalRService.getLastStatuses();
+      if (cached.size > 0) {
+        setPrinterStatuses(() => {
+          if (printerIdsRef.current && printerIdsRef.current.length > 0) {
+            return new Map(Array.from(cached.entries()).filter(([id]) => printerIdsRef.current!.includes(id)));
+          }
+          return cached;
+        });
+      }
+    } catch {
+      // ignore cache seed failures
+    }
+
     const handleStatusUpdate = (status: PrinterStatusUpdate) => {
       try {
         // Expose debug info for live inspection in browser console (guarded)
