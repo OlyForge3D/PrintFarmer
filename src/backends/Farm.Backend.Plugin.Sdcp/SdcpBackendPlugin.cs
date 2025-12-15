@@ -2,6 +2,7 @@ namespace Farm.Backend.Plugin.Sdcp;
 
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -67,11 +68,19 @@ public class SdcpBackendPlugin : IExtendedBackendPlugin
     public void RegisterAdditionalServices(IServiceCollection services)
     {
         // Register the SDCP client interface with its implementation
-        services.AddScoped<ISdcpClient, SdcpClient>();
+        // Using AddScoped because HTTP clients need fresh instances per request scope
+        services.AddScoped<ISdcpClient>(provider =>
+        {
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            return new SdcpClient(httpClient, logger);
+        });
 
-        // Register the SDCP status client for real-time status updates
-        // Status clients implement IPrinterStatusClient and are instantiated by the PrinterStatusClientFactory
-        services.AddSingleton<IPrinterStatusClient, SdcpStatusClient>();
+        // NOTE: Status clients are NOT registered in DI container. They are instantiated
+        // on-demand by PrinterStatusClientFactory which properly handles their dependencies
+        // on scoped services.
     }
 
     /// <summary>

@@ -1,31 +1,29 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services.Printers
 {
     /// <summary>
     /// Default implementation of IBackendClientFactory.
-    /// Dynamically manages all backend-specific client implementations provided by plugins
-    /// and provides unified access to them based on printer backend type.
-    /// This factory has zero hardcoded dependencies on specific backend implementations,
-    /// allowing new backends to be added via plugins without modifying the API.
+    /// Maps PrinterBackend enum values to backend client interface types discovered from plugins.
+    /// This factory discovers available clients at initialization and resolves them on-demand
+    /// from the current DI scope (must be called from within a scoped context).
+    /// 
+    /// CRITICAL: Backend clients are registered as SCOPED services. This factory MUST be called
+    /// from within a scoped context (e.g., from a scoped service like PrintersService).
+    /// The factory does NOT create its own scope - the caller must ensure proper scoping.
     /// </summary>
     public class BackendClientFactory : IBackendClientFactory
     {
         private readonly IServiceProvider _serviceProvider;
-        private readonly IBackendPluginRegistry _pluginRegistry;
+        private readonly Dictionary<PrinterBackend, Type> _clientTypeMap;
         private readonly IUnifiedLoggingService _logger;
-        private readonly Dictionary<PrinterBackend, IBackendClient> _clientCache;
 
-        /// <summary>
-        /// Creates a new BackendClientFactory that dynamically discovers backends from plugins.
-        /// </summary>
-        /// <param name="serviceProvider">Service provider for resolving plugin-registered client implementations</param>
-        /// <param name="pluginRegistry">Plugin registry containing all loaded backend plugins</param>
-        /// <param name="logger">Logging service</param>
         public BackendClientFactory(
             IServiceProvider serviceProvider,
             IBackendPluginRegistry pluginRegistry,
@@ -36,75 +34,112 @@ namespace Farm.Web.Api.Services.Printers
             ArgumentNullException.ThrowIfNull(logger);
 
             _serviceProvider = serviceProvider;
-            _pluginRegistry = pluginRegistry;
             _logger = logger;
-            _clientCache = new Dictionary<PrinterBackend, IBackendClient>();
+            _clientTypeMap = new Dictionary<PrinterBackend, Type>();
 
-            InitializeClients();
+            DiscoverAvailableClients(pluginRegistry);
         }
 
         /// <summary>
-        /// Initializes the client cache by discovering all registered backend plugins
-        /// and resolving their client implementations from the service provider.
+        /// Discovers available backend client types from the plugin registry.
+        /// Maps PrinterBackend enum values to their corresponding interface types.
+        /// Does NOT instantiate clients - they are resolved on-demand when requested.
         /// </summary>
-        private void InitializeClients()
+        private void DiscoverAvailableClients(IBackendPluginRegistry pluginRegistry)
         {
-            var registeredBackends = _pluginRegistry.GetAllPlugins();
-            var loadedCount = 0;
-
-            foreach (var plugin in registeredBackends)
+            try
             {
-                try
+                var plugins = pluginRegistry.GetAllExtendedPlugins();
+                var discoveredCount = 0;
+                var duplicateIds = new HashSet<int>();
+
+                foreach (var plugin in plugins)
                 {
-                    // Get the client interface type from the plugin
-                    var clientInterfaceType = plugin.ClientInterfaceType;
-                    
-                    if (clientInterfaceType == null)
+                    if (plugin.ClientType == null)
                     {
-                        _logger.LogWarning($"Backend plugin '{plugin.BackendType}' does not specify a ClientInterfaceType");
+                        _logger.LogDebug($"Plugin {plugin.DisplayName} has no client type, skipping.");
                         continue;
                     }
 
-                    // Attempt to resolve the client from the service provider
-                    // The plugin's RegisterAdditionalServices should have registered this type
-                    var client = _serviceProvider.GetService(clientInterfaceType) as IBackendClient;
-                    
-                    if (client != null)
+                    try
                     {
-                        // Map the backend type to the client
-                        if (Enum.TryParse<PrinterBackend>(plugin.BackendType, ignoreCase: true, out var backendEnum))
+                        // Read BackendId from the BackendPluginAttribute on the plugin's assembly
+                        var pluginAssembly = plugin.GetType().Assembly;
+                        var backendAttr = pluginAssembly.GetCustomAttributes(typeof(BackendPluginAttribute), false)
+                            .FirstOrDefault() as BackendPluginAttribute;
+
+                        if (backendAttr == null)
                         {
-                            _clientCache[backendEnum] = client;
-                            loadedCount++;
-                            _logger.LogInformation($"Backend client loaded: {plugin.BackendType} ({plugin.DisplayName})");
+                            _logger.LogWarning($"Plugin {plugin.DisplayName} assembly is missing BackendPluginAttribute, skipping.");
+                            continue;
+                        }
+
+                        var backendId = (PrinterBackend)backendAttr.BackendId;
+
+                        // Check for duplicate BackendId
+                        if (_clientTypeMap.ContainsKey(backendId))
+                        {
+                            _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.DisplayName} has BackendId={backendAttr.BackendId} but it's already registered. This will cause incorrect backend routing.");
+                            duplicateIds.Add(backendAttr.BackendId);
+                            continue;
+                        }
+
+                        // Map the BackendId to the client type (don't instantiate yet)
+                        if (typeof(IBackendClient).IsAssignableFrom(plugin.ClientType))
+                        {
+                            _clientTypeMap[backendId] = plugin.ClientType;
+                            discoveredCount++;
+                            _logger.LogInformation($"✓ Registered backend client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.ClientType.Name})");
                         }
                         else
                         {
-                            _logger.LogWarning($"Could not parse backend type '{plugin.BackendType}' as PrinterBackend enum");
+                            _logger.LogWarning($"Plugin {plugin.DisplayName} client type {plugin.ClientType.Name} does not implement IBackendClient.");
                         }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        _logger.LogWarning($"Could not resolve client interface '{clientInterfaceType.Name}' for backend '{plugin.BackendType}'. Ensure the plugin's RegisterAdditionalServices method registered it.");
+                        _logger.LogWarning($"Failed to discover client type for plugin {plugin.DisplayName}: {ex.Message}");
                     }
                 }
-                catch (Exception ex)
+
+                if (discoveredCount == 0)
                 {
-                    _logger.LogError($"Error loading client for backend '{plugin.BackendType}': {ex.Message}");
+                    _logger.LogWarning("No backend client types were discovered from plugins. Factory will not have any backends registered.");
+                }
+                else
+                {
+                    _logger.LogInformation($"BackendClientFactory discovered {discoveredCount} backend client type(s): {string.Join(", ", _clientTypeMap.Keys)}");
+                }
+
+                if (duplicateIds.Count > 0)
+                {
+                    throw new InvalidOperationException($"Duplicate BackendIds detected: {string.Join(", ", duplicateIds)}. Each plugin must have a unique BackendId.");
                 }
             }
-
-            _logger.LogInformation($"BackendClientFactory initialized with {loadedCount} backend clients from plugins");
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error discovering backend client types from plugins: {ex.Message}");
+                throw;
+            }
         }
 
         public IBackendClient GetClient(PrinterBackend backend)
         {
-            if (!_clientCache.TryGetValue(backend, out var client))
+            if (!_clientTypeMap.TryGetValue(backend, out var clientType))
             {
-                throw new ArgumentException($"Unsupported printer backend: {backend}. Available backends: {string.Join(", ", _clientCache.Keys)}", nameof(backend));
+                throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
             }
 
-            return client ?? throw new InvalidOperationException($"Client for {backend} is null");
+            // Resolve the backend client from the current scope
+            // Caller MUST be in a scoped context for this to work
+            var client = _serviceProvider.GetService(clientType) as IBackendClient;
+            
+            if (client == null)
+            {
+                throw new InvalidOperationException($"Could not resolve backend client for backend {backend} (type: {clientType.Name}). Ensure you are calling this from within a scoped context (e.g., from a scoped service or HTTP request). The plugin may not have registered it correctly.");
+            }
+
+            return client;
         }
 
         public IBackendClient GetClient(int backendValue)
@@ -115,7 +150,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public bool IsBackendSupported(PrinterBackend backend)
         {
-            return _clientCache.ContainsKey(backend);
+            return _clientTypeMap.ContainsKey(backend);
         }
     }
 }

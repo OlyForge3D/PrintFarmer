@@ -2,6 +2,7 @@ namespace Farm.Backend.Plugin.Moonraker;
 
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -68,15 +69,18 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     public void RegisterAdditionalServices(IServiceCollection services)
     {
         // Register the Moonraker client interface with its implementation
-        // The HTTP client factory handles creation with proper timeout
-        services.AddHttpClient<IMoonrakerClient, MoonrakerClient>(client =>
+        services.AddScoped<IMoonrakerClient>(provider =>
         {
-            client.Timeout = TimeSpan.FromSeconds(10);
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            return new MoonrakerClient(httpClient, logger);
         });
 
-        // Register the Moonraker status client for real-time status updates
-        // Status clients implement IPrinterStatusClient and are instantiated by the PrinterStatusClientFactory
-        services.AddSingleton<IPrinterStatusClient, MoonrakerStatusClient>();
+        // NOTE: Status clients are NOT registered in DI container. They are instantiated
+        // on-demand by PrinterStatusClientFactory which properly handles their dependencies
+        // on scoped services.
 
         // Register the Moonraker diagnostics service for API diagnostics endpoints
         services.AddScoped<IMoonrakerDiagnosticsService, MoonrakerDiagnosticsService>();

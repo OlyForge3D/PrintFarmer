@@ -21,12 +21,10 @@ namespace Farm.Backend.Plugin.OctoPrint;
 public sealed class OctoPrintPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
-    IOctoPrintClient octoPrintClient) : IHostedService, IDisposable
+    IUnifiedLoggingService logger) : IHostedService, IDisposable
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
-    private readonly IOctoPrintClient _octoPrintClient = octoPrintClient;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, OctoPrintWebSocketAdapter> _webSocketAdapters = new();
@@ -130,11 +128,16 @@ public sealed class OctoPrintPollingService(
                             var printer = await GetPrinterAsync(id, ct);
                             if (printer != null)
                             {
+                                // Get the OctoPrint client from a scoped context
+                                // (scoped services cannot be injected directly into singletons)
+                                using var scope = _scopeFactory.CreateScope();
+                                var octoPrintClient = scope.ServiceProvider.GetRequiredService<IOctoPrintClient>();
+
                                 var adapter = new OctoPrintWebSocketAdapter(
                                     id,
                                     printer,
                                     _logger,
-                                    _octoPrintClient,
+                                    octoPrintClient,
                                     _hub);
 
                                 _webSocketAdapters.TryAdd(id, adapter);

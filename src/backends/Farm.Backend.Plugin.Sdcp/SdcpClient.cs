@@ -116,36 +116,13 @@ public class SdcpAckResult
 }
 
 
-public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
+public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger) : PrinterClientBase, ISdcpClient,
     ISupportsFileList,
     ISupportsCamera
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IUnifiedLoggingService _logger;
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-    // Adapter to allow construction with a single HttpClient instance when the
-    // typed HttpClient activator attempts to construct SdcpClient(HttpClient, ...)
-    private sealed class SingleClientFactory : IHttpClientFactory
-    {
-        private readonly HttpClient _client;
-        public SingleClientFactory(HttpClient client) => _client = client ?? throw new ArgumentNullException(nameof(client));
-        public HttpClient CreateClient(string name) => _client;
-    }
-
-    // Primary constructor used by DI when an IHttpClientFactory is available
-    public SdcpClient(IHttpClientFactory httpClientFactory, IUnifiedLoggingService logger)
-    {
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
-    // Constructor used by AddHttpClient's typed client factory which provides HttpClient
-    public SdcpClient(HttpClient httpClient, IUnifiedLoggingService logger)
-    {
-        ArgumentNullException.ThrowIfNull(httpClient);
-        _httpClientFactory = new SingleClientFactory(httpClient);
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null, // Keep original property names for SDCP
@@ -520,8 +497,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
 
             try
             {
-                using HttpClient client = _httpClientFactory.CreateClient();
-                using HttpResponseMessage response = await client.GetAsync(cameraUri, cts.Token);
+                using HttpResponseMessage response = await _httpClient.GetAsync(cameraUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return cameraUri.ToString();
@@ -537,8 +513,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
                     Port = 3030,
                     Path = "/video"
                 }.Uri;
-                using HttpClient client = _httpClientFactory.CreateClient();
-                using HttpResponseMessage response = await client.GetAsync(cameraUri, cts.Token);
+                using HttpResponseMessage response = await _httpClient.GetAsync(cameraUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return cameraUri.ToString();
@@ -554,8 +529,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
                     Port = 3030,
                     Path = "/video"
                 }.Uri;
-                using HttpClient client = _httpClientFactory.CreateClient();
-                using HttpResponseMessage response = await client.GetAsync(cameraUri, cts.Token);
+                using HttpResponseMessage response = await _httpClient.GetAsync(cameraUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return cameraUri.ToString();
@@ -600,8 +574,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
 
             try
             {
-                using HttpClient client = _httpClientFactory.CreateClient();
-                using HttpResponseMessage response = await client.GetAsync(snapshotUri, cts.Token);
+                using HttpResponseMessage response = await _httpClient.GetAsync(snapshotUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return snapshotUri.ToString();
@@ -617,8 +590,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
                     Port = 3030,
                     Path = "/snapshot"
                 }.Uri;
-                using HttpClient client = _httpClientFactory.CreateClient();
-                using HttpResponseMessage response = await client.GetAsync(snapshotUri, cts.Token);
+                using HttpResponseMessage response = await _httpClient.GetAsync(snapshotUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return snapshotUri.ToString();
@@ -634,8 +606,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
                     Port = 3030,
                     Path = "/snapshot"
                 }.Uri;
-                using HttpClient client = _httpClientFactory.CreateClient();
-                using HttpResponseMessage response = await client.GetAsync(snapshotUri, cts.Token);
+                using HttpResponseMessage response = await _httpClient.GetAsync(snapshotUri, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     return snapshotUri.ToString();
@@ -833,8 +804,7 @@ public sealed class SdcpClient : PrinterClientBase, ISdcpClient,
             streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             formContent.Add(streamContent, "file", fileName);
 
-            using HttpClient client = _httpClientFactory.CreateClient();
-            using HttpResponseMessage resp = await client.PostAsync(uploadUri, formContent, cts.Token);
+            using HttpResponseMessage resp = await _httpClient.PostAsync(uploadUri, formContent, cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch

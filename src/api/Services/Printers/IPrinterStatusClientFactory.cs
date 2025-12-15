@@ -1,51 +1,36 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Services.Printers
 {
-    /// <summary>
-    /// Factory for creating printer status clients based on backend type.
-    /// This service manages the creation and registry of all backend-specific status clients.
-    /// Uses the plugin registry to discover status clients dynamically.
-    /// </summary>
     public interface IPrinterStatusClientFactory
     {
-        /// <summary>
-        /// Gets the status client for a specific printer backend type.
-        /// </summary>
-        /// <param name="backend">The printer backend type</param>
-        /// <returns>The corresponding status client implementation</returns>
-        /// <exception cref="ArgumentException">Thrown if backend type is not supported</exception>
         IPrinterStatusClient GetStatusClient(PrinterBackend backend);
-
-        /// <summary>
-        /// Gets the status client for a specific backend integer value.
-        /// </summary>
-        /// <param name="backendValue">The integer value of the printer backend</param>
-        /// <returns>The corresponding status client implementation</returns>
         IPrinterStatusClient GetStatusClient(int backendValue);
-
-        /// <summary>
-        /// Checks if a backend is supported by a registered status client.
-        /// </summary>
-        /// <param name="backend">The printer backend type</param>
-        /// <returns>True if supported, false otherwise</returns>
         bool IsBackendSupported(PrinterBackend backend);
     }
 
     /// <summary>
     /// Default implementation of IPrinterStatusClientFactory.
-    /// Manages backend-specific printer status clients using plugin discovery with BackendId.
-    /// This maintains extensibility by discovering status clients from the plugin registry
-    /// rather than hardcoding individual client injections.
+    /// Maps PrinterBackend enum values to status client types discovered from plugins.
+    /// This factory discovers available status clients at initialization and resolves them on-demand
+    /// using service scopes to properly handle scoped dependencies.
+    /// 
+    /// NOTE: Status clients are NOT registered in DI. They are instantiated on-demand
+    /// by this factory using dependency injection to resolve their dependencies.
+    /// Status clients may depend on scoped services (like backend clients), so the factory
+    /// creates a temporary scope for each instantiation to ensure proper dependency resolution.
     /// </summary>
     public class PrinterStatusClientFactory : IPrinterStatusClientFactory
     {
-        private readonly Dictionary<PrinterBackend, IPrinterStatusClient> _clients;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly Dictionary<PrinterBackend, Type> _statusClientTypeMap;
         private readonly IUnifiedLoggingService _logger;
 
         public PrinterStatusClientFactory(
@@ -57,18 +42,20 @@ namespace Farm.Web.Api.Services.Printers
             ArgumentNullException.ThrowIfNull(pluginRegistry);
             ArgumentNullException.ThrowIfNull(logger);
 
+            _serviceProvider = serviceProvider;
+            _serviceScopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
             _logger = logger;
-            _clients = new Dictionary<PrinterBackend, IPrinterStatusClient>();
+            _statusClientTypeMap = new Dictionary<PrinterBackend, Type>();
 
-            DiscoverStatusClientsFromPlugins(serviceProvider, pluginRegistry);
+            DiscoverStatusClientTypes(pluginRegistry);
         }
 
         /// <summary>
-        /// Discovers and registers status clients from the plugin registry.
-        /// Reads BackendId from the BackendPluginAttribute for unique identification.
-        /// Detects and logs duplicate BackendIds as errors.
+        /// Discovers status client TYPES from the plugin registry.
+        /// Maps BackendId to the status client type, but does NOT instantiate clients yet.
+        /// Instances are resolved on-demand when GetStatusClient() is called.
         /// </summary>
-        private void DiscoverStatusClientsFromPlugins(IServiceProvider serviceProvider, IBackendPluginRegistry pluginRegistry)
+        private void DiscoverStatusClientTypes(IBackendPluginRegistry pluginRegistry)
         {
             try
             {
@@ -88,8 +75,8 @@ namespace Farm.Web.Api.Services.Printers
                     {
                         // Read BackendId from the BackendPluginAttribute on the plugin's assembly
                         var pluginAssembly = plugin.GetType().Assembly;
-                        var backendAttr = pluginAssembly.GetCustomAttributes(typeof(Farm.Backend.Plugin.Core.BackendPluginAttribute), false)
-                            .FirstOrDefault() as Farm.Backend.Plugin.Core.BackendPluginAttribute;
+                        var backendAttr = pluginAssembly.GetCustomAttributes(typeof(BackendPluginAttribute), false)
+                            .FirstOrDefault() as BackendPluginAttribute;
 
                         if (backendAttr == null)
                         {
@@ -100,20 +87,19 @@ namespace Farm.Web.Api.Services.Printers
                         var backendId = (PrinterBackend)backendAttr.BackendId;
 
                         // Check for duplicate BackendId
-                        if (_clients.ContainsKey(backendId))
+                        if (_statusClientTypeMap.ContainsKey(backendId))
                         {
                             _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.DisplayName} has BackendId={backendAttr.BackendId} but it's already registered. This will cause incorrect backend routing.");
                             duplicateIds.Add(backendAttr.BackendId);
                             continue;
                         }
 
-                        var statusClient = serviceProvider.GetService(plugin.StatusClientType);
-                        if (statusClient is IPrinterStatusClient printerStatusClient)
+                        // Map the BackendId to the status client type (don't instantiate yet)
+                        if (typeof(IPrinterStatusClient).IsAssignableFrom(plugin.StatusClientType))
                         {
-                            // Register with BackendId as the unique key
-                            _clients[backendId] = printerStatusClient;
+                            _statusClientTypeMap[backendId] = plugin.StatusClientType;
                             discoveredCount++;
-                            _logger.LogInformation($"✓ Registered status client: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.StatusClientType.Name})");
+                            _logger.LogInformation($"✓ Registered status client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.StatusClientType.Name})");
                         }
                         else
                         {
@@ -122,17 +108,17 @@ namespace Farm.Web.Api.Services.Printers
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"Failed to instantiate status client for plugin {plugin.DisplayName}: {ex.Message}");
+                        _logger.LogWarning($"Failed to discover status client type for plugin {plugin.DisplayName}: {ex.Message}");
                     }
                 }
 
                 if (discoveredCount == 0)
                 {
-                    _logger.LogWarning("No status clients were discovered from plugins. Factory will not have any backends registered.");
+                    _logger.LogWarning("No status client types were discovered from plugins. Factory will not have any backends registered.");
                 }
                 else
                 {
-                    _logger.LogInformation($"PrinterStatusClientFactory initialized with {discoveredCount} status client(s): {string.Join(", ", _clients.Keys)}");
+                    _logger.LogInformation($"PrinterStatusClientFactory discovered {discoveredCount} status client type(s): {string.Join(", ", _statusClientTypeMap.Keys)}");
                 }
 
                 if (duplicateIds.Count > 0)
@@ -142,19 +128,40 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Error discovering status clients from plugins: {ex.Message}");
+                _logger.LogError($"Error discovering status client types from plugins: {ex.Message}");
                 throw;
             }
         }
 
         public IPrinterStatusClient GetStatusClient(PrinterBackend backend)
         {
-            if (_clients.TryGetValue(backend, out var client))
+            if (!_statusClientTypeMap.TryGetValue(backend, out var statusClientType))
             {
-                return client;
+                throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
             }
 
-            throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
+            try
+            {
+                // Create a temporary scope to resolve the status client and its dependencies
+                // Status clients depend on scoped services (like their backend client),
+                // so we create them in a proper scope rather than registering them in DI.
+                using var scope = _serviceScopeFactory.CreateScope();
+                var scopedProvider = scope.ServiceProvider;
+                
+                // Activate the status client with its dependencies resolved from the scope
+                var statusClient = (IPrinterStatusClient)ActivatorUtilities.CreateInstance(
+                    scopedProvider, 
+                    statusClientType) ?? throw new InvalidOperationException(
+                        $"Failed to instantiate status client type: {statusClientType.Name}");
+                
+                _logger.LogDebug($"✓ Instantiated status client for {backend}: {statusClientType.Name}");
+                return statusClient;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"✗ Failed to instantiate status client for {backend} (type: {statusClientType?.Name}): {ex.Message}");
+                throw new InvalidOperationException($"Could not instantiate status client for backend {backend}: {ex.Message}", ex);
+            }
         }
 
         public IPrinterStatusClient GetStatusClient(int backendValue)
@@ -165,7 +172,7 @@ namespace Farm.Web.Api.Services.Printers
 
         public bool IsBackendSupported(PrinterBackend backend)
         {
-            return _clients.ContainsKey(backend);
+            return _statusClientTypeMap.ContainsKey(backend);
         }
     }
 }

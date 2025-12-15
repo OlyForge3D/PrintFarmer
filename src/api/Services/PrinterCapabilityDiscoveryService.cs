@@ -4,6 +4,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.PrinterCapabilities;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
 
@@ -263,22 +264,16 @@ public class PrinterCapabilityDiscoveryService(
     {
         try
         {
-            // Retrieve Moonraker client from factory
-            if (!_capabilityFactory.TryGetFileDownloadClient(PrinterBackend.Moonraker, out var baseClient))
+            // Retrieve Moonraker file download capability
+            if (!_capabilityFactory.TryGetFileDownloadClient(PrinterBackend.Moonraker, out var downloadClient) ||
+                downloadClient is not ISupportsFileDownload fileDownload)
             {
                 _logger.LogWarning("Moonraker backend does not support file downloads for capability discovery");
                 return null;
             }
 
-            var moonrakerClient = baseClient as IMoonrakerClient;
-            if (moonrakerClient == null)
-            {
-                _logger.LogError("Failed to retrieve Moonraker client from factory");
-                return null;
-            }
-
             // Try to get printer.cfg file to determine stepper configurations and features
-            byte[]? printerConfigBytes = await moonrakerClient.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken) ?? await moonrakerClient.DownloadFileAsync(printer.ServerUrl, "printer.cfg", cancellationToken);
+            byte[]? printerConfigBytes = await fileDownload.DownloadFileAsync(printer.ServerUrl, "config/printer.cfg", cancellationToken) ?? await fileDownload.DownloadFileAsync(printer.ServerUrl, "printer.cfg", cancellationToken);
 
             if (printerConfigBytes == null)
             {
@@ -371,27 +366,9 @@ public class PrinterCapabilityDiscoveryService(
     {
         try
         {
-            // Retrieve PrusaLink client from factory
-            if (!_capabilityFactory.TryGetFileListClient(PrinterBackend.PrusaLink, out var baseClient))
-            {
-                _logger.LogWarning("PrusaLink backend does not support required operations for capability discovery");
-                return null;
-            }
-
-            var prusaLinkClient = baseClient as IPrusaLinkClient;
-            if (prusaLinkClient == null)
-            {
-                _logger.LogError("Failed to retrieve PrusaLink client from factory");
-                return null;
-            }
-
-            // PrusaLink provides less configuration data, but we can get some basic info from status
-            PrusaStatus status = await prusaLinkClient.GetStatusAsync(printer.ServerUrl, printer.ApiKey, cancellationToken);
-            if (status == null)
-            {
-                return null;
-            }
-
+            // PrusaLink provides minimal capability discovery - only basic assumptions
+            // Since PrusaLink doesn't expose configuration like Moonraker does,
+            // we can only make educated guesses based on printer model
             DiscoveredCapabilities discovered = new()
             {
                 HasHeatedBed = true, // Most Prusa printers have heated beds
@@ -406,7 +383,7 @@ public class PrinterCapabilityDiscoveryService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error discovering capabilities from PrusaLink for printer {printer.Id}");
+            _logger.LogError(ex, "Error discovering capabilities from PrusaLink");
             return null;
         }
     }

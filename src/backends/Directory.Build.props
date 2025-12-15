@@ -1,15 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
 <Project>
 
-  <!-- Backend Plugin Common Configuration -->
-  <!-- This file is inherited by all backend plugin projects including Core -->
+  <!-- Backend Plugin Configuration -->
+  <!-- Inherits common build settings from /src/Directory.Build.props -->
+  <!-- Only defines backend-specific NuGet package references -->
 
-  <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-  </PropertyGroup>
+  <!-- Import parent Directory.Build.props from /src -->
+  <Import Project="../Directory.Build.props" />
 
   <!-- Common NuGet Package References for Backend Infrastructure -->
   <!-- These versions are synchronized across all backend projects -->
@@ -24,3 +21,4 @@
   </ItemGroup>
 
 </Project>
+

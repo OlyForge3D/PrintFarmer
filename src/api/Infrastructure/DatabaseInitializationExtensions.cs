@@ -190,7 +190,9 @@ public static class DatabaseInitializationExtensions
             logger.LogInformation("[Startup] Step 3/3: Initializing application settings...");
             try
             {
-                ISettingsInitializationService settingsInit = app.Services.GetRequiredService<ISettingsInitializationService>();
+                // Create a scope to resolve scoped services (SettingsService depends on AppDbContext which is scoped)
+                using var settingsScope = app.Services.CreateScope();
+                ISettingsInitializationService settingsInit = settingsScope.ServiceProvider.GetRequiredService<ISettingsInitializationService>();
                 settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
                 settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
                 logger.LogInformation("[Startup]   ✓ Settings initialized from environment");

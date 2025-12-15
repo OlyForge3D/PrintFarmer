@@ -98,7 +98,7 @@ public partial class HarvestWorkerService(
         IHarvestRepository harvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
         IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
         IGcodeRepository gcodeRepo = scope.ServiceProvider.GetRequiredService<IGcodeRepository>();
-        IBackendClientFactory backendClientFactory = scope.ServiceProvider.GetRequiredService<IBackendClientFactory>();
+        IBackendCapabilityFactory capabilityFactory = scope.ServiceProvider.GetRequiredService<IBackendCapabilityFactory>();
 
         _logger.LogDebug($"Processing file job: {job}", null, null);
 
@@ -181,7 +181,7 @@ public partial class HarvestWorkerService(
             {
                 // Download and process file
                 PrinterBackend backend = (PrinterBackend)printer.Backend;
-                using MemoryStream? fileContent = await DownloadFileAsync(backend, printer, job.FilePath, backendClientFactory);
+                using MemoryStream? fileContent = await DownloadFileAsync(backend, printer, job.FilePath, capabilityFactory);
 
                 if (fileContent != null)
                 {
@@ -355,35 +355,34 @@ public partial class HarvestWorkerService(
         PrinterBackend backend,
         Printer printer,
         string filePath,
-        IBackendClientFactory backendClientFactory)
+        IBackendCapabilityFactory capabilityFactory)
     {
         try
         {
-            IBackendClient client = backendClientFactory.GetBackendClient(backend);
-            
-            // Only Moonraker currently supports file downloads
-            if (client is ISupportsFileDownload downloadClient)
+            // Try to get a client that supports file downloads
+            if (!capabilityFactory.TryGetFileDownloadClient(backend, out var client) ||
+                client is not ISupportsFileDownload downloadClient)
             {
-                string backendUrl = backend == PrinterBackend.Moonraker
-                    ? $"{printer.ServerUrl}:{printer.FrontendPort}"
-                    : printer.BackendUrl;
-                
-                byte[]? bytes = await downloadClient.DownloadFileAsync(backendUrl, filePath);
-                if (bytes != null)
-                {
-                    return new MemoryStream(bytes);
-                }
-
-                _logger.LogWarning($"Failed to download file {filePath} from {backend} at {backendUrl}", null, null);
+                _logger.LogWarning($"Backend {backend} does not support file downloads for {filePath}");
                 return null;
             }
+            
+            string backendUrl = backend == PrinterBackend.Moonraker
+                ? $"{printer.ServerUrl}:{printer.FrontendPort}"
+                : printer.BackendUrl;
+            
+            byte[]? bytes = await downloadClient.DownloadFileAsync(backendUrl, filePath);
+            if (bytes != null)
+            {
+                return new MemoryStream(bytes);
+            }
 
-            _logger.LogWarning($"Backend {backend} does not support file downloads for {filePath}", null, null);
+            _logger.LogWarning($"Failed to download file {filePath} from {backend} at {backendUrl}");
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to download file {filePath} from {backend}", null, null);
+            _logger.LogError(ex, $"Failed to download file {filePath} from {backend}");
             return null;
         }
     }

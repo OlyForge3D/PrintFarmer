@@ -13,6 +13,7 @@ using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Resilience;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
@@ -229,11 +230,10 @@ public partial class GcodeHarvestService(
     {
         await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
         IHarvestRepository scopedHarvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
-        IMoonrakerClient scopedMoonraker = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
-        IPrusaLinkClient scopedPrusa = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
-        ISdcpClient scopedSdcp = scope.ServiceProvider.GetRequiredService<ISdcpClient>();
+        IBackendClientFactory scopedBackendFactory = scope.ServiceProvider.GetRequiredService<IBackendClientFactory>();
+        IBackendCapabilityFactory scopedCapabilityFactory = scope.ServiceProvider.GetRequiredService<IBackendCapabilityFactory>();
         IUnifiedLoggingService scopedLogger = scope.ServiceProvider.GetRequiredService<IUnifiedLoggingService>();
-        IHubContext<HarvestHub> scopedHub = scope.ServiceProvider.GetRequiredService<IHubContext<HarvestHub>>();
+        // Note: HarvestHub is deleted, file discovery is now integrated into regular printer services
 
         try
         {
@@ -247,7 +247,7 @@ public partial class GcodeHarvestService(
             try
             {
                 // Check if the backend supports file listing using capability factory
-                if (_capabilityFactory.TryGetFileListClient(backend, out _))
+                if (scopedCapabilityFactory.TryGetFileListClient(backend, out _))
                 {
                     fileList = backend switch
                     {
@@ -340,8 +340,9 @@ public partial class GcodeHarvestService(
                 scopedLogger.LogInformation($"Updated operation {operation.Id} with {dbOperation.FilesFound} G-code files found");
 
                 // Emit SignalR update so clients see the updated FilesFound count immediately
-                GcodeHarvestOperationDto operationDto = MapToDto(dbOperation);
-                await scopedHub.Clients.All.SendAsync("HarvestOperationUpdated", operationDto);
+                // TODO: Re-implement with proper hub context when HarvestHub is restored
+                // GcodeHarvestOperationDto operationDto = MapToDto(dbOperation);
+                // await scopedHub.Clients.All.SendAsync("HarvestOperationUpdated", operationDto);
             }
             else
             {
@@ -370,17 +371,18 @@ public partial class GcodeHarvestService(
 
                 await scopedHarvestRepo.AddDiscoveredFileAsync(discoveredFile, ct: default);
 
-                // Send file discovery event immediately so UI can show files 
-                await scopedHub.Clients.Group($"harvest-{operation.Id}").SendAsync("harvestfilediscovered", new
-                {
-                    operationId = operation.Id.ToString(),
-                    fileId = discoveredFile.Id.ToString(),
-                    fileName = fileInfo.Name,
-                    filePath = fileInfo.Path,
-                    fileSize = fileInfo.Size,
-                    extractedSlicer = fileInfo.SlicerName ?? "",
-                    extractedMaterial = fileInfo.FilamentWeightGrams.HasValue ? $"~{Math.Round(fileInfo.FilamentWeightGrams.Value)}g" : "",
-                });
+                // Send file discovery event immediately so UI can show files
+                // TODO: Re-implement with proper hub context when HarvestHub is restored
+                // await scopedHub.Clients.Group($"harvest-{operation.Id}").SendAsync("harvestfilediscovered", new
+                // {
+                //     operationId = operation.Id.ToString(),
+                //     fileId = discoveredFile.Id.ToString(),
+                //     fileName = fileInfo.Name,
+                //     filePath = fileInfo.Path,
+                //     fileSize = fileInfo.Size,
+                //     extractedSlicer = fileInfo.SlicerName ?? "",
+                //     extractedMaterial = fileInfo.FilamentWeightGrams.HasValue ? $"~{Math.Round(fileInfo.FilamentWeightGrams.Value)}g" : "",
+                // });
             }
 
             await scopedHarvestRepo.SaveChangesAsync(ct: default);
@@ -390,12 +392,13 @@ public partial class GcodeHarvestService(
             scopedLogger.LogInformation($"Discovery complete for operation {operation.Id}. Waiting for user to select files to import.");
 
             // Signal to UI that discovery is complete and stop the spinner
-            await scopedHub.Clients.Group($"harvest-{operation.Id}").SendAsync("harvestdiscoverycomplete", new
-            {
-                operationId = operation.Id.ToString(),
-                totalFilesDiscovered = gcodeFileCount,
-                completedAt = DateTime.UtcNow.ToString("O")
-            });
+            // TODO: Re-implement with proper hub context when HarvestHub is restored
+            // await scopedHub.Clients.Group($"harvest-{operation.Id}").SendAsync("harvestdiscoverycomplete", new
+            // {
+            //     operationId = operation.Id.ToString(),
+            //     totalFilesDiscovered = gcodeFileCount,
+            //     completedAt = DateTime.UtcNow.ToString("O")
+            // });
         }
         catch (Exception ex)
         {
@@ -421,30 +424,16 @@ public partial class GcodeHarvestService(
         try
         {
             // Check if the backend supports file downloads using capability factory
-            if (_capabilityFactory.TryGetFileDownloadClient(backend, out _))
+            if (_capabilityFactory.TryGetFileDownloadClient(backend, out var downloadClient) && 
+                downloadClient is ISupportsFileDownload fileDownload)
             {
-                // Moonraker is the only client that currently supports DownloadFileAsync
-                if (backend == PrinterBackend.Moonraker)
-                {
-                    // Retrieve Moonraker client from factory when needed
-                    if (!_capabilityFactory.TryGetFileDownloadClient(PrinterBackend.Moonraker, out var downloadClient))
-                    {
-                        log.LogWarning("Moonraker backend does not support file downloads");
-                        return null;
-                    }
-
-                    var moonrakerClient = downloadClient as IMoonrakerClient;
-                    if (moonrakerClient == null)
-                    {
-                        log.LogError("Failed to retrieve Moonraker client from factory");
-                        return null;
-                    }
-
-                    return await ConvertBytesToMemoryStreamAsync(
-                        await moonrakerClient.DownloadFileAsync(printer.ServerUrl, filePath));
-                }
-
-                return null;
+                // Use capability interface for file download (works for all backends that support it)
+                string baseUrl = backend == PrinterBackend.Moonraker
+                    ? printer.ServerUrl  // Moonraker uses ServerUrl directly
+                    : printer.BackendUrl;
+                    
+                byte[]? fileBytes = await fileDownload.DownloadFileAsync(baseUrl, filePath, ct: CancellationToken.None);
+                return await ConvertBytesToMemoryStreamAsync(fileBytes);
             }
             
             // For backends that don't support downloads, return null
@@ -1041,21 +1030,16 @@ public partial class GcodeHarvestService(
         try
         {
             // Retrieve Moonraker client from factory when needed
-            if (!_capabilityFactory.TryGetFileDownloadClient(PrinterBackend.Moonraker, out var downloadClient))
+            if (!_capabilityFactory.TryGetFileDownloadClient(PrinterBackend.Moonraker, out var downloadClient) ||
+                downloadClient is not ISupportsFileDownload fileDownload)
             {
                 log.LogWarning("Moonraker backend does not support file downloads");
                 return null;
             }
 
-            var moonrakerClient = downloadClient as IMoonrakerClient;
-            if (moonrakerClient == null)
-            {
-                log.LogError("Failed to retrieve Moonraker client from factory");
-                return null;
-            }
-
+            // We already have ISupportsFileDownload, so use it directly
             log.LogInformation("Downloading file {FilePath} from Moonraker at {ServerUrl}", filePath, serverUrl);
-            byte[]? bytes = await moonrakerClient.DownloadFileAsync(serverUrl, filePath);
+            byte[]? bytes = await fileDownload.DownloadFileAsync(serverUrl, filePath);
             if (bytes != null)
             {
                 log.LogInformation("Successfully downloaded {FilePath} ({Size} bytes)", filePath, bytes.Length);
@@ -1179,31 +1163,27 @@ public partial class GcodeHarvestService(
 
         try
         {
-            // Retrieve PrusaLink client from factory when needed
-            if (!_capabilityFactory.TryGetFileListClient(PrinterBackend.PrusaLink, out var baseClient))
+            // Retrieve PrusaLink file list using capability interface
+            if (_capabilityFactory.TryGetFileListClient(PrinterBackend.PrusaLink, out var baseClient) &&
+                baseClient is ISupportsFileList fileListClient)
             {
-                log.LogWarning("Backend PrusaLink does not support file listing");
-                return new List<PrinterFileInfo>();
+                List<Farm.Infrastructure.Services.Printers.PrinterFileInfo> files = await fileListClient.GetFileListAsync(serverUrl, apiKey, CancellationToken.None);
+                log.LogInformation($"Found {files.Count} files in PrusaLink at {serverUrl}");
+                
+                // Map infrastructure PrinterFileInfo to local PrinterFileInfo class
+                return files.Select(f => new PrinterFileInfo
+                {
+                    Name = f.Name,
+                    Path = f.Path,
+                    Size = f.Size ?? 0,
+                    ModifiedAt = null,
+                    SlicerName = null,
+                    FilamentWeightGrams = null
+                }).ToList();
             }
 
-            var prusaLinkClient = baseClient as IPrusaLinkClient;
-            if (prusaLinkClient == null)
-            {
-                log.LogError("Failed to retrieve PrusaLink client from factory");
-                return new List<PrinterFileInfo>();
-            }
-
-            string[] fileNames = await prusaLinkClient.GetFileListAsync(serverUrl, apiKey);
-            List<PrinterFileInfo> files = fileNames.Select(fileName => new PrinterFileInfo
-            {
-                Name = fileName,
-                Path = fileName,
-                Size = 0, // PrusaLink basic API doesn't provide size info
-                ModifiedAt = null // PrusaLink basic API doesn't provide modification date
-            }).ToList();
-
-            log.LogInformation($"Found {files.Count} files in PrusaLink at {serverUrl}");
-            return files;
+            log.LogWarning("Backend PrusaLink does not support file listing capability");
+            return new List<PrinterFileInfo>();
         }
         catch (Exception ex)
         {

@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Farm.Backend.Plugin.OctoPrint;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Interfaces;
 using FluentAssertions;

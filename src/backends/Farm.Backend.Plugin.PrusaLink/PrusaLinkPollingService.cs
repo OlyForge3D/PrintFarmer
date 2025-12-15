@@ -18,12 +18,10 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public sealed class PrusaLinkPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
-    IPrusaLinkClient prusaLinkClient) : IHostedService, IDisposable
+    IUnifiedLoggingService logger) : IHostedService, IDisposable
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
-    private readonly IPrusaLinkClient _prusaLinkClient = prusaLinkClient;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
@@ -178,7 +176,12 @@ public sealed class PrusaLinkPollingService(
                 // Poll the printer
                 try
                 {
-                    PrusaCompositeStatus status = await _prusaLinkClient.GetCompositeStatusAsync(
+                    // Get the PrusaLink client from a scoped context
+                    // (scoped services cannot be injected directly into singletons)
+                    using var scope = _scopeFactory.CreateScope();
+                    var prusaLinkClient = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
+
+                    PrusaCompositeStatus status = await prusaLinkClient.GetCompositeStatusAsync(
                         printer.ServerUrl,
                         printer.ApiKey,
                         ct);

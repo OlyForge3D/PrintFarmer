@@ -2,6 +2,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -71,15 +72,19 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
         services.AddScoped<IPrusaLinkApiClient, PrusaLinkApiClient>();
 
         // Register the PrusaLink client interface with its implementation
-        // The HTTP client factory handles creation with proper timeout
-        services.AddHttpClient<IPrusaLinkClient, PrusaLinkClient>(client =>
+        // Using AddScoped because it needs fresh instances per request
+        services.AddScoped<IPrusaLinkClient>(provider =>
         {
-            client.Timeout = TimeSpan.FromSeconds(10);
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            var logger = provider.GetService<IUnifiedLoggingService>();
+            return new PrusaLinkClient(httpClient, logger);
         });
 
-        // Register the PrusaLink status client for real-time status updates
-        // Status clients implement IPrinterStatusClient and are instantiated by the PrinterStatusClientFactory
-        services.AddSingleton<IPrinterStatusClient, PrusaLinkStatusClient>();
+        // NOTE: Status clients are NOT registered in DI container. They are instantiated
+        // on-demand by PrinterStatusClientFactory which properly handles their dependencies
+        // on scoped services.
 
         // Register the PrusaLinkPollingService hosted service
         // This service polls PrusaLink printers for status updates every 5 seconds

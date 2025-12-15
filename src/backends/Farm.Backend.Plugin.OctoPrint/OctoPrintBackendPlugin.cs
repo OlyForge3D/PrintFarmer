@@ -4,6 +4,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Plugin descriptor for OctoPrint backend client support.
@@ -67,13 +68,19 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
     public void RegisterAdditionalServices(IServiceCollection services)
     {
         // Register the HTTP client for OctoPrint with proper timeout
-        services.AddHttpClient<IOctoPrintClient, OctoPrintClient>(client =>
+        // Using AddScoped to allow proper dependency resolution
+        services.AddScoped<IOctoPrintClient>(provider =>
         {
-            client.Timeout = TimeSpan.FromSeconds(10);
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            var logger = provider.GetService<Microsoft.Extensions.Logging.ILogger<OctoPrintClient>>();
+            return new OctoPrintClient(httpClient, logger);
         });
 
-        // Register the status client as singleton for real-time status updates
-        services.AddSingleton<IPrinterStatusClient, OctoPrintStatusClient>();
+        // NOTE: Status clients are NOT registered in DI container. They are instantiated
+        // on-demand by PrinterStatusClientFactory which properly handles their dependencies
+        // on scoped services.
 
         // Register the polling service as hosted service
         services.AddSingleton<IHostedService, OctoPrintPollingService>();
