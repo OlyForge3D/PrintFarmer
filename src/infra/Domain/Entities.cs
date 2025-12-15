@@ -74,7 +74,41 @@ public class Printer
     public Guid ModelId { get; set; } // No longer nullable - uses default "Unknown Model"
     public PrinterModel? Model { get; set; }
     public DateTime? DateAcquired { get; set; }
-    public PrinterCapabilities? Capabilities { get; set; }
+    
+    // Hardware Specifications (previously in PrinterCapabilities)
+    public double? MaxBuildVolumeX { get; set; }
+    public double? MaxBuildVolumeY { get; set; }
+    public double? MaxBuildVolumeZ { get; set; }
+    public bool HasHeatedBed { get; set; } = true;
+    public bool HasEnclosure { get; set; }
+    public bool MultiMaterial { get; set; }
+    public bool SupportsAutoLeveling { get; set; }
+    public int? MaxPrintSpeed { get; set; }
+    
+    // Bed temperature ranges
+    [ImportExport(ImportExportTargets.Import)]
+    public int? MinBedTemp { get; set; }
+    public int? MaxBedTemp { get; set; }
+    
+    // Material and job tracking
+    [ImportExport(ImportExportTargets.Import)]
+    public string? CurrentMaterial { get; set; } // From Spoolman integration
+    [ImportExport(ImportExportTargets.Import)]
+    public int? CurrentSpoolId { get; set; } // Spoolman spool ID
+    
+    // Availability
+    [ImportExport(ImportExportTargets.Import)]
+    public bool IsAvailable { get; set; } = true; // Can accept new jobs
+    public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
+    
+    // Multi-toolhead support (one-to-many with Toolhead)
+    /// <summary>
+    /// Collection of toolheads (hotends/nozzles) for this printer.
+    /// For single-toolhead printers, this will have one entry.
+    /// For multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.), this will have multiple entries.
+    /// </summary>
+    public ICollection<Toolhead> Toolheads { get; set; } = new List<Toolhead>();
+    
     public bool InMaintenance { get; set; } = false;
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
 }
@@ -512,41 +546,6 @@ public class PrintJob
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime QueuedAt { get; set; }
-}
-
-// Printer Capabilities (extends Printer entity conceptually)
-#pragma warning disable CA1724 // Type name conflicts with namespace Farm.Infrastructure.Repositories.PrinterCapabilities
-public class PrinterCapabilities
-#pragma warning restore CA1724
-{
-    public Guid Id { get; set; }
-    public Guid PrinterId { get; set; }
-    public Printer Printer { get; set; } = null!;
-    public double? NozzleDiameter { get; set; }
-    public string[]? SupportedMaterials { get; set; } // JSON array: ["PLA", "PETG", "ABS"]
-    public double? MaxBuildVolumeX { get; set; }
-    public double? MaxBuildVolumeY { get; set; }
-    public double? MaxBuildVolumeZ { get; set; }
-    public bool HasHeatedBed { get; set; } = true;
-    public bool HasEnclosure { get; set; }
-    public bool MultiMaterial { get; set; }
-    public int NumberOfExtruders { get; set; } = 1;
-    public int? MinHotendTemp { get; set; }
-    public int? MaxHotendTemp { get; set; }
-    [ImportExport(ImportExportTargets.Import)]
-    public int? MinBedTemp { get; set; }
-    public int? MaxBedTemp { get; set; }
-    [ImportExport(ImportExportTargets.Import)]
-    public string? CurrentMaterial { get; set; } // From Spoolman integration
-    [ImportExport(ImportExportTargets.Import)]
-    public int? CurrentSpoolId { get; set; } // Spoolman spool ID
-    [ImportExport(ImportExportTargets.Import)]
-    public bool IsAvailable { get; set; } = true; // Can accept new jobs
-    public DateTime LastUpdated { get; set; }
-    public bool SupportsAutoLeveling { get; set; }
-    public int? MaxPrintSpeed { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
 }
 
 // User Management and Authentication System

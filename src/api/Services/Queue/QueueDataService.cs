@@ -83,9 +83,9 @@ namespace Farm.Web.Api.Services.Queue
         public Task<List<Printer>> GetAvailablePrintersAsync(CancellationToken ct)
         {
             return _db.Printers
-                .Include(p => p.Capabilities)
                 .Include(p => p.Model)
-                .Where(p => p.Capabilities != null && p.Capabilities.IsAvailable)
+                .Include(p => p.Toolheads)
+                .Where(p => p.IsAvailable)
                 .ToListAsync(ct);
         }
 

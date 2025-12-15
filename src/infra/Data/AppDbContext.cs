@@ -22,7 +22,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
-    public DbSet<PrinterCapabilities> PrinterCapabilities => Set<PrinterCapabilities>();
+    public DbSet<Toolhead> Toolheads => Set<Toolhead>();
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
 
@@ -110,6 +110,42 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(p => p.ModelId)
              .OnDelete(DeleteBehavior.Restrict); // Changed from SetNull - ModelId is not nullable
             _ = b.Property(p => p.DateAcquired);
+            
+            // Toolheads collection - one printer can have multiple hotends
+            _ = b.HasMany(p => p.Toolheads)
+             .WithOne(t => t.Printer)
+             .HasForeignKey(t => t.PrinterId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Toolhead Entity Configuration
+        _ = modelBuilder.Entity<Toolhead>(b =>
+        {
+            _ = b.HasKey(t => t.Id);
+            _ = b.Property(t => t.Name).HasMaxLength(128);
+            _ = b.Property(t => t.Index).IsRequired();
+            _ = b.Property(t => t.NozzleDiameter).IsRequired();
+            _ = b.Property(t => t.MinHotendTemp).HasDefaultValue(0);
+            _ = b.Property(t => t.MaxHotendTemp).HasDefaultValue(300);
+            _ = b.Property(t => t.HasHeatedEnclosure).HasDefaultValue(false);
+            _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
+            _ = b.Property(t => t.UpdatedAt).IsRequired();
+            
+            // JSON array properties
+            _ = b.Property(t => t.SupportedMaterials)
+                .HasConversion(
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
+            
+            // Foreign Key
+            _ = b.HasOne(t => t.Printer)
+             .WithMany(p => p.Toolheads)
+             .HasForeignKey(t => t.PrinterId)
+             .OnDelete(DeleteBehavior.Cascade);
+            
+            // Indexes
+            _ = b.HasIndex(t => t.PrinterId);
+            _ = b.HasIndex(t => t.Index);
         });
 
         _ = modelBuilder.Entity<Manufacturer>(b =>
@@ -313,26 +349,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(j => j.AssignedPrinterId);
         });
 
-        // Printer Capabilities Entity Configuration
-        _ = modelBuilder.Entity<PrinterCapabilities>(b =>
-        {
-            _ = b.HasKey(c => c.Id);
-            _ = b.Property(c => c.SupportedMaterials)
-                .HasConversion(
-                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
-                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
-
-            // Foreign Key - One-to-one relationship
-            _ = b.HasOne(c => c.Printer)
-                .WithOne(p => p.Capabilities)
-                .HasForeignKey<PrinterCapabilities>(c => c.PrinterId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Indexes
-            _ = b.HasIndex(c => c.PrinterId).IsUnique();
-            _ = b.HasIndex(c => c.NozzleDiameter);
-            _ = b.HasIndex(c => c.IsAvailable);
-        });
+        // Printer Capabilities Entity Configuration - REMOVED (merged into Printer entity)
 
         // G-code Harvest Operation Entity Configuration
         _ = modelBuilder.Entity<GcodeHarvestOperation>(b =>

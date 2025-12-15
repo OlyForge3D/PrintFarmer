@@ -37,7 +37,7 @@ namespace Farm.Web.Api.Services.Queue
                     PrinterId = printer.Id,
                     PrinterName = printer.Name,
                     PrinterModel = printer.Model?.Name ?? "Unknown",
-                    IsAvailable = printer.Capabilities?.IsAvailable ?? false,
+                    IsAvailable = printer.IsAvailable,
                     QueuedJobsCount = queuedJobs.Count,
                     CurrentJobId = currentJob?.Id,
                     CurrentJobName = currentJob?.Name,
@@ -305,14 +305,25 @@ namespace Farm.Web.Api.Services.Queue
 
             foreach (Printer printer in printers)
             {
-                if (request.RequiredNozzleDiameter.HasValue && printer.Capabilities?.NozzleDiameter.HasValue == true && Math.Abs(printer.Capabilities.NozzleDiameter.Value - (double)request.RequiredNozzleDiameter.Value) > 0.01)
+                // Check nozzle diameter - now per-toolhead, check if any toolhead matches
+                if (request.RequiredNozzleDiameter.HasValue)
                 {
-                    continue;
+                    double requiredDiameter = (double)request.RequiredNozzleDiameter;
+                    bool hasCompatibleToolhead = printer.Toolheads?.Any(t => t.NozzleDiameter.HasValue && Math.Abs(t.NozzleDiameter.Value - requiredDiameter) <= 0.01) ?? false;
+                    if (!hasCompatibleToolhead)
+                    {
+                        continue;
+                    }
                 }
 
-                if (!string.IsNullOrEmpty(request.RequiredMaterialType) && printer.Capabilities?.SupportedMaterials != null && !printer.Capabilities.SupportedMaterials.Contains(request.RequiredMaterialType))
+                // Check supported materials - now per-toolhead, check if any toolhead supports the material
+                if (!string.IsNullOrEmpty(request.RequiredMaterialType))
                 {
-                    continue;
+                    bool hasCompatibleToolhead = printer.Toolheads?.Any(t => t.SupportedMaterials?.Contains(request.RequiredMaterialType) ?? false) ?? false;
+                    if (!hasCompatibleToolhead)
+                    {
+                        continue;
+                    }
                 }
 
                 int queueCount = await _dataService.CountQueuedJobsForPrinterAsync(printer.Id, ct);

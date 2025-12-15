@@ -36,7 +36,6 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IBackendClientFactory _backendFactory;
         private readonly IBackendCapabilityFactory _capabilityFactory;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IPrinterCapabilityDiscoveryService _capabilityDiscovery;
         private readonly IDefaultCatalogService _defaultCatalog;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
@@ -51,7 +50,6 @@ namespace Farm.Web.Api.Services.Printers
             IBackendClientFactory backendFactory,
             IBackendCapabilityFactory capabilityFactory,
             ICircuitBreakerService circuitBreaker,
-            IPrinterCapabilityDiscoveryService capabilityDiscovery,
             IDefaultCatalogService defaultCatalog,
             Catalog.ICatalogService catalogService,
             IHttpClientFactory httpClientFactory,
@@ -66,7 +64,6 @@ namespace Farm.Web.Api.Services.Printers
             _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
             _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
             _circuitBreaker = circuitBreaker ?? throw new ArgumentNullException(nameof(circuitBreaker));
-            _capabilityDiscovery = capabilityDiscovery ?? throw new ArgumentNullException(nameof(capabilityDiscovery));
             _defaultCatalog = defaultCatalog ?? throw new ArgumentNullException(nameof(defaultCatalog));
             _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
@@ -267,20 +264,7 @@ namespace Farm.Web.Api.Services.Printers
             await _repo.SaveChangesAsync(ct);
         }
 
-        public async Task<Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities>> GetCapabilitiesDictionaryAsync(Guid[]? ids, CancellationToken ct)
-        {
-            return await _repo.GetCapabilitiesDictionaryAsync(ids, ct);
-        }
-
-        public async Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct)
-        {
-            return await _repo.GetCapabilitiesListAsync(ids, ct);
-        }
-
-        public async Task<Farm.Infrastructure.Domain.PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct)
-        {
-            return await _repo.GetCapabilitiesByPrinterIdAsync(id, ct);
-        }
+        // DEPRECATED: PrinterCapabilities methods removed - hardware specs now on Printer entity
 
         // ----- Orchestration methods -----
         public async Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct)
@@ -409,14 +393,17 @@ namespace Farm.Web.Api.Services.Printers
                 string? streamUrl = null;
                 string? snapshotUrl = null;
 
-                // PrusaLink camera URLs are not supported due to encoding issues
                 var backend = (PrinterBackend)p.Backend;
-                if (backend != PrinterBackend.PrusaLink && 
-                    await IsCameraAvailableAsync(p.BackendUrl, p.Backend, p.FrontendPort, p.ApiKey, ct))
+                
+                // Check if this backend supports camera operations
+                var backendCapabilities = _capabilityFactory.GetSupportedCapabilities(backend);
+                if ((backendCapabilities & BackendCapabilities.Camera) == BackendCapabilities.Camera)
                 {
                     try
                     {
                         // Use capability factory for polymorphic camera URL retrieval
+                        // Note: We return URLs as-is without validation. The presence of a URL
+                        // indicates camera support. Frontend can validate accessibility.
                         if (_capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient))
                         {
                             streamUrl = await cameraClient!.GetCameraStreamUrlAsync(p!.BackendUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
@@ -433,10 +420,7 @@ namespace Farm.Web.Api.Services.Printers
             return dtos;
         }
 
-        public async Task SaveCapabilitiesAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, CancellationToken ct)
-        {
-            await _repo.SaveCapabilitiesAsync(capabilities, ct);
-        }
+        // DEPRECATED: SaveCapabilitiesAsync removed - hardware specs now on Printer entity
 
         public async Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct)
         {
@@ -659,8 +643,7 @@ namespace Farm.Web.Api.Services.Printers
 
             if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
             {
-                Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await GetCapabilitiesDictionaryAsync(ids, ct);
-                await StreamJsonExportAsync(query, capabilities, response, ct);
+                await StreamJsonExportAsync(query, response, ct);
                 return;
             }
 
@@ -693,11 +676,9 @@ namespace Farm.Web.Api.Services.Printers
         public async Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
-            List<Farm.Infrastructure.Domain.PrinterCapabilities> capabilities = await GetCapabilitiesListAsync(ids, ct);
 
             PrinterWithCapabilitiesDto[] results = printers.Select(p =>
             {
-                Farm.Infrastructure.Domain.PrinterCapabilities? cap = capabilities.Find(c => c.PrinterId == p.Id);
                 return new PrinterWithCapabilitiesDto
                 {
                     PrinterId = p.Id,
@@ -708,29 +689,32 @@ namespace Farm.Web.Api.Services.Printers
                     IpAddress = p.IpAddress,
                     // Add import-friendly fields for re-importing
                     ServerUrl = p.ServerUrl,
+                    BackendPort = p.BackendPort,
+                    FrontendPort = p.FrontendPort,
                     ApiKey = p.ApiKey,
                     Notes = p.Notes,
-                    Capabilities = cap == null ? null : new PrinterCapabilitiesExportDto
+                    // Export hardware specs directly from Printer (merged from legacy PrinterCapabilities)
+                    Capabilities = new PrinterCapabilitiesExportDto
                     {
-                        Id = cap.Id,
-                        NozzleDiameter = cap.NozzleDiameter,
-                        SupportedMaterials = cap.SupportedMaterials,
-                        MaxBuildVolumeX = cap.MaxBuildVolumeX,
-                        MaxBuildVolumeY = cap.MaxBuildVolumeY,
-                        MaxBuildVolumeZ = cap.MaxBuildVolumeZ,
-                        HasHeatedBed = cap.HasHeatedBed,
-                        HasEnclosure = cap.HasEnclosure,
-                        MultiMaterial = cap.MultiMaterial,
-                        SupportsAutoLeveling = cap.SupportsAutoLeveling,
-                        NumberOfExtruders = cap.NumberOfExtruders,
-                        MinHotendTemp = cap.MinHotendTemp,
-                        MaxHotendTemp = cap.MaxHotendTemp,
-                        MinBedTemp = cap.MinBedTemp,
-                        MaxBedTemp = cap.MaxBedTemp,
-                        CurrentMaterial = cap.CurrentMaterial,
-                        CurrentSpoolId = cap.CurrentSpoolId,
-                        IsAvailable = cap.IsAvailable,
-                        LastUpdated = cap.LastUpdated
+                        Id = p.Id, // Use printer ID as capabilities ID
+                        NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter, // Get from primary toolhead
+                        SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials, // Get from primary toolhead
+                        MaxBuildVolumeX = p.MaxBuildVolumeX,
+                        MaxBuildVolumeY = p.MaxBuildVolumeY,
+                        MaxBuildVolumeZ = p.MaxBuildVolumeZ,
+                        HasHeatedBed = p.HasHeatedBed,
+                        HasEnclosure = p.HasEnclosure,
+                        MultiMaterial = p.MultiMaterial,
+                        SupportsAutoLeveling = p.SupportsAutoLeveling,
+                        NumberOfExtruders = p.Toolheads?.Count ?? 1, // Use toolhead count
+                        MinHotendTemp = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.MinHotendTemp, // Get from primary toolhead
+                        MaxHotendTemp = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.MaxHotendTemp, // Get from primary toolhead
+                        MinBedTemp = p.MinBedTemp,
+                        MaxBedTemp = p.MaxBedTemp,
+                        CurrentMaterial = p.CurrentMaterial,
+                        CurrentSpoolId = p.CurrentSpoolId,
+                        IsAvailable = p.IsAvailable,
+                        LastUpdated = p.LastCapabilityUpdate
                     }
                 };
             }).ToArray();
@@ -753,18 +737,7 @@ namespace Farm.Web.Api.Services.Printers
             return raw;
         }
 
-        private static bool PropertySuppressedForExport(PropertyInfo? pi)
-        {
-            if (pi == null)
-            {
-                return false;
-            }
-
-            ImportExportAttribute? attr = pi.GetCustomAttributes(typeof(ImportExportAttribute), inherit: true).FirstOrDefault() as ImportExportAttribute;
-            return attr != null && (attr.IgnoreFor & ImportExportTargets.Export) != 0;
-        }
-
-        private async Task StreamJsonExportAsync(IQueryable<Printer> query, Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities> capabilities, HttpResponse response, CancellationToken ct)
+        private async Task StreamJsonExportAsync(IQueryable<Printer> query, HttpResponse response, CancellationToken ct)
         {
             response.ContentType = "application/json";
             string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
@@ -773,7 +746,8 @@ namespace Farm.Web.Api.Services.Printers
             await using StreamWriter writer = new StreamWriter(response.Body, Encoding.UTF8, leaveOpen: true);
             await writer.WriteAsync("[");
             bool first = true;
-            await foreach (Printer? p in query.AsAsyncEnumerable().WithCancellation(ct))
+            // Include Toolheads in query to access toolhead data during export
+            await foreach (Printer? p in query.Include(pr => pr.Toolheads).AsAsyncEnumerable().WithCancellation(ct))
             {
                 if (!first)
                 {
@@ -781,8 +755,7 @@ namespace Farm.Web.Api.Services.Printers
                 }
 
                 first = false;
-                _ = capabilities.TryGetValue(p.Id, out Farm.Infrastructure.Domain.PrinterCapabilities? cap);
-                Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p, cap);
+                Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p);
                 string json = JsonSerializer.Serialize(dtoDict, _exportJsonOptions);
                 await writer.WriteAsync(json);
                 await writer.FlushAsync();
@@ -791,7 +764,7 @@ namespace Farm.Web.Api.Services.Printers
             await writer.FlushAsync();
         }
 
-        private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p, Farm.Infrastructure.Domain.PrinterCapabilities? cap)
+        private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p)
         {
             Dictionary<string, object?> dict = new Dictionary<string, object?>
             {
@@ -804,20 +777,32 @@ namespace Farm.Web.Api.Services.Printers
                 ["Model"] = p.Model?.Name,
                 ["Backend"] = p.Backend,
                 ["ApiKey"] = p.ApiKey,
-                ["DateAcquired"] = p.DateAcquired
+                ["DateAcquired"] = p.DateAcquired,
+                // Export hardware specs directly from Printer (merged from legacy PrinterCapabilities)
+                ["MaxBuildVolumeX"] = p.MaxBuildVolumeX,
+                ["MaxBuildVolumeY"] = p.MaxBuildVolumeY,
+                ["MaxBuildVolumeZ"] = p.MaxBuildVolumeZ,
+                ["HasHeatedBed"] = p.HasHeatedBed,
+                ["HasEnclosure"] = p.HasEnclosure,
+                ["MultiMaterial"] = p.MultiMaterial,
+                ["SupportsAutoLeveling"] = p.SupportsAutoLeveling,
+                ["NumberOfExtruders"] = p.Toolheads?.Count ?? 1,
+                ["MinBedTemp"] = p.MinBedTemp,
+                ["MaxBedTemp"] = p.MaxBedTemp,
+                ["CurrentMaterial"] = p.CurrentMaterial,
+                ["CurrentSpoolId"] = p.CurrentSpoolId,
+                ["IsAvailable"] = p.IsAvailable,
+                ["LastUpdated"] = p.LastCapabilityUpdate
             };
 
-            if (cap != null)
+            // Export primary toolhead specs if available
+            Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
+            if (primaryToolhead != null)
             {
-                foreach (PropertyInfo prop in typeof(Farm.Infrastructure.Domain.PrinterCapabilities).GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (PropertySuppressedForExport(prop))
-                    {
-                        continue;
-                    }
-
-                    dict[prop.Name] = prop.GetValue(cap);
-                }
+                dict["NozzleDiameter"] = primaryToolhead.NozzleDiameter;
+                dict["SupportedMaterials"] = primaryToolhead.SupportedMaterials;
+                dict["MinHotendTemp"] = primaryToolhead.MinHotendTemp;
+                dict["MaxHotendTemp"] = primaryToolhead.MaxHotendTemp;
             }
 
             return dict;
@@ -1072,24 +1057,22 @@ namespace Farm.Web.Api.Services.Printers
                 IsEnabled = dto.IsEnabled
             };
 
+            // Create a default Toolhead for single-toolhead printers
+            // Multi-toolhead printers can be added later via separate API
+            Toolhead defaultToolhead = new()
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = p.Id,
+                Name = "Extruder 1",
+                Index = 0,
+                IsPrimary = true
+            };
+            p.Toolheads.Add(defaultToolhead);
+
             await AddAsync(p, ct).ConfigureAwait(false);
 
-            try
-            {
-                Printer? printerForDiscovery = await FindByIdWithIncludesAsync(p.Id, ct).ConfigureAwait(false);
-                if (printerForDiscovery != null)
-                {
-                    Farm.Infrastructure.Domain.PrinterCapabilities? discoveredCapabilities = await _capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDiscovery, ct).ConfigureAwait(false);
-                    if (discoveredCapabilities == null)
-                    {
-                        _logger.LogDebug($"Could not discover capabilities for imported printer: {p.Name} ({p.Id})");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug($"Error during capability discovery for imported printer: {p.Name} ({p.Id}) - {ex.Message}");
-            }
+            // Capability discovery disabled - hardware specs now populated via printer model defaults and Toolhead creation
+            // TODO: Future enhancement - implement automatic discovery to populate Toolhead specs from printer API
 
             // Return offline DTO for newly imported printer (hasn't fetched status yet)
             return CreateOfflinePrinterDto(p);
@@ -2091,11 +2074,16 @@ namespace Farm.Web.Api.Services.Printers
 
                             // Build ServerUrl from IpAddress 
                             string ipAddress = values[ipAddressIdx];
-                            // Get BackendPort from CSV - MUST be provided
-                            if (backendPortIdx < 0 || backendPortIdx >= values.Length || string.IsNullOrWhiteSpace(values[backendPortIdx]) || !int.TryParse(values[backendPortIdx], out int backendPort))
+                            // Get BackendPort from CSV - use default if not provided
+                            int backendPort;
+                            if (backendPortIdx >= 0 && backendPortIdx < values.Length && !string.IsNullOrWhiteSpace(values[backendPortIdx]) && int.TryParse(values[backendPortIdx], out int providedPort))
                             {
-                                errors.Add($"Line {lineNumber}: BackendPort is required and must be a valid integer");
-                                continue;
+                                backendPort = providedPort;
+                            }
+                            else
+                            {
+                                // Use default port based on backend type
+                                backendPort = backendEnum == PrinterBackend.Moonraker ? 7125 : 80;
                             }
                             string serverUrl = $"http://{ipAddress}";
 

@@ -91,6 +91,28 @@ export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls
   });
 }
 
+export function usePrinterBackendCapabilities(options?: UseQueryOptions<PrinterBackendCapabilitiesDto[], ApiError>) {
+  return useQuery({
+    queryKey: [...queryKeys.printers, 'backend-capabilities'],
+    queryFn: () => apiClient.getPrinterBackendCapabilities(),
+    staleTime: 600000, // 10 minutes - backend capabilities rarely change
+    ...options,
+  });
+}
+
+export function usePrinterBackendCapabilitiesSingle(printerId: string | null, options?: UseQueryOptions<PrinterBackendCapabilitiesDto, ApiError>) {
+  return useQuery({
+    queryKey: [...queryKeys.printers, printerId, 'backend-capabilities'],
+    queryFn: () => {
+      if (!printerId) throw new Error('printerId is required');
+      return apiClient.getPrinterBackendCapabilitiesSingle(printerId);
+    },
+    enabled: !!printerId,
+    staleTime: 600000, // 10 minutes
+    ...options,
+  });
+}
+
 export function usePrintersWithCameraUrls(includeDisabled = false) {
   const printersQuery = usePrintersFast(includeDisabled);
   const cameraUrlsQuery = usePrinterCameraUrls();

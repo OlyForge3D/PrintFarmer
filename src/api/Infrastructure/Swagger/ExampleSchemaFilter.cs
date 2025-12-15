@@ -207,10 +207,6 @@ public static class ExampleSchemaFilter
                 ["maxBuildVolumeZ"] = new OpenApiDouble(250),
                 ["hasHeatedBed"] = new OpenApiBoolean(true),
                 ["hasEnclosure"] = new OpenApiBoolean(true),
-                ["multiMaterial"] = new OpenApiBoolean(false),
-                ["numberOfExtruders"] = new OpenApiInteger(1),
-                ["isAvailable"] = new OpenApiBoolean(true),
-                ["lastUpdated"] = new OpenApiString(DateTime.UtcNow.ToString("o"))
             };
         }
         else if (t == typeof(PrintJobDto))

@@ -107,6 +107,23 @@ export interface PrinterCameraUrls {
   cameraSnapshotUrl?: string;
 }
 
+export interface PrinterBackendCapabilitiesDto {
+  printerId: string;
+  printerName: string;
+  backend: PrinterBackend;
+  supportsCamera: boolean;
+  supportsFileDownload: boolean;
+  supportsFileList: boolean;
+  supportsFileUpload: boolean;
+  supportsStartPrint: boolean;
+  supportsControlOperations: boolean;
+  supportsFileMetadata: boolean;
+  supportsMovement: boolean;
+  supportsTemperatureControl: boolean;
+  supportsPrinterInformation: boolean;
+  supportsHistory: boolean;
+}
+
 export interface PrinterFast {
   id: string;
   name: string;

@@ -497,6 +497,25 @@ public class CreatePrinterDto : PrinterInfoDto
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
+    /// Hardware specification fields - populated from exported printer data or discovery
+    /// </summary>
+    public double? MaxBuildVolumeX { get; set; }
+    public double? MaxBuildVolumeY { get; set; }
+    public double? MaxBuildVolumeZ { get; set; }
+    public bool HasHeatedBed { get; set; } = true;
+    public bool HasEnclosure { get; set; } = false;
+    public bool MultiMaterial { get; set; } = false;
+    public bool SupportsAutoLeveling { get; set; } = false;
+    public double? NozzleDiameter { get; set; }
+    public string[]? SupportedMaterials { get; set; }
+    public int? MinHotendTemp { get; set; }
+    public int? MaxHotendTemp { get; set; }
+    public int? MinBedTemp { get; set; }
+    public int? MaxBedTemp { get; set; }
+    public string? CurrentMaterial { get; set; }
+    public int? CurrentSpoolId { get; set; }
+
+    /// <summary>
     /// Create from discovered printer info with optional catalog metadata.
     /// </summary>
     public static CreatePrinterDto FromDiscovered(

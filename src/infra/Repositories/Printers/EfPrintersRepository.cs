@@ -20,7 +20,7 @@ public class EfPrintersRepository : IPrintersRepository
 
     public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct) => await _db.Printers.FindAsync(new object?[] { id }, ct);
 
-    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).Include(p => p.Capabilities).FirstOrDefaultAsync(p => p.Id == id, ct);
+    public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct) => await _db.Printers.Include(p => p.Manufacturer).Include(p => p.Model).FirstOrDefaultAsync(p => p.Id == id, ct);
 
     public async Task AddAsync(Printer p, CancellationToken ct)
     {
@@ -67,63 +67,6 @@ public class EfPrintersRepository : IPrintersRepository
     }
 
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);
-
-    public async Task<Dictionary<Guid, Domain.PrinterCapabilities>> GetCapabilitiesDictionaryAsync(Guid[]? ids, CancellationToken ct)
-    {
-        IQueryable<Domain.PrinterCapabilities> q = _db.PrinterCapabilities.AsNoTracking();
-        if (ids != null && ids.Length > 0)
-        {
-            q = q.Where(c => ids.Contains(c.PrinterId));
-        }
-
-        return await q.ToDictionaryAsync(c => c.PrinterId, ct);
-    }
-
-    public async Task<List<Domain.PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct)
-    {
-        IQueryable<Domain.PrinterCapabilities> q = _db.PrinterCapabilities.AsNoTracking();
-        if (ids != null && ids.Length > 0)
-        {
-            q = q.Where(c => ids.Contains(c.PrinterId));
-        }
-
-        return await q.ToListAsync(ct);
-    }
-
-    public async Task<Domain.PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct) => await _db.PrinterCapabilities.AsNoTracking().FirstOrDefaultAsync(c => c.PrinterId == id, ct);
-
-    public async Task SaveCapabilitiesAsync(Domain.PrinterCapabilities capabilities, CancellationToken ct)
-    {
-        Domain.PrinterCapabilities? existing = await _db.PrinterCapabilities.FirstOrDefaultAsync(c => c.PrinterId == capabilities.PrinterId, ct);
-        if (existing == null)
-        {
-            _ = _db.PrinterCapabilities.Add(capabilities);
-        }
-        else
-        {
-            // copy updatable fields
-            existing.NozzleDiameter = capabilities.NozzleDiameter;
-            existing.SupportedMaterials = capabilities.SupportedMaterials;
-            existing.MaxBuildVolumeX = capabilities.MaxBuildVolumeX;
-            existing.MaxBuildVolumeY = capabilities.MaxBuildVolumeY;
-            existing.MaxBuildVolumeZ = capabilities.MaxBuildVolumeZ;
-            existing.HasHeatedBed = capabilities.HasHeatedBed;
-            existing.HasEnclosure = capabilities.HasEnclosure;
-            existing.MultiMaterial = capabilities.MultiMaterial;
-            existing.NumberOfExtruders = capabilities.NumberOfExtruders;
-            existing.MinHotendTemp = capabilities.MinHotendTemp;
-            existing.MaxHotendTemp = capabilities.MaxHotendTemp;
-            existing.MinBedTemp = capabilities.MinBedTemp;
-            existing.MaxBedTemp = capabilities.MaxBedTemp;
-            existing.CurrentMaterial = capabilities.CurrentMaterial;
-            existing.CurrentSpoolId = capabilities.CurrentSpoolId;
-            existing.IsAvailable = capabilities.IsAvailable;
-            existing.LastUpdated = capabilities.LastUpdated;
-            existing.UpdatedAt = capabilities.UpdatedAt;
-        }
-
-        _ = await _db.SaveChangesAsync(ct);
-    }
 
     public async Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct)
     {

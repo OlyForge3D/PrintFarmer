@@ -61,11 +61,26 @@ namespace Farm.Web.Api.Services.Printers
             try
             {
                 var plugins = pluginRegistry.GetAllExtendedPlugins();
+                if (plugins == null)
+                {
+                    _logger.LogWarning("Plugin registry returned null for GetAllExtendedPlugins()");
+                    return;
+                }
+
+                var pluginsList = plugins.ToList();
+                _logger.LogDebug($"Got {pluginsList.Count} plugins from registry");
+
                 var discoveredCount = 0;
                 var duplicateIds = new HashSet<int>();
 
-                foreach (var plugin in plugins)
+                foreach (var plugin in pluginsList)
                 {
+                    if (plugin == null)
+                    {
+                        _logger.LogWarning("Plugin registry returned a null plugin object");
+                        continue;
+                    }
+
                     if (plugin.StatusClientType == null)
                     {
                         _logger.LogDebug($"Plugin {plugin.DisplayName} has no status client type, skipping.");
@@ -74,24 +89,37 @@ namespace Farm.Web.Api.Services.Printers
 
                     try
                     {
-                        // Read BackendId from the BackendPluginAttribute on the plugin's assembly
+                        // Try to get BackendId from assembly attribute first
                         var pluginAssembly = plugin.GetType().Assembly;
                         var backendAttr = pluginAssembly.GetCustomAttributes(typeof(BackendPluginAttribute), false)
                             .FirstOrDefault() as BackendPluginAttribute;
 
-                        if (backendAttr == null)
+                        PrinterBackend backendId;
+                        
+                        if (backendAttr != null)
                         {
-                            _logger.LogWarning($"Plugin {plugin.DisplayName} assembly is missing BackendPluginAttribute, skipping.");
-                            continue;
+                            // Use BackendId from assembly attribute if available
+                            backendId = (PrinterBackend)backendAttr.BackendId;
                         }
-
-                        var backendId = (PrinterBackend)backendAttr.BackendId;
+                        else
+                        {
+                            // Fallback: Try to parse BackendType string to PrinterBackend enum
+                            if (Enum.TryParse<PrinterBackend>(plugin.BackendType, out var parsedBackend))
+                            {
+                                backendId = parsedBackend;
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"Plugin {plugin.DisplayName} assembly is missing BackendPluginAttribute and BackendType '{plugin.BackendType}' cannot be parsed to PrinterBackend enum, skipping.");
+                                continue;
+                            }
+                        }
 
                         // Check for duplicate BackendId
                         if (_statusClientTypeMap.ContainsKey(backendId))
                         {
-                            _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.DisplayName} has BackendId={backendAttr.BackendId} but it's already registered. This will cause incorrect backend routing.");
-                            duplicateIds.Add(backendAttr.BackendId);
+                            _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.DisplayName} has BackendId={backendId} but it's already registered. This will cause incorrect backend routing.");
+                            duplicateIds.Add((int)backendId);
                             continue;
                         }
 
@@ -100,7 +128,7 @@ namespace Farm.Web.Api.Services.Printers
                         // Don't do IsAssignableFrom check due to potential assembly loading issues
                         _statusClientTypeMap[backendId] = plugin.StatusClientType;
                         discoveredCount++;
-                        _logger.LogInformation($"✓ Registered status client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.StatusClientType.Name})");
+                        _logger.LogInformation($"✓ Registered status client type: {plugin.DisplayName} (BackendId={backendId}, Type={plugin.StatusClientType.Name})");
                     }
                     catch (Exception ex)
                     {

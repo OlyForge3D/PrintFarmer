@@ -211,7 +211,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.PrinterCapabilities.IPrinterCapabilitiesRepository, Farm.Infrastructure.Repositories.PrinterCapabilities.EfPrinterCapabilitiesRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Harvest.IHarvestRepository, Farm.Infrastructure.Repositories.Harvest.EfHarvestRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileConsistencyRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileConsistencyRepository>();
 
@@ -348,7 +347,6 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddScoped<Importing.Services.Import.IImportParserService, Importing.Services.Import.ImportParserService>();
         _ = services.AddScoped<Importing.Services.Import.IImportProcessorService, Importing.Services.Import.ImportProcessorService>();
-        _ = services.AddScoped<Importing.Services.Adapters.IPrinterCapabilityDiscoveryAdapter, Services.Adapters.PrinterCapabilityDiscoveryAdapter>();
         _ = services.AddScoped<Importing.Services.Adapters.IDefaultCatalogAdapter, Services.Adapters.DefaultCatalogAdapter>();
     }
 
@@ -458,13 +456,14 @@ public static class ServiceCollectionExtensions
         
         // Register the printer status fallback service for timeout and circuit breaker management
         _ = services.AddScoped<Services.Printers.IPrinterStatusFallbackService, Services.Printers.PrinterStatusFallbackService>();
+        
+        // Register the backend capabilities service for exposing plugin capabilities to the UI
+        _ = services.AddScoped<Services.Printers.IPrinterBackendCapabilitiesService, Services.Printers.PrinterBackendCapabilitiesService>();
 
         // Register the multi-printer status coordinator for parallel operation orchestration
         _ = services.AddScoped<Services.Printers.IMultiPrinterStatusCoordinator, Services.Printers.MultiPrinterStatusCoordinator>();
 
         _ = services.AddScoped<Services.Printers.IPrintersService, Services.Printers.PrintersService>();
-        _ = services.AddScoped<Services.Interfaces.IPrinterCapabilityDiscoveryService, Services.PrinterCapabilityDiscoveryService>();
-        _ = services.AddScoped<Services.PrinterCapabilities.IPrinterCapabilitiesService, Services.PrinterCapabilities.PrinterCapabilitiesService>();
     }
 
     #endregion

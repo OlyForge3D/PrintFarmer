@@ -112,12 +112,9 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
 
   // Camera URL logic: prioritize real-time status, fallback to printer config
   const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
-  // Only support cameras for Moonraker and OctoPrint backends
-  const supportsCameras = printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint;
-  // Only enable camera button if snapshot URL is available
-  const hasCameraUrls = supportsCameras && (
-    typeof cameraSnapshotUrl === 'string' && cameraSnapshotUrl.trim().length > 0
-  );
+  const cameraStreamUrl = status?.cameraStreamUrl ?? printer.cameraStreamUrl;
+  // Check if printer has camera URLs - the presence of URLs is the source of truth
+  const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
   // Update last known values when new data is available
   // useLayoutEffect runs synchronously after DOM mutations but before browser paint

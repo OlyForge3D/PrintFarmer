@@ -12,10 +12,6 @@ public interface IPrintersRepository
     Task AddAsync(Printer p, CancellationToken ct);
     Task RemoveAsync(Printer p, CancellationToken ct);
     Task SaveChangesAsync(CancellationToken ct);
-    Task<Dictionary<Guid, Domain.PrinterCapabilities>> GetCapabilitiesDictionaryAsync(Guid[]? ids, CancellationToken ct);
-    Task<List<Domain.PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct);
-    Task<Domain.PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct);
-    Task SaveCapabilitiesAsync(Domain.PrinterCapabilities capabilities, CancellationToken ct);
     // Return printers suitable for export (includes Manufacturer and Model, AsNoTracking).
     Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct);
     // Quick existence check by name or server URL to avoid duplicates during imports

@@ -16,13 +16,9 @@ namespace Farm.Web.Api.Services.Printers
         Task AddAsync(Printer p, CancellationToken ct);
         Task RemoveAsync(Printer p, CancellationToken ct);
         Task SaveChangesAsync(CancellationToken ct);
-        Task SaveCapabilitiesAsync(Farm.Infrastructure.Domain.PrinterCapabilities capabilities, CancellationToken ct);
         Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct);
         Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct);
         Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
-        Task<Dictionary<Guid, Farm.Infrastructure.Domain.PrinterCapabilities>> GetCapabilitiesDictionaryAsync(Guid[]? ids, CancellationToken ct);
-        Task<List<Farm.Infrastructure.Domain.PrinterCapabilities>> GetCapabilitiesListAsync(Guid[]? ids, CancellationToken ct);
-        Task<Farm.Infrastructure.Domain.PrinterCapabilities?> GetCapabilitiesByPrinterIdAsync(Guid id, CancellationToken ct);
         // Higher-level orchestration methods that encapsulate external client calls and status aggregation
         Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct);
         Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct);

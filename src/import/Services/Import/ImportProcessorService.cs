@@ -16,14 +16,12 @@ public class ImportProcessorService : IImportProcessorService
 {
     private readonly AppDbContext _db;
     private readonly FluentValidation.IValidator<CreatePrinterDto> _validator;
-    private readonly IPrinterCapabilityDiscoveryAdapter _capabilityDiscovery;
     private readonly IDefaultCatalogAdapter _defaultCatalog;
 
-    public ImportProcessorService(AppDbContext db, FluentValidation.IValidator<CreatePrinterDto> validator, IPrinterCapabilityDiscoveryAdapter capabilityDiscovery, IDefaultCatalogAdapter defaultCatalog)
+    public ImportProcessorService(AppDbContext db, FluentValidation.IValidator<CreatePrinterDto> validator, IDefaultCatalogAdapter defaultCatalog)
     {
         _db = db;
         _validator = validator;
-        _capabilityDiscovery = capabilityDiscovery;
         _defaultCatalog = defaultCatalog;
     }
 
@@ -202,20 +200,43 @@ public class ImportProcessorService : IImportProcessorService
             ModelId = modelId,
             DateAcquired = dto.DateAcquired,
             Backend = (int)dto.Backend,
-            ApiKey = dto.ApiKey
+            ApiKey = dto.ApiKey,
+            // Populate hardware specs from DTO (populated from exported data or discovery)
+            MaxBuildVolumeX = dto.MaxBuildVolumeX,
+            MaxBuildVolumeY = dto.MaxBuildVolumeY,
+            MaxBuildVolumeZ = dto.MaxBuildVolumeZ,
+            HasHeatedBed = dto.HasHeatedBed,
+            HasEnclosure = dto.HasEnclosure,
+            MultiMaterial = dto.MultiMaterial,
+            SupportsAutoLeveling = dto.SupportsAutoLeveling,
+            MinBedTemp = dto.MinBedTemp,
+            MaxBedTemp = dto.MaxBedTemp,
+            CurrentMaterial = dto.CurrentMaterial,
+            CurrentSpoolId = dto.CurrentSpoolId,
+            IsAvailable = true
         };
         _ = _db.Printers.Add(p);
         await _db.SaveChangesAsync(ct);
 
-        try
+        // Create default toolhead for the imported printer
+        var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead
         {
-            var printerForDisc = await _db.Printers.Include(pr => pr.Manufacturer).Include(pr => pr.Model).FirstOrDefaultAsync(pr => pr.Id == p.Id, ct);
-            if (printerForDisc != null)
-            {
-                _ = await _capabilityDiscovery.DiscoverCapabilitiesAsync(printerForDisc, ct);
-            }
-        }
-        catch { }
+            Id = Guid.NewGuid(),
+            PrinterId = p.Id,
+            Name = "Extruder 1",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = dto.NozzleDiameter,
+            SupportedMaterials = dto.SupportedMaterials,
+            MinHotendTemp = dto.MinHotendTemp,
+            MaxHotendTemp = dto.MaxHotendTemp,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _db.Toolheads.Add(defaultToolhead);
+        await _db.SaveChangesAsync(ct);
+
+        // Capability discovery disabled - hardware specs now populated via printer model defaults and Toolhead creation
+        // TODO: Future enhancement - implement automatic discovery to populate Toolhead specs from printer API
 
         return new Farm.Infrastructure.PrinterDto(
             Id: p.Id,

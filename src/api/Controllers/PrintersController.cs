@@ -32,7 +32,8 @@ public class PrintersController(
     Services.Catalog.ICatalogService catalogService,
     IDefaultCatalogService defaultCatalogService,
     IValidator<CreatePrinterDto> validator,
-    Services.Interfaces.IDiscoveryProxyService discoveryProxyService)
+    Services.Interfaces.IDiscoveryProxyService discoveryProxyService,
+    Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService)
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -41,6 +42,7 @@ public class PrintersController(
     private readonly IDefaultCatalogService defaultCatalog = defaultCatalogService;
     private readonly IValidator<CreatePrinterDto> _validator = validator;
     private readonly Services.Interfaces.IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
+    private readonly Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
 
     /// <summary>
     /// Retrieves camera URLs for all printers without making external API calls.
@@ -76,6 +78,72 @@ public class PrintersController(
         string msg = ex.GetBaseException().Message;
         return msg.Contains("no such table", StringComparison.OrdinalIgnoreCase) ||
             msg.Contains("database is locked", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Retrieves backend capabilities for all printers.
+    /// Indicates which features each backend (Moonraker, PrusaLink, etc.) supports.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Backend capabilities for all printers</returns>
+    /// <response code="200">Returns backend capabilities for all printers</response>
+    [HttpGet("backend-capabilities")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterBackendCapabilitiesDto>), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<IEnumerable<PrinterBackendCapabilitiesDto>>> GetBackendCapabilitiesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var capabilities = await _printerBackendCapabilitiesService.GetAllAsync(ct);
+            return Ok(capabilities);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[BACKEND-CAPABILITIES] Startup DB exception in /api/printers/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return Ok(Array.Empty<PrinterBackendCapabilitiesDto>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Retrieves backend capabilities for a specific printer.
+    /// Indicates which features the printer's backend (Moonraker, PrusaLink, etc.) supports.
+    /// </summary>
+    /// <param name="printerId">The ID of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Backend capabilities for the specified printer</returns>
+    /// <response code="200">Returns backend capabilities for the printer</response>
+    /// <response code="404">Printer not found</response>
+    [HttpGet("{printerId}/backend-capabilities")]
+    [ProducesResponseType(typeof(PrinterBackendCapabilitiesDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterBackendCapabilitiesDto>> GetPrinterBackendCapabilitiesAsync(Guid printerId, CancellationToken ct)
+    {
+        try
+        {
+            var capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(printerId, ct);
+            if (capabilities == null)
+            {
+                return NotFound($"Printer with ID {printerId} not found");
+            }
+
+            return Ok(capabilities);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning($"[BACKEND-CAPABILITIES] Startup DB exception for printer {printerId}. TraceId={HttpContext.TraceIdentifier}, Exception={ex.Message}");
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[FATAL] Unhandled exception in /api/printers/{printerId}/backend-capabilities. TraceId={HttpContext.TraceIdentifier}, User={User?.Identity?.Name ?? "anonymous"}, Exception={ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -383,33 +451,30 @@ public class PrintersController(
             return NotFound();
         }
 
-        PrinterCapabilitiesDto? capabilitiesDto = null;
-        if (p.Capabilities != null)
-        {
-            capabilitiesDto = new PrinterCapabilitiesDto(
-                p.Capabilities.Id,
-                p.Capabilities.PrinterId,
-                p.Name,
-                p.Capabilities.NozzleDiameter,
-                p.Capabilities.SupportedMaterials,
-                p.Capabilities.MaxBuildVolumeX,
-                p.Capabilities.MaxBuildVolumeY,
-                p.Capabilities.MaxBuildVolumeZ,
-                p.Capabilities.HasHeatedBed,
-                p.Capabilities.HasEnclosure,
-                p.Capabilities.MultiMaterial,
-                p.Capabilities.SupportsAutoLeveling,
-                p.Capabilities.NumberOfExtruders,
-                p.Capabilities.MinHotendTemp,
-                p.Capabilities.MaxHotendTemp,
-                p.Capabilities.MinBedTemp,
-                p.Capabilities.MaxBedTemp,
-                p.Capabilities.CurrentMaterial,
-                p.Capabilities.CurrentSpoolId,
-                p.Capabilities.IsAvailable,
-                p.Capabilities.LastUpdated
-            );
-        }
+        // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
+        PrinterCapabilitiesDto? capabilitiesDto = new PrinterCapabilitiesDto(
+            Guid.NewGuid(), // PrinterCapabilities.Id - generate a temporary ID since this entity is being phased out
+            p.Id,
+            p.Name,
+            null, // NozzleDiameter - now per-Toolhead, not printer-wide
+            null, // SupportedMaterials - now per-Toolhead, not printer-wide
+            p.MaxBuildVolumeX,
+            p.MaxBuildVolumeY,
+            p.MaxBuildVolumeZ,
+            p.HasHeatedBed,
+            p.HasEnclosure,
+            p.MultiMaterial,
+            p.SupportsAutoLeveling,
+            p.Toolheads?.Count ?? 1, // NumberOfExtruders - use Toolheads collection count
+            null, // MinHotendTemp - now per-Toolhead
+            null, // MaxHotendTemp - now per-Toolhead
+            p.MinBedTemp,
+            p.MaxBedTemp,
+            p.CurrentMaterial,
+            p.CurrentSpoolId,
+            p.IsAvailable,
+            p.LastCapabilityUpdate
+        );
 
         return new PrinterDetailsDto(
             p.Id,
@@ -767,39 +832,28 @@ public class PrintersController(
             p.IsEnabled = dto.IsEnabled.Value;
         }
 
-        // Update or create printer capabilities
-        PrinterCapabilities? capabilities = await _printersService.GetCapabilitiesByPrinterIdAsync(id, ct);
-        if (capabilities == null)
+        // Update hardware specs on the Printer entity (merged from legacy PrinterCapabilities)
+        p.MaxBuildVolumeX = dto.MaxBuildVolumeX ?? p.MaxBuildVolumeX;
+        p.MaxBuildVolumeY = dto.MaxBuildVolumeY ?? p.MaxBuildVolumeY;
+        p.MaxBuildVolumeZ = dto.MaxBuildVolumeZ ?? p.MaxBuildVolumeZ;
+        p.HasHeatedBed = dto.HasHeatedBed ?? p.HasHeatedBed;
+        p.HasEnclosure = dto.HasEnclosure ?? p.HasEnclosure;
+        p.MultiMaterial = dto.MultiMaterial ?? p.MultiMaterial;
+        p.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? p.SupportsAutoLeveling;
+        p.MinBedTemp = dto.MinBedTemp ?? p.MinBedTemp;
+        p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
+        p.LastCapabilityUpdate = DateTime.UtcNow;
+
+        // Update primary toolhead specs if provided
+        Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
+        if (primaryToolhead != null)
         {
-            capabilities = new PrinterCapabilities
-            {
-                Id = Guid.NewGuid(),
-                PrinterId = id,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
+            primaryToolhead.NozzleDiameter = dto.NozzleDiameter ?? primaryToolhead.NozzleDiameter;
+            primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
+            primaryToolhead.MinHotendTemp = dto.MinHotendTemp ?? primaryToolhead.MinHotendTemp;
+            primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
+            primaryToolhead.UpdatedAt = DateTime.UtcNow;
         }
-
-        // Update capability fields from DTO
-        capabilities.NozzleDiameter = dto.NozzleDiameter;
-        capabilities.SupportedMaterials = dto.SupportedMaterials;
-        capabilities.MaxBuildVolumeX = dto.MaxBuildVolumeX;
-        capabilities.MaxBuildVolumeY = dto.MaxBuildVolumeY;
-        capabilities.MaxBuildVolumeZ = dto.MaxBuildVolumeZ;
-        capabilities.HasHeatedBed = dto.HasHeatedBed ?? true;
-        capabilities.HasEnclosure = dto.HasEnclosure ?? false;
-        capabilities.MultiMaterial = dto.MultiMaterial ?? false;
-        capabilities.NumberOfExtruders = dto.NumberOfExtruders ?? 1;
-        capabilities.MinHotendTemp = dto.MinHotendTemp;
-        capabilities.MaxHotendTemp = dto.MaxHotendTemp;
-        capabilities.MinBedTemp = dto.MinBedTemp;
-        capabilities.MaxBedTemp = dto.MaxBedTemp;
-        capabilities.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? false;
-        capabilities.MaxPrintSpeed = dto.MaxPrintSpeed;
-        capabilities.LastUpdated = DateTime.UtcNow;
-        capabilities.UpdatedAt = DateTime.UtcNow;
-
-        await _printersService.SaveCapabilitiesAsync(capabilities, ct);
 
         // Build updated manufacturer/model names
         string? manufacturerName = null;
@@ -814,6 +868,9 @@ public class PrintersController(
             PrinterModelDto? mod = await _catalogService.GetModelByIdAsync(p.ModelId, ct);
             modelName = mod?.Name;
         }
+
+        // Save all changes (printer + toolhead updates)
+        await _printersService.SaveChangesAsync(ct);
 
         PrinterDto dtoResponse = new(
             Id: p.Id,
@@ -1709,73 +1766,6 @@ public class PrintersController(
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to update printer configuration",
-                error = ex.Message
-            });
-        }
-    }
-
-    /// <summary>
-    /// Gets the capabilities and specifications for a specific printer.
-    /// Returns detailed hardware capabilities like build volume, temperature limits, materials support, etc.
-    /// </summary>
-    /// <param name="id">The unique identifier of the printer</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>Printer capabilities and specifications</returns>
-    /// <response code="200">Returns the printer capabilities</response>
-    /// <response code="404">If the printer does not exist or has no capabilities</response>
-    /// <response code="500">If there was an error retrieving capabilities</response>
-    [HttpGet("{id:guid}/capabilities")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<IActionResult> GetPrinterCapabilitiesAsync(Guid id, CancellationToken ct)
-    {
-        try
-        {
-            _logger.LogInformation($"[Capabilities] Getting printer capabilities for {id}");
-
-            PrinterCapabilities? capabilities = await _printersService.GetCapabilitiesByPrinterIdAsync(id, ct);
-
-            if (capabilities == null)
-            {
-                _logger.LogWarning($"[Capabilities] No capabilities found for printer {id}");
-                return NotFound(new { message = $"Capabilities not found for printer {id}" });
-            }
-
-            // Return capabilities as JSON object
-            var capabilitiesObj = new
-            {
-                id = capabilities.Id,
-                printerId = capabilities.PrinterId,
-                nozzleDiameter = capabilities.NozzleDiameter,
-                supportedMaterials = capabilities.SupportedMaterials,
-                maxBuildVolumeX = capabilities.MaxBuildVolumeX,
-                maxBuildVolumeY = capabilities.MaxBuildVolumeY,
-                maxBuildVolumeZ = capabilities.MaxBuildVolumeZ,
-                hasHeatedBed = capabilities.HasHeatedBed,
-                hasEnclosure = capabilities.HasEnclosure,
-                multiMaterial = capabilities.MultiMaterial,
-                supportsAutoLeveling = capabilities.SupportsAutoLeveling,
-                numberOfExtruders = capabilities.NumberOfExtruders,
-                minHotendTemp = capabilities.MinHotendTemp,
-                maxHotendTemp = capabilities.MaxHotendTemp,
-                minBedTemp = capabilities.MinBedTemp,
-                maxBedTemp = capabilities.MaxBedTemp,
-                maxPrintSpeed = capabilities.MaxPrintSpeed,
-                currentMaterial = capabilities.CurrentMaterial,
-                currentSpoolId = capabilities.CurrentSpoolId,
-                isAvailable = capabilities.IsAvailable,
-                lastUpdated = capabilities.LastUpdated
-            };
-
-            return Ok(capabilitiesObj);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"[Capabilities] Failed to get printer capabilities for {id}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Failed to retrieve printer capabilities",
                 error = ex.Message
             });
         }

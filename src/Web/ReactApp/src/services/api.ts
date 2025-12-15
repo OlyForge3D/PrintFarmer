@@ -25,6 +25,7 @@ import {
   Printer,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
+  PrinterBackendCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
   PrinterFileDto,
@@ -249,6 +250,20 @@ export class ApiClient {
   async getPrinterCameraUrls(): Promise<PrinterCameraUrls[]> {
     const response = await this.client.get<PrinterCameraUrls[]>(
       "/printers/camera-urls"
+    );
+    return response.data;
+  }
+
+  async getPrinterBackendCapabilities(): Promise<PrinterBackendCapabilitiesDto[]> {
+    const response = await this.client.get<PrinterBackendCapabilitiesDto[]>(
+      "/printers/backend-capabilities"
+    );
+    return response.data;
+  }
+
+  async getPrinterBackendCapabilitiesSingle(printerId: string): Promise<PrinterBackendCapabilitiesDto> {
+    const response = await this.client.get<PrinterBackendCapabilitiesDto>(
+      `/printers/${printerId}/backend-capabilities`
     );
     return response.data;
   }
