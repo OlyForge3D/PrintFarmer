@@ -85,16 +85,11 @@ namespace Farm.Web.Api.Services.Printers
                         }
 
                         // Map the BackendId to the client type (don't instantiate yet)
-                        if (typeof(IBackendClient).IsAssignableFrom(plugin.ClientType))
-                        {
-                            _clientTypeMap[backendId] = plugin.ClientType;
-                            discoveredCount++;
-                            _logger.LogInformation($"✓ Registered backend client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.ClientType.Name})");
-                        }
-                        else
-                        {
-                            _logger.LogWarning($"Plugin {plugin.DisplayName} client type {plugin.ClientType.Name} does not implement IBackendClient.");
-                        }
+                        // TRUST the plugin's ClientType - it's already defined in the plugin descriptor
+                        // Don't do IsAssignableFrom check due to potential assembly loading issues
+                        _clientTypeMap[backendId] = plugin.ClientType;
+                        discoveredCount++;
+                        _logger.LogInformation($"✓ Registered backend client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.ClientType.Name})");
                     }
                     catch (Exception ex)
                     {
@@ -127,19 +122,30 @@ namespace Farm.Web.Api.Services.Printers
         {
             if (!_clientTypeMap.TryGetValue(backend, out var clientType))
             {
+                _logger.LogError($"✗ Unsupported printer backend requested: {backend}. Available backends: {string.Join(", ", _clientTypeMap.Keys)}");
                 throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
             }
 
-            // Resolve the backend client from the current scope
-            // Caller MUST be in a scoped context for this to work
-            var client = _serviceProvider.GetService(clientType) as IBackendClient;
-            
-            if (client == null)
+            try
             {
-                throw new InvalidOperationException($"Could not resolve backend client for backend {backend} (type: {clientType.Name}). Ensure you are calling this from within a scoped context (e.g., from a scoped service or HTTP request). The plugin may not have registered it correctly.");
-            }
+                // Resolve the backend client from the current scope
+                // Caller MUST be in a scoped context for this to work
+                var client = _serviceProvider.GetService(clientType) as IBackendClient;
+                
+                if (client == null)
+                {
+                    _logger.LogError($"✗ Failed to resolve backend client for {backend} (type: {clientType.Name}). The service may not be registered or caller is not in a scoped context.");
+                    throw new InvalidOperationException($"Could not resolve backend client for backend {backend} (type: {clientType.Name}). Ensure you are calling this from within a scoped context (e.g., from a scoped service or HTTP request). The plugin may not have registered it correctly.");
+                }
 
-            return client;
+                _logger.LogDebug($"✓ Resolved backend client for {backend}: {clientType.Name}");
+                return client;
+            }
+            catch (Exception ex) when (!(ex is ArgumentException) && !(ex is InvalidOperationException))
+            {
+                _logger.LogError($"✗ Error resolving backend client for {backend} (type: {clientType.Name}): {ex.Message}");
+                throw new InvalidOperationException($"Error resolving backend client for {backend}: {ex.Message}", ex);
+            }
         }
 
         public IBackendClient GetClient(int backendValue)

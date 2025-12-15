@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -95,16 +96,11 @@ namespace Farm.Web.Api.Services.Printers
                         }
 
                         // Map the BackendId to the status client type (don't instantiate yet)
-                        if (typeof(IPrinterStatusClient).IsAssignableFrom(plugin.StatusClientType))
-                        {
-                            _statusClientTypeMap[backendId] = plugin.StatusClientType;
-                            discoveredCount++;
-                            _logger.LogInformation($"✓ Registered status client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.StatusClientType.Name})");
-                        }
-                        else
-                        {
-                            _logger.LogWarning($"Plugin {plugin.DisplayName} status client type {plugin.StatusClientType.Name} does not implement IPrinterStatusClient.");
-                        }
+                        // TRUST the plugin's StatusClientType - it's already defined in the plugin descriptor
+                        // Don't do IsAssignableFrom check due to potential assembly loading issues
+                        _statusClientTypeMap[backendId] = plugin.StatusClientType;
+                        discoveredCount++;
+                        _logger.LogInformation($"✓ Registered status client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, Type={plugin.StatusClientType.Name})");
                     }
                     catch (Exception ex)
                     {
@@ -137,6 +133,7 @@ namespace Farm.Web.Api.Services.Printers
         {
             if (!_statusClientTypeMap.TryGetValue(backend, out var statusClientType))
             {
+                _logger.LogError($"✗ Unsupported printer backend requested: {backend}. Available status client backends: {string.Join(", ", _statusClientTypeMap.Keys)}");
                 throw new ArgumentException($"Unsupported printer backend: {backend}", nameof(backend));
             }
 
@@ -149,13 +146,28 @@ namespace Farm.Web.Api.Services.Printers
                 var scopedProvider = scope.ServiceProvider;
                 
                 // Activate the status client with its dependencies resolved from the scope
-                var statusClient = (IPrinterStatusClient)ActivatorUtilities.CreateInstance(
-                    scopedProvider, 
-                    statusClientType) ?? throw new InvalidOperationException(
-                        $"Failed to instantiate status client type: {statusClientType.Name}");
+                // Use ActivatorUtilities which automatically resolves constructor dependencies
+                var statusClient = ActivatorUtilities.CreateInstance(scopedProvider, statusClientType);
                 
+                if (statusClient == null)
+                {
+                    throw new InvalidOperationException($"Failed to instantiate status client type: {statusClientType.Name}");
+                }
+                
+                // Verify it's assignable to IPrinterStatusClient
+                // (don't use explicit cast due to potential assembly loading issues)
+                if (!typeof(IPrinterStatusClient).IsAssignableFrom(statusClient.GetType()))
+                {
+                    throw new InvalidOperationException(
+                        $"Status client {statusClientType.Name} does not implement IPrinterStatusClient interface. " +
+                        $"Expected interface assembly: {typeof(IPrinterStatusClient).Assembly.FullName}, " +
+                        $"Status client type: {statusClient.GetType().FullName}");
+                }
+                
+                // Cast is safe now - we verified it
+                var typedClient = (IPrinterStatusClient)statusClient;
                 _logger.LogDebug($"✓ Instantiated status client for {backend}: {statusClientType.Name}");
-                return statusClient;
+                return typedClient;
             }
             catch (Exception ex)
             {

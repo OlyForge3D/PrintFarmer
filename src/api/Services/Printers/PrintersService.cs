@@ -365,18 +365,22 @@ namespace Farm.Web.Api.Services.Printers
             {
                 // Delegate to the appropriate backend status client
                 // Each backend client is responsible for creating the PrinterStatusDto
+                _logger.LogDebug($"GetStatusDtoAsync: Getting status for printer {p.Id} ({p.Name}) with backend {p.Backend}");
                 var statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-                return await statusClient.GetPrinterStatusAsync(p, ct);
+                _logger.LogDebug($"GetStatusDtoAsync: Obtained status client {statusClient.GetType().Name} for printer {p.Id}");
+                var result = await statusClient.GetPrinterStatusAsync(p, ct);
+                _logger.LogDebug($"GetStatusDtoAsync: Got status for printer {p.Id}: IsOnline={result.IsOnline}, State={result.State}");
+                return result;
             }
-            catch (ArgumentException)
+            catch (ArgumentException ex)
             {
                 // Unsupported backend type
-                _logger.LogWarning($"Unsupported printer backend {p.Backend} for printer {p.Id}");
+                _logger.LogWarning($"✗ Unsupported printer backend {p.Backend} for printer {p.Id} ({p.Name}): {ex.Message}");
                 return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Unsupported", Progress: null);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}");
+                _logger.LogWarning($"✗ Failed to get status for printer {p.Id} ({p.Name}): {ex.GetType().Name}: {ex.Message}");
                 return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: null);
             }
         }
