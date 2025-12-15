@@ -20,13 +20,23 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Integration")]
-public class TagServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class TagServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public TagServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public TagServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     private async Task<Model3D> CreateTestModelAsync(string displayName = "test-model")

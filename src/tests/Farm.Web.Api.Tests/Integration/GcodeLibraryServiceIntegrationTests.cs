@@ -23,13 +23,23 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Integration")]
-public class GcodeLibraryServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public GcodeLibraryServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public GcodeLibraryServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     #region QueryLibraryAsync Tests

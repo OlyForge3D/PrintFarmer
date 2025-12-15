@@ -22,13 +22,23 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Integration")]
-public class FilamentTypeServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public FilamentTypeServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public FilamentTypeServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     private async Task<FilamentTypeDto> CreateTestFilamentAsync(

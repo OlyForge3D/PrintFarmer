@@ -13,21 +13,34 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// Submit (POST /api/slice) -> Claim (POST /api/slice/claim) -> Get Status (GET /api/slice/{id}).
 /// This validates the new worker bridging path (BLOCKER 1) independent of repository shortcuts.
 /// </summary>
-public class SliceJobHttpFlowTests : IClassFixture<CustomWebApplicationFactory>
+public class SliceJobHttpFlowTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly Xunit.Abstractions.ITestOutputHelper _output;
-    public SliceJobHttpFlowTests(CustomWebApplicationFactory factory, Xunit.Abstractions.ITestOutputHelper output)
+    private HttpClient _client;
+
+    public SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output)
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
         _output = output;
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateWorkerClientAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     [Fact(DisplayName = "HTTP flow: submit then claim transitions status to Processing")]
     public async Task Submit_Then_Claim_Transitions_Status()
     {
-        HttpClient client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Worker-Key", "test-worker-key");
+        // _client is already authenticated via InitializeAsync with Bearer token and X-Worker-Key header
 
         // 1. Submit new job
         SubmitSliceJobRequest submit = new SubmitSliceJobRequest
@@ -39,7 +52,7 @@ public class SliceJobHttpFlowTests : IClassFixture<CustomWebApplicationFactory>
             SlicerProfileJson = "{}"
         };
 
-        HttpResponseMessage submitResp = await client.PostAsJsonAsync("/api/slice", submit);
+        HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
         _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Accepted);
         SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
         _ = submitted.Should().NotBeNull();
@@ -53,7 +66,7 @@ public class SliceJobHttpFlowTests : IClassFixture<CustomWebApplicationFactory>
             Capabilities = new[] { "orcaslicer" },
             LeaseDurationSeconds = 300
         };
-        HttpResponseMessage claimResp = await client.PostAsJsonAsync("/api/slice/claim", claimReq);
+        HttpResponseMessage claimResp = await _client.PostAsJsonAsync("/api/slice/claim", claimReq);
         string claimBody = await claimResp.Content.ReadAsStringAsync();
         _ = claimResp.StatusCode.Should().Be(HttpStatusCode.OK, $"Claim failed. Status {(int)claimResp.StatusCode}. Body: {claimBody}");
         SliceJobStatusResponse? claimed = await claimResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
@@ -63,7 +76,7 @@ public class SliceJobHttpFlowTests : IClassFixture<CustomWebApplicationFactory>
         _ = claimed.WorkerId.Should().NotBeNull();
 
         // 3. Fetch status directly
-        HttpResponseMessage statusResp = await client.GetAsync($"/api/slice/{submitted.JobId}");
+        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted.JobId}");
         _ = statusResp.EnsureSuccessStatusCode();
         SliceJobStatusResponse? status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
         _ = status.Should().NotBeNull();

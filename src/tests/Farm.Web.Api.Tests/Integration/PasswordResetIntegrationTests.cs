@@ -1,5 +1,7 @@
-﻿using System.Net;
+﻿using System;
+using System.Net;
 using System.Net.Http.Json;
+using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -11,13 +13,23 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration;
 
-public class PasswordResetIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class PasswordResetIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public PasswordResetIntegrationTests(CustomWebApplicationFactory factory)
+    public PasswordResetIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     [Fact]

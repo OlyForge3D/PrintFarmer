@@ -59,21 +59,29 @@ namespace Farm.Web.Api.Tests.Services.Printers
             // Create mock extended plugins that will return the correct status client types
             var mockMoonrakerPlugin = new Mock<IExtendedBackendPlugin>();
             mockMoonrakerPlugin.Setup(p => p.BackendType).Returns("Moonraker");
+            mockMoonrakerPlugin.Setup(p => p.DisplayName).Returns("Moonraker Backend");
+            mockMoonrakerPlugin.Setup(p => p.Description).Returns("Klipper firmware backend via Moonraker API");
             mockMoonrakerPlugin.Setup(p => p.StatusClientType).Returns(typeof(MoonrakerStatusClient));
             mockMoonrakerPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(MoonrakerStatusClient));
             
             var mockPrusaLinkPlugin = new Mock<IExtendedBackendPlugin>();
             mockPrusaLinkPlugin.Setup(p => p.BackendType).Returns("PrusaLink");
+            mockPrusaLinkPlugin.Setup(p => p.DisplayName).Returns("PrusaLink Backend");
+            mockPrusaLinkPlugin.Setup(p => p.Description).Returns("Prusa printers via PrusaLink API");
             mockPrusaLinkPlugin.Setup(p => p.StatusClientType).Returns(typeof(PrusaLinkStatusClient));
             mockPrusaLinkPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(PrusaLinkStatusClient));
             
             var mockSdcpPlugin = new Mock<IExtendedBackendPlugin>();
             mockSdcpPlugin.Setup(p => p.BackendType).Returns("SDCP");
+            mockSdcpPlugin.Setup(p => p.DisplayName).Returns("SDCP Backend");
+            mockSdcpPlugin.Setup(p => p.Description).Returns("Simple Data Communication Protocol");
             mockSdcpPlugin.Setup(p => p.StatusClientType).Returns(typeof(SdcpStatusClient));
             mockSdcpPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(SdcpStatusClient));
             
             var mockOctoPrintPlugin = new Mock<IExtendedBackendPlugin>();
             mockOctoPrintPlugin.Setup(p => p.BackendType).Returns("OctoPrint");
+            mockOctoPrintPlugin.Setup(p => p.DisplayName).Returns("OctoPrint Backend");
+            mockOctoPrintPlugin.Setup(p => p.Description).Returns("OctoPrint printer management software");
             mockOctoPrintPlugin.Setup(p => p.StatusClientType).Returns(typeof(OctoPrintStatusClient));
             mockOctoPrintPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(OctoPrintStatusClient));
 

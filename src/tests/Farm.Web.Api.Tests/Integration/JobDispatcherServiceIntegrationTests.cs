@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -17,13 +19,23 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Integration")]
-public class JobDispatcherServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public JobDispatcherServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public JobDispatcherServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     private async Task<Worker> CreateTestWorkerAsync(

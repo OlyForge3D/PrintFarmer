@@ -27,7 +27,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_ValidOrcaBundle_ReturnsPreview()
     {
         // Arrange
-        HttpClient client = _factory.CreateClient();
+        HttpClient client = await _factory.CreateAdminClientAsync();
 
         // Sample minimal Orca bundle with one printer, one filament, one process
         string bundleJson = """
@@ -105,7 +105,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_InvalidBundleFormat_ReturnsBadRequest()
     {
         // Arrange
-        HttpClient client = _factory.CreateClient();
+        HttpClient client = await _factory.CreateAdminClientAsync();
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto
         {
@@ -128,7 +128,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_EmptyBundleJson_ReturnsBadRequest()
     {
         // Arrange
-        HttpClient client = _factory.CreateClient();
+        HttpClient client = await _factory.CreateAdminClientAsync();
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto
         {
@@ -151,7 +151,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_MultiplePresetsPerSection_ParsesAll()
     {
         // Arrange
-        HttpClient client = _factory.CreateClient();
+        HttpClient client = await _factory.CreateAdminClientAsync();
 
         string bundleJson = """
         {

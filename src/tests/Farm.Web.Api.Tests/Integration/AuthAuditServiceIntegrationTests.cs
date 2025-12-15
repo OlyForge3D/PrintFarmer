@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -14,13 +16,23 @@ namespace Farm.Web.Api.Tests.Integration;
 /// Integration tests for AuthAuditService
 /// Tests authentication audit logging and repository functionality
 /// </summary>
-public class AuthAuditServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class AuthAuditServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public AuthAuditServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public AuthAuditServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     /// <summary>

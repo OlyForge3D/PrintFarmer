@@ -22,15 +22,26 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// Tests HTTP-based completion flow with multiple artifact types (G-code, log, thumbnail).
 /// Validates worker authentication integration and artifact aggregation.
 /// </summary>
-public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebApplicationFactory>
+public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
-    private readonly HttpClient _client;
+    private HttpClient _client;
 
-    public SliceJobHttpCompletionWithArtifactsTests(CustomWebApplicationFactory factory)
+    public SliceJobHttpCompletionWithArtifactsTests()
     {
-        _factory = factory;
-        _client = _factory.CreateClient();
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateWorkerClientAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     [Fact(DisplayName = "Complete job with G-code, log text, and thumbnail via HTTP")]
@@ -191,7 +202,9 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
     [Fact(DisplayName = "Complete job fails with 401 when auth header missing")]
     public async Task Complete_Job_Fails_401_Without_Auth()
     {
-        // Arrange
+        // Arrange - use a client without worker key header
+        HttpClient clientWithoutWorkerKey = await _factory.CreateAuthenticatedClientAsync();
+        
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
@@ -216,14 +229,14 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "test.gcode", "application/gcode");
         Artifact artifact = await artifactsService.UploadAsync(gcodeForm, job.Id, null, "gcode", default);
 
-        // Complete WITHOUT auth header
+        // Complete WITHOUT worker key header
         CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
         {
             PrimaryArtifactId = artifact!.Id
         };
 
         // Act
-        HttpResponseMessage completeResponse = await _client.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest);
+        HttpResponseMessage completeResponse = await clientWithoutWorkerKey.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest);
 
         // Assert
         _ = completeResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -232,6 +245,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IClassFixture<CustomWebA
         SliceJob? unchangedJob = await jobRepo.GetByIdAsync(job.Id);
         _ = unchangedJob!.Status.Should().Be(SliceJobStatus.Processing);
         _ = unchangedJob.CompletedAt.Should().BeNull();
+
+        clientWithoutWorkerKey.Dispose();
     }
 
     [Fact(DisplayName = "Complete job with large log text and multiple thumbnails")]

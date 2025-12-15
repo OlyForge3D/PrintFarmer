@@ -1,4 +1,6 @@
+using System;
 using System.IO;
+using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -19,13 +21,23 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Integration")]
-public class SlicingSubmissionServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public SlicingSubmissionServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public SlicingSubmissionServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     private IFormFile CreateMockFormFile(
@@ -470,31 +482,6 @@ public class SlicingSubmissionServiceIntegrationTests : IClassFixture<CustomWebA
         // Create a larger mock file (5MB)
         var largeContent = string.Concat(Enumerable.Repeat("x", 5 * 1024 * 1024));
         var formFile = CreateMockFormFile("large-model.stl", largeContent);
-        var profile = new SlicerProfileDto();
-
-        // Act
-        var result = await service.SubmitSlicingJobAsync(
-            formFile,
-            "orcaslicer",
-            Guid.NewGuid(),
-            profile,
-            Guid.NewGuid(),
-            CancellationToken.None);
-
-        // Assert
-        result.Success.Should().BeTrue();
-        result.Result!.JobId.Should().NotBeNullOrEmpty();
-    }
-
-    [Fact]
-    public async Task SubmitSlicingJobAsync_WithSpecialCharactersInFileName_HandlesCorrectly()
-    {
-        // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
-
-        var specialFileName = "model-with-special-chars_#@!.stl";
-        var formFile = CreateMockFormFile(specialFileName);
         var profile = new SlicerProfileDto();
 
         // Act

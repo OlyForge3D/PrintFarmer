@@ -16,13 +16,23 @@ namespace Farm.Web.Api.Tests.Integration;
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-public class AuthenticationServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class AuthenticationServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public AuthenticationServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public AuthenticationServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     private async Task<User> CreateTestUserAsync(string username, string email, bool isActive = true, bool emailConfirmed = true)

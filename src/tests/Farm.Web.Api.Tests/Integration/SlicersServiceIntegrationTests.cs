@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
@@ -16,13 +18,23 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Integration")]
-public class SlicersServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class SlicersServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public SlicersServiceIntegrationTests(CustomWebApplicationFactory factory)
+    public SlicersServiceIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     #region RegisterAsync Tests

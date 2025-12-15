@@ -1,7 +1,10 @@
-﻿using System.Data;
+﻿using System;
+using System.Data;
 using System.Data.Common;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
+using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
@@ -17,15 +20,26 @@ namespace Farm.Web.Api.Tests.Integration;
 [Trait("Category", "DbHeavy")]
 [Collection("DbHeavySerial")]
 [TestTiming]
-public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class AuthAuditIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
-    private readonly HttpClient _client;
+    private HttpClient _client = null!;
 
-    public AuthAuditIntegrationTests(CustomWebApplicationFactory factory)
+    public AuthAuditIntegrationTests()
     {
-        _factory = factory;
-        _client = factory.CreateClient();
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateAuthenticatedClientAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     private static async Task DumpResponse(HttpResponseMessage resp, string tag)

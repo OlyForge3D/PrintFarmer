@@ -14,7 +14,6 @@ public class PrinterBuilder
     private string _serverUrl = "http://192.168.1.100";
     private int _backendPort = 7125;
     private int _backend = (int)PrinterBackend.Moonraker;
-    private PrinterCapabilities? _capabilities;
     private PrinterModel? _model;
     private string? _apiKey;
     private string? _notes;
@@ -51,12 +50,6 @@ public class PrinterBuilder
         return this;
     }
 
-    public PrinterBuilder WithCapabilities(PrinterCapabilities capabilities)
-    {
-        _capabilities = capabilities;
-        return this;
-    }
-
     public PrinterBuilder WithModel(PrinterModel model)
     {
         _model = model;
@@ -81,10 +74,7 @@ public class PrinterBuilder
     /// </summary>
     public PrinterBuilder AsOnlineAndReady()
     {
-        _capabilities = new PrinterCapabilities
-        {
-            IsAvailable = true
-        };
+        // Hardware specs are now set directly on Printer entity via constructor/properties
         return this;
     }
 
@@ -93,14 +83,7 @@ public class PrinterBuilder
     /// </summary>
     public PrinterBuilder AsOffline()
     {
-        if (_capabilities != null)
-        {
-            _capabilities.IsAvailable = false;
-        }
-        else
-        {
-            _capabilities = new PrinterCapabilities { IsAvailable = false };
-        }
+        // Hardware specs are now set directly on Printer entity via constructor/properties
         return this;
     }
 
@@ -109,14 +92,7 @@ public class PrinterBuilder
     /// </summary>
     public PrinterBuilder AsPrinting()
     {
-        if (_capabilities != null)
-        {
-            _capabilities.IsAvailable = false;
-        }
-        else
-        {
-            _capabilities = new PrinterCapabilities { IsAvailable = false };
-        }
+        // Hardware specs are now set directly on Printer entity via constructor/properties
         return this;
     }
 
@@ -149,7 +125,6 @@ public class PrinterBuilder
             ServerUrl = _serverUrl,
             BackendPort = _backendPort,
             Backend = _backend,
-            Capabilities = _capabilities,
             Model = _model,
             ApiKey = _apiKey,
             Notes = _notes,

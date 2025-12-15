@@ -19,15 +19,26 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Tests worker authentication enforcement on protected slicing endpoints.
 /// </summary>
-public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory>
+public class SliceJobWorkerAuthTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
-    private readonly HttpClient _client;
+    private HttpClient _client;
 
-    public SliceJobWorkerAuthTests(CustomWebApplicationFactory factory)
+    public SliceJobWorkerAuthTests()
     {
-        _factory = factory;
-        _client = _factory.CreateClient();
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateAuthenticatedClientAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     [Fact(DisplayName = "Claim endpoint returns 401 when worker key header is missing")]
@@ -260,6 +271,9 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
     [Fact(DisplayName = "Claim endpoint succeeds with valid worker key")]
     public async Task Claim_Succeeds_With_Valid_Key()
     {
+        // Register a valid worker in the database
+        await _factory.RegisterWorkerAsync("test-worker-key", "Test Worker");
+
         // Arrange - create a queued job
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
@@ -282,12 +296,19 @@ public class SliceJobWorkerAuthTests : IClassFixture<CustomWebApplicationFactory
             Capabilities = new[] { "orcaslicer" }
         };
 
-        // Act - claim with valid key
+        // Act - claim with valid key (uses authenticated client from InitializeAsync)
+        // Note: _client already has Bearer token from CreateAuthenticatedClientAsync in InitializeAsync
         HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
         {
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
+        // Manually add auth header since SendAsync bypasses default headers
+        var authHeader = _client.DefaultRequestHeaders.Authorization;
+        if (authHeader != null)
+        {
+            requestMessage.Headers.Authorization = authHeader;
+        }
         HttpResponseMessage response = await _client.SendAsync(requestMessage);
 
         // Assert
