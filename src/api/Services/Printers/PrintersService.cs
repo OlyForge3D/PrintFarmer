@@ -46,6 +46,7 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IMultiPrinterStatusCoordinator _coordinator;
         private readonly IPrinterStatusFallbackService _fallbackService;
         private readonly IPrinterStatusClientFactory _statusClientFactory;
+        private readonly IPrinterStatusCache _statusCache;
 
         public PrintersService(
             Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo,
@@ -60,7 +61,8 @@ namespace Farm.Web.Api.Services.Printers
             IHubContext<PrinterHub> hubContext,
             IMultiPrinterStatusCoordinator coordinator,
             IPrinterStatusFallbackService fallbackService,
-            IPrinterStatusClientFactory statusClientFactory)
+            IPrinterStatusClientFactory statusClientFactory,
+            IPrinterStatusCache statusCache)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
@@ -73,6 +75,7 @@ namespace Farm.Web.Api.Services.Printers
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
             _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
             _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
+            _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
             _fallbackService = fallbackService ?? throw new ArgumentNullException(nameof(fallbackService));
             _statusClientFactory = statusClientFactory ?? throw new ArgumentNullException(nameof(statusClientFactory));
         }
@@ -515,13 +518,26 @@ namespace Farm.Web.Api.Services.Printers
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
             var dtos = new List<CompletePrinterDto>();
+            var cachedStatuses = _statusCache.GetAllStatuses();
             
             foreach (var p in items)
             {
                 try
                 {
-                    // Get real-time status for each printer
-                    PrinterStatusDto status = await GetStatusDtoAsync(p.Id, ct);
+                    // Try to get cached status first (from SignalR updates)
+                    // If not cached, create an offline placeholder
+                    PrinterStatusDto status = cachedStatuses.TryGetValue(p.Id, out var cachedStatus)
+                        ? cachedStatus
+                        : new PrinterStatusDto(
+                            Id: p.Id,
+                            IsOnline: false,
+                            State: "Loading",
+                            Progress: null,
+                            JobName: null,
+                            ThumbnailUrl: null,
+                            CameraStreamUrl: null,
+                            CameraSnapshotUrl: null,
+                            SpoolInfo: null);
                     
                     // Use database camera URLs (discovered at registration) - they use frontend port
                     // Fall back to status camera URLs only if database URLs are not set
@@ -546,7 +562,7 @@ namespace Farm.Web.Api.Services.Printers
                         InMaintenance: p.InMaintenance, 
                         IsEnabled: p.IsEnabled,
                         
-                        // Live status merged from real-time source
+                        // Live status from cache (or placeholder if not cached yet)
                         IsOnline: status.IsOnline,
                         State: status.State,
                         Progress: status.Progress,
@@ -567,8 +583,8 @@ namespace Farm.Web.Api.Services.Printers
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}. Using offline status.");
-                    // Fallback to offline status if retrieval fails
+                    _logger.LogWarning($"Failed to build complete DTO for printer {p.Id}: {ex.Message}. Using offline status.");
+                    // Fallback to offline status if DTO building fails
                     dtos.Add(new CompletePrinterDto(
                         Id: p.Id, 
                         Name: p.Name, 

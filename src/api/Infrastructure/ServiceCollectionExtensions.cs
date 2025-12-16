@@ -467,6 +467,14 @@ public static class ServiceCollectionExtensions
             return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
         });
         
+        // Register the printer status cache (singleton - shared across all requests for fast list operations)
+        var printerStatusCache = new Services.Printers.PrinterStatusCache();
+        _ = services.AddSingleton<Services.Printers.IPrinterStatusCache>(printerStatusCache);
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(printerStatusCache);
+
+        // Register the printer status update receiver (scoped - one per request)
+        _ = services.AddScoped<Services.Printers.IPrinterStatusUpdateReceiver, Services.Printers.PrinterStatusUpdateReceiver>();
+
         // Register the printer status fallback service for timeout and circuit breaker management
         _ = services.AddScoped<Services.Printers.IPrinterStatusFallbackService, Services.Printers.PrinterStatusFallbackService>();
         
