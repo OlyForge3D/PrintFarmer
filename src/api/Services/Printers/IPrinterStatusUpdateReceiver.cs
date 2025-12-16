@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.Printers
@@ -28,10 +29,10 @@ namespace Farm.Web.Api.Services.Printers
     /// </summary>
     public class PrinterStatusUpdateReceiver : IPrinterStatusUpdateReceiver
     {
-        private readonly IPrinterStatusCache _cache;
+        private readonly IPrinterStatusCacheWriter _cache;
         private readonly IUnifiedLoggingService _logger;
 
-        public PrinterStatusUpdateReceiver(IPrinterStatusCache cache, IUnifiedLoggingService logger)
+        public PrinterStatusUpdateReceiver(IPrinterStatusCacheWriter cache, IUnifiedLoggingService logger)
         {
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -51,7 +52,10 @@ namespace Farm.Web.Api.Services.Printers
             if (statuses == null)
                 return;
 
-            _cache.UpdateStatuses(statuses);
+            foreach (var status in statuses)
+            {
+                _cache.UpdateStatus(status);
+            }
             _logger.LogDebug($"[StatusCache] Updated multiple printer statuses");
         }
     }

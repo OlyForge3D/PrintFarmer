@@ -1,35 +1,17 @@
 using System;
 using System.Collections.Generic;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Web.Api.Services.Printers
 {
     /// <summary>
-    /// Cache for storing the latest printer status updates from SignalR.
-    /// Allows quick retrieval of printer status without making external API calls.
+    /// API convenience wrapper that exposes the Infrastructure cache with read/write and clear operations.
+    /// This interface combines both read and write access plus API-specific clear operations.
+    /// The real implementation is in Infrastructure.Services.Printers.PrinterStatusCache.
     /// </summary>
-    public interface IPrinterStatusCache
+    public interface IPrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCacheWriter
     {
-        /// <summary>
-        /// Get the cached status for a specific printer, or null if no status is cached yet.
-        /// </summary>
-        PrinterStatusDto? GetStatus(Guid printerId);
-
-        /// <summary>
-        /// Get all cached printer statuses.
-        /// </summary>
-        IReadOnlyDictionary<Guid, PrinterStatusDto> GetAllStatuses();
-
-        /// <summary>
-        /// Update the cached status for a printer (typically called by SignalR hub).
-        /// </summary>
-        void UpdateStatus(PrinterStatusDto status);
-
-        /// <summary>
-        /// Update multiple printer statuses at once.
-        /// </summary>
-        void UpdateStatuses(IEnumerable<PrinterStatusDto> statuses);
-
         /// <summary>
         /// Clear cached status for a specific printer.
         /// </summary>

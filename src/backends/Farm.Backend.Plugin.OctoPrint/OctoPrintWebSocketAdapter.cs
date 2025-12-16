@@ -21,6 +21,7 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
     private readonly IUnifiedLoggingService _logger;
     private readonly IOctoPrintClient _octoPrintClient;
     private readonly IHubContext<PrinterHub> _hub;
+    private readonly IPrinterStatusCacheWriter _statusCacheWriter;
     private readonly Guid _printerId;
     private readonly Printer _printer;
     private readonly CancellationTokenSource _cts = new();
@@ -50,13 +51,15 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
         Printer printer,
         IUnifiedLoggingService logger,
         IOctoPrintClient octoPrintClient,
-        IHubContext<PrinterHub> hub)
+        IHubContext<PrinterHub> hub,
+        IPrinterStatusCacheWriter statusCacheWriter)
     {
         _printerId = printerId;
         _printer = printer;
         _logger = logger;
         _octoPrintClient = octoPrintClient;
         _hub = hub;
+        _statusCacheWriter = statusCacheWriter;
     }
 
     /// <summary>
@@ -217,7 +220,31 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
     {
         try
         {
-            var update = new PrinterStatusUpdate(
+            // Create cache update (PrinterStatusDto - no HomedAxes)
+            var cacheUpdate = new PrinterStatusDto(
+                Id: _printerId,
+                IsOnline: status.IsOnline,
+                State: PrinterStateNormalizer.NormalizeState(status.State),
+                Progress: status.Progress,
+                JobName: status.JobName,
+                ThumbnailUrl: status.ThumbnailUrl,
+                CameraStreamUrl: status.CameraStreamUrl,
+                CameraSnapshotUrl: null,
+                X: status.X,
+                Y: status.Y,
+                Z: status.Z,
+                HotendTemp: status.HotendTemp,
+                BedTemp: status.BedTemp,
+                HotendTarget: status.HotendTarget,
+                BedTarget: status.BedTarget,
+                SpoolInfo: null
+            );
+
+            // Update cache before broadcasting to clients
+            _statusCacheWriter.UpdateStatus(cacheUpdate);
+
+            // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
+            var signalRUpdate = new PrinterStatusUpdate(
                 Id: _printerId,
                 IsOnline: status.IsOnline,
                 State: PrinterStateNormalizer.NormalizeState(status.State),
@@ -236,7 +263,7 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
                 SpoolInfo: null
             );
 
-            await _hub.Clients.All.SendAsync("printerupdated", update, ct);
+            await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
         }
         catch (Exception ex)
         {

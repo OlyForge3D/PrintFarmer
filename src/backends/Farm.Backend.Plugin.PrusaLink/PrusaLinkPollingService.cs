@@ -18,11 +18,13 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public sealed class PrusaLinkPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger) : IHostedService, IDisposable
+    IUnifiedLoggingService logger,
+    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
+    private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -206,8 +208,8 @@ public sealed class PrusaLinkPollingService(
                     state.LastKnownJobName = status.JobName;
                     state.ConsecutiveFailures = 0;
 
-                    // Broadcast update via SignalR using PrinterStatusUpdate (same as Moonraker service for consistency)
-                    var update = new PrinterStatusUpdate(
+                    // Broadcast update via SignalR using PrinterStatusDto
+                    var update = new PrinterStatusDto(
                         Id: printerId,
                         IsOnline: status.IsOnline,
                         State: PrinterStateNormalizer.NormalizeState(status.State),
@@ -215,6 +217,7 @@ public sealed class PrusaLinkPollingService(
                         JobName: status.JobName,
                         ThumbnailUrl: status.ThumbnailUrl,
                         CameraStreamUrl: status.CameraStreamUrl,
+                        CameraSnapshotUrl: null,
                         X: null,
                         Y: null,
                         Z: null,
@@ -222,9 +225,11 @@ public sealed class PrusaLinkPollingService(
                         BedTemp: null,
                         HotendTarget: null,
                         BedTarget: null,
-                        HomedAxes: null,
                         SpoolInfo: null
                     );
+
+                    // Update cache before broadcasting to clients
+                    _statusCacheWriter.UpdateStatus(update);
 
                     await _hub.Clients.All.SendAsync("printerupdated", update, ct);
 
@@ -240,7 +245,7 @@ public sealed class PrusaLinkPollingService(
                     {
                         _logger.LogWarning($"PrusaLink printer {printerId} marked offline after {state.ConsecutiveFailures} failures");
                         state.LastKnownIsOnline = false;
-                        var offlineUpdate = new PrinterStatusUpdate(
+                        var offlineUpdate = new PrinterStatusDto(
                             Id: printerId,
                             IsOnline: false,
                             State: null,
@@ -248,6 +253,7 @@ public sealed class PrusaLinkPollingService(
                             JobName: null,
                             ThumbnailUrl: null,
                             CameraStreamUrl: null,
+                            CameraSnapshotUrl: null,
                             X: null,
                             Y: null,
                             Z: null,
@@ -255,9 +261,11 @@ public sealed class PrusaLinkPollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            HomedAxes: null,
                             SpoolInfo: null
                         );
+
+                        // Update cache before broadcasting to clients
+                        _statusCacheWriter.UpdateStatus(offlineUpdate);
 
                         await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
                     }

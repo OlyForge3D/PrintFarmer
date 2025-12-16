@@ -21,11 +21,13 @@ namespace Farm.Backend.Plugin.OctoPrint;
 public sealed class OctoPrintPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger) : IHostedService, IDisposable
+    IUnifiedLoggingService logger,
+    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
+    private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, OctoPrintWebSocketAdapter> _webSocketAdapters = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
@@ -138,7 +140,8 @@ public sealed class OctoPrintPollingService(
                                     printer,
                                     _logger,
                                     octoPrintClient,
-                                    _hub);
+                                    _hub,
+                                    _statusCacheWriter);
 
                                 _webSocketAdapters.TryAdd(id, adapter);
                                 var state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState 
@@ -272,8 +275,31 @@ public sealed class OctoPrintPollingService(
                         state.ConsecutiveFailures = 0;
                         state.LastApiState = "responding";
 
-                        // Broadcast update via SignalR
-                        var update = new PrinterStatusUpdate(
+                        // Create cache update (PrinterStatusDto - no HomedAxes)
+                        var cacheUpdate = new PrinterStatusDto(
+                            Id: printerId,
+                            IsOnline: statusData.IsOnline,
+                            State: PrinterStateNormalizer.NormalizeState(statusData.State),
+                            Progress: statusData.Progress,
+                            JobName: statusData.JobName,
+                            ThumbnailUrl: statusData.ThumbnailUrl,
+                            CameraStreamUrl: statusData.CameraStreamUrl,
+                            CameraSnapshotUrl: null,
+                            X: statusData.X,
+                            Y: statusData.Y,
+                            Z: statusData.Z,
+                            HotendTemp: statusData.HotendTemp,
+                            BedTemp: statusData.BedTemp,
+                            HotendTarget: statusData.HotendTarget,
+                            BedTarget: statusData.BedTarget,
+                            SpoolInfo: null
+                        );
+
+                        // Update cache before broadcasting to clients
+                        _statusCacheWriter.UpdateStatus(cacheUpdate);
+
+                        // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
+                        var signalRUpdate = new PrinterStatusUpdate(
                             Id: printerId,
                             IsOnline: statusData.IsOnline,
                             State: PrinterStateNormalizer.NormalizeState(statusData.State),
@@ -292,7 +318,7 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: null
                         );
 
-                        await _hub.Clients.All.SendAsync("printerupdated", update, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
                     }
                 }
                 catch (Exception ex)
@@ -310,7 +336,32 @@ public sealed class OctoPrintPollingService(
                             $"OctoPrint printer {printerId} marked offline after {state.ConsecutiveFailures} HTTP fallback failures " +
                             $"(apiState={apiState})");
                         state.LastKnownIsOnline = false;
-                        var offlineUpdate = new PrinterStatusUpdate(
+                        
+                        // Create cache update (PrinterStatusDto - no HomedAxes)
+                        var offlineCacheUpdate = new PrinterStatusDto(
+                            Id: printerId,
+                            IsOnline: false,
+                            State: null,
+                            Progress: null,
+                            JobName: null,
+                            ThumbnailUrl: null,
+                            CameraStreamUrl: null,
+                            CameraSnapshotUrl: null,
+                            X: null,
+                            Y: null,
+                            Z: null,
+                            HotendTemp: null,
+                            BedTemp: null,
+                            HotendTarget: null,
+                            BedTarget: null,
+                            SpoolInfo: null
+                        );
+
+                        // Update cache before broadcasting to clients
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+
+                        // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
+                        var offlineSignalRUpdate = new PrinterStatusUpdate(
                             Id: printerId,
                             IsOnline: false,
                             State: null,
@@ -329,7 +380,7 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: null
                         );
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 

@@ -1,16 +1,34 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Services.Printers;
 
-namespace Farm.Web.Api.Services.Printers
+namespace Farm.Infrastructure.Services.Printers
 {
+    /// <summary>
+    /// Shared interface for reading printer status cache.
+    /// Used by API layer to retrieve cached status without external API calls.
+    /// </summary>
+    public interface IPrinterStatusCacheReader
+    {
+        /// <summary>
+        /// Get the cached status for a specific printer, or null if not cached.
+        /// </summary>
+        PrinterStatusDto? GetStatus(Guid printerId);
+
+        /// <summary>
+        /// Get all cached printer statuses.
+        /// </summary>
+        IReadOnlyDictionary<Guid, PrinterStatusDto> GetAllStatuses();
+    }
+
     /// <summary>
     /// Thread-safe in-memory cache for printer status updates from SignalR.
     /// Stores the latest status for each printer to enable fast list operations without external API calls.
+    /// This cache is shared between:
+    /// - Backend services (MoonrakerSubscriptionService, PrusaLinkPollingService) - write updates
+    /// - API layer (PrintersService) - read cached data for list endpoints
     /// </summary>
-    public class PrinterStatusCache : IPrinterStatusCache, IPrinterStatusCacheWriter
+    public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCacheWriter
     {
         private readonly Dictionary<Guid, PrinterStatusDto> _cache = new();
         private readonly object _lockObj = new();
