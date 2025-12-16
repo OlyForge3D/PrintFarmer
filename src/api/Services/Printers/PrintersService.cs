@@ -14,11 +14,13 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Printers;
 using Farm.SignalR.Hubs;
 using Farm.Web.Api.Controllers.Requests;
@@ -474,7 +476,10 @@ namespace Farm.Web.Api.Services.Printers
                         BackendPort: p.BackendPort, 
                         FrontendPort: p.FrontendPort, 
                         InMaintenance: p.InMaintenance, 
-                        IsEnabled: p.IsEnabled));
+                        IsEnabled: p.IsEnabled,
+                        // Camera URLs from database (discovered at registration)
+                        CameraStreamUrl: p.CameraStreamUrl,
+                        CameraSnapshotUrl: p.CameraSnapshotUrl));
                 }
                 catch (Exception ex)
                 {
@@ -496,7 +501,10 @@ namespace Farm.Web.Api.Services.Printers
                         BackendPort: p.BackendPort, 
                         FrontendPort: p.FrontendPort, 
                         InMaintenance: p.InMaintenance, 
-                        IsEnabled: p.IsEnabled));
+                        IsEnabled: p.IsEnabled,
+                        // Camera URLs from database (discovered at registration)
+                        CameraStreamUrl: p.CameraStreamUrl,
+                        CameraSnapshotUrl: p.CameraSnapshotUrl));
                 }
             }
             
@@ -514,6 +522,13 @@ namespace Farm.Web.Api.Services.Printers
                 {
                     // Get real-time status for each printer
                     PrinterStatusDto status = await GetStatusDtoAsync(p.Id, ct);
+                    
+                    // Use database camera URLs (discovered at registration) - they use frontend port
+                    // Fall back to status camera URLs only if database URLs are not set
+                    string? cameraStreamUrl = !string.IsNullOrEmpty(p.CameraStreamUrl) 
+                        ? p.CameraStreamUrl 
+                        : status.CameraStreamUrl;
+                    
                     dtos.Add(new CompletePrinterDto(
                         // Static configuration from database
                         Id: p.Id, 
@@ -537,7 +552,8 @@ namespace Farm.Web.Api.Services.Printers
                         Progress: status.Progress,
                         JobName: status.JobName,
                         ThumbnailUrl: status.ThumbnailUrl,
-                        CameraStreamUrl: status.CameraStreamUrl,
+                        // Camera URL from database (correct frontend port) or fallback to status
+                        CameraStreamUrl: cameraStreamUrl,
                         X: status.X,
                         Y: status.Y,
                         Z: status.Z,
@@ -569,13 +585,13 @@ namespace Farm.Web.Api.Services.Printers
                         InMaintenance: p.InMaintenance, 
                         IsEnabled: p.IsEnabled,
                         
-                        // Offline status
+                        // Offline status - but still include camera URL from database
                         IsOnline: false,
                         State: null,
                         Progress: null,
                         JobName: null,
                         ThumbnailUrl: null,
-                        CameraStreamUrl: null,
+                        CameraStreamUrl: p.CameraStreamUrl, // From database
                         X: null,
                         Y: null,
                         Z: null,
@@ -1065,7 +1081,8 @@ namespace Farm.Web.Api.Services.Printers
                 PrinterId = p.Id,
                 Name = "Extruder 1",
                 Index = 0,
-                IsPrimary = true
+                IsPrimary = true,
+                NozzleDiameter = 0.4 // Standard default nozzle size
             };
             p.Toolheads.Add(defaultToolhead);
 
@@ -2237,6 +2254,66 @@ namespace Farm.Web.Api.Services.Printers
             totals.JobTotals.LongestPrint = jobs.Max(j => j.PrintDuration);
 
             return totals;
+        }
+        
+        /// <summary>
+        /// Refreshes camera URLs for a printer by querying the backend API.
+        /// Updates the stored camera URLs in the database.
+        /// For Moonraker: queries /server/webcams/list API for actual configured cameras
+        /// For other backends: generates static URLs based on frontend port
+        /// </summary>
+        public async Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
+        {
+            _logger.LogInformation($"RefreshCameraUrlsAsync: Starting refresh for printer {id}");
+            
+            Printer? printer = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
+            if (printer == null)
+            {
+                _logger.LogWarning($"RefreshCameraUrlsAsync: Printer {id} not found");
+                return null;
+            }
+            
+            _logger.LogInformation($"RefreshCameraUrlsAsync: Found printer {printer.Name}, Backend={printer.Backend}, ServerUrl={printer.ServerUrl}, FrontendPort={printer.FrontendPort}");
+
+            var backend = (PrinterBackend)printer.Backend;
+            string? streamUrl = null;
+            string? snapshotUrl = null;
+
+            try
+            {
+                bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient);
+                _logger.LogInformation($"RefreshCameraUrlsAsync: TryGetCameraClientTyped result: {gotCameraClient}, cameraClient is null: {cameraClient == null}");
+                
+                if (gotCameraClient && cameraClient != null)
+                {
+                    // For Moonraker, use the frontend URL (not backend port 7125)
+                    // Camera streams are served via the web frontend (port 80 typically)
+                    string baseUrlForCamera = backend == PrinterBackend.Moonraker 
+                        ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+                        : printer.BackendUrl;
+                    
+                    _logger.LogInformation($"RefreshCameraUrlsAsync: Using baseUrlForCamera={baseUrlForCamera}");
+                    
+                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
+                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
+                    
+                    _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs - stream={streamUrl}, snapshot={snapshotUrl}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {id}: {ex.Message}");
+            }
+
+            // Update printer in database
+            _logger.LogInformation($"RefreshCameraUrlsAsync: Updating database for printer {printer.Name}: CameraStreamUrl={streamUrl}");
+            printer.CameraStreamUrl = streamUrl;
+            printer.CameraSnapshotUrl = snapshotUrl;
+            await SaveChangesAsync(ct).ConfigureAwait(false);
+            _logger.LogInformation($"RefreshCameraUrlsAsync: SaveChangesAsync completed");
+
+            // Return updated DTO
+            return await GetPrinterDtoAsync(id, ct).ConfigureAwait(false);
         }
     }
 }

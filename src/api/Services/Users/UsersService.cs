@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api.Services.Authentication;
 
 namespace Farm.Web.Api.Services.Users

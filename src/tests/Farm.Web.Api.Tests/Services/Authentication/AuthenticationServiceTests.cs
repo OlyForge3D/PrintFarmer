@@ -3,10 +3,11 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Email;
+using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.Email;
-using Farm.Web.Api.Services.RateLimiting;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Moq;
@@ -21,25 +22,25 @@ namespace Farm.Web.Api.Tests.Services.Authentication;
 public class AuthenticationServiceTests
 {
     private readonly Mock<IUsersRepository> _mockUsersRepository;
-    private readonly Mock<IPasswordHashingService> _mockPasswordHashing;
+    private readonly Mock<Farm.Infrastructure.Services.Authentication.IPasswordHashingService> _mockPasswordHashing;
     private readonly Mock<IConfiguration> _mockConfiguration;
     private readonly Mock<IUnifiedLoggingService> _mockLogger;
     private readonly Mock<IEmailService> _mockEmailService;
     private readonly Mock<IRateLimitService> _mockRateLimitService;
     private readonly Mock<IAccountLockoutService> _mockAccountLockoutService;
-    private readonly Mock<IAuthAuditService> _mockAuthAuditService;
+    private readonly Mock<Farm.Infrastructure.Services.Authentication.IAuthAuditService> _mockAuthAuditService;
     private readonly AuthenticationService _service;
 
     public AuthenticationServiceTests()
     {
         _mockUsersRepository = new Mock<IUsersRepository>();
-        _mockPasswordHashing = new Mock<IPasswordHashingService>();
+        _mockPasswordHashing = new Mock<Farm.Infrastructure.Services.Authentication.IPasswordHashingService>();
         _mockConfiguration = new Mock<IConfiguration>();
         _mockLogger = new Mock<IUnifiedLoggingService>();
         _mockEmailService = new Mock<IEmailService>();
         _mockRateLimitService = new Mock<IRateLimitService>();
         _mockAccountLockoutService = new Mock<IAccountLockoutService>();
-        _mockAuthAuditService = new Mock<IAuthAuditService>();
+        _mockAuthAuditService = new Mock<Farm.Infrastructure.Services.Authentication.IAuthAuditService>();
 
         // Setup configuration defaults for JWT
         _mockConfiguration.Setup(c => c["Jwt:Key"]).Returns("ThisIsASuperSecureKeyForTestingPurposesOnly12345678");

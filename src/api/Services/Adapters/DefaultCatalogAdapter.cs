@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Farm.Importing.Services.Adapters;
-using Farm.Web.Api.Services;
+using Farm.Infrastructure.Services;
 
 namespace Farm.Web.Api.Services.Adapters;
 

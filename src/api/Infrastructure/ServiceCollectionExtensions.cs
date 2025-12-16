@@ -8,8 +8,13 @@ using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Catalog;
+using Farm.Infrastructure.Services.Catalog.Caching;
+using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -18,10 +23,8 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.Email;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.JobDispatch;
-using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Slicing.Abstractions;
@@ -288,12 +291,12 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterAuthenticationServices(IServiceCollection services)
     {
-        _ = services.AddScoped<IPasswordHashingService, PasswordHashingService>();
-        _ = services.AddScoped<IAuthenticationService, AuthenticationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasswordHashingService, Farm.Infrastructure.Services.Authentication.PasswordHashingService>();
+        _ = services.AddScoped<IAuthenticationService, Farm.Infrastructure.Services.Authentication.AuthenticationService>();
         _ = services.AddScoped<Services.PasswordPolicy.IPasswordPolicyService, Services.PasswordPolicy.PasswordPolicyService>();
-        _ = services.AddScoped<Services.Authentication.IAccountLockoutService, Services.Authentication.AccountLockoutService>();
-        _ = services.AddScoped<Services.Authentication.IAuthAuditService, Services.Authentication.AuthAuditService>();
-        _ = services.AddScoped<Services.Authentication.ITokenRevocationService, Services.Authentication.TokenRevocationService>();
+        _ = services.AddScoped<IAccountLockoutService, Farm.Infrastructure.Services.Authentication.AccountLockoutService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
         _ = services.AddScoped<Services.Users.IUsersService, Services.Users.UsersService>();
     }
@@ -317,9 +320,9 @@ public static class ServiceCollectionExtensions
             IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
             EmailOptions opts = sp.GetRequiredService<EmailOptions>();
             IEmailTemplateRenderer renderer = sp.GetRequiredService<IEmailTemplateRenderer>();
-            return opts.Provider?.Equals("mailjet", StringComparison.OrdinalIgnoreCase) == true
-                ? new Farm.Web.Api.Services.Email.MailjetEmailService(logger, opts, renderer)
-                : new Farm.Web.Api.Services.Email.ConsoleEmailService(logger, renderer);
+            return opts.Mailjet?.ApiKey != null
+                ? new MailjetEmailService(logger, opts, renderer)
+                : new ConsoleEmailService(logger);
         });
     }
 
@@ -336,7 +339,7 @@ public static class ServiceCollectionExtensions
             cfg.GetSection("RateLimiting").Bind(opts);
             return opts;
         });
-        _ = services.AddSingleton<IRateLimitService, InMemoryRateLimitService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.RateLimiting.IRateLimitService, Farm.Infrastructure.Services.RateLimiting.InMemoryRateLimitService>();
     }
 
     #endregion
@@ -356,8 +359,16 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterCatalogServices(IServiceCollection services)
     {
-        _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogService>();
-        _ = services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
+        // Register cache adapter that wraps API-specific ICatalogCache for Infrastructure use
+        _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.Caching.ICatalogCacheProvider, Services.Catalog.CatalogCacheAdapter>();
+        
+        // Register Infrastructure catalog service with cache abstraction
+        _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.ICatalogService, Farm.Infrastructure.Services.Catalog.CatalogService>();
+        
+        // Register API adapter that wraps Infrastructure service to work with request DTOs
+        _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
+        
+        _ = services.AddScoped<Farm.Infrastructure.Services.IDefaultCatalogService, Farm.Infrastructure.Services.DefaultCatalogService>();
         _ = services.AddScoped<Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
     }
 
@@ -423,35 +434,37 @@ public static class ServiceCollectionExtensions
         // The factory dynamically discovers clients from plugins via IBackendPluginRegistry
         // This eliminates the need to pass individual backend clients (Moon, Prusa, SDCP, OctoPrint)
         // to PrintersService, making it easier to add new backends without modifying the constructor
-        _ = services.AddSingleton<Services.Printers.IBackendClientFactory>(provider =>
+        // IMPORTANT: Must be SCOPED because backend clients (e.g., IMoonrakerClient) are scoped services
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IBackendClientFactory>(provider =>
         {
             var serviceProvider = provider;
             var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
             var logger = provider.GetRequiredService<IUnifiedLoggingService>();
             
-            return new Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, logger);
+            return new Farm.Infrastructure.Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, logger);
         });
         
         // Register the backend capability factory for capability-aware client retrieval
         // This factory now integrates with the plugin registry for backend metadata
         // while maintaining backward compatibility with reflection-based detection
-        _ = services.AddSingleton<Services.Printers.IBackendCapabilityFactory>(provider =>
+        // IMPORTANT: Must be SCOPED because it depends on IBackendClientFactory which is scoped
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IBackendCapabilityFactory>(provider =>
         {
-            var clientFactory = provider.GetRequiredService<Services.Printers.IBackendClientFactory>();
+            var clientFactory = provider.GetRequiredService<Farm.Infrastructure.Services.Printers.IBackendClientFactory>();
             var logger = provider.GetRequiredService<IUnifiedLoggingService>();
             var pluginRegistry = provider.GetService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
             
-            return new Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
+            return new Farm.Infrastructure.Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
         });
 
         // Register the factory for getting printer status clients from plugins
-        _ = services.AddSingleton<Services.Printers.IPrinterStatusClientFactory>(provider =>
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusClientFactory>(provider =>
         {
             var serviceProvider = provider;
             var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
             var logger = provider.GetRequiredService<IUnifiedLoggingService>();
             
-            return new Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
+            return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
         });
         
         // Register the printer status fallback service for timeout and circuit breaker management

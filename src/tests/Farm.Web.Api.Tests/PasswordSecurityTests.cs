@@ -1,5 +1,5 @@
 ﻿using System.Diagnostics;
-using Farm.Web.Api.Services.Authentication;
+using Farm.Infrastructure.Services.Authentication;
 
 namespace Farm.Web.Api.Tests;
 

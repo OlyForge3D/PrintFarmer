@@ -1,6 +1,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.Printers;

@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
@@ -725,6 +726,38 @@ public class PrintersController(
             IpAddress: printer.IpAddress
         );
         return Ok(dto);
+    }
+
+    /// <summary>
+    /// Refreshes camera URLs for a printer by querying the backend API.
+    /// Use this to update camera configuration after adding or modifying cameras on a printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The updated printer DTO with refreshed camera URLs</returns>
+    /// <response code="200">Returns the updated printer with camera URLs</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error refreshing camera URLs</response>
+    [HttpPost("{id:guid}/refresh-cameras")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterDto>> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            PrinterDto? result = await _printersService.RefreshCameraUrlsAsync(id, ct);
+            if (result == null)
+            {
+                return NotFound();
+            }
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to refresh camera URLs for printer {id}");
+            return StatusCode(500, "Failed to refresh camera URLs");
+        }
     }
 
     /// <summary>

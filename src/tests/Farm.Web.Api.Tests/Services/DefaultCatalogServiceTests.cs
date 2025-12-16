@@ -1,5 +1,5 @@
 using Farm.Infrastructure.Repositories.Catalog;
-using Farm.Web.Api.Services;
+using Farm.Infrastructure.Services;
 using FluentAssertions;
 using Moq;
 

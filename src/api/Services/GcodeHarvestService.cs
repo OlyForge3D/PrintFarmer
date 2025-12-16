@@ -19,7 +19,6 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.Models;
-using Farm.Web.Api.Services.Printers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using MoonrakerDir = Farm.Infrastructure.Contracts.Printers.Moonraker.MoonrakerDirectoryInfo;
@@ -41,7 +40,7 @@ public partial class GcodeHarvestService(
     StorageManagement.IStoragePathService storagePathService,
     FileManagement.IGcodeThumbnailExtractorService thumbnailExtractor,
     IOptions<GcodeHarvestSettings> harvestOptions,
-    Printers.IBackendCapabilityFactory capabilityFactory) : IGcodeHarvestService
+    IBackendCapabilityFactory capabilityFactory) : IGcodeHarvestService
 {
     public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
     {
@@ -121,7 +120,7 @@ public partial class GcodeHarvestService(
     private readonly StorageManagement.IStoragePathService _storagePathService = storagePathService;
     private readonly FileManagement.IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor;
     private readonly GcodeHarvestSettings _harvestSettings = harvestOptions.Value;
-    private readonly Printers.IBackendCapabilityFactory _capabilityFactory = capabilityFactory;
+    private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory;
 
     private static readonly string[] sourceArray = { "gcode" };
 

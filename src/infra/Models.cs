@@ -227,9 +227,10 @@ public partial record PrinterCameraUrlsDto
     [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 
-// Fast printer info optimized for performance - excludes camera URLs and real-time status
+// Fast printer info optimized for performance - includes camera URLs from database (discovered at registration)
 /// <summary>
-/// Fast printer information for dashboard loading - excludes camera URLs which are available via separate endpoint.
+/// Fast printer information for dashboard loading - includes camera URLs discovered during printer registration.
+/// Camera URLs are stored in the database and returned directly without additional API calls.
 /// </summary>
 public partial record PrinterFastDto(
     Guid Id,
@@ -247,7 +248,9 @@ public partial record PrinterFastDto(
     int BackendPort = 80,
     int? FrontendPort = null,
     bool InMaintenance = false,
-    bool IsEnabled = true);
+    bool IsEnabled = true,
+    string? CameraStreamUrl = null,
+    string? CameraSnapshotUrl = null);
 
 public partial record PrinterFastDto
 {

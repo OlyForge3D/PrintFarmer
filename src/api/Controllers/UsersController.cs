@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;

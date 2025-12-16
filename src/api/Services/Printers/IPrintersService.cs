@@ -78,5 +78,14 @@ namespace Farm.Web.Api.Services.Printers
 
         // File-based import
         Task<object> ImportFromFileAsync(IFormFile file, string duplicateHandling = "skip", CancellationToken ct = default);
+        
+        /// <summary>
+        /// Refreshes camera URLs for a printer by querying the backend API.
+        /// This updates the stored camera URLs in the database.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Updated printer with refreshed camera URLs, or null if printer not found</returns>
+        Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct);
     }
 }

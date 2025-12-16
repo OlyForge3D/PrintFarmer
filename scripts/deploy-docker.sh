@@ -1776,6 +1776,7 @@ tear_down_deployment() {
     echo "  4. Prune dangling images (base images are preserved)"
     echo "  5. Clear Docker builder cache"
     echo "  6. Clean up generated configuration files"
+    echo -e "  7. ${RED}Remove ALL bind-mounted storage INCLUDING DATABASE${NC}"
     echo
     
     if [ "$NON_INTERACTIVE" = "false" ]; then
@@ -2059,10 +2060,16 @@ tear_down_deployment() {
             print_info "Kept external storage directories (data preserved)"
         fi
     else
-        # In non-interactive mode with --tear-down, remove all external storage EXCEPT database
-        # (Database is skipped due to permission issues with Docker-managed containers)
+        # In non-interactive mode with --tear-down: remove ALL storage INCLUDING database
+        # This provides a complete reset to fresh state
+        
+        # Add database to the removal list
+        if [ -n "$external_database_path" ]; then
+            paths_to_remove+=("$external_database_path:Database")
+        fi
+        
         if [ ${#paths_to_remove[@]} -gt 0 ]; then
-            print_warning "Removing external storage directories (from config):"
+            print_warning "Removing ALL external storage directories (from config):"
             for path_entry in "${paths_to_remove[@]}"; do
                 local path="${path_entry%:*}"
                 local desc="${path_entry#*:}"
@@ -2088,11 +2095,6 @@ tear_down_deployment() {
             done
             if [ $external_paths_removed -gt 0 ]; then
                 print_success "✓ External storage directories removed: $external_paths_removed"
-            fi
-            
-            # Notify about database (skipped in non-interactive mode)
-            if [ -n "$external_database_path" ] && [ -d "$external_database_path" ]; then
-                print_info "⊘ Skipped Database directory (Docker-managed, kept for data preservation)"
             fi
         else
             print_info "✓ No external storage directories configured - nothing to remove"
@@ -2179,8 +2181,8 @@ OPTIONS:
         --redeploy          Rebuild and restart using existing configuration
                             (detects previous deployment automatically)
     --tear-down             Tear down existing deployment (stops containers, removes
-        --teardown          volumes, cleans up). Useful for starting fresh.
-        --clean             Same as --tear-down
+        --teardown          volumes, and ALL bind-mounted storage including database).
+        --clean             Useful for starting completely fresh.
     --build-verbosity LEVEL Set Docker build verbosity: quiet (default), minimal, normal, detailed
         --verbose-build     Shorthand for --build-verbosity detailed
         --cleanup-generated Remove generated Docker files after deployment (default keeps them)

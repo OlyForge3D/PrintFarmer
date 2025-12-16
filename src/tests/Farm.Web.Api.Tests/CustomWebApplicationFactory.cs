@@ -11,6 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Web.Api.Services.Authentication;
 
 namespace Farm.Web.Api.Tests

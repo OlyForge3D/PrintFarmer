@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.RateLimiting;
+using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Telemetry;
 using Moq;
 using Xunit;

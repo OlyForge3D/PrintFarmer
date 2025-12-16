@@ -6,6 +6,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Setup;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 

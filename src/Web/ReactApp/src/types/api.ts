@@ -141,6 +141,18 @@ export interface PrinterFast {
   frontendPort?: number;
   inMaintenance?: boolean;
   isEnabled?: boolean;
+  // Camera URLs from database (discovered during printer registration)
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
+  // Temperature data (may be populated from real-time status)
+  hotendTemp?: number;
+  bedTemp?: number;
+  hotendTarget?: number;
+  bedTarget?: number;
+  // Position data
+  x?: number;
+  y?: number;
+  z?: number;
 }
 
 export enum PrinterBackend {

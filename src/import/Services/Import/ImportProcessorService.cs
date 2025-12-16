@@ -226,7 +226,7 @@ public class ImportProcessorService : IImportProcessorService
             Name = "Extruder 1",
             Index = 0,
             IsPrimary = true,
-            NozzleDiameter = dto.NozzleDiameter,
+            NozzleDiameter = dto.NozzleDiameter ?? 0.4, // Default to standard 0.4mm nozzle
             SupportedMaterials = dto.SupportedMaterials,
             MinHotendTemp = dto.MinHotendTemp,
             MaxHotendTemp = dto.MaxHotendTemp,

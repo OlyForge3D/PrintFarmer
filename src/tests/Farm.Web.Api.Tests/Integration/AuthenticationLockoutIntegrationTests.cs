@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services.Authentication;
+using Farm.Infrastructure.Services.Authentication;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;

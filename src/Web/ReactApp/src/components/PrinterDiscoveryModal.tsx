@@ -73,11 +73,29 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     }
   }, [sessionId, isActive, isCompleted, foundPrinters.length, progress?.status, completed?.totalPrintersFound]);
 
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   // When modal is being closed, reset session so a new discovery can start fresh next open
-  if (!isOpen) {
-    if (sessionId) {
+  useEffect(() => {
+    if (!isOpen && sessionId) {
       setSessionId(null);
     }
+  }, [isOpen, sessionId]);
+
+  // Early return AFTER all hooks
+  if (!isOpen) {
     return null;
   }
 
@@ -197,19 +215,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   // Determine if scan has been run (either completed or has results)
   const hasScanRun = isCompleted || foundPrinters.length > 0;
 
-  // Handle ESC key to close modal
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
+  // Note: ESC key handler is defined earlier in the hook section
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">

@@ -4,6 +4,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Authentication;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api.Services.Authentication;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
