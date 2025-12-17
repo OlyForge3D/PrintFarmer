@@ -19,6 +19,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.SignalR.Hubs;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Infrastructure.Caching;
@@ -656,7 +657,7 @@ app.UseAuthorization();
 // Configure API routing and SignalR hubs
 app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
-// app.MapHub<HarvestHub>("/hubs/harvest");  // TODO: HarvestHub deleted, needs refactoring
+app.MapHub<HarvestHub>("/hubs/harvest");
 // Slicer registry events hub (worker registration, heartbeat, deregistration)
 // app.MapHub<SlicerHub>("/hubs/slicer-registry");  // TODO: SlicerHub deleted, needs refactoring
 // Slicer progress hub for job processing progress events
