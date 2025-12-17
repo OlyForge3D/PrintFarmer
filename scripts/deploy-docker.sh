@@ -2580,7 +2580,7 @@ ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 EOF
 
     # Save slicer worker API keys to preserve them across deployments
-    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && [ ${#SLICER_WORKER_API_KEYS[@]:-0} -gt 0 ]; then
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && [ -n "${SLICER_WORKER_API_KEYS[0]:-}" ]; then
         echo "" >> "$CONFIG_FILE"
         echo "# Slicer Worker API Keys (preserved for consistent worker registration)" >> "$CONFIG_FILE"
         for ((i=0; i<${#SLICER_WORKER_API_KEYS[@]}; i++)); do
