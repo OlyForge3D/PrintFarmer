@@ -471,23 +471,24 @@ public static class ServiceCollectionExtensions
         var printerStatusCache = new Farm.Infrastructure.Services.Printers.PrinterStatusCache();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(printerStatusCache);
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(printerStatusCache);
-        // Register a factory for the API interface that wraps the Infrastructure cache
-        _ = services.AddSingleton<Services.Printers.IPrinterStatusCache>(sp =>
-            new Farm.Web.Api.Services.Printers.PrinterStatusCacheAdapter(printerStatusCache));
 
         // Register the printer status update receiver (scoped - one per request)
-        _ = services.AddScoped<Services.Printers.IPrinterStatusUpdateReceiver, Services.Printers.PrinterStatusUpdateReceiver>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusUpdateReceiver, Farm.Infrastructure.Services.Printers.PrinterStatusUpdateReceiver>();
 
         // Register the printer status fallback service for timeout and circuit breaker management
-        _ = services.AddScoped<Services.Printers.IPrinterStatusFallbackService, Services.Printers.PrinterStatusFallbackService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusFallbackService, Farm.Infrastructure.Services.Printers.PrinterStatusFallbackService>();
         
         // Register the backend capabilities service for exposing plugin capabilities to the UI
         _ = services.AddScoped<Services.Printers.IPrinterBackendCapabilitiesService, Services.Printers.PrinterBackendCapabilitiesService>();
 
         // Register the multi-printer status coordinator for parallel operation orchestration
-        _ = services.AddScoped<Services.Printers.IMultiPrinterStatusCoordinator, Services.Printers.MultiPrinterStatusCoordinator>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IMultiPrinterStatusCoordinator, Farm.Infrastructure.Services.Printers.MultiPrinterStatusCoordinator>();
 
-        _ = services.AddScoped<Services.Printers.IPrintersService, Services.Printers.PrintersService>();
+        // Register SignalR printer status broadcaster - abstracts real-time broadcasting for any UI implementation
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusBroadcaster, Services.Printers.SignalRPrinterStatusBroadcaster>();
+
+        // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();
     }
 
     #endregion

@@ -63,7 +63,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var csvContent = "";
         var file = CreateCsvFormFile("empty.csv", csvContent);
@@ -71,7 +71,10 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
         {
-            await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+            using (var stream = file.OpenReadStream())
+            {
+                await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
+            }
         });
         exception.Message.Should().Contain("empty");
     }
@@ -81,7 +84,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var csvContent = "Name,IpAddress,Backend\n";
         var file = CreateCsvFormFile("header-only.csv", csvContent);
@@ -89,7 +92,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("No valid printer");
     }
@@ -99,7 +102,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var jsonContent = "{ invalid json }";
         var file = CreateJsonFormFile("invalid.json", jsonContent);
@@ -107,7 +110,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
     }
 
@@ -116,7 +119,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var content = "some content";
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -130,7 +133,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
         {
-            await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("CSV or JSON");
     }
@@ -140,7 +143,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         // Missing 'Backend' required column
         var csvContent = "Name,IpAddress\nPrinter1,192.168.1.100\n";
@@ -149,7 +152,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("required columns");
     }
@@ -161,7 +164,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var jsonContent = JsonSerializer.Serialize(new[]
         {
@@ -181,7 +184,11 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         var file = CreateJsonFormFile("printers.json", jsonContent);
 
         // Act
-        var result = await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+        object result;
+        using (var stream = file.OpenReadStream())
+        {
+            result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
+        }
 
         // Assert - Result should not be null (indicates successful import)
         result.Should().NotBeNull();
@@ -192,7 +199,7 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var csvContent = @"Name,IpAddress,Backend,Notes
 Prusa1,192.168.1.100,Moonraker,First printer
@@ -202,7 +209,11 @@ Prusa3,192.168.1.102,SDCP,Third printer
         var file = CreateCsvFormFile("printers-detailed.csv", csvContent);
 
         // Act
-        var result = await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+        object result;
+        using (var stream = file.OpenReadStream())
+        {
+            result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
+        }
 
         // Assert
         result.Should().NotBeNull();
@@ -213,7 +224,7 @@ Prusa3,192.168.1.102,SDCP,Third printer
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         // CSV with quoted fields containing commas
         var csvContent = @"Name,IpAddress,Backend,Notes
@@ -223,7 +234,11 @@ SimpleNamePrinter,192.168.1.101,Moonraker,SimpleNote
         var file = CreateCsvFormFile("quoted.csv", csvContent);
 
         // Act
-        var result = await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+        object result;
+        using (var stream = file.OpenReadStream())
+        {
+            result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
+        }
 
         // Assert
         result.Should().NotBeNull();
@@ -234,7 +249,7 @@ SimpleNamePrinter,192.168.1.101,Moonraker,SimpleNote
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var csvContent = @"Name,IpAddress,Backend
 MoonrakerPrinter,192.168.1.100,Moonraker
@@ -245,7 +260,11 @@ OctoPrintPrinter,192.168.1.103,OctoPrint
         var file = CreateCsvFormFile("mixed-backends.csv", csvContent);
 
         // Act
-        var result = await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+        object result;
+        using (var stream = file.OpenReadStream())
+        {
+            result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
+        }
 
         // Assert
         result.Should().NotBeNull();
@@ -256,7 +275,7 @@ OctoPrintPrinter,192.168.1.103,OctoPrint
     {
         // Arrange
         var printersService = _factory.Services.CreateAsyncScope().ServiceProvider
-            .GetRequiredService<Farm.Web.Api.Services.Printers.IPrintersService>();
+            .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         var csvContent = @"Name,IpAddress,Backend,Notes,ManufacturerName,ModelName,ApiKey,IsEnabled,BackendPort,CameraStreamUrl
 Printer1,192.168.1.100,Moonraker,Test,Prusa,CORE One,key123,true,7125,http://cam.local
@@ -265,7 +284,11 @@ Printer2,192.168.1.101,PrusaLink,Test2,Prusa,Mk3S+,key456,false,8008,http://cam2
         var file = CreateCsvFormFile("with-optional.csv", csvContent);
 
         // Act
-        var result = await printersService.ImportFromFileAsync(file, "skip", CancellationToken.None);
+        object result;
+        using (var stream = file.OpenReadStream())
+        {
+            result = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
+        }
 
         // Assert
         result.Should().NotBeNull();

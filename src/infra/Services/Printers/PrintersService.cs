@@ -11,7 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
+using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
 using Farm.Infrastructure.Contracts.Printers;
@@ -22,14 +22,9 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Printers;
-using Farm.SignalR.Hubs;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Services.Interfaces;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services.Printers
+namespace Farm.Infrastructure.Services.Printers
 {
     public class PrintersService : IPrintersService
     {
@@ -42,11 +37,11 @@ namespace Farm.Web.Api.Services.Printers
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
         private readonly AutoMapper.IMapper _mapper;
-        private readonly IHubContext<PrinterHub> _hubContext;
+        private readonly IPrinterStatusBroadcaster _broadcaster;
         private readonly IMultiPrinterStatusCoordinator _coordinator;
         private readonly IPrinterStatusFallbackService _fallbackService;
         private readonly IPrinterStatusClientFactory _statusClientFactory;
-        private readonly IPrinterStatusCache _statusCache;
+        private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _statusCache;
 
         public PrintersService(
             Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo,
@@ -58,11 +53,11 @@ namespace Farm.Web.Api.Services.Printers
             IHttpClientFactory httpClientFactory,
             Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger,
             AutoMapper.IMapper mapper,
-            IHubContext<PrinterHub> hubContext,
+            IPrinterStatusBroadcaster broadcaster,
             IMultiPrinterStatusCoordinator coordinator,
             IPrinterStatusFallbackService fallbackService,
             IPrinterStatusClientFactory statusClientFactory,
-            IPrinterStatusCache statusCache)
+            Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
@@ -73,7 +68,7 @@ namespace Farm.Web.Api.Services.Printers
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
-            _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
+            _broadcaster = broadcaster ?? throw new ArgumentNullException(nameof(broadcaster));
             _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
             _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
             _fallbackService = fallbackService ?? throw new ArgumentNullException(nameof(fallbackService));
@@ -667,43 +662,41 @@ namespace Farm.Web.Api.Services.Printers
             return ms.ToArray();
         }
 
-        public async Task StreamExportToResponseAsync(Guid[]? ids, string format, HttpResponse response, CancellationToken ct)
+        /// <summary>
+        /// Exports printers to JSON format and returns the bytes.
+        /// HTTP response handling is done by the controller.
+        /// </summary>
+        public async Task<byte[]> BuildExportJsonAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
-
             IQueryable<Printer> query = printers.AsQueryable();
 
-            if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
+            using MemoryStream ms = new MemoryStream();
+            await using StreamWriter writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
+            
+            await writer.WriteAsync("[");
+            bool first = true;
+            // Include Toolheads in query to access toolhead data during export
+            await foreach (Printer? p in query.Include(pr => pr.Toolheads).AsAsyncEnumerable().WithCancellation(ct))
             {
-                await StreamJsonExportAsync(query, response, ct);
-                return;
-            }
+                if (!first)
+                {
+                    await writer.WriteAsync(",");
+                }
 
-            // CSV - export fields matching AdminCli CSV format for consistency
-            response.ContentType = "text/csv";
-            string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
-            response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
-
-            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired" };
-
-            await using StreamWriter writer = new StreamWriter(response.Body, Encoding.UTF8, leaveOpen: true);
-            await writer.WriteLineAsync(string.Join(',', headerParts));
-
-            foreach (Printer p in query)
-            {
-                PrinterBackend backend = (PrinterBackend)p.Backend;
-                string backendName = backend.ToString();
-                string backendPort = p.BackendPort.ToString();
-                string frontendPort = p.FrontendPort?.ToString() ?? "";
-                string apiKey = p.ApiKey ?? "";
-                string cameraStreamUrl = p.CameraStreamUrl ?? "";
-                string cameraSnapshotUrl = p.CameraSnapshotUrl ?? "";
-                string dateAcquired = p.DateAcquired?.ToString("O") ?? "";
-                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired}";
-                await writer.WriteLineAsync(csvLine);
+                first = false;
+                Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p);
+                string json = JsonSerializer.Serialize(dtoDict, _exportJsonOptions);
+                await writer.WriteAsync(json);
                 await writer.FlushAsync();
             }
+            await writer.WriteAsync("]");
+            await writer.FlushAsync();
+            
+            return ms.ToArray();
         }
+
+        /// <summary>
 
         public async Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct)
         {
@@ -767,33 +760,6 @@ namespace Farm.Web.Api.Services.Printers
                 return '"' + raw.Replace("\"", "\"\"") + '"';
             }
             return raw;
-        }
-
-        private async Task StreamJsonExportAsync(IQueryable<Printer> query, HttpResponse response, CancellationToken ct)
-        {
-            response.ContentType = "application/json";
-            string filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
-            response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
-
-            await using StreamWriter writer = new StreamWriter(response.Body, Encoding.UTF8, leaveOpen: true);
-            await writer.WriteAsync("[");
-            bool first = true;
-            // Include Toolheads in query to access toolhead data during export
-            await foreach (Printer? p in query.Include(pr => pr.Toolheads).AsAsyncEnumerable().WithCancellation(ct))
-            {
-                if (!first)
-                {
-                    await writer.WriteAsync(",");
-                }
-
-                first = false;
-                Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p);
-                string json = JsonSerializer.Serialize(dtoDict, _exportJsonOptions);
-                await writer.WriteAsync(json);
-                await writer.FlushAsync();
-            }
-            await writer.WriteAsync("]");
-            await writer.FlushAsync();
         }
 
         private static Dictionary<string, object?> BuildExportPrinterDictionary(Printer p)
@@ -1010,7 +976,17 @@ namespace Farm.Web.Api.Services.Printers
                     SupportedFilamentTypeIds: null);
                 try
                 {
-                    PrinterModelDto createdModel = await _catalogService.CreateModelAsync(createReq, ct).ConfigureAwait(false);
+                    PrinterModelDto createdModel = await _catalogService.CreateModelAsync(
+                        createReq.ManufacturerId,
+                        createReq.Name,
+                        createReq.Type,
+                        createReq.MaxX,
+                        createReq.MaxY,
+                        createReq.MaxZ,
+                        createReq.DefaultBackend,
+                        createReq.SupportedFilamentTypeIds,
+                        createReq.DefaultNozzleDiameter,
+                        ct).ConfigureAwait(false);
                     modelId = createdModel.Id;
                 }
                 catch (Infrastructure.Exceptions.DuplicateEntityException ex)
@@ -1886,8 +1862,8 @@ namespace Farm.Web.Api.Services.Printers
                     };
                     results.Add(result);
 
-                    // Send SignalR update to all connected clients
-                    await _hubContext.Clients.All.SendAsync("printerImportProgress", result, ct);
+                    // Broadcast import progress update to all connected clients
+                    await _broadcaster.BroadcastPrinterImportProgressAsync(result, ct);
                 }
                 catch (Exception ex)
                 {
@@ -1905,8 +1881,8 @@ namespace Farm.Web.Api.Services.Printers
                     };
                     results.Add(result);
 
-                    // Send SignalR update for failure
-                    await _hubContext.Clients.All.SendAsync("printerImportProgress", result, ct);
+                    // Broadcast import progress update for failure
+                    await _broadcaster.BroadcastPrinterImportProgressAsync(result, ct);
                 }
             }
 
@@ -1980,23 +1956,25 @@ namespace Farm.Web.Api.Services.Printers
         }
 
         /// <summary>
-        /// Imports printers from an uploaded CSV or JSON file.
-        /// Supports duplicate handling strategies: 'skip' (default), 'overwrite', or 'error'.
+        /// Imports printers from a stream containing CSV or JSON data.
+        /// This is the core import logic that works with any Stream, not just HTTP uploads.
         /// </summary>
-        /// <param name="file">The uploaded file (CSV or JSON)</param>
+        /// <param name="stream">The stream containing CSV or JSON data</param>
+        /// <param name="fileName">The filename (used to detect format via extension)</param>
         /// <param name="duplicateHandling">How to handle duplicates: 'skip', 'overwrite', or 'error'</param>
         /// <param name="ct">Cancellation token</param>
         /// <returns>Import result with counts and error details</returns>
-        public async Task<object> ImportFromFileAsync(IFormFile file, string duplicateHandling = "skip", CancellationToken ct = default)
+        public async Task<object> ImportFromStreamAsync(Stream stream, string fileName, string duplicateHandling = "skip", CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(file);
+            ArgumentNullException.ThrowIfNull(stream);
+            ArgumentNullException.ThrowIfNull(fileName);
 
-            if (file.Length == 0)
+            if (stream.Length == 0)
             {
-                throw new ArgumentException("File cannot be empty");
+                throw new ArgumentException("Stream cannot be empty");
             }
 
-            string fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            string fileExtension = Path.GetExtension(fileName).ToLowerInvariant();
             if (fileExtension != ".csv" && fileExtension != ".json")
             {
                 throw new ArgumentException("File must be CSV or JSON format");
@@ -2008,11 +1986,11 @@ namespace Farm.Web.Api.Services.Printers
 
                 if (fileExtension == ".csv")
                 {
-                    printers = await ParseCsvFileAsync(file, ct);
+                    printers = await ParseCsvStreamAsync(stream, ct);
                 }
                 else // JSON
                 {
-                    printers = await ParseJsonFileAsync(file, ct);
+                    printers = await ParseJsonStreamAsync(stream, ct);
                 }
 
                 if (printers == null || printers.Length == 0)
@@ -2029,25 +2007,26 @@ namespace Farm.Web.Api.Services.Printers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[Import] Failed to import printers from file: {ex.Message}");
+                _logger.LogError(ex, $"[Import] Failed to import printers from stream: {ex.Message}");
                 throw;
             }
         }
 
+
         /// <summary>
-        /// Parses a CSV file into printer DTOs.
+        /// Parses a CSV stream into printer DTOs.
         /// Required columns: Name, IpAddress, Backend
         /// Optional columns: Notes, ManufacturerName, ModelName, ApiKey, IsEnabled, BackendPort, FrontendPort, CameraStreamUrl, CameraSnapshotUrl
         /// IDs are not portable between systems; use names instead.
         /// </summary>
-        private async Task<CreatePrinterDto[]> ParseCsvFileAsync(IFormFile file, CancellationToken ct)
+        private async Task<CreatePrinterDto[]> ParseCsvStreamAsync(Stream stream, CancellationToken ct)
         {
             List<CreatePrinterDto> printers = new List<CreatePrinterDto>();
             List<string> errors = new List<string>();
 
             try
             {
-                using (StreamReader reader = new StreamReader(file.OpenReadStream()))
+                using (StreamReader reader = new StreamReader(stream))
                 {
                     string? headerLine = await reader.ReadLineAsync(ct);
                     if (string.IsNullOrWhiteSpace(headerLine))
@@ -2169,14 +2148,14 @@ namespace Farm.Web.Api.Services.Printers
         }
 
         /// <summary>
-        /// Parses a JSON file into printer DTOs.
+        /// Parses a JSON stream into printer DTOs.
         /// Expected format: Array of printer objects with Name, ServerUrl, Backend, etc.
         /// </summary>
-        private async Task<CreatePrinterDto[]> ParseJsonFileAsync(IFormFile file, CancellationToken ct)
+        private async Task<CreatePrinterDto[]> ParseJsonStreamAsync(Stream stream, CancellationToken ct)
         {
             try
             {
-                using (StreamReader reader = new StreamReader(file.OpenReadStream()))
+                using (StreamReader reader = new StreamReader(stream))
                 {
                     string content = await reader.ReadToEndAsync(ct);
 

@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/printers")]
 public class PrintersController(
     IUnifiedLoggingService logger,
-    Services.Printers.IPrintersService printersService,
+    Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
     IDefaultCatalogService defaultCatalogService,
     IValidator<CreatePrinterDto> validator,
@@ -38,7 +38,7 @@ public class PrintersController(
     : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
-    private readonly Services.Printers.IPrintersService _printersService = printersService;
+    private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IDefaultCatalogService defaultCatalog = defaultCatalogService;
     private readonly IValidator<CreatePrinterDto> _validator = validator;
@@ -292,9 +292,12 @@ public class PrintersController(
         try
         {
             _logger.LogInformation($"[Import] Starting import from file: {file.FileName}");
-            object result = await _printersService.ImportFromFileAsync(file, duplicateHandling ?? "skip", ct);
-            _logger.LogInformation($"[Import] Successfully imported from file: {file.FileName}");
-            return Ok(result);
+            using (var stream = file.OpenReadStream())
+            {
+                object result = await _printersService.ImportFromStreamAsync(stream, file.FileName, duplicateHandling ?? "skip", ct);
+                _logger.LogInformation($"[Import] Successfully imported from file: {file.FileName}");
+                return Ok(result);
+            }
         }
         catch (ArgumentException ex)
         {
@@ -1587,14 +1590,32 @@ public class PrintersController(
     {
         try
         {
-            // Delegate streaming export to service which will write directly to the response
-            await _printersService.StreamExportToResponseAsync(ids, format, Response, ct);
+            byte[] data;
+            string contentType;
+            string filename;
+            
+            if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
+            {
+                data = await _printersService.BuildExportJsonAsync(ids, ct);
+                contentType = "application/json";
+                filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.json";
+            }
+            else
+            {
+                data = await _printersService.BuildExportCsvAsync(ids, ct);
+                contentType = "text/csv";
+                filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
+            }
+            
+            Response.ContentType = contentType;
+            Response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
+            await Response.Body.WriteAsync(data, 0, data.Length, ct);
             return new EmptyResult();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to stream export");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to stream export");
+            _logger.LogError(ex, "Failed to export printers");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to export printers");
         }
     }
 

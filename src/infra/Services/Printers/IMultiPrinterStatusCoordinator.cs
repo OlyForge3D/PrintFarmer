@@ -1,7 +1,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Printers
+namespace Farm.Infrastructure.Services.Printers
 {
     /// <summary>
     /// Coordinates parallel execution of printer status operations across multiple printers.

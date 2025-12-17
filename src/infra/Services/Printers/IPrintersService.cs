@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Printers
+namespace Farm.Infrastructure.Services.Printers
 {
     public interface IPrintersService
     {
@@ -27,9 +27,9 @@ namespace Farm.Web.Api.Services.Printers
         Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct);
         // Get complete printer DTOs with live status merged in (replaces GetAllFastDtosAsync for new API)
         Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct);
-        // Export helpers: build CSV bytes or stream export directly
+        // Export helpers: return bytes instead of streaming to HTTP response (HTTP handling done in API layer)
         Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct);
-        Task StreamExportToResponseAsync(Guid[]? ids, string format, HttpResponse response, CancellationToken ct);
+        Task<byte[]> BuildExportJsonAsync(Guid[]? ids, CancellationToken ct);
         // Return ready-to-serialize DTOs combining printer identity and capabilities
         Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct);
         // Create a printer from DTO (resolves manufacturer/model, normalizes host, persists printer and returns DTO)
@@ -42,7 +42,6 @@ namespace Farm.Web.Api.Services.Printers
         string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl);
 
         // Return normalized server URLs for all printers (for discovery exclusion checks)
-
 
         // High-level printer operations that previously lived in controllers
         Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct);
@@ -73,11 +72,11 @@ namespace Farm.Web.Api.Services.Printers
         // Get current print job status for a printer
         Task<PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct);
 
-        // Bulk operations
+        // Bulk operations - domain logic that works with domain objects, not HTTP uploads
         Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
 
-        // File-based import
-        Task<object> ImportFromFileAsync(IFormFile file, string duplicateHandling = "skip", CancellationToken ct = default);
+        // File-based import - accepts Stream instead of IFormFile (HTTP abstraction removed)
+        Task<object> ImportFromStreamAsync(Stream stream, string fileName, string duplicateHandling = "skip", CancellationToken ct = default);
         
         /// <summary>
         /// Refreshes camera URLs for a printer by querying the backend API.

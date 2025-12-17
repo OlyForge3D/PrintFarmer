@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Farm.Web.Api.Services.Printers;
+namespace Farm.Infrastructure.Services.Printers;
 
-internal static class CsvImportParser
+public static class CsvImportParser
 {
     public static string[] SplitCsvLine(string? line)
     {

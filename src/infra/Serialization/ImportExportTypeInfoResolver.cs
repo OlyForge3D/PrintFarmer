@@ -6,7 +6,7 @@ using System.Text.Json.Serialization.Metadata;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
 
-namespace Farm.Web.Api.Serialization;
+namespace Farm.Infrastructure.Serialization;
 
 /// <summary>
 /// TypeInfoResolver that wraps the default resolver and applies ImportExportAttribute-based suppression

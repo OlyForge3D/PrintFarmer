@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Infrastructure.Exceptions;
+﻿namespace Farm.Infrastructure.Exceptions;
 
 /// <summary>
 /// Thrown to signal a duplicate entity (HTTP 409) with an existing DTO and optional normalized name.

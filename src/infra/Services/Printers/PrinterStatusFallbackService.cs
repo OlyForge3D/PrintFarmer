@@ -1,7 +1,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Printers
+namespace Farm.Infrastructure.Services.Printers
 {
     /// <summary>
     /// Manages timeout and fallback logic for printer status operations.

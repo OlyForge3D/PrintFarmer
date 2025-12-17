@@ -32,12 +32,12 @@ namespace Farm.Web.Api.Services.SignalR
     public class PrinterStatusHubListener : IPrinterStatusHubListener
     {
         private readonly IHubContext<PrinterHub> _hubContext;
-        private readonly Services.Printers.IPrinterStatusCache _cache;
+        private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _cache;
         private readonly IUnifiedLoggingService _logger;
 
         public PrinterStatusHubListener(
             IHubContext<PrinterHub> hubContext,
-            Services.Printers.IPrinterStatusCache cache,
+            Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader cache,
             IUnifiedLoggingService logger)
         {
             _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));

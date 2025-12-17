@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 
-namespace Farm.Web.Api.Services.Printers
+namespace Farm.Infrastructure.Services.Printers
 {
     /// <summary>
     /// Receives printer status updates and stores them in the cache.
     /// This service is called by backend polling services to update the shared status cache.
+    /// Backend plugins use this to update the cache without direct API layer dependencies.
     /// </summary>
     public interface IPrinterStatusUpdateReceiver
     {
