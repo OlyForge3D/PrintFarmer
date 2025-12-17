@@ -10,16 +10,16 @@ namespace Farm.Web.Api.Services.Workers;
 /// </summary>
 public class StaleWorkerCleanupHostedService : BackgroundService
 {
-    private readonly IWorkerRepository _workerRepository;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<StaleWorkerCleanupHostedService> _logger;
     private readonly IOptionsMonitor<StaleWorkerCleanupSettings> _settingsMonitor;
 
     public StaleWorkerCleanupHostedService(
-        IWorkerRepository workerRepository,
+        IServiceProvider serviceProvider,
         ILogger<StaleWorkerCleanupHostedService> logger,
         IOptionsMonitor<StaleWorkerCleanupSettings> settingsMonitor)
     {
-        _workerRepository = workerRepository ?? throw new ArgumentNullException(nameof(workerRepository));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
     }
@@ -74,10 +74,14 @@ public class StaleWorkerCleanupHostedService : BackgroundService
     {
         try
         {
+            // Create a scope to get the scoped repository
+            using var scope = _serviceProvider.CreateScope();
+            var workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
+
             var cutoffTime = DateTime.UtcNow.AddMinutes(-settings.StaleAfterMinutes);
 
             // Get all workers
-            var allWorkers = await _workerRepository.GetAllAsync(int.MaxValue, 0);
+            var allWorkers = await workerRepository.GetAllAsync(int.MaxValue, 0);
 
             var staleWorkers = allWorkers
                 .Where(w => IsStale(w, cutoffTime))
@@ -96,11 +100,11 @@ public class StaleWorkerCleanupHostedService : BackgroundService
 
             if (settings.AutoDelete)
             {
-                await DeleteStaleWorkersAsync(staleWorkers, cancellationToken);
+                await DeleteStaleWorkersAsync(workerRepository, staleWorkers);
             }
             else
             {
-                await MarkStaleWorkersOfflineAsync(staleWorkers, cancellationToken);
+                await MarkStaleWorkersOfflineAsync(workerRepository, staleWorkers);
             }
         }
         catch (Exception ex)
@@ -125,7 +129,7 @@ public class StaleWorkerCleanupHostedService : BackgroundService
         return false;
     }
 
-    private async Task MarkStaleWorkersOfflineAsync(List<Worker> staleWorkers, CancellationToken cancellationToken)
+    private async Task MarkStaleWorkersOfflineAsync(IWorkerRepository workerRepository, List<Worker> staleWorkers)
     {
         try
         {
@@ -134,7 +138,7 @@ public class StaleWorkerCleanupHostedService : BackgroundService
                 if (worker.Status == WorkerStatus.Offline)
                     continue;
 
-                await _workerRepository.UpdateStatusAsync(worker.Id, WorkerStatus.Offline);
+                await workerRepository.UpdateStatusAsync(worker.Id, WorkerStatus.Offline);
 
                 _logger.LogInformation(
                     "Marked worker '{WorkerName}' (ID: {WorkerId}) as offline due to inactivity",
@@ -148,13 +152,13 @@ public class StaleWorkerCleanupHostedService : BackgroundService
         }
     }
 
-    private async Task DeleteStaleWorkersAsync(List<Worker> staleWorkers, CancellationToken cancellationToken)
+    private async Task DeleteStaleWorkersAsync(IWorkerRepository workerRepository, List<Worker> staleWorkers)
     {
         try
         {
             foreach (var worker in staleWorkers)
             {
-                await _workerRepository.DeleteAsync(worker.Id);
+                await workerRepository.DeleteAsync(worker.Id);
 
                 _logger.LogInformation(
                     "Deleted stale worker '{WorkerName}' (ID: {WorkerId}) due to inactivity",
