@@ -433,6 +433,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async refreshCameraUrls(id: string): Promise<Printer> {
+    const response = await this.client.post<Printer>(`/printers/${id}/refresh-cameras`);
+    return response.data;
+  }
+
   async deletePrinter(id: string): Promise<void> {
     await this.client.delete(`/printers/${id}`);
   }

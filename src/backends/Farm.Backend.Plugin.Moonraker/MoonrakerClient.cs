@@ -18,6 +18,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     ISupportsStartPrint,
     ISupportsControlOperations,
     ISupportsCamera,
+    ISupportsConfiguredCameraDetection,
     ISupportsFileMetadata,
     ISupportsMovement,
     ISupportsTemperatureControl,
@@ -474,9 +475,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         PrinterSpoolInfoDto? spoolInfo,
         CancellationToken ct = default)
     {
-        // Get camera URLs from Moonraker client methods
-        string? cameraStreamUrl = await GetCameraStreamUrlAsync(printer.ServerUrl, printer.FrontendPort, ct).ConfigureAwait(false);
-        string? cameraSnapshotUrl = await GetCameraSnapshotUrlAsync(printer.ServerUrl, printer.FrontendPort, ct).ConfigureAwait(false);
+        // Use camera URLs from database (discovered and validated during printer setup/refresh)
+        // These are validated URLs - null if no cameras are configured
+        string? cameraStreamUrl = printer.CameraStreamUrl;
+        string? cameraSnapshotUrl = printer.CameraSnapshotUrl;
 
         // Construct backend-specific PrinterDto
         return new PrinterDto(
@@ -2023,6 +2025,18 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
 
     async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
         => await GetCameraSnapshotUrlAsync(baseUrl, ct: ct);
+
+    /// <summary>
+    /// ISupportsConfiguredCameraDetection implementation - detects actually configured cameras.
+    /// This queries the Moonraker API to find cameras that are actually present on the printer.
+    /// Returns (null, null) if no cameras are found, preventing false positives.
+    /// </summary>
+    async Task<(string? streamUrl, string? snapshotUrl)> ISupportsConfiguredCameraDetection.DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)
+    {
+        // Query the actual API to get configured camera URLs
+        (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
+        return (stream, snapshot);
+    }
 
     /// <summary>
     /// ISupportsFileMetadata implementation - gets metadata for a file on the printer.

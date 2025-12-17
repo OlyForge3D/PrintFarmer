@@ -92,6 +92,12 @@ public interface IBackendCapabilityFactory
     bool TryGetCameraClientTyped(PrinterBackend backend, out ISupportsCamera? client);
 
     /// <summary>
+    /// Tries to get a backend client typed as ISupportsConfiguredCameraDetection for detecting configured cameras.
+    /// This is used to query the printer's actual camera configuration and ONLY return URLs for cameras that exist.
+    /// </summary>
+    bool TryGetConfiguredCameraDetectionClient(PrinterBackend backend, out ISupportsConfiguredCameraDetection? client);
+
+    /// <summary>
     /// Tries to get a backend client typed as ISupportsHistory for history operations.
     /// </summary>
     bool TryGetHistoryClientTyped(PrinterBackend backend, out ISupportsHistory? client);

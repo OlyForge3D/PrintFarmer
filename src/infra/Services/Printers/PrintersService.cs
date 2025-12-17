@@ -2276,23 +2276,44 @@ namespace Farm.Infrastructure.Services.Printers
 
             try
             {
-                bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient);
-                _logger.LogInformation($"RefreshCameraUrlsAsync: TryGetCameraClientTyped result: {gotCameraClient}, cameraClient is null: {cameraClient == null}");
-                
-                if (gotCameraClient && cameraClient != null)
+                // Try to use the configured camera detection interface which queries actual cameras
+                if (_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out var detectionClient) && detectionClient != null)
                 {
+                    _logger.LogInformation($"RefreshCameraUrlsAsync: Using configured camera detection for backend {backend}");
+                    
                     // For Moonraker, use the frontend URL (not backend port 7125)
-                    // Camera streams are served via the web frontend (port 80 typically)
                     string baseUrlForCamera = backend == PrinterBackend.Moonraker 
                         ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                         : printer.BackendUrl;
                     
                     _logger.LogInformation($"RefreshCameraUrlsAsync: Using baseUrlForCamera={baseUrlForCamera}");
                     
-                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
-                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
+                    // Call the detection method - it will ONLY return URLs if cameras actually exist
+                    (streamUrl, snapshotUrl) = await detectionClient.DetectConfiguredCameraUrlsAsync(
+                        baseUrlForCamera, 
+                        printer.FrontendPort, 
+                        printer.ApiKey, 
+                        ct).ConfigureAwait(false);
                     
-                    _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs - stream={streamUrl}, snapshot={snapshotUrl}");
+                    _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from detection - stream={streamUrl}, snapshot={snapshotUrl}");
+                }
+                else
+                {
+                    // Fallback: Use standard camera client (may return default URLs even if cameras don't exist)
+                    _logger.LogWarning($"RefreshCameraUrlsAsync: Configured camera detection not available for backend {backend}, falling back to standard interface");
+                    
+                    bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient);
+                    if (gotCameraClient && cameraClient != null)
+                    {
+                        string baseUrlForCamera = backend == PrinterBackend.Moonraker 
+                            ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+                            : printer.BackendUrl;
+                        
+                        streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
+                        snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
+                        
+                        _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from standard interface - stream={streamUrl}, snapshot={snapshotUrl}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -2300,12 +2321,12 @@ namespace Farm.Infrastructure.Services.Printers
                 _logger.LogWarning(ex, $"RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {id}: {ex.Message}");
             }
 
-            // Update printer in database
-            _logger.LogInformation($"RefreshCameraUrlsAsync: Updating database for printer {printer.Name}: CameraStreamUrl={streamUrl}");
+            // Update printer in database - only set URLs if they are not null (i.e., cameras actually exist)
+            _logger.LogInformation($"RefreshCameraUrlsAsync: Updating database for printer {printer.Name}: CameraStreamUrl={streamUrl}, CameraSnapshotUrl={snapshotUrl}");
             printer.CameraStreamUrl = streamUrl;
             printer.CameraSnapshotUrl = snapshotUrl;
             await SaveChangesAsync(ct).ConfigureAwait(false);
-            _logger.LogInformation($"RefreshCameraUrlsAsync: SaveChangesAsync completed");
+            _logger.LogInformation($"RefreshCameraUrlsAsync: SaveChangesAsync completed - URLs saved: stream={!string.IsNullOrEmpty(streamUrl)}, snapshot={!string.IsNullOrEmpty(snapshotUrl)}");
 
             // Return updated DTO
             return await GetPrinterDtoAsync(id, ct).ConfigureAwait(false);

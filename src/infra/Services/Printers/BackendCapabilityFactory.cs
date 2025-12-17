@@ -28,6 +28,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         { typeof(ISupportsStartPrint), BackendCapabilities.StartPrint },
         { typeof(ISupportsControlOperations), BackendCapabilities.ControlOperations },
         { typeof(ISupportsCamera), BackendCapabilities.Camera },
+        { typeof(ISupportsConfiguredCameraDetection), BackendCapabilities.Camera },
         { typeof(ISupportsFileMetadata), BackendCapabilities.FileMetadata },
         { typeof(ISupportsMovement), BackendCapabilities.Movement },
         { typeof(ISupportsTemperatureControl), BackendCapabilities.TemperatureControl },
@@ -270,6 +271,17 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         if (TryGetCameraClient(backend, out var baseClient) && baseClient is ISupportsCamera cameraClient)
         {
             client = cameraClient;
+            return true;
+        }
+        return false;
+    }
+
+    public bool TryGetConfiguredCameraDetectionClient(PrinterBackend backend, out ISupportsConfiguredCameraDetection? client)
+    {
+        client = null;
+        if (TryGetCameraClient(backend, out var baseClient) && baseClient is ISupportsConfiguredCameraDetection detectionClient)
+        {
+            client = detectionClient;
             return true;
         }
         return false;

@@ -52,6 +52,22 @@ public interface ISupportsCamera
 }
 
 /// <summary>
+/// Capability marker interface for backend clients that support detecting configured cameras.
+/// This interface detects ONLY cameras that are actually configured on the printer.
+/// Returns null if no cameras are configured, preventing false positives.
+/// Implementations MUST validate camera existence before returning URLs.
+/// </summary>
+public interface ISupportsConfiguredCameraDetection
+{
+    /// <summary>
+    /// Detects and returns camera URLs for cameras actually configured on the printer.
+    /// MUST return null for both stream and snapshot if no cameras are found.
+    /// This prevents saving camera URLs for printers that don't have cameras.
+    /// </summary>
+    Task<(string? streamUrl, string? snapshotUrl)> DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backend clients that support file metadata extraction.
 /// Moonraker-specific but designed as a capability interface.
 /// </summary>

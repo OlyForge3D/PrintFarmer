@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Loader2 } from 'lucide-react';
+import { X, Check, Loader2, RotateCcw } from 'lucide-react';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
+import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from './FilamentTypeSelector';
 import { BackendSelector } from './BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert, Checkbox } from '@/components/ui';
@@ -26,6 +27,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [lastModelId, setLastModelId] = useState<string | undefined>();
+  const [isRefreshingCameras, setIsRefreshingCameras] = useState(false);
   
   // Fetch default capabilities for the selected model
   const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
@@ -138,6 +140,26 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     onClose();
     setValidationErrors({});
     setError('');
+  };
+
+  const handleRefreshCameraUrls = async () => {
+    if (!printerId) return;
+    setIsRefreshingCameras(true);
+    try {
+      const updated = await apiClient.refreshCameraUrls(printerId);
+      if (updated.cameraStreamUrl || updated.cameraSnapshotUrl) {
+        toast.success('Camera URLs detected and updated');
+      } else {
+        toast.info('No camera URLs found. Make sure your printer is online and configured with a camera.');
+      }
+      // Optionally refetch printer details to update form if needed
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to refresh camera URLs';
+      toast.error(message);
+      console.error('Failed to refresh camera URLs:', err);
+    } finally {
+      setIsRefreshingCameras(false);
+    }
   };
 
   if (!isOpen || !formData) return null;
@@ -469,22 +491,34 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </FormField>
               </div>
             </div>
-            <div className="flex items-center justify-end space-x-3 pt-2">
+            <div className="flex items-center justify-between space-x-3 pt-2">
               <Button
                 type="button"
                 variant="secondary"
-                onClick={handleClose}
+                onClick={handleRefreshCameraUrls}
+                disabled={isRefreshingCameras}
+                title="Refresh camera URLs from the printer backend"
               >
-                Cancel
+                <RotateCcw className={`w-4 h-4 mr-1 ${isRefreshingCameras ? 'animate-spin' : ''}`} />
+                {isRefreshingCameras ? 'Detecting...' : 'Detect Cameras'}
               </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={updateMutation.status === 'pending'}
-              >
-                <Check className="w-4 h-4 mr-1" />
-                {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleClose}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={updateMutation.status === 'pending'}
+                >
+                  <Check className="w-4 h-4 mr-1" />
+                  {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
             </div>
           </form>
         </div>
