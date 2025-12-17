@@ -384,6 +384,9 @@ builder.Services.Configure<Farm.Web.Api.Services.Workers.JobDispatchRetrySetting
 builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(builder.Configuration.GetSection("CircuitBreaker"));
 builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
+// Stale worker cleanup service
+builder.Services.Configure<Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings.SectionName));
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerCleanupHostedService>();
 
 // Register asset service for OrcaSlicer printer images and bed textures
 builder.Services.AddSingleton<IAssetService, AssetService>();
