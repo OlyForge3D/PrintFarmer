@@ -2579,7 +2579,16 @@ ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
 EOF
 
-    # (Prusa worker support removed) — no Prusa defaults are written for modern deployments
+    # Save slicer worker API keys to preserve them across deployments
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && [ ${#SLICER_WORKER_API_KEYS[@]:-0} -gt 0 ]; then
+        echo "" >> "$CONFIG_FILE"
+        echo "# Slicer Worker API Keys (preserved for consistent worker registration)" >> "$CONFIG_FILE"
+        for ((i=0; i<${#SLICER_WORKER_API_KEYS[@]}; i++)); do
+            local key_index=$((i+1))
+            local api_key="${SLICER_WORKER_API_KEYS[$i]}"
+            echo "SLICER_WORKER_API_KEY_${key_index}=$(printf '%q' "$api_key")" >> "$CONFIG_FILE"
+        done
+    fi
 
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
         cat >> "$CONFIG_FILE" << EOF
@@ -2588,7 +2597,6 @@ EOF
 OVERRIDE_WORKER_ENDPOINTS=yes
 EOF
         [ "${ENABLE_ORCA_WORKER}" = "yes" ] && echo "ORCA_WORKER_ENDPOINT=${ORCA_WORKER_ENDPOINT}" >> "$CONFIG_FILE"
-
     fi
 
     if [ "${ENABLE_SPOOLMAN:-no}" = "yes" ]; then
@@ -4067,7 +4075,7 @@ generate_slicer_worker_api_keys() {
         return 0
     fi
 
-    print_header "🔑 Generating Slicer Worker API Keys"
+    print_header "🔑 Configuring Slicer Worker API Keys"
     
     # Initialize arrays for storing worker info (without -g for cross-shell compatibility)
     SLICER_WORKER_API_KEYS=()
@@ -4082,15 +4090,23 @@ generate_slicer_worker_api_keys() {
         fi
         
         local api_key
-        api_key=$(generate_slicer_api_key)
+        # Try to load existing API key from config first (preserve across deployments)
+        local config_var_name="SLICER_WORKER_API_KEY_${i}"
+        api_key="${!config_var_name:-}"
+        
+        if [ -z "$api_key" ]; then
+            # No existing key found, generate a new one
+            api_key=$(generate_slicer_api_key)
+            print_info "Generated new API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
+        else
+            print_info "Reusing existing API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
+        fi
         
         SLICER_WORKER_NAMES+=("$worker_name")
         SLICER_WORKER_API_KEYS+=("$api_key")
-        
-        print_info "Generated API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
     done
     
-    print_success "Generated ${#SLICER_WORKER_API_KEYS[@]} API keys for OrcaSlicer workers"
+    print_success "Configured ${#SLICER_WORKER_API_KEYS[@]} API keys for OrcaSlicer workers"
 }
 
 # Export slicer worker API keys to environment file
