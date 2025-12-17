@@ -898,6 +898,18 @@ public sealed class MoonrakerSubscriptionService(
 
         _logger.LogDebug($"Processing status update for printer {printerId}. Raw status: {statusObj.GetRawText()}");
 
+        // Initialize klippy ready state from webhooks if not yet set
+        // This handles the initial subscription response which contains the current klippy state
+        if (!_klippyReadyState.ContainsKey(printerId) && 
+            statusObj.TryGetProperty("webhooks", out JsonElement wh) &&
+            wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
+        {
+            string? webhooksState = ws.GetString();
+            bool isReady = webhooksState == "ready";
+            _klippyReadyState[printerId] = isReady;
+            _logger.LogInformation($"Initialized klippyReadyState for printer {printerId}: {isReady} (webhooks.state={webhooksState})");
+        }
+
         // Process each object type separately by dispatching to handler methods
         // This aligns with Moonraker's incremental update model where each notification
         // contains only the objects that have changed
