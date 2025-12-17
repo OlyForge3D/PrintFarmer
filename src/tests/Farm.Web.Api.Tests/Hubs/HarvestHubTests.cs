@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Web.Api.Hubs;
+using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;

@@ -1,9 +1,12 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Farm.Web.Api.Hubs;
+namespace Farm.Infrastructure.Services.SignalR;
 
+/// <summary>
+/// SignalR hub for broadcasting G-code harvest progress and operations.
+/// </summary>
 public class HarvestHub : Hub
 {
     // Called by backend to broadcast per-file progress to all clients in the operation group
