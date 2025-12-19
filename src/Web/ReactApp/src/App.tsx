@@ -46,6 +46,8 @@ import { ConfirmEmailPage } from './pages/ConfirmEmailPage';
 import { useAuth } from '@/contexts/AuthHooks';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { assetService } from '@/services/assetService';
+import { printerSignalRService } from '@/services/printer-signalr';
+import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
 
 // Create a query client for React Query
@@ -250,6 +252,20 @@ function App() {
   useEffect(() => {
     assetService.initialize().catch(err => {
       logger.warn('Failed to initialize asset service', {
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
+  }, [logger]);
+
+  // Eagerly establish SignalR connections on app startup for faster realtime updates
+  useEffect(() => {
+    // Connect both SignalR services in the background
+    // These will establish connections and start receiving updates immediately
+    Promise.all([
+      printerSignalRService.connect(),
+      harvestSignalRService.connect()
+    ]).catch(err => {
+      logger.warn('Failed to establish SignalR connections', {
         error: err instanceof Error ? err.message : String(err)
       });
     });

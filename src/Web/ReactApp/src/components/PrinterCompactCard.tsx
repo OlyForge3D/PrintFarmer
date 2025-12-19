@@ -25,8 +25,8 @@ export function PrinterCompactCard({
   return (
     <div className="bg-pf-bg-1 rounded-lg p-4 shadow border border-pf-border hover:border-pf-primary transition-colors">
       <div className="mb-3">
-        <div className="w-full h-32 bg-pf-border flex items-center justify-center rounded overflow-hidden mb-3">
-          {p.thumbnailUrl && !imageError ? (
+        {p.thumbnailUrl && !imageError ? (
+          <div className="w-full h-32 bg-pf-border flex items-center justify-center rounded overflow-hidden mb-3">
             <img
               src={p.thumbnailUrl}
               alt={`${p.name} thumbnail`}
@@ -34,12 +34,8 @@ export function PrinterCompactCard({
               loading="lazy"
               onError={() => setImageError(true)}
             />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-pf-loading animate-pulse">
-              <ImagePlaceholder className="w-8 h-8 text-pf-text-secondary" />
-            </div>
-          )}
-        </div>
+          </div>
+        ) : null}
         <div className="text-base font-medium">{p.name}</div>
         <div className="text-sm text-pf-text-secondary">
           {p.manufacturerName ? `${p.manufacturerName} ${p.modelName ?? ''}` : (p.modelName ?? '')}
