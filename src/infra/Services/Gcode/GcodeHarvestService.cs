@@ -33,7 +33,6 @@ public partial class GcodeHarvestService(
     IGcodeRepository gcodeRepo,
     IUnifiedLoggingService logger,
     IServiceScopeFactory serviceScopeFactory,
-    IHarvestQueue harvestQueue,
     IGcodeMetadataExtractorService metadataExtractor,
     IStoragePathService storagePathService,
     IGcodeThumbnailExtractorService thumbnailExtractor,
@@ -75,31 +74,6 @@ public partial class GcodeHarvestService(
         file.Error = null;
         await _harvestRepo.SaveChangesAsync(ct);
 
-        // Re-queue the file for processing (simulate as if it was just discovered)
-        GcodeHarvestOperation? op = await _harvestRepo.GetOperationByIdAsync(operationId, ct);
-        if (op == null)
-        {
-            return false;
-        }
-
-        Printer? printer = await _printersRepo.FindByIdAsync(op.PrinterId, ct);
-        if (printer == null)
-        {
-            return false;
-        }
-
-        HarvestFileJob job = new()
-        {
-            OperationId = operationId,
-            PrinterId = printer.Id,
-            ServerUrl = printer.ServerUrl,
-            FilePath = file.FilePath,
-            FileName = file.FileName,
-            FileSize = file.Size,
-            ModifiedAt = file.ModifiedAt ?? DateTime.UtcNow
-        };
-        await _harvestQueue.EnqueueAsync(job, ct);
-
         // Send file update to SignalR clients
         await _harvestEventBroadcaster.BroadcastToGroupAsync(operationId, "harvestfileupdated", MapToDto(file), ct);
 
@@ -110,7 +84,6 @@ public partial class GcodeHarvestService(
     private readonly IGcodeRepository _gcodeRepo = gcodeRepo;
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
-    private readonly IHarvestQueue _harvestQueue = harvestQueue;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
     private readonly IGcodeMetadataExtractorService _metadataExtractor = metadataExtractor;
     private readonly IStoragePathService _storagePathService = storagePathService;
