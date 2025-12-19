@@ -1147,15 +1147,7 @@ public partial class GcodeHarvestService(
         // This avoids downloading files just to extract metadata
         public string? SlicerName { get; set; }
         public string? SlicerVersion { get; set; }
-        public int? EstimatedTimeSeconds { get; set; }
-        public double? FilamentLengthMm { get; set; }
         public double? FilamentWeightGrams { get; set; }
-        public double? LayerHeight { get; set; }
-        public double? FirstLayerHeight { get; set; }
-        public double? ObjectHeight { get; set; }
-        public double? FirstLayerBedTemp { get; set; }
-        public double? FirstLayerExtrTemp { get; set; }
-        public string? ThumbnailRelativePath { get; set; } // Path to largest thumbnail
     }
 
     /// <summary>

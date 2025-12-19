@@ -84,15 +84,6 @@ namespace Farm.Infrastructure.Services.Printers
             return _backendFactory.GetClient(backend);
         }
 
-        /// <summary>
-        /// Gets a backend client and casts it to a capability interface if supported.
-        /// </summary>
-        private T GetBackendCapability<T>(PrinterBackend backend) where T : class
-        {
-            var client = GetBackendClient(backend);
-            return client as T ?? throw new NotSupportedException($"Backend {backend} does not support capability {typeof(T).Name}");
-        }
-
         // History helpers moved from controller: delegate to appropriate backend client
         public async Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
         {
@@ -810,41 +801,6 @@ namespace Farm.Infrastructure.Services.Printers
             return dict;
         }
 
-        private async Task<bool> IsCameraAvailableAsync(string serverUrl, int backend, int? frontendPort, string? apiKey, CancellationToken ct)
-        {
-            if (string.IsNullOrWhiteSpace(serverUrl))
-            {
-                return false;
-            }
-
-            try
-            {
-                string? snapshotUrl = null;
-
-                // Use capability factory for polymorphic camera snapshot retrieval
-                var backendEnum = (PrinterBackend)backend;
-                if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out var cameraClient))
-                {
-                    snapshotUrl = await cameraClient!.GetCameraSnapshotUrlAsync(serverUrl, frontendPort, apiKey, ct).ConfigureAwait(false);
-                }
-
-                if (string.IsNullOrWhiteSpace(snapshotUrl))
-                {
-                    return false;
-                }
-
-                HttpClient httpClient = _httpClientFactory.CreateClient();
-                httpClient.Timeout = TimeSpan.FromSeconds(2);
-                using HttpRequestMessage request = new(HttpMethod.Head, snapshotUrl);
-                using HttpResponseMessage response = await httpClient.SendAsync(request, ct);
-                return response.StatusCode < HttpStatusCode.InternalServerError;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug($"Camera availability check failed for printer {serverUrl} (backend {backend}): {ex.Message}");
-                return false;
-            }
-        }
 
         private static PrinterDto CreateOfflinePrinterDto(Printer p)
         {
@@ -881,59 +837,6 @@ namespace Farm.Infrastructure.Services.Printers
         }
 
         // Reuse controller's GetSpoolInfoAsync logic adapted for service
-        private async Task<PrinterSpoolInfoDto?> GetSpoolInfoAsync(string serverUrl, CancellationToken ct)
-        {
-            try
-            {
-                var client = GetBackendClient(PrinterBackend.Moonraker);
-                if (client is not ISupportsSpoolman spoolman)
-                {
-                    return null;
-                }
-
-                int? activeSpoolId = await spoolman.GetSpoolmanActiveSpoolAsync(serverUrl, ct);
-                if (activeSpoolId == null)
-                {
-                    return new PrinterSpoolInfoDto(HasActiveSpool: false);
-                }
-
-                string? spoolDetailsJson = await spoolman.GetSpoolmanSpoolByIdAsync(serverUrl, activeSpoolId.Value, ct);
-                if (string.IsNullOrWhiteSpace(spoolDetailsJson))
-                {
-                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
-                }
-
-                try
-                {
-                    using JsonDocument doc = System.Text.Json.JsonDocument.Parse(spoolDetailsJson);
-                    JsonElement root = doc.RootElement;
-                    string? spoolName = root.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() : null;
-                    string? material = root.TryGetProperty("material", out JsonElement matEl) ? matEl.GetString() : null;
-                    string? colorHex = root.TryGetProperty("color_hex", out JsonElement colorEl) ? colorEl.GetString() : null;
-                    double? remainingWeight = root.TryGetProperty("remaining_weight", out JsonElement weightEl) && weightEl.ValueKind == JsonValueKind.Number ? weightEl.GetDouble() : (double?)null;
-                    string? filamentName = null;
-                    string? vendor = null;
-                    if (root.TryGetProperty("filament", out JsonElement filamentEl) && filamentEl.ValueKind == JsonValueKind.Object)
-                    {
-                        filamentName = filamentEl.TryGetProperty("name", out JsonElement fnameEl) ? fnameEl.GetString() : null;
-                        if (filamentEl.TryGetProperty("vendor", out JsonElement vendorEl) && vendorEl.ValueKind == JsonValueKind.Object)
-                        {
-                            vendor = vendorEl.TryGetProperty("name", out JsonElement vNameEl) ? vNameEl.GetString() : null;
-                        }
-                    }
-
-                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId, SpoolName: spoolName, Material: material, ColorHex: colorHex, FilamentName: filamentName, Vendor: vendor, RemainingWeightG: remainingWeight, SpoolInUse: true);
-                }
-                catch
-                {
-                    return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
-                }
-            }
-            catch
-            {
-                return new PrinterSpoolInfoDto(HasActiveSpool: false);
-            }
-        }
 
         public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
         {
