@@ -8,7 +8,6 @@ import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
-import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { toast } from 'sonner';
 import { Trash2, Edit, CheckSquare, Square } from 'lucide-react';
 import { Alert, Button, Checkbox, FileUpload, Label, Select, Tooltip } from '@/components/ui';
