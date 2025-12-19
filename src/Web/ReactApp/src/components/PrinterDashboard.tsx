@@ -1,18 +1,9 @@
 import React from 'react';
-import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
+import { usePrintersWithCameraUrls } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard, Edit, Trash2, Grid2x2, Grid3x3, List } from 'lucide-react';
-import { ImagePlaceholder } from '@/components/icons';
-import { toast } from 'sonner';
-import type { Printer } from '@/types/api';
-import { EditPrinterModal } from '@/components/EditPrinterModal';
-import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
-import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
-import { PrinterCompactCard } from '@/components/PrinterCompactCard';
-import { PrinterTableView } from '@/components/PrinterTableView';
+import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard } from 'lucide-react';
 import { DetailedSystemHealth } from '@/components/SystemHealth';
 import { PageTemplate } from '@/components/PageTemplate';
-import { Button } from '@/components/ui';
 
 interface StatsCardProps {
   title: string;
@@ -53,21 +44,6 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
 export const PrinterDashboard: React.FC = () => {
   const { data: printers, isLoading, error } = usePrintersWithCameraUrls();
   const { getPrinterStatus } = usePrinterStatusUpdates();
-  const deletePrinterMutation = useDeletePrinter();
-
-  const [editPrinterId, setEditPrinterId] = React.useState<string | null>(null);
-  const [showEditModal, setShowEditModal] = React.useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = React.useState<{ isOpen: boolean; printers: Printer[] }>({ isOpen: false, printers: [] });
-  const [viewMode, setViewMode] = React.useState<'compact' | 'expandable' | 'table'>(() => {
-    // Load from localStorage if available
-    const saved = localStorage.getItem('printerViewMode');
-    return (saved as 'compact' | 'expandable' | 'table') || 'table';
-  });
-
-  // Save view mode preference to localStorage
-  React.useEffect(() => {
-    localStorage.setItem('printerViewMode', viewMode);
-  }, [viewMode]);
 
   const stats = React.useMemo(() => {
     const userPrinters = printers ?? [];
@@ -88,27 +64,14 @@ export const PrinterDashboard: React.FC = () => {
     return { total, online, printing, paused, offline: total - online };
   }, [printers, getPrinterStatus]);
 
-  const handleEditPrinter = (printerId: string) => {
-    setEditPrinterId(printerId);
-    setShowEditModal(true);
-  };
-
-  const handleDeleteSinglePrinter = (printer: Printer) => {
-    setDeleteConfirmation({ isOpen: true, printers: [printer] });
-    toast(`Delete: "${printer.name}" — confirm to proceed`, { duration: 3000 });
-  };
 
   const handleDeleteConfirm = async () => {
-    try {
-      await Promise.all(deleteConfirmation.printers.map((printer) => deletePrinterMutation.mutateAsync(printer.id)));
-      setDeleteConfirmation({ isOpen: false, printers: [] });
-    } catch (err) {
-      // swallow - toast handled in hook
-      console.error('Failed to delete printers', err);
-    }
+    // No-op: dashboard doesn't handle deletions
   };
 
-  const handleDeleteCancel = () => setDeleteConfirmation({ isOpen: false, printers: [] });
+  const handleDeleteCancel = () => {
+    // No-op: dashboard doesn't handle deletions
+  };
 
   return (
     <PageTemplate
@@ -151,111 +114,8 @@ export const PrinterDashboard: React.FC = () => {
             <p className="text-sm mt-2">Get started by adding your first 3D printer.</p>
           </div>
         ) : (
-          <div>
-            <div className="mt-8">
-              <DetailedSystemHealth />
-            </div>
-
-            {/* Printers list - accessible list with test ids for tests */}
-            {printers && printers.length > 0 && (
-              <div className="mt-6">
-                {/* View Mode Toggle */}
-                <div className="mb-6 flex items-center gap-2">
-                  <span className="text-sm font-medium text-pf-text-secondary">View:</span>
-                  <div className="flex gap-1 bg-pf-bg-1 p-1 rounded-lg border border-pf-border">
-                    <Button
-                      variant={viewMode === 'table' ? 'primary' : 'subtle'}
-                      size="sm"
-                      onClick={() => setViewMode('table')}
-                      title="Table View"
-                      className="!p-2"
-                    >
-                      <List className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant={viewMode === 'compact' ? 'primary' : 'subtle'}
-                      size="sm"
-                      onClick={() => setViewMode('compact')}
-                      title="Compact Cards"
-                      className="!p-2"
-                    >
-                      <Grid2x2 className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant={viewMode === 'expandable' ? 'primary' : 'subtle'}
-                      size="sm"
-                      onClick={() => setViewMode('expandable')}
-                      title="Expandable Cards"
-                      className="!p-2"
-                    >
-                      <Grid3x3 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Expandable Cards View */}
-                {viewMode === 'expandable' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {printers.map((p) => (
-                      <ExpandablePrinterCard
-                        key={p.id}
-                        printer={p}
-                        onEdit={() => handleEditPrinter(p.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Compact Cards View */}
-                {viewMode === 'compact' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {printers.map((p) => (
-                      <PrinterCompactCard
-                        key={p.id}
-                        printer={p}
-                        onEdit={(printer) => handleEditPrinter(printer.id)}
-                        onDelete={handleDeleteSinglePrinter}
-                        getPrinterStatus={getPrinterStatus}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Table View */}
-                {viewMode === 'table' && (
-                  <PrinterTableView
-                    printers={printers}
-                    onEdit={(printer) => handleEditPrinter(printer.id)}
-                    onDelete={(printersToDelete) => {
-                      setDeleteConfirmation({ isOpen: true, printers: printersToDelete });
-                      toast(`Delete: ${printersToDelete.length} printer${printersToDelete.length > 1 ? 's' : ''} — confirm to proceed`, { duration: 3000 });
-                    }}
-                    onBulkSetMaintenance={() => {
-                      // Placeholder for maintenance mode functionality
-                      toast('Maintenance mode not yet implemented', { duration: 3000 });
-                    }}
-                  />
-                )}
-              </div>
-            )}
-
-            {/* Edit/Delete Modals for inline actions */}
-            {showEditModal && (
-              <EditPrinterModal
-                printerId={editPrinterId}
-                isOpen={showEditModal}
-                onClose={() => setShowEditModal(false)}
-                onSuccess={() => { setShowEditModal(false); /* optionally refetch printers via parent if available */ }}
-              />
-            )}
-            {deleteConfirmation.isOpen && (
-              <DeleteConfirmationModal
-                isOpen={deleteConfirmation.isOpen}
-                printers={deleteConfirmation.printers}
-                onConfirm={handleDeleteConfirm}
-                onCancel={handleDeleteCancel}
-              />
-            )}
+          <div className="mt-8">
+            <DetailedSystemHealth />
           </div>
         )}
     </PageTemplate>

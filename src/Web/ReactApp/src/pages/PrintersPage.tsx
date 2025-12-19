@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
+import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useQueryClient } from '@tanstack/react-query';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -10,18 +11,21 @@ import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton';
+import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
+import { PrinterCompactCard } from '@/components/PrinterCompactCard';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
-import { Printer as PrinterIcon, LayoutGrid, List } from 'lucide-react';
+import { Printer as PrinterIcon, LayoutGrid, List, Grid2x2, Grid3x3 } from 'lucide-react';
+import { toast } from 'sonner';
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
-type ViewMode = 'cards' | 'table';
+type ViewMode = 'collapsed' | 'compact' | 'expandable' | 'table';
 
 // Helper function to get backend name from enum value
 function getBackendName(backend: PrinterBackend | string | number): string {
@@ -39,9 +43,13 @@ export function PrintersPage() {
     error,
     refetch: refetchPrinters
   } = usePrintersWithCameraUrls();
+  const { getPrinterStatus } = usePrinterStatusUpdates();
   
   const deletePrinterMutation = useDeletePrinter();
-  const [viewMode, setViewMode] = useState<ViewMode>('cards');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('printerViewMode');
+    return (saved as ViewMode) || 'collapsed';
+  });
   const [editPrinterId, setEditPrinterId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [expandedPrinterId, setExpandedPrinterId] = useState<string | null>(null);
@@ -49,6 +57,11 @@ export function PrintersPage() {
     isOpen: boolean;
     printers: Printer[];
   }>({ isOpen: false, printers: [] });
+
+  // Save view mode preference to localStorage
+  React.useEffect(() => {
+    localStorage.setItem('printerViewMode', viewMode);
+  }, [viewMode]);
 
   // Filter state
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
@@ -83,6 +96,7 @@ export function PrintersPage() {
 
   const handleDeleteSinglePrinter = (printer: Printer) => {
     setDeleteConfirmation({ isOpen: true, printers: [printer] });
+    toast(`Delete: "${printer.name}" — confirm to proceed`, { duration: 3000 });
   };
 
   const handleDeleteConfirm = async () => {
@@ -189,7 +203,7 @@ export function PrintersPage() {
   return (
     <PageTemplate
       title="Printers"
-      subtitle={viewMode === 'cards' ? 'Monitor and manage your 3D printers' : 'Manage your 3D printer fleet with bulk operations'}
+      subtitle="Monitor and manage your 3D printer farm"
       icon={PrinterIcon}
       maxWidth="max-w-7xl"
     >
@@ -224,13 +238,33 @@ export function PrintersPage() {
           <div className="flex items-center bg-pf-bg-1 border border-pf-border rounded-lg p-1">
             <Button
               type="button"
-              onClick={() => setViewMode('cards')}
-              variant={viewMode === 'cards' ? 'primary' : 'subtle'}
+              onClick={() => setViewMode('collapsed')}
+              variant={viewMode === 'collapsed' ? 'primary' : 'subtle'}
               size="sm"
               className="flex items-center space-x-2"
-              title="Card View"
+              title="Collapsed Card View"
             >
               <LayoutGrid className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setViewMode('compact')}
+              variant={viewMode === 'compact' ? 'primary' : 'subtle'}
+              size="sm"
+              className="!p-2"
+              title="Compact Cards"
+            >
+              <Grid2x2 className="w-4 h-4" />
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setViewMode('expandable')}
+              variant={viewMode === 'expandable' ? 'primary' : 'subtle'}
+              size="sm"
+              className="!p-2"
+              title="Expandable Cards"
+            >
+              <Grid3x3 className="w-4 h-4" />
             </Button>
             <Button
               type="button"
@@ -264,7 +298,7 @@ export function PrintersPage() {
                 )}
               </div>
             </div>
-          ) : viewMode === 'cards' ? (
+          ) : viewMode === 'collapsed' ? (
             <div className="flex gap-6">
               <div className="grid grid-cols-[repeat(auto-fit,26rem)] gap-6 justify-start flex-1">
                 {userPrinters.map((printer) => (
@@ -283,6 +317,28 @@ export function PrintersPage() {
                   onClose={() => setExpandedPrinterId(null)}
                 />
               )}
+            </div>
+          ) : viewMode === 'compact' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {userPrinters.map((p) => (
+                <PrinterCompactCard
+                  key={p.id}
+                  printer={p}
+                  onEdit={(printer) => handleEditPrinter(printer)}
+                  onDelete={handleDeleteSinglePrinter}
+                  getPrinterStatus={getPrinterStatus}
+                />
+              ))}
+            </div>
+          ) : viewMode === 'expandable' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {userPrinters.map((p) => (
+                <ExpandablePrinterCard
+                  key={p.id}
+                  printer={p}
+                  onEdit={() => handleEditPrinter(p)}
+                />
+              ))}
             </div>
           ) : (
             <PrinterTableView

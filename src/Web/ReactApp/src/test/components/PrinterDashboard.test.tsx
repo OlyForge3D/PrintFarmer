@@ -169,9 +169,10 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-    // Check that printer names are rendered
-    expect(screen.getByText('Test Printer 1')).toBeInTheDocument();
-    expect(screen.getByText('Test Printer 2')).toBeInTheDocument();
+    // Check that stats are rendered instead of printer cards
+    expect(screen.getByText('Total Printers')).toBeInTheDocument();
+    expect(screen.getByText('Online')).toBeInTheDocument();
+    expect(screen.getByText('Printing')).toBeInTheDocument();
   });
 
   it('exposes data-testid attributes for printers list and items', () => {
@@ -191,8 +192,8 @@ describe('PrinterDashboard', () => {
       </TestWrapper>
     );
 
-    // Check that the printer name is rendered
-    expect(screen.getByText('X')).toBeInTheDocument();
-    expect(screen.getByText('M Model')).toBeInTheDocument();
+    // Check that the dashboard stats are rendered (not individual printers)
+    expect(screen.getByText('Total Printers')).toBeInTheDocument();
+    expect(screen.getByText('Online')).toBeInTheDocument();
   });
 });
