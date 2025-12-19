@@ -80,6 +80,7 @@ const navigation: NavigationItem[] = [
     requiredRole: 'farm_admin',
     children: [
       { name: 'Printers', href: '/admin/printers', icon: Printer },
+      { name: 'Locations', href: '/admin/locations', icon: Layers },
       { name: 'Workers', href: '/admin/workers', icon: Cog },
       { name: 'File Health', href: '/admin/file-health', icon: FileText },
       { name: 'Catalog', href: '/catalog', icon: Layers },
