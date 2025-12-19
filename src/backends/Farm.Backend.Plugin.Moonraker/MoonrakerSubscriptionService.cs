@@ -315,7 +315,7 @@ public sealed class MoonrakerSubscriptionService(
                 }
 
                 // Establish WebSocket connection
-                Uri uri = BuildWsUri(printer.ServerUrl);
+                Uri uri = BuildWsUri(printer.BackendUrl);
                 ws = new ClientWebSocket();
 
                 _logger.LogDebug($"Connecting to Moonraker WebSocket at {uri} for printer {printer.Name}");
@@ -333,7 +333,7 @@ public sealed class MoonrakerSubscriptionService(
                 try
                 {
                     _logger.LogDebug("Querying initial toolhead data for printer {PrinterName} to get homed_axes", printer.Name);
-                    await QueryAndCacheToolheadDataAsync(printer.Id, printer.ServerUrl, ct);
+                    await QueryAndCacheToolheadDataAsync(printer.Id, printer.BackendUrl, ct);
                 }
                 catch (Exception ex)
                 {
@@ -800,7 +800,7 @@ public sealed class MoonrakerSubscriptionService(
                 res.TryGetProperty("status", out JsonElement statusObj))
             {
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
-                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.ServerUrl, printer.CameraStreamUrl, null, ct);
+                await ProcessStatusUpdateAsync(statusObj, printer.Id, printer.BackendUrl, printer.CameraStreamUrl, null, ct);
             }
         }
         catch (JsonException ex)
@@ -839,7 +839,7 @@ public sealed class MoonrakerSubscriptionService(
                 {
                     _logger.LogDebug("Processing notify_status_update for printer {PrinterName}. Status data: {StatusData}",
                         printer.Name, p[0].GetRawText());
-                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.ServerUrl, printer.CameraStreamUrl, null, ct);
+                    await ProcessStatusUpdateAsync(p[0], printer.Id, printer.BackendUrl, printer.CameraStreamUrl, null, ct);
                 }
                 break;
 
@@ -1548,7 +1548,7 @@ public sealed class MoonrakerSubscriptionService(
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
 
             // Get comprehensive status using existing HTTP endpoint
-            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.ServerUrl, ct);
+            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.BackendUrl, ct);
 
             if (compositeStatus != null && compositeStatus.IsOnline)
             {
@@ -1556,7 +1556,7 @@ public sealed class MoonrakerSubscriptionService(
                 _logger.LogDebug($"HTTP polling fallback retrieved status for printer {printer.Name}: State={compositeStatus.State}, IsOnline={compositeStatus.IsOnline}");
 
                 // Create a status update using the composite status data
-                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.ServerUrl, ct);
+                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
 
                 PrinterStatusUpdate statusUpdate = new(
                     printer.Id,

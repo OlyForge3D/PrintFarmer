@@ -705,7 +705,6 @@ public class PrintersController(
         PrinterDto dto = new(
             Id: printer.Id,
             Name: printer.Name,
-            ServerUrl: printer.ServerUrl,
             Notes: printer.Notes,
             IsOnline: false,
             State: "Unknown",
@@ -726,7 +725,11 @@ public class PrintersController(
             Backend: (PrinterBackend)printer.Backend,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress
+            IpAddress: printer.IpAddress,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl
         );
         return Ok(dto);
     }
@@ -911,7 +914,6 @@ public class PrintersController(
         PrinterDto dtoResponse = new(
             Id: p.Id,
             Name: p.Name,
-            ServerUrl: p.ServerUrl,
             Notes: p.Notes,
             IsOnline: false,
             State: "Unknown",
@@ -932,7 +934,11 @@ public class PrintersController(
             Backend: (PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
+            IpAddress: p.IpAddress,
+            BackendPort: p.BackendPort,
+            FrontendPort: p.FrontendPort,
+            BackendUrl: p.BackendUrl,
+            FrontendUrl: p.FrontendUrl
         );
 
         return Ok(dtoResponse);

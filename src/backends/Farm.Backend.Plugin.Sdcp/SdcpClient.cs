@@ -403,7 +403,6 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         return new PrinterDto(
             Id: printer.Id,
             Name: printer.Name,
-            ServerUrl: printer.ServerUrl,
             Notes: printer.Notes,
             IsOnline: status.IsOnline,
             State: status.State,
@@ -426,7 +425,9 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
             OriginalServerUrl: printer.OriginalServerUrl,
             IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
-            FrontendPort: printer.FrontendPort
+            FrontendPort: printer.FrontendPort,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl
         );
     }
 

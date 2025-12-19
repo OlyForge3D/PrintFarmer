@@ -25,6 +25,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
+    public DbSet<GcodeHarvestQueueItem> GcodeHarvestQueueItems => Set<GcodeHarvestQueueItem>();
 
     // 3D Model Management & Slicer Integration
     public DbSet<Model3D> Models3D => Set<Model3D>();
@@ -901,6 +902,37 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(f => f.StartedAt);
             _ = b.Property(f => f.CompletedAt);
             _ = b.HasIndex(f => f.HarvestOperationId);
+        });
+
+        // GcodeHarvestQueueItem Entity Configuration
+        _ = modelBuilder.Entity<GcodeHarvestQueueItem>(b =>
+        {
+            _ = b.HasKey(q => q.Id);
+            _ = b.Property(q => q.PrinterId).IsRequired();
+            _ = b.Property(q => q.QueuedAt).IsRequired();
+            _ = b.Property(q => q.ProcessingStartedAt);
+            _ = b.Property(q => q.CompletedAt);
+            _ = b.Property(q => q.Priority).IsRequired().HasDefaultValue(0);
+            _ = b.Property(q => q.Status).IsRequired().HasConversion<int>(); // Pending - default set via entity initializer
+            _ = b.Property(q => q.Parameters).IsRequired().HasColumnType("TEXT"); // JSON serialized parameters
+            _ = b.Property(q => q.ErrorMessage);
+            _ = b.Property(q => q.ErrorDetails).HasColumnType("TEXT");
+            _ = b.Property(q => q.FilesFound).HasDefaultValue(0);
+            _ = b.Property(q => q.FilesAdded).HasDefaultValue(0);
+            _ = b.Property(q => q.FilesSkipped).HasDefaultValue(0);
+            _ = b.Property(q => q.FilesErrored).HasDefaultValue(0);
+
+            // Foreign Keys
+            _ = b.HasOne(q => q.Printer)
+                .WithMany()
+                .HasForeignKey(q => q.PrinterId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for efficient queue processing
+            _ = b.HasIndex(q => new { q.Status, q.Priority, q.QueuedAt }); // Get next item to process
+            _ = b.HasIndex(q => q.PrinterId); // Find queue items for a printer
+            _ = b.HasIndex(q => q.QueuedAt).IsDescending(); // Recent items first
+            _ = b.HasIndex(q => q.Status); // Filter by status
         });
 
         // File Health Audit Entity Configuration

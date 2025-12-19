@@ -164,8 +164,8 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
       setState(prev => ({ ...prev, operationId }));
 
       // Join SignalR group for this discovery operation
-      signalRService.connect();
-      signalRService.joinHarvestGroup(operationId);
+      await signalRService.connect();
+      await signalRService.joinHarvestGroup(operationId);
 
       // Unsubscribe from previous subscription if it exists
       if (subscriptionRef.current) {

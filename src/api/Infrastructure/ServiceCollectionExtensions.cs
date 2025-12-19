@@ -15,6 +15,7 @@ using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -28,6 +29,8 @@ using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using Farm.Web.Api.Services.Slicing.Abstractions;
+using Farm.Web.Api.Services.StorageManagement;
+using Farm.Web.Api.Services.Workers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 
@@ -181,14 +184,18 @@ public static class ServiceCollectionExtensions
         // Circuit breaker for resilient external calls
         _ = services.AddSingleton<ICircuitBreakerService, CircuitBreakerService>();
 
+        // Application path provider abstraction (bridges ASP.NET Core to Infrastructure layer)
+        _ = services.AddSingleton<Farm.Infrastructure.Services.StorageManagement.IApplicationPathProvider, AspNetCorePathProvider>();
+
         // Storage path service for multi-deployment support (Docker and Kubernetes)
-        _ = services.AddSingleton<Services.StorageManagement.IStoragePathService, Services.StorageManagement.StoragePathService>();
+        // Now registered from Infrastructure layer with abstracted path provider
+        _ = services.AddSingleton<Farm.Infrastructure.Services.StorageManagement.IStoragePathService, Farm.Infrastructure.Services.StorageManagement.StoragePathService>();
 
         // File Management Services
         _ = services.AddSingleton<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
         _ = services.AddSingleton<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
         _ = services.AddSingleton<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
-        _ = services.AddSingleton<Services.FileManagement.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
         _ = services.AddSingleton<Services.IO.IFileSystem, Services.IO.SystemFileSystem>();
@@ -511,21 +518,24 @@ public static class ServiceCollectionExtensions
 
         // Harvest configuration and services
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
-        _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
-        _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IHarvestQueue, Farm.Infrastructure.Services.Gcode.InMemoryHarvestQueue>();
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Services.Gcode.IGcodeLibraryService, Services.Gcode.GcodeLibraryService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, Services.Gcode.SignalRHarvestEventBroadcaster>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
+        _ = services.AddHostedService<Farm.Infrastructure.Services.Gcode.HarvestWorkerService>();
+
+        // Gcode harvest queue (async processing)
+        _ = services.AddScoped<Farm.Infrastructure.Services.GcodeHarvest.IGcodeHarvestQueue, Farm.Infrastructure.Services.GcodeHarvest.EfGcodeHarvestQueue>();
+        if (!disableBackgroundServices)
+        {
+            _ = services.AddHostedService<Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService>();
+        }
 
         // Gcode upload settings and quota
         _ = services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
         _ = services.AddSingleton<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
-
-        // Harvest worker (background)
-        if (!disableBackgroundServices)
-        {
-            _ = services.AddHostedService<HarvestWorkerService>();
-        }
     }
 
     #endregion
@@ -594,6 +604,9 @@ public static class ServiceCollectionExtensions
         {
             // System log cleanup (common service, not plugin-specific)
             _ = services.AddHostedService<SystemLogCleanupService>();
+
+            // Stale worker cleanup service
+            _ = services.AddHostedService<Services.Workers.StaleWorkerCleanupHostedService>();
 
             // Backend-specific background services are now registered by their respective plugins
             // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:

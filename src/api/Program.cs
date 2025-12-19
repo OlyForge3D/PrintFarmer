@@ -933,7 +933,7 @@ catch (Exception ex)
 try
 {
     await using AsyncServiceScope storageScope = app.Services.CreateAsyncScope();
-    var storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.StorageManagement.IStoragePathService>();
+    var storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
     await storagePathService.EnsureDirectoriesExistAsync();
 }
 catch (Exception ex)

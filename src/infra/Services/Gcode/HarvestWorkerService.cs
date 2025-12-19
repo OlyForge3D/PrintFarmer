@@ -7,15 +7,14 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.Models;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Background service that processes harvest file jobs from the queue
@@ -23,14 +22,12 @@ namespace Farm.Web.Api.Services;
 public partial class HarvestWorkerService(
     IHarvestQueue queue,
     IServiceScopeFactory scopeFactory,
-    IUnifiedLoggingService logger,
-    IHubContext<HarvestHub> harvestHub) : BackgroundService
+    IUnifiedLoggingService logger) : BackgroundService
 {
     private readonly IHarvestQueue _queue = queue;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly SemaphoreSlim _workerSemaphore = new(MaxConcurrentWorkers, MaxConcurrentWorkers);
-    private readonly IHubContext<HarvestHub> _harvestHub = harvestHub;
     private const int MaxConcurrentWorkers = 3; // Configurable
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -98,6 +95,7 @@ public partial class HarvestWorkerService(
         IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
         IGcodeRepository gcodeRepo = scope.ServiceProvider.GetRequiredService<IGcodeRepository>();
         IBackendCapabilityFactory capabilityFactory = scope.ServiceProvider.GetRequiredService<IBackendCapabilityFactory>();
+        IHarvestEventBroadcaster harvestEventBroadcaster = scope.ServiceProvider.GetRequiredService<IHarvestEventBroadcaster>();
 
         _logger.LogDebug($"Processing file job: {job}", null, null);
 
@@ -267,8 +265,8 @@ public partial class HarvestWorkerService(
             await harvestRepo.AddDiscoveredFileAsync(discoveredFile, ct);
             await harvestRepo.SaveChangesAsync(ct);
 
-            // Emit per-file progress event with discovered file info
-            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("harvestfilediscovered", new
+            // Send per-file discovery event to SignalR clients
+            await harvestEventBroadcaster.BroadcastToGroupAsync(job.OperationId, "harvestfilediscovered", new
             {
                 operationId = job.OperationId,
                 fileId = discoveredFile.Id,
@@ -281,17 +279,17 @@ public partial class HarvestWorkerService(
                 extractedMaterial = discoveredFile.ExtractedMaterial
             }, ct);
 
-            // Emit operation progress update for real-time UI updates
+            // Send operation progress update for real-time UI updates
             int totalProcessed = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
-            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("harvestoperationprogress", new
+            await harvestEventBroadcaster.BroadcastToGroupAsync(job.OperationId, "harvestoperationprogress", new
             {
                 operationId = job.OperationId,
                 filesFound = operation.FilesFound,
                 filesProcessed = totalProcessed,
                 filesAdded = operation.FilesAdded,
-                filesSkipped = operation.FilesSkipped,
-                filesErrored = operation.FilesErrored
-            }, ct);
+                    filesSkipped = operation.FilesSkipped,
+                    filesErrored = operation.FilesErrored
+                }, ct);
 
             _logger.LogInformation($"Successfully processed file {job.FileName} for operation {job.OperationId}", null, null);
 
@@ -308,14 +306,14 @@ public partial class HarvestWorkerService(
             }
 
             // Check if operation should be marked as complete
-            await CheckAndCompleteOperationAsync(harvestRepo, job.OperationId, ct);
+            await CheckAndCompleteOperationAsync(harvestRepo, job.OperationId, harvestEventBroadcaster, ct);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Failed to process file job {job.FileName} for operation {job.OperationId}", null, null);
             await RecordFileErrorAsync(harvestRepo, job.OperationId, job.FileName, ex.Message, ct);
-            // Emit error event for this file
-            await _harvestHub.Clients.Group($"harvest-{job.OperationId}").SendAsync("harvestfilediscovered", new
+            // Send error event for this file to SignalR clients
+            await harvestEventBroadcaster.BroadcastToGroupAsync(job.OperationId, "harvestfilediscovered", new
             {
                 operationId = job.OperationId,
                 fileId = Guid.NewGuid(),
@@ -325,10 +323,10 @@ public partial class HarvestWorkerService(
                 status = "error",
                 error = ex.Message
                 // thumbnailUrl, extractedSlicer, extractedMaterial omitted if not available
-            }, ct);
+                }, ct);
 
             // Check if operation should be marked as complete even after error
-            await CheckAndCompleteOperationAsync(harvestRepo, job.OperationId, ct);
+            await CheckAndCompleteOperationAsync(harvestRepo, job.OperationId, harvestEventBroadcaster, ct);
         }
     }
 
@@ -366,9 +364,8 @@ public partial class HarvestWorkerService(
                 return null;
             }
             
-            string backendUrl = backend == PrinterBackend.Moonraker
-                ? $"{printer.ServerUrl}:{printer.FrontendPort}"
-                : printer.BackendUrl;
+            // Use the calculated BackendUrl property which includes the proper port
+            string backendUrl = printer.BackendUrl;
             
             byte[]? bytes = await downloadClient.DownloadFileAsync(backendUrl, filePath);
             if (bytes != null)
@@ -503,7 +500,7 @@ public partial class HarvestWorkerService(
         }
     }
 
-    private async Task CheckAndCompleteOperationAsync(IHarvestRepository harvestRepo, Guid operationId, CancellationToken ct)
+    private async Task CheckAndCompleteOperationAsync(IHarvestRepository harvestRepo, Guid operationId, IHarvestEventBroadcaster harvestEventBroadcaster, CancellationToken ct)
     {
         // Get the operation
         GcodeHarvestOperation? operation = await harvestRepo.GetOperationByIdAsync(operationId, ct);
@@ -532,8 +529,8 @@ public partial class HarvestWorkerService(
 
             _logger.LogInformation($"Operation {operationId} completed: {operation.FilesAdded} added, {operation.FilesSkipped} skipped, {operation.FilesErrored} errors", null, null);
 
-            // Emit completion event via SignalR
-            await _harvestHub.Clients.Group($"harvest-{operationId}").SendAsync("HarvestOperationCompleted", new
+            // Send completion event to SignalR clients
+            await harvestEventBroadcaster.BroadcastToGroupAsync(operationId, "harvestoperationcompleted", new
             {
                 operationId,
                 status = "Completed",

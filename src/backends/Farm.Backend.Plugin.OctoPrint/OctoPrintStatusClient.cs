@@ -117,7 +117,6 @@ namespace Farm.Backend.Plugin.OctoPrint
                     return new PrinterDto(
                         Id: printer.Id,
                         Name: printer.Name,
-                        ServerUrl: printer.ServerUrl,
                         Notes: printer.Notes,
                         IsOnline: printerState.Operational,
                         State: printerState.State,
@@ -139,9 +138,11 @@ namespace Farm.Backend.Plugin.OctoPrint
                         ApiKey: printer.ApiKey,
                         OriginalServerUrl: printer.OriginalServerUrl,
                         IpAddress: printer.IpAddress,
-                        SpoolInfo: null,
                         BackendPort: printer.BackendPort,
-                        FrontendPort: printer.FrontendPort);
+                        FrontendPort: printer.FrontendPort,
+                        SpoolInfo: null,
+                        BackendUrl: printer.BackendUrl,
+                        FrontendUrl: printer.FrontendUrl);
                 }
                 else
                 {

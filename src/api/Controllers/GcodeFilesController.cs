@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
 using Farm.Web.Api.Services.FileManagement;
@@ -32,7 +33,7 @@ public class GcodeFilesController(
     Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,
     Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
     Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService,
-    Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService
+    IStoragePathService storagePathService
 ) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.

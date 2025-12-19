@@ -10,6 +10,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
@@ -21,14 +22,14 @@ namespace Farm.Web.Api.Services.Gcode
     {
         private readonly IGcodeRepository _gcodeRepo;
         private readonly IUnifiedLoggingService _logger;
-        private readonly Farm.Web.Api.Services.StorageManagement.IStoragePathService _storagePathService;
+        private readonly IStoragePathService _storagePathService;
         private readonly IGcodeMetadataExtractorService _metadataExtractor;
         private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
 
         public GcodeFilesService(
             IGcodeRepository gcodeRepo,
             IUnifiedLoggingService logger,
-            Farm.Web.Api.Services.StorageManagement.IStoragePathService storagePathService,
+            IStoragePathService storagePathService,
             IGcodeMetadataExtractorService metadataExtractor,
             IGcodeThumbnailExtractorService thumbnailExtractor)
         {

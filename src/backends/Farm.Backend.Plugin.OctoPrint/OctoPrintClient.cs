@@ -493,7 +493,6 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         return new PrinterDto(
             Id: printer.Id,
             Name: printer.Name,
-            ServerUrl: printer.ServerUrl,
             Notes: printer.Notes,
             IsOnline: isOnline,
             State: state,
@@ -514,7 +513,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             Backend: PrinterBackend.OctoPrint,
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
-            IpAddress: printer.IpAddress
+            IpAddress: printer.IpAddress,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl
         );
     }
 

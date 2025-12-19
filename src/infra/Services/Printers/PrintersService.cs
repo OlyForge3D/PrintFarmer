@@ -461,7 +461,8 @@ namespace Farm.Infrastructure.Services.Printers
                     dtos.Add(new PrinterFastDto(
                         Id: p.Id, 
                         Name: p.Name, 
-                        ServerUrl: p.ServerUrl, 
+                        BackendUrl: p.BackendUrl,
+                        FrontendUrl: p.FrontendUrl,
                         Notes: p.Notes, 
                         IsOnline: status.IsOnline,
                         State: status.State,
@@ -486,7 +487,8 @@ namespace Farm.Infrastructure.Services.Printers
                     dtos.Add(new PrinterFastDto(
                         Id: p.Id, 
                         Name: p.Name, 
-                        ServerUrl: p.ServerUrl, 
+                        BackendUrl: p.BackendUrl,
+                        FrontendUrl: p.FrontendUrl,
                         Notes: p.Notes, 
                         IsOnline: false,
                         State: null,
@@ -544,7 +546,6 @@ namespace Farm.Infrastructure.Services.Printers
                         // Static configuration from database
                         Id: p.Id, 
                         Name: p.Name, 
-                        ServerUrl: p.ServerUrl, 
                         Notes: p.Notes, 
                         ManufacturerName: p.Manufacturer?.Name, 
                         ModelName: p.Model?.Name, 
@@ -573,7 +574,9 @@ namespace Farm.Infrastructure.Services.Printers
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
                         HomedAxes: null, // Will be filled by PrinterStatusUpdate via SignalR
-                        SpoolInfo: status.SpoolInfo
+                        SpoolInfo: status.SpoolInfo,
+                        BackendUrl: p.BackendUrl,
+                        FrontendUrl: p.FrontendUrl
                     ));
                 }
                 catch (Exception ex)
@@ -583,7 +586,6 @@ namespace Farm.Infrastructure.Services.Printers
                     dtos.Add(new CompletePrinterDto(
                         Id: p.Id, 
                         Name: p.Name, 
-                        ServerUrl: p.ServerUrl, 
                         Notes: p.Notes, 
                         ManufacturerName: p.Manufacturer?.Name, 
                         ModelName: p.Model?.Name, 
@@ -611,7 +613,9 @@ namespace Farm.Infrastructure.Services.Printers
                         HotendTarget: null,
                         BedTarget: null,
                         HomedAxes: null,
-                        SpoolInfo: null
+                        SpoolInfo: null,
+                        BackendUrl: p.BackendUrl,
+                        FrontendUrl: p.FrontendUrl
                     ));
                 }
             }
@@ -847,7 +851,6 @@ namespace Farm.Infrastructure.Services.Printers
             return new PrinterDto(
                 Id: p.Id,
                 Name: p.Name,
-                ServerUrl: p.ServerUrl,
                 Notes: p.Notes,
                 IsOnline: false,
                 State: null,
@@ -869,9 +872,11 @@ namespace Farm.Infrastructure.Services.Printers
                 ApiKey: p.ApiKey,
                 OriginalServerUrl: p.OriginalServerUrl,
                 IpAddress: p.IpAddress,
-                SpoolInfo: null,
                 BackendPort: p.BackendPort,
-                FrontendPort: p.FrontendPort
+                FrontendPort: p.FrontendPort,
+                SpoolInfo: null,
+                BackendUrl: p.BackendUrl,
+                FrontendUrl: p.FrontendUrl
             );
         }
 

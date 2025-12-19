@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services.Models;
+﻿namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Represents a single file processing job in the harvest queue

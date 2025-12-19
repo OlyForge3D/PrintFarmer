@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure;
 
-namespace Farm.Web.Api.Services.Interfaces;
+namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Service for harvesting G-code files from registered printers
@@ -95,3 +95,4 @@ public interface IGcodeHarvestService
     /// <param name="ct">Cancellation token</param>
     Task WaitForAllTasksAsync(TimeSpan timeout, CancellationToken ct = default);
 }
+

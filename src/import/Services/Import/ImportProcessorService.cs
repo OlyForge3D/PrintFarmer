@@ -241,7 +241,6 @@ public class ImportProcessorService : IImportProcessorService
         return new Farm.Infrastructure.PrinterDto(
             Id: p.Id,
             Name: p.Name,
-            ServerUrl: p.ServerUrl,
             Notes: p.Notes,
             IsOnline: false,
             State: null,
@@ -262,7 +261,11 @@ public class ImportProcessorService : IImportProcessorService
             Backend: (Farm.Infrastructure.PrinterBackend)p.Backend,
             ApiKey: p.ApiKey,
             OriginalServerUrl: p.OriginalServerUrl,
-            IpAddress: p.IpAddress
+            IpAddress: p.IpAddress,
+            BackendPort: p.BackendPort,
+            FrontendPort: p.FrontendPort,
+            BackendUrl: p.BackendUrl,
+            FrontendUrl: p.FrontendUrl
         );
     }
 }

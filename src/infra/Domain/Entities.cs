@@ -63,6 +63,47 @@ public class Printer
             }
         }
     }
+
+    /// <summary>
+    /// Constructs the frontend URL by combining ServerUrl with FrontendPort.
+    /// For Moonraker, this typically points to the web UI on port 80.
+    /// Returns BackendUrl if FrontendPort is not set.
+    /// </summary>
+    [NotMapped]
+    public string FrontendUrl
+    {
+        get
+        {
+            if (!FrontendPort.HasValue || FrontendPort.Value == 0)
+            {
+                return BackendUrl; // Fall back to backend URL if no frontend port specified
+            }
+            
+            if (string.IsNullOrWhiteSpace(ServerUrl))
+            {
+                return ServerUrl;
+            }
+            
+            try
+            {
+                Uri baseUri = new(ServerUrl);
+                int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
+                
+                // Only include port in URL if it's non-standard
+                if (FrontendPort.Value == defaultPort)
+                {
+                    return baseUri.ToString().TrimEnd('/');
+                }
+                
+                UriBuilder ub = new(baseUri) { Port = FrontendPort.Value };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                return BackendUrl; // Fall back to backend URL on error
+            }
+        }
+    }
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
     public string? Notes { get; set; }
     public int Backend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
@@ -838,4 +879,58 @@ public class Model3DTagMapping
     // Navigation properties
     public Model3D? Model3D { get; set; }
     public Model3DTag? Tag { get; set; }
+}
+/// <summary>
+/// Queue item for G-code harvest operations. Decouples the API request from the background processing.
+/// Allows multiple harvest requests to be queued and processed sequentially or with priority.
+/// </summary>
+public class GcodeHarvestQueueItem
+{
+    public Guid Id { get; set; }
+    public Guid PrinterId { get; set; }
+    public DateTime QueuedAt { get; set; }
+    public DateTime? ProcessingStartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public int Priority { get; set; } = 0; // Higher = process sooner
+    
+    /// <summary>
+    /// Current status of the queue item.
+    /// </summary>
+    public GcodeHarvestQueueItemStatus Status { get; set; } = GcodeHarvestQueueItemStatus.Pending;
+    
+    /// <summary>
+    /// Serialized StartGcodeHarvestDto parameters as JSON for deferred processing.
+    /// </summary>
+    public string Parameters { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Error message if processing failed.
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+    
+    /// <summary>
+    /// Error details for debugging (stack trace, additional context).
+    /// </summary>
+    public string? ErrorDetails { get; set; }
+    
+    // Results cached after completion
+    public int FilesFound { get; set; }
+    public int FilesAdded { get; set; }
+    public int FilesSkipped { get; set; }
+    public int FilesErrored { get; set; }
+    
+    // Navigation
+    public Printer? Printer { get; set; }
+}
+
+/// <summary>
+/// Status of a harvest operation in the queue.
+/// </summary>
+public enum GcodeHarvestQueueItemStatus
+{
+    Pending = 0,      // Waiting to be processed
+    Processing = 1,   // Currently being processed
+    Completed = 2,    // Successfully completed
+    Failed = 3,       // Failed during processing
+    Cancelled = 4     // Cancelled by user
 }

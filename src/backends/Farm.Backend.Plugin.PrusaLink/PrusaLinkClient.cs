@@ -161,7 +161,6 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         return new PrinterDto(
             Id: printer.Id,
             Name: printer.Name,
-            ServerUrl: printer.ServerUrl,
             Notes: printer.Notes,
             IsOnline: status.IsOnline,
             State: status.State,
@@ -177,7 +176,9 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             OriginalServerUrl: printer.OriginalServerUrl,
             IpAddress: printer.IpAddress,
             BackendPort: printer.BackendPort,
-            FrontendPort: printer.FrontendPort
+            FrontendPort: printer.FrontendPort,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl
         );
     }
 

@@ -1,51 +1,25 @@
-﻿namespace Farm.Web.Api.Services.StorageManagement;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+
+namespace Farm.Infrastructure.Services.StorageManagement;
 
 /// <summary>
-/// Service for managing file storage paths across different deployment architectures.
-/// Supports both Docker and Kubernetes deployments with shared volume configurations.
+/// Infrastructure implementation of IStoragePathService.
+/// Manages file storage paths across Docker, Kubernetes, and local development deployments.
+/// Uses IApplicationPathProvider abstraction instead of ASP.NET Core IWebHostEnvironment.
 /// </summary>
-public interface IStoragePathService
-{
-    /// <summary>
-    /// Get the base directory for gcode files storage.
-    /// In Docker/K8s: Uses mounted external volume path
-    /// In local dev: Uses wwwroot relative path
-    /// </summary>
-    string GetGcodeStorageDirectory();
-
-    /// <summary>
-    /// Get the directory for gcode thumbnails.
-    /// </summary>
-    string GetThumbnailDirectory();
-
-    /// <summary>
-    /// Get the directory for uploaded model files.
-    /// </summary>
-    string GetModelUploadDirectory();
-
-    /// <summary>
-    /// Get the directory for slicer profiles.
-    /// </summary>
-    string GetSlicerProfilesDirectory();
-
-    /// <summary>
-    /// Ensure all storage directories exist.
-    /// </summary>
-    Task EnsureDirectoriesExistAsync();
-}
-
 public class StoragePathService : IStoragePathService
 {
-    private readonly IWebHostEnvironment _environment;
+    private readonly IApplicationPathProvider _pathProvider;
     private readonly IConfiguration _configuration;
     private readonly ILogger<StoragePathService> _logger;
 
     public StoragePathService(
-        IWebHostEnvironment environment,
+        IApplicationPathProvider pathProvider,
         IConfiguration configuration,
         ILogger<StoragePathService> logger)
     {
-        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+        _pathProvider = pathProvider ?? throw new ArgumentNullException(nameof(pathProvider));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -76,7 +50,7 @@ public class StoragePathService : IStoragePathService
         }
 
         // Default: local development path
-        string defaultPath = Path.Combine(_environment.ContentRootPath, "gcode-library");
+        string defaultPath = Path.Combine(_pathProvider.GetContentRootPath(), "gcode-library");
         _logger.LogInformation("Using default gcode storage path: {StoragePath}", defaultPath);
         return defaultPath;
     }
@@ -107,7 +81,7 @@ public class StoragePathService : IStoragePathService
         }
 
         // Default: local development path
-        string defaultPath = Path.Combine(_environment.ContentRootPath, "uploads");
+        string defaultPath = Path.Combine(_pathProvider.GetContentRootPath(), "uploads");
         _logger.LogInformation("Using default model upload path: {StoragePath}", defaultPath);
         return defaultPath;
     }
@@ -131,7 +105,7 @@ public class StoragePathService : IStoragePathService
         }
 
         // Default: local development path
-        string defaultPath = Path.Combine(_environment.ContentRootPath, "profiles");
+        string defaultPath = Path.Combine(_pathProvider.GetContentRootPath(), "profiles");
         _logger.LogInformation("Using default slicer profiles path: {StoragePath}", defaultPath);
         return defaultPath;
     }

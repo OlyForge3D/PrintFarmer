@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.GcodeHarvest;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
@@ -13,17 +14,19 @@ namespace Farm.Web.Api.Controllers;
 [Tags("G-code Harvesting")]
 public class GcodeHarvestController(
     IGcodeHarvestService harvestService,
+    IGcodeHarvestQueue harvestQueue,
     IUnifiedLoggingService logger) : ControllerBase
 {
     private readonly IGcodeHarvestService _harvestService = harvestService;
+    private readonly IGcodeHarvestQueue _harvestQueue = harvestQueue;
     private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
-    /// Start a G-code harvest operation for a specific printer
+    /// Queue a G-code harvest operation for a specific printer
     /// </summary>
     /// <param name="request">Harvest configuration (IncludeSubdirectories, MaxFileSizeBytes, ModifiedAfter, FileExtensions, MinFileSizeBytes, DuplicateHandling: skip|overwrite|rename)</param>
     /// <param name="ct">Cancellation token</param>
-    /// <response code="200">Harvest operation started successfully</response>
+    /// <response code="202">Harvest operation queued successfully</response>
     /// <response code="400">Invalid request parameters</response>
     /// <response code="404">Printer not found</response>
     /// <remarks>
@@ -39,11 +42,11 @@ public class GcodeHarvestController(
     /// }
     /// </remarks>
     [HttpPost("start")]
-    [ProducesResponseType(typeof(GcodeHarvestResultDto), 200)]
+    [ProducesResponseType(typeof(QueueHarvestResponseDto), 202)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<GcodeHarvestResultDto>> StartHarvestAsync(
+    public async Task<ActionResult<QueueHarvestResponseDto>> StartHarvestAsync(
         [FromBody] StartGcodeHarvestDto request,
         CancellationToken ct)
     {
@@ -53,13 +56,22 @@ public class GcodeHarvestController(
         }
         try
         {
-            GcodeHarvestResultDto result = await _harvestService.StartHarvestAsync(request, ct);
-            return Ok(result);
+            _logger.LogInformation($"Queueing harvest operation for printer {request.PrinterId}");
+
+            // Queue the harvest operation for background processing
+            var queueItem = await _harvestQueue.EnqueueAsync(request.PrinterId, request);
+
+            var response = new QueueHarvestResponseDto(
+                queueItem.Id,
+                $"Harvest operation queued. Queue item ID: {queueItem.Id}",
+                (GcodeHarvestQueueItemStatus)(int)queueItem.Status);
+
+            return Accepted(response);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to start harvest for printer {request.PrinterId}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to start harvest operation");
+            _logger.LogError(ex, $"Failed to queue harvest for printer {request.PrinterId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to queue harvest operation");
         }
     }
 
@@ -398,5 +410,115 @@ public class GcodeHarvestController(
         }
     }
 
-    // Diagnostics and test endpoints moved to GcodeHarvestDiagnosticsController
+    /// <summary>
+    /// Get all queued harvest operations
+    /// </summary>
+    /// <param name="printerId">Optional: filter by printer ID</param>
+    /// <param name="status">Optional: filter by status</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">List of queued operations</response>
+    [HttpGet("queue")]
+    [ProducesResponseType(typeof(GcodeHarvestQueueItemDto[]), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<GcodeHarvestQueueItemDto[]>> GetQueueAsync(
+        [FromQuery] Guid? printerId = null,
+        [FromQuery] GcodeHarvestQueueItemStatus? status = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var items = await _harvestQueue.GetQueuedItemsAsync(status);
+
+            // Filter by printer ID if provided
+            var filtered = printerId.HasValue
+                ? items.Where(i => i.PrinterId == printerId.Value)
+                : items;
+
+            var dtos = filtered.Select(item => new GcodeHarvestQueueItemDto(
+                item.Id,
+                item.PrinterId,
+                item.Printer?.Name ?? "Unknown",
+                item.QueuedAt,
+                item.ProcessingStartedAt,
+                item.CompletedAt,
+                (GcodeHarvestQueueItemStatus)(int)item.Status,
+                item.Priority,
+                item.ErrorMessage,
+                item.FilesFound,
+                item.FilesAdded)).ToArray();
+
+            return Ok(dtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to get queue items: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve queue");
+        }
+    }
+
+    /// <summary>
+    /// Get pending harvest operations for a printer
+    /// </summary>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">List of pending operations for printer</response>
+    [HttpGet("queue/pending/{printerId:guid}")]
+    [ProducesResponseType(typeof(GcodeHarvestQueueItemDto[]), 200)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<GcodeHarvestQueueItemDto[]>> GetPendingForPrinterAsync(
+        Guid printerId,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var items = await _harvestQueue.GetPendingForPrinterAsync(printerId);
+
+            var dtos = items.Select(item => new GcodeHarvestQueueItemDto(
+                item.Id,
+                item.PrinterId,
+                item.Printer?.Name ?? "Unknown",
+                item.QueuedAt,
+                item.ProcessingStartedAt,
+                item.CompletedAt,
+                (GcodeHarvestQueueItemStatus)(int)item.Status,
+                item.Priority,
+                item.ErrorMessage,
+                item.FilesFound,
+                item.FilesAdded)).ToArray();
+
+            return Ok(dtos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to get pending operations for printer {printerId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to retrieve pending operations");
+        }
+    }
+
+    /// <summary>
+    /// Cancel a queued harvest operation
+    /// </summary>
+    /// <param name="queueItemId">The queue item ID to cancel</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="200">Operation cancelled successfully</response>
+    /// <response code="404">Queue item not found or cannot be cancelled</response>
+    [HttpPost("queue/{queueItemId:guid}/cancel")]
+    [ProducesResponseType(typeof(bool), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<bool>> CancelQueuedOperationAsync(
+        Guid queueItemId,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            bool cancelled = await _harvestQueue.CancelAsync(queueItemId);
+            return cancelled ? Ok(true) : NotFound("Queue item not found or already processing");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to cancel queue item {queueItemId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to cancel operation");
+        }
+    }
 }

@@ -1,9 +1,7 @@
 ﻿using System.Threading.Channels;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
-using Farm.Web.Api.Services.Models;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// In-memory implementation of harvest file processing queue using System.Threading.Channels

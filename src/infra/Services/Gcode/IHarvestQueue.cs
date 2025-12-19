@@ -1,6 +1,4 @@
-﻿using Farm.Web.Api.Services.Models;
-
-namespace Farm.Web.Api.Services.Interfaces;
+﻿namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Queue for managing G-code harvest file processing jobs

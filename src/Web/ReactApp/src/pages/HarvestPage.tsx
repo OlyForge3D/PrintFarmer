@@ -61,18 +61,23 @@ export const HarvestPage: React.FC = () => {
 
   // Set up real-time updates for harvest progress and per-file progress
   useEffect(() => {
-    signalRService.connect();
+    // Async setup function
+    const setupSignalR = async () => {
+      await signalRService.connect();
 
-    // Join SignalR group for each running operation
-    const joinedOps = new Set<string>();
-    if (harvestOperations) {
-      for (const op of harvestOperations) {
-        if (op.status === GcodeHarvestStatus.Running && op.id) {
-          signalRService.joinHarvestGroup(op.id);
-          joinedOps.add(op.id);
+      // Join SignalR group for each running operation
+      if (harvestOperations) {
+        for (const op of harvestOperations) {
+          if (op.status === GcodeHarvestStatus.Running && op.id) {
+            await signalRService.joinHarvestGroup(op.id);
+            joinedOps.add(op.id);
+          }
         }
       }
-    }
+    };
+
+    const joinedOps = new Set<string>();
+    setupSignalR();
 
     // Subscribe to per-file progress events
     const unsubscribeFileProgress = signalRService.onHarvestFileProgress((progress) => {

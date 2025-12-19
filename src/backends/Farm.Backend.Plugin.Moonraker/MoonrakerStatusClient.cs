@@ -44,13 +44,12 @@ namespace Farm.Backend.Plugin.Moonraker
 
             try
             {
-                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.BackendPort);
-                _logger.LogInformation($"[Moonraker] GetPrinterStatusAsync for {printer.Name} (ID={printer.Id}): ServerUrl={printer.ServerUrl}, BackendPort={printer.BackendPort}, FinalUrl={moonrakerUrl}");
+                _logger.LogInformation($"[Moonraker] GetPrinterStatusAsync for {printer.Name} (ID={printer.Id}): BackendUrl={printer.BackendUrl}");
                 
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
                 
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                    async ct => await _client.GetCompositeStatusAsync(moonrakerUrl, ct),
+                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
                 
                 _logger.LogInformation($"[Moonraker] Status received for {printer.Name}: IsOnline={status.IsOnline}, State={status.State}");
@@ -90,17 +89,16 @@ namespace Farm.Backend.Plugin.Moonraker
 
             try
             {
-                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.BackendPort);
-                _logger.LogInformation($"[Moonraker] GetPrinterDtoAsync for {printer.Name} (ID={printer.Id}): ServerUrl={printer.ServerUrl}, BackendPort={printer.BackendPort}, FinalUrl={moonrakerUrl}");
+                _logger.LogInformation($"[Moonraker] GetPrinterDtoAsync for {printer.Name} (ID={printer.Id}): BackendUrl={printer.BackendUrl}");
                 
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
                 
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                    async ct => await _client.GetCompositeStatusAsync(moonrakerUrl, ct),
+                    async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
                 
                 // Get Spoolman integration info for Moonraker
-                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(moonrakerUrl, ct);
+                PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
                 
                 _logger.LogInformation($"[Moonraker] DTO created for {printer.Name}: IsOnline={status.IsOnline}, State={status.State}");
                 
@@ -165,8 +163,7 @@ namespace Farm.Backend.Plugin.Moonraker
 
             try
             {
-                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.BackendPort);
-                return await _client.GetCameraStreamUrlAsync(moonrakerUrl, printer.FrontendPort, ct);
+                return await _client.GetCameraStreamUrlAsync(printer.BackendUrl, printer.FrontendPort, ct);
             }
             catch (Exception ex)
             {
@@ -181,8 +178,7 @@ namespace Farm.Backend.Plugin.Moonraker
 
             try
             {
-                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.BackendPort);
-                return await _client.GetCameraSnapshotUrlAsync(moonrakerUrl, printer.FrontendPort, ct);
+                return await _client.GetCameraSnapshotUrlAsync(printer.BackendUrl, printer.FrontendPort, ct);
             }
             catch (Exception ex)
             {
@@ -197,7 +193,7 @@ namespace Farm.Backend.Plugin.Moonraker
 
             try
             {
-                string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+                string moonrakerUrl = printer.FrontendUrl;
                 string? streamUrl = await GetCameraStreamUrlAsync(printer, ct);
                 return !string.IsNullOrEmpty(streamUrl);
             }
@@ -220,13 +216,6 @@ namespace Farm.Backend.Plugin.Moonraker
                 CameraStreamUrl: null,
                 CameraSnapshotUrl: null,
                 SpoolInfo: null);
-        }
-
-        private static string BuildMoonrakerUrl(string serverUrl, int? port)
-        {
-            return port.HasValue
-                ? $"{serverUrl}:{port}"
-                : serverUrl;
         }
     }
 }

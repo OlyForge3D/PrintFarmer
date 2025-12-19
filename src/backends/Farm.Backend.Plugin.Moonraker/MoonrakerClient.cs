@@ -484,7 +484,6 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         return new PrinterDto(
             Id: printer.Id,
             Name: printer.Name,
-            ServerUrl: printer.ServerUrl,
             Notes: printer.Notes,
             IsOnline: status.IsOnline,
             State: status.State,
@@ -506,9 +505,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             ApiKey: printer.ApiKey,
             OriginalServerUrl: printer.OriginalServerUrl,
             IpAddress: printer.IpAddress,
-            SpoolInfo: spoolInfo,
             BackendPort: printer.BackendPort,
-            FrontendPort: printer.FrontendPort
+            FrontendPort: printer.FrontendPort,
+            SpoolInfo: spoolInfo,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl
         );
     }
 

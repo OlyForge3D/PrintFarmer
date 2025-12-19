@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services;
+namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Helper class for categorizing and enriching harvest operation errors

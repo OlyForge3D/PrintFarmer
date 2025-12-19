@@ -189,6 +189,15 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
 
     public bool TryGetFileListClient(PrinterBackend backend, out IBackendClient? client)
     {
+        _logger.LogWarning($"[DIAGNOSTIC] TryGetFileListClient called for backend {backend}. Cache contains {_capabilitiesCache.Count} entries. Cache has key: {_capabilitiesCache.ContainsKey(backend)}");
+        if (_capabilitiesCache.TryGetValue(backend, out var caps))
+        {
+            _logger.LogWarning($"[DIAGNOSTIC] Backend {backend} capabilities from cache: {caps}. Has FileList: {caps.HasFlag(BackendCapabilities.FileList)}");
+        }
+        else
+        {
+            _logger.LogWarning($"[DIAGNOSTIC] Backend {backend} NOT FOUND in capabilities cache!");
+        }
         return TryGetClientWithCapability(backend, BackendCapabilities.FileList, out client);
     }
 
@@ -372,6 +381,8 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         BackendCapabilities requiredCapability,
         out IBackendClient? client)
     {
+        _logger.LogWarning($"[DIAGNOSTIC] TryGetClientWithCapability ENTRY: backend={backend}, requiredCapability={requiredCapability}");
+        
         client = null;
 
         // Check if this backend supports the requested capability
@@ -392,6 +403,61 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         try
         {
             client = _clientFactory.GetClient(backend);
+            
+            // DIAGNOSTIC: Log the actual client type returned and its interfaces
+            if (client != null)
+            {
+                var clientType = client.GetType();
+                var clientFullName = clientType.FullName;
+                var interfaces = clientType.GetInterfaces().Select(i => i.Name).ToList();
+                var implementsRequiredInterface = false;
+                
+                // Check if client implements the specific interface for this capability
+                switch (requiredCapability)
+                {
+                    case BackendCapabilities.FileList:
+                        implementsRequiredInterface = client is ISupportsFileList;
+                        break;
+                    case BackendCapabilities.FileDownload:
+                        implementsRequiredInterface = client is ISupportsFileDownload;
+                        break;
+                    case BackendCapabilities.FileUpload:
+                        implementsRequiredInterface = client is ISupportsFileUpload;
+                        break;
+                    case BackendCapabilities.StartPrint:
+                        implementsRequiredInterface = client is ISupportsStartPrint;
+                        break;
+                    case BackendCapabilities.ControlOperations:
+                        implementsRequiredInterface = client is ISupportsControlOperations;
+                        break;
+                    case BackendCapabilities.Camera:
+                        implementsRequiredInterface = client is ISupportsCamera;
+                        break;
+                    case BackendCapabilities.FileMetadata:
+                        implementsRequiredInterface = client is ISupportsFileMetadata;
+                        break;
+                    case BackendCapabilities.Movement:
+                        implementsRequiredInterface = client is ISupportsMovement;
+                        break;
+                    case BackendCapabilities.TemperatureControl:
+                        implementsRequiredInterface = client is ISupportsTemperatureControl;
+                        break;
+                    case BackendCapabilities.PrinterInformation:
+                        implementsRequiredInterface = client is ISupportsPrinterInformation;
+                        break;
+                }
+                
+                _logger.LogWarning(
+                    $"[DIAGNOSTIC] TryGetClientWithCapability({backend}, {requiredCapability}) => " +
+                    $"Type: {clientFullName}, " +
+                    $"Implements {requiredCapability} Interface: {implementsRequiredInterface}, " +
+                    $"All Interfaces: [{string.Join(", ", interfaces)}]");
+            }
+            else
+            {
+                _logger.LogWarning($"[DIAGNOSTIC] TryGetClientWithCapability({backend}, {requiredCapability}) => client is NULL!");
+            }
+            
             return true;
         }
         catch (Exception ex)
