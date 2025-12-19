@@ -14,20 +14,33 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Integration tests for OrcaSlicer bundle preview endpoint.
 /// </summary>
-public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
+public class OrcaBundlePreviewTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
+    private HttpClient _client = null!;
 
-    public OrcaBundlePreviewTests(CustomWebApplicationFactory factory)
+    public OrcaBundlePreviewTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateAdminClientAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     [Fact(DisplayName = "Preview valid Orca bundle returns structured preview")]
     public async Task Preview_ValidOrcaBundle_ReturnsPreview()
     {
         // Arrange
-        HttpClient client = await _factory.CreateAdminClientAsync();
+        HttpClient client = _client;
 
         // Sample minimal Orca bundle with one printer, one filament, one process
         string bundleJson = """
@@ -105,7 +118,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_InvalidBundleFormat_ReturnsBadRequest()
     {
         // Arrange
-        HttpClient client = await _factory.CreateAdminClientAsync();
+        HttpClient client = _client;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto
         {
@@ -128,7 +141,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_EmptyBundleJson_ReturnsBadRequest()
     {
         // Arrange
-        HttpClient client = await _factory.CreateAdminClientAsync();
+        HttpClient client = _client;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto
         {
@@ -151,7 +164,7 @@ public class OrcaBundlePreviewTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Preview_MultiplePresetsPerSection_ParsesAll()
     {
         // Arrange
-        HttpClient client = await _factory.CreateAdminClientAsync();
+        HttpClient client = _client;
 
         string bundleJson = """
         {
