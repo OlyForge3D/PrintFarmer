@@ -114,6 +114,8 @@ public class Printer
     public Manufacturer? Manufacturer { get; set; }
     public Guid ModelId { get; set; } // No longer nullable - uses default "Unknown Model"
     public PrinterModel? Model { get; set; }
+    public Guid? LocationId { get; set; } // Optional location for organizing printers geographically
+    public Location? Location { get; set; }
     public DateTime? DateAcquired { get; set; }
     
     // Hardware Specifications (previously in PrinterCapabilities)
@@ -170,6 +172,20 @@ public class Manufacturer
     public string Name { get; set; } = string.Empty;
     public ICollection<PrinterModel> Models { get; } = new List<PrinterModel>();
     public bool IsActive { get; set; } = true;
+}
+
+public class Location
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int PrinterCount { get; set; } = 0; // Denormalized count for efficient filtering
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime ModifiedAt { get; set; } = DateTime.UtcNow;
+    public bool IsActive { get; set; } = true;
+    
+    // Navigation property: all printers in this location
+    public ICollection<Printer> Printers { get; } = new List<Printer>();
 }
 
 // Explicit table mapping to ensure EF Core creates the expected "Models" table during test initialization.

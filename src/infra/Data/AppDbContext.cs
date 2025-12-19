@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AppSettingsEntity> AppSettingsEntities => Set<AppSettingsEntity>();
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<Printer> Printers => Set<Printer>();
+    public DbSet<Location> Locations => Set<Location>();
     public DbSet<Spool> Spools => Set<Spool>();
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
     public DbSet<PrinterModel> Models => Set<PrinterModel>();
@@ -110,6 +111,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany()
              .HasForeignKey(p => p.ModelId)
              .OnDelete(DeleteBehavior.Restrict); // Changed from SetNull - ModelId is not nullable
+            _ = b.HasOne(p => p.Location)
+             .WithMany(l => l.Printers)
+             .HasForeignKey(p => p.LocationId)
+             .OnDelete(DeleteBehavior.SetNull); // Allow setting location to null
             _ = b.Property(p => p.DateAcquired);
             
             // Toolheads collection - one printer can have multiple hotends
@@ -147,6 +152,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // Indexes
             _ = b.HasIndex(t => t.PrinterId);
             _ = b.HasIndex(t => t.Index);
+        });
+
+        // Location Entity Configuration
+        _ = modelBuilder.Entity<Location>(b =>
+        {
+            _ = b.HasKey(l => l.Id);
+            _ = b.Property(l => l.Name).IsRequired().HasMaxLength(256);
+            _ = b.Property(l => l.Description).HasMaxLength(1024);
+            _ = b.Property(l => l.PrinterCount).HasDefaultValue(0);
+            _ = b.Property(l => l.CreatedAt).IsRequired();
+            _ = b.Property(l => l.ModifiedAt).IsRequired();
+            _ = b.Property(l => l.IsActive).HasDefaultValue(true);
+            
+            // One location can have many printers
+            _ = b.HasMany(l => l.Printers)
+             .WithOne(p => p.Location)
+             .HasForeignKey(p => p.LocationId)
+             .OnDelete(DeleteBehavior.SetNull);
+            
+            // Indexes
+            _ = b.HasIndex(l => l.Name).IsUnique();
+            _ = b.HasIndex(l => l.IsActive);
+            _ = b.HasIndex(l => l.CreatedAt);
         });
 
         _ = modelBuilder.Entity<Manufacturer>(b =>
