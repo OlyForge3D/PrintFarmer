@@ -53,6 +53,10 @@ public class GcodeHarvestQueueProcessorService(
                     var parameters = JsonSerializer.Deserialize<StartGcodeHarvestDto>(queueItem.Parameters)
                         ?? throw new InvalidOperationException("Failed to deserialize harvest parameters");
 
+                    Console.Error.WriteLine($"[HARVEST_PROCESSOR] CHECKPOINT_1 for queue item {queueItem.Id}");
+                    
+                    logger.LogInformation("xxx_CHECKPOINT_1: About to get harvest service type");
+
                     // Get the harvest service from DI using GetType lookup
                     // We use reflection to avoid circular dependency between infra and API layers
                     var harvestServiceType = AppDomain.CurrentDomain.GetAssemblies()
@@ -62,6 +66,8 @@ public class GcodeHarvestQueueProcessorService(
                         })
                         .FirstOrDefault(t => t.Name == "IGcodeHarvestService" && t.IsInterface);
 
+                    logger.LogInformation("xxx_CHECKPOINT_2: Got harvest service type: {ServiceType}", harvestServiceType?.FullName ?? "NULL");
+
                     if (harvestServiceType == null)
                     {
                         logger.LogWarning("IGcodeHarvestService not found in loaded assemblies");
@@ -70,6 +76,7 @@ public class GcodeHarvestQueueProcessorService(
                     }
 
                     var harvestService = scope.ServiceProvider.GetService(harvestServiceType);
+                    logger.LogInformation("xxx_CHECKPOINT_3: Got harvest service instance: {IsNull}", harvestService == null);
                     if (harvestService == null)
                     {
                         logger.LogWarning("IGcodeHarvestService is not registered in DI");
@@ -79,6 +86,7 @@ public class GcodeHarvestQueueProcessorService(
 
                     // Call StartHarvestAsync via reflection
                     var startMethod = harvestServiceType.GetMethod("StartHarvestAsync");
+                    logger.LogInformation("xxx_CHECKPOINT_4: Got start method: {IsNull}", startMethod == null);
                     if (startMethod == null)
                     {
                         logger.LogWarning("StartHarvestAsync method not found");
@@ -86,7 +94,34 @@ public class GcodeHarvestQueueProcessorService(
                         continue;
                     }
 
-                    var result = await (dynamic)startMethod.Invoke(harvestService, new object[] { parameters, stoppingToken })!;
+                    logger.LogInformation("xxx_CHECKPOINT_5: About to invoke StartHarvestAsync");
+                    logger.LogError($"[DIAGNOSTIC] About to call StartHarvestAsync for queue item {queueItem.Id}");
+                    logger.LogInformation("xxx_CHECKPOINT_5b: After error log");
+                    var result = (object?)await (dynamic)startMethod.Invoke(harvestService, new object[] { parameters, stoppingToken })!;
+                    logger.LogError($"[DIAGNOSTIC] StartHarvestAsync returned result = {(result == null ? "NULL" : result.GetType().FullName)}");
+
+                    // Extract result properties if available
+                    string? operationId = null;
+                    bool? success = null;
+                    string? message = null;
+                    if (result != null)
+                    {
+                        try
+                        {
+                            dynamic dynResult = result;
+                            operationId = dynResult.OperationId?.ToString();
+                            success = dynResult.Success;
+                            message = dynResult.Message;
+                        }
+                        catch { }
+                    }
+
+                    logger.LogInformation(
+                        "StartHarvestAsync returned for queue item {QueueItemId}: operationId={OperationId}, success={Success}, message={Message}",
+                        queueItem.Id,
+                        operationId ?? "unknown",
+                        success ?? false,
+                        message ?? "no message");
 
                     // Mark as completed
                     await queue.MarkCompletedAsync(queueItem.Id, 0, 0, 0, 0);

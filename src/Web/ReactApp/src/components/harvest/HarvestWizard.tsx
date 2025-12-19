@@ -151,7 +151,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
     setState(prev => ({ ...prev, isDiscovering: true, discoveredFiles: [] }));
 
     try {
-      // Start harvest discovery on backend - this returns the operation ID
+      // Start harvest discovery on backend - this queues it and returns queue item ID
       const result = await apiClient.startHarvestOperation(state.selectedPrinterId, {
         includeSubdirectories: state.options.includeSubdirectories,
         fileExtensions: state.options.fileExtensions,
@@ -160,7 +160,18 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
         duplicateHandling: state.options.duplicateHandling,
       });
 
-      const operationId = result.operationId;
+      const queueItemId = result.queueItemId;
+      if (!queueItemId) {
+        throw new Error('Failed to start harvest operation: no queue item ID returned');
+      }
+
+      // Wait for the backend to create the actual operation (happens asynchronously)
+      // Poll for up to 10 seconds for the operation to be created
+      const operationId = await apiClient.waitForHarvestOperationCreated(state.selectedPrinterId, 10000);
+      if (!operationId) {
+        throw new Error('Harvest operation was queued but operation ID could not be retrieved. The background service may be busy.');
+      }
+      
       setState(prev => ({ ...prev, operationId }));
 
       // Join SignalR group for this discovery operation

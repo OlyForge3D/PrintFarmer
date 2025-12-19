@@ -186,8 +186,8 @@ public partial class GcodeHarvestService(
         _logger.LogError($"[DIAGNOSTIC-HARVEST] Extracted printer data: id={printerId}, name={printerName}, backendUrl={printerBackendUrl}, backend={printerBackend}");
 
         // Start file discovery and queueing in background
-        // Use explicit async void method to properly execute on thread pool
-        async void ExecuteHarvest()
+        // Use explicit async task method to properly execute on thread pool
+        async Task ExecuteHarvestAsync()
         {
             Console.Error.WriteLine($"[HARVEST] Background harvest start for op {operation.Id}");
             try
@@ -206,7 +206,9 @@ public partial class GcodeHarvestService(
                 // Update the operation status to failed with detailed error info
                 await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
                 IHarvestRepository scopedHarvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
-                GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdAsync(operation.Id);
+                // CRITICAL: Must use GetOperationByIdTrackedAsync (with tracking) not GetOperationByIdAsync (AsNoTracking)
+                // We need to modify the operation, so it MUST be tracked by EF Core
+                GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operation.Id);
                 if (dbOperation != null)
                 {
                     HarvestErrorHelper.SetOperationError(
@@ -224,7 +226,7 @@ public partial class GcodeHarvestService(
             }
         }
         
-        _ = Task.Run(ExecuteHarvest);
+        _ = Task.Run(ExecuteHarvestAsync);
 
         _logger.LogDebug($"Queued harvest operation {operation.Id} to thread pool");
 
@@ -380,11 +382,32 @@ public partial class GcodeHarvestService(
             _logger.LogError($"[DIAGNOSTIC-HARVEST] Files after filtering: {gcodeFileCount} (from {fileList?.Count ?? 0})");
 
             // Update files found count immediately
-            GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdAsync(operation.Id);
+            // CRITICAL: Must use GetOperationByIdTrackedAsync (with tracking) not GetOperationByIdAsync (AsNoTracking)
+            // AsNoTracking objects are detached and SaveChangesAsync won't detect modifications
+            _logger.LogError($"[DIAGNOSTIC-HARVEST] ABOUT TO CALL GetOperationByIdTrackedAsync");
+            GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operation.Id);
+            _logger.LogError($"[DIAGNOSTIC-HARVEST] RETURNED FROM GetOperationByIdTrackedAsync: dbOperation is {(dbOperation == null ? "NULL" : "NOT NULL")}");
             if (dbOperation != null)
             {
+                _logger.LogError($"[DIAGNOSTIC-HARVEST] BEFORE UPDATE: FilesFound={dbOperation.FilesFound}");
                 dbOperation.FilesFound = gcodeFileCount;
-                await scopedHarvestRepo.SaveChangesAsync();
+                _logger.LogError($"[DIAGNOSTIC-HARVEST] AFTER ASSIGNMENT: FilesFound={dbOperation.FilesFound}");
+                try
+                {
+                    await scopedHarvestRepo.SaveChangesAsync();
+                    _logger.LogError($"[DIAGNOSTIC-HARVEST] SaveChangesAsync completed successfully");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[DIAGNOSTIC-HARVEST] SaveChangesAsync FAILED with exception: {ex.Message}");
+                    throw;
+                }
+                _logger.LogError($"[DIAGNOSTIC-HARVEST] AFTER SAVE: FilesFound={dbOperation.FilesFound}");
+                
+                // Verify the save actually persisted by querying again
+                GcodeHarvestOperation? verifyOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operation.Id);
+                _logger.LogError($"[DIAGNOSTIC-HARVEST] VERIFICATION QUERY: Operation={verifyOperation?.Id}, FilesFound={verifyOperation?.FilesFound}");
+                
                 _logger.LogInformation($"Updated operation {operation.Id} with {dbOperation.FilesFound} G-code files found");
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] Updated DB operation: FilesFound={gcodeFileCount}");
 
@@ -404,6 +427,7 @@ public partial class GcodeHarvestService(
             else
             {
                 _logger.LogWarning($"Could not find operation {operation.Id} in database to update files found count");
+                _logger.LogError($"[DIAGNOSTIC-HARVEST] ERROR: Could not find operation {operation.Id} to update FilesFound");
             }
 
             // Send discovered files to frontend immediately during discovery phase (not wait for processing)
@@ -453,7 +477,9 @@ public partial class GcodeHarvestService(
             _logger.LogError(ex, $"File discovery failed for operation {operation.Id}");
 
             // Mark operation as failed with detailed error info
-            GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdAsync(operation.Id);
+            // CRITICAL: Must use GetOperationByIdTrackedAsync (with tracking) not GetOperationByIdAsync (AsNoTracking)
+            // We need to modify the operation, so it MUST be tracked by EF Core
+            GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operation.Id);
             if (dbOperation != null)
             {
                 HarvestErrorHelper.SetOperationError(

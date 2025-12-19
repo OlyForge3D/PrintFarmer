@@ -492,7 +492,9 @@ public partial class HarvestWorkerService(
     {
         _ = fileName;
         _ = errorMessage;
-        GcodeHarvestOperation? operation = await harvestRepo.GetOperationByIdAsync(operationId, ct);
+        // CRITICAL: Must use GetOperationByIdTrackedAsync (with tracking) not GetOperationByIdAsync (AsNoTracking)
+        // We need to modify the operation counter, so it MUST be tracked by EF Core
+        GcodeHarvestOperation? operation = await harvestRepo.GetOperationByIdTrackedAsync(operationId, ct);
         if (operation != null)
         {
             operation.FilesErrored++;
@@ -503,7 +505,9 @@ public partial class HarvestWorkerService(
     private async Task CheckAndCompleteOperationAsync(IHarvestRepository harvestRepo, Guid operationId, IHarvestEventBroadcaster harvestEventBroadcaster, CancellationToken ct)
     {
         // Get the operation
-        GcodeHarvestOperation? operation = await harvestRepo.GetOperationByIdAsync(operationId, ct);
+        // CRITICAL: Must use GetOperationByIdTrackedAsync (with tracking) not GetOperationByIdAsync (AsNoTracking)
+        // We need to modify the operation status and completion time, so it MUST be tracked by EF Core
+        GcodeHarvestOperation? operation = await harvestRepo.GetOperationByIdTrackedAsync(operationId, ct);
 
         if (operation == null || operation.Status != GcodeHarvestStatus.Running)
         {
