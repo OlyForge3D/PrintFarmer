@@ -11,16 +11,32 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// <summary>
 /// Tests /api/slice/{id}/progress endpoint updates job state and emits event prerequisites.
 /// </summary>
-public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationFactory>
+public class SliceJobProgressEndpointTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
-    public SliceJobProgressEndpointTests(CustomWebApplicationFactory factory) => _factory = factory;
+    private HttpClient _client;
+
+    public SliceJobProgressEndpointTests()
+    {
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateWorkerClientAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
+    }
 
     [Fact(DisplayName = "Progress endpoint updates percent and message for Processing job")]
     public async Task Progress_Updates_Fields()
     {
-        HttpClient client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Worker-Key", "test-worker-key");
+        // _client is already authenticated via InitializeAsync with Bearer token and X-Worker-Key header
 
         // Submit job
         SubmitSliceJobRequest submitReq = new SubmitSliceJobRequest
@@ -31,7 +47,7 @@ public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationF
             SlicerEngine = 0,
             SlicerProfileJson = "{}"
         };
-        HttpResponseMessage submitResp = await client.PostAsJsonAsync("/api/slice", submitReq);
+        HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submitReq);
         _ = submitResp.IsSuccessStatusCode.Should().BeTrue();
         SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
         _ = submitted.Should().NotBeNull();
@@ -43,7 +59,7 @@ public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationF
             Capabilities = new[] { "orcaslicer" },
             LeaseDurationSeconds = 120
         };
-        HttpResponseMessage claimResp = await client.PostAsJsonAsync("/api/slice/claim", claimReq);
+        HttpResponseMessage claimResp = await _client.PostAsJsonAsync("/api/slice/claim", claimReq);
         _ = claimResp.IsSuccessStatusCode.Should().BeTrue();
 
         // Progress update
@@ -52,11 +68,11 @@ public class SliceJobProgressEndpointTests : IClassFixture<CustomWebApplicationF
             ProgressPercent = 42,
             ProgressMessage = "Layer slicing"
         };
-        HttpResponseMessage progressResp = await client.PostAsJsonAsync($"/api/slice/{submitted!.JobId}/progress", progressReq);
+        HttpResponseMessage progressResp = await _client.PostAsJsonAsync($"/api/slice/{submitted!.JobId}/progress", progressReq);
         _ = progressResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         // Fetch status
-        HttpResponseMessage statusResp = await client.GetAsync($"/api/slice/{submitted.JobId}");
+        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted.JobId}");
         _ = statusResp.IsSuccessStatusCode.Should().BeTrue();
         SliceJobStatusResponse? status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
         _ = status.Should().NotBeNull();

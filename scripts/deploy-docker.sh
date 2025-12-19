@@ -296,15 +296,18 @@ auto_load_cached_images() {
     # If ImagesDir not specified, search for cached images automatically
     if [ -z "$images_dir" ] || [ "$images_dir" = "." ]; then
         print_info "Searching for cached Docker images..."
-        images_dir=$(find_cached_images_dir) || {
+        images_dir=$(find_cached_images_dir) || true
+        if [ -z "$images_dir" ]; then
             print_info "No cached images found in common locations"
-            return 1
-        }
+            print_info "Images will be built during docker-compose deployment"
+            return 0
+        fi
     fi
     
     if [ ! -d "$images_dir" ]; then
         print_info "Images directory not found: $images_dir"
-        return 1
+        print_info "Images will be built during docker-compose deployment"
+        return 0
     fi
     
     # Check if there are any TAR files
@@ -312,7 +315,8 @@ auto_load_cached_images() {
     tar_files=$(find "$images_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
     if [ -z "$tar_files" ]; then
         print_info "No cached images found in $images_dir"
-        return 1
+        print_info "Images will be built during docker-compose deployment"
+        return 0
     fi
     
     # Find images that need to be loaded
@@ -1772,6 +1776,7 @@ tear_down_deployment() {
     echo "  4. Prune dangling images (base images are preserved)"
     echo "  5. Clear Docker builder cache"
     echo "  6. Clean up generated configuration files"
+    echo -e "  7. ${RED}Remove ALL bind-mounted storage INCLUDING DATABASE${NC}"
     echo
     
     if [ "$NON_INTERACTIVE" = "false" ]; then
@@ -2055,10 +2060,16 @@ tear_down_deployment() {
             print_info "Kept external storage directories (data preserved)"
         fi
     else
-        # In non-interactive mode with --tear-down, remove all external storage EXCEPT database
-        # (Database is skipped due to permission issues with Docker-managed containers)
+        # In non-interactive mode with --tear-down: remove ALL storage INCLUDING database
+        # This provides a complete reset to fresh state
+        
+        # Add database to the removal list
+        if [ -n "$external_database_path" ]; then
+            paths_to_remove+=("$external_database_path:Database")
+        fi
+        
         if [ ${#paths_to_remove[@]} -gt 0 ]; then
-            print_warning "Removing external storage directories (from config):"
+            print_warning "Removing ALL external storage directories (from config):"
             for path_entry in "${paths_to_remove[@]}"; do
                 local path="${path_entry%:*}"
                 local desc="${path_entry#*:}"
@@ -2084,11 +2095,6 @@ tear_down_deployment() {
             done
             if [ $external_paths_removed -gt 0 ]; then
                 print_success "✓ External storage directories removed: $external_paths_removed"
-            fi
-            
-            # Notify about database (skipped in non-interactive mode)
-            if [ -n "$external_database_path" ] && [ -d "$external_database_path" ]; then
-                print_info "⊘ Skipped Database directory (Docker-managed, kept for data preservation)"
             fi
         else
             print_info "✓ No external storage directories configured - nothing to remove"
@@ -2175,8 +2181,8 @@ OPTIONS:
         --redeploy          Rebuild and restart using existing configuration
                             (detects previous deployment automatically)
     --tear-down             Tear down existing deployment (stops containers, removes
-        --teardown          volumes, cleans up). Useful for starting fresh.
-        --clean             Same as --tear-down
+        --teardown          volumes, and ALL bind-mounted storage including database).
+        --clean             Useful for starting completely fresh.
     --build-verbosity LEVEL Set Docker build verbosity: quiet (default), minimal, normal, detailed
         --verbose-build     Shorthand for --build-verbosity detailed
         --cleanup-generated Remove generated Docker files after deployment (default keeps them)
@@ -2573,7 +2579,16 @@ ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
 EOF
 
-    # (Prusa worker support removed) — no Prusa defaults are written for modern deployments
+    # Save slicer worker API keys to preserve them across deployments
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && [ -n "${SLICER_WORKER_API_KEYS[0]:-}" ]; then
+        echo "" >> "$CONFIG_FILE"
+        echo "# Slicer Worker API Keys (preserved for consistent worker registration)" >> "$CONFIG_FILE"
+        for ((i=0; i<${#SLICER_WORKER_API_KEYS[@]}; i++)); do
+            local key_index=$((i+1))
+            local api_key="${SLICER_WORKER_API_KEYS[$i]}"
+            echo "SLICER_WORKER_API_KEY_${key_index}=$(printf '%q' "$api_key")" >> "$CONFIG_FILE"
+        done
+    fi
 
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
         cat >> "$CONFIG_FILE" << EOF
@@ -2582,7 +2597,6 @@ EOF
 OVERRIDE_WORKER_ENDPOINTS=yes
 EOF
         [ "${ENABLE_ORCA_WORKER}" = "yes" ] && echo "ORCA_WORKER_ENDPOINT=${ORCA_WORKER_ENDPOINT}" >> "$CONFIG_FILE"
-
     fi
 
     if [ "${ENABLE_SPOOLMAN:-no}" = "yes" ]; then
@@ -4061,7 +4075,7 @@ generate_slicer_worker_api_keys() {
         return 0
     fi
 
-    print_header "🔑 Generating Slicer Worker API Keys"
+    print_header "🔑 Configuring Slicer Worker API Keys"
     
     # Initialize arrays for storing worker info (without -g for cross-shell compatibility)
     SLICER_WORKER_API_KEYS=()
@@ -4076,15 +4090,23 @@ generate_slicer_worker_api_keys() {
         fi
         
         local api_key
-        api_key=$(generate_slicer_api_key)
+        # Try to load existing API key from config first (preserve across deployments)
+        local config_var_name="SLICER_WORKER_API_KEY_${i}"
+        api_key="${!config_var_name:-}"
+        
+        if [ -z "$api_key" ]; then
+            # No existing key found, generate a new one
+            api_key=$(generate_slicer_api_key)
+            print_info "Generated new API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
+        else
+            print_info "Reusing existing API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
+        fi
         
         SLICER_WORKER_NAMES+=("$worker_name")
         SLICER_WORKER_API_KEYS+=("$api_key")
-        
-        print_info "Generated API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
     done
     
-    print_success "Generated ${#SLICER_WORKER_API_KEYS[@]} API keys for OrcaSlicer workers"
+    print_success "Configured ${#SLICER_WORKER_API_KEYS[@]} API keys for OrcaSlicer workers"
 }
 
 # Export slicer worker API keys to environment file
@@ -4299,6 +4321,19 @@ ORCA_HOST_PORT=$ORCA_HOST_PORT
 
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
+
+# Docker Base Image Tags (override Dockerfile defaults for normal deployments)
+SDK_TAG=9.0
+ASPNET_TAG=9.0-bookworm-slim
+NODE_TAG=22-alpine
+NGINX_TAG=alpine
+UBUNTU_TAG=24.04
+
+# Standalone Service Image Tags (override compose template defaults for normal deployments)
+NGINX_IMAGE=nginx:alpine
+POSTGRES_IMAGE=postgres:16-alpine
+SQLSERVER_IMAGE=mcr.microsoft.com/mssql/server:2022-latest
+MYSQL_IMAGE=mysql:8.0
 
 # Spoolman
 SPOOLMAN_ENABLED=${ENABLE_SPOOLMAN:-no}
@@ -6184,18 +6219,18 @@ verify_deployment() {
         local orca_container=""
         
         # Get the first OrcaSlicer worker container (whether single or scaled)
-        orca_container=$(docker-compose -f "$COMPOSE_FILE" ps -q orcaslicer-worker 2>/dev/null | head -1)
+        orca_container=$(dc ps -q orcaslicer-worker 2>/dev/null | head -1)
         
         if [ -n "$orca_container" ]; then
-            # Check container health via docker-compose exec
-            if docker-compose -f "$COMPOSE_FILE" exec -T orcaslicer-worker curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
+            # Check container health via docker compose exec
+            if dc exec -T orcaslicer-worker curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
                 print_success "✓ OrcaSlicer worker: Healthy"
                 orca_checked=true
             fi
         fi
         
         # Fallback: try localhost:port (works when worker port is bound to host in monolithic mode)
-        if [ "$orca_checked" = false ] && curl -sf "http://localhost:${ORCA_HOST_PORT:-8081}/healthz" >/dev/null 2>&1; then
+        if [ "$orca_checked" = false ] && curl -sf "http://localhost:${ORCA_HOST_PORT:-8080}/healthz" >/dev/null 2>&1; then
             print_success "✓ OrcaSlicer worker: Healthy"
             orca_checked=true
         fi

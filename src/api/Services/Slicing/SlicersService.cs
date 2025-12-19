@@ -250,9 +250,11 @@ namespace Farm.Web.Api.Services.Slicing
                     worker.LastHeartbeat = DateTime.UtcNow;
                     worker.UpdatedAt = DateTime.UtcNow;
 
-                    // NOTE: FreeSlots is now calculated as TotalSlots - ActiveJobs
-                    // ActiveJobs is managed exclusively by JobDispatcherService (increment on dispatch, decrement on complete).
-                    // Do not update ActiveJobs from heartbeat data.
+                    // Update FreeSlots/ActiveJobs if provided in heartbeat
+                    if (dto.FreeSlots.HasValue)
+                    {
+                        worker.ActiveJobs = Math.Max(0, worker.TotalSlots - dto.FreeSlots.Value);
+                    }
 
                     totalSlots = worker.TotalSlots;
                     await _repo.SaveChangesAsync(ct); // Worker entity tracked by same DbContext

@@ -208,3 +208,115 @@ The fix addresses #1 and #2 comprehensively. However, risks remain for:
 - Platform-specific deployment problems
 
 **Recommendation**: Keep this document updated and regularly run real deployments to catch issues that unit tests miss.
+
+---
+
+## Phase 23: JobDispatcherService Integration Tests (December 2025)
+
+### Summary
+Implemented comprehensive integration tests for `JobDispatcherService` - the critical job dispatching and worker selection logic.
+
+**Results**:
+- ✅ **17 new integration tests** - All passing
+- ✅ **+14.26% coverage improvement** - From 23.98% → 38.24%
+- ✅ **Fixed critical EF Core bug** - LINQ translation issue in `EfWorkerRepository`
+- ✅ **No regressions** - Full test suite: 1821/1822 passing (99.95%)
+
+### Test Breakdown
+
+| Category | Tests | Status | Focus |
+|----------|-------|--------|-------|
+| DispatchNextJobAsync | 3 | ✅ | Queue management, worker availability |
+| FindBestWorkerForJobAsync | 6 | ✅ | Worker selection, capability matching, scoring |
+| DispatchJobAsync | 3 | ✅ | Job validation, error handling |
+| Load Balancing & Scoring | 3 | ✅ | Multi-factor algorithm (capacity, speed, reliability) |
+| Priority Handling | 1 | ✅ | High-priority job selection |
+| Integration | 1 | ✅ | Multi-job scenarios |
+
+### Infrastructure Fix
+**Problem**: Repository code couldn't translate computed `FreeSlots` property to SQL
+```csharp
+// ❌ FAILED: Cannot translate computed property
+.Where(w => w.FreeSlots > 0)
+
+// ✅ FIXED: Use calculated expression
+.Where(w => (w.TotalSlots - w.ActiveJobs) > 0)
+```
+
+**Files Updated**:
+- `src/infra/Repositories/Workers/EfWorkerRepository.cs`
+  - `GetAvailableWorkersAsync()` method
+  - `GetWorkersByCapabilitiesAsync()` method
+
+### Validated Algorithm
+- ✅ Multi-factor worker scoring (capacity, load, speed, reliability)
+- ✅ Load balancing across distributed worker pool
+- ✅ Capability-aware job routing
+- ✅ Priority-based job selection
+- ✅ Stale worker filtering (>120 seconds)
+- ✅ Success rate consideration
+
+### Lessons for Future Test Implementation
+1. **Don't create new documentation files** - Update existing comprehensive guides instead
+2. **Consolidate results** - Add accomplishments to appropriate existing documents
+````markdown
+3. **Keep docs DRY** - Single source of truth prevents documentation debt
+4. **Focus on substance** - Test implementation matters, documentation organization should be minimal
+
+## Phase 24: SlicingSubmissionService Integration Tests (December 2025)
+
+### Summary
+Implemented comprehensive integration tests for `SlicingSubmissionService` - the critical job submission workflow handling file uploads and model-based submissions.
+
+**Results**:
+- ✅ **20 new integration tests** - All passing
+- ✅ **+0.29% coverage improvement** - From 38.24% → 38.53%
+- ✅ **No regressions** - Full test suite: 1841/1842 passing (99.95%)
+- ✅ **Farm.Web.Api coverage improved** - From 37.07% → 37.28% (+0.21 points)
+
+### Test Breakdown
+
+| Category | Tests | Status | Focus |
+|----------|-------|--------|-------|
+| SubmitSlicingJobAsync - Success | 6 | ✅ | File upload, slicer versions, profile metadata |
+| SubmitSlicingJobFromModelAsync - Success | 3 | ✅ | Model retrieval, file validation, slicing |
+| Model-Based Submission - Errors | 2 | ✅ | Non-existent models, missing files |
+| Error Handling | 3 | ✅ | Invalid slicer engines, large files, special chars |
+| Printer & User Association | 2 | ✅ | PrinterId and UserId assignment |
+| File Format Support | 4 | ✅ | STL, OBJ, 3MF format handling |
+
+### Validated Workflows
+- ✅ File upload → storage → orchestration → result DTO
+- ✅ Model retrieval → validation → upload → orchestration
+- ✅ Slicer engine detection (OrcaSlicer, PrusaSlicer)
+- ✅ Profile metadata preservation
+- ✅ Large file handling (5MB test)
+- ✅ Special characters in filenames
+- ✅ Multi-format support (STL, OBJ, 3MF)
+- ✅ Error handling (non-existent models, missing files)
+- ✅ Initial progress tracking (0%)
+- ✅ Unique job ID generation
+
+### Testing Approach
+- **CustomWebApplicationFactory**: Integration testing with real AppDbContext
+- **Mock IFormFile**: Simulates file uploads without actual filesystem
+- **Test Model Creation**: Creates temporary files and database entries
+- **Async/Await**: Proper async test patterns with cancellation token support
+- **Fluent Assertions**: Clear test intent and error messages
+
+### Test Execution Time
+- **Individual tests**: ~200-250ms each
+- **Full suite (20 tests)**: ~2 seconds
+- **Suitable for CI/CD**: Fast execution without sacrificing coverage
+
+### Lessons from Phase 24
+1. **Model property accuracy**: Carefully match domain entity structure (Model3D has FileSizeBytes, not FileSize)
+2. **DbSet naming**: Property names must match AppDbContext (Models3D for Model3D entities)
+3. **Enum naming**: Use exact enum values (ModelFileFormat.STL not Stl)
+4. **File cleanup**: Temporary test files should be cleaned up automatically
+
+```
+
+````
+
+```

@@ -15,6 +15,13 @@
   <ItemGroup>
   <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
+    <ProjectReference Include="../signalr/Farm.SignalR/Farm.SignalR.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
+    <!-- Plugin implementations - needed for dynamic plugin discovery -->
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.9" />

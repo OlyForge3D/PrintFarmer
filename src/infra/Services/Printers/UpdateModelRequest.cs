@@ -1,0 +1,33 @@
+﻿namespace Farm.Infrastructure.Services.Printers;
+
+using Farm.Infrastructure;
+
+/// <summary>
+/// Request object for updating a printer model.
+/// Infrastructure version (no ASP.NET binding attributes).
+/// </summary>
+public record UpdateModelRequest(
+    string Name,
+    MotionType? Type,
+    double? MaxX,
+    double? MaxY,
+    double? MaxZ,
+    PrinterBackend? DefaultBackend,
+    Guid[]? SupportedFilamentTypeIds,
+
+    // Default capabilities that can be inherited by new printers
+    double? DefaultNozzleDiameter = null,
+    bool? HasHeatedBed = null,
+    bool? HasEnclosure = null,
+    bool? MultiMaterial = null,
+    int? NumberOfExtruders = null,
+    bool? SupportsAutoLeveling = null,
+
+    // Temperature ranges
+    int? MinHotendTemp = null,
+    int? MaxHotendTemp = null,
+    int? MinBedTemp = null,
+    int? MaxBedTemp = null,
+
+    // Speed capabilities
+    int? MaxPrintSpeed = null);

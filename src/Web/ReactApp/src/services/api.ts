@@ -25,6 +25,7 @@ import {
   Printer,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
+  PrinterBackendCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
   PrinterFileDto,
@@ -253,6 +254,20 @@ export class ApiClient {
     return response.data;
   }
 
+  async getPrinterBackendCapabilities(): Promise<PrinterBackendCapabilitiesDto[]> {
+    const response = await this.client.get<PrinterBackendCapabilitiesDto[]>(
+      "/printers/backend-capabilities"
+    );
+    return response.data;
+  }
+
+  async getPrinterBackendCapabilitiesSingle(printerId: string): Promise<PrinterBackendCapabilitiesDto> {
+    const response = await this.client.get<PrinterBackendCapabilitiesDto>(
+      `/printers/${printerId}/backend-capabilities`
+    );
+    return response.data;
+  }
+
   async getPrinter(id: string): Promise<Printer> {
     const response = await this.client.get<Printer>(`/printers/${id}`);
     return response.data;
@@ -415,6 +430,11 @@ export class ApiClient {
 
   async updatePrinter(id: string, printer: UpdatePrinterDto): Promise<Printer> {
     const response = await this.client.put<Printer>(`/printers/${id}`, printer);
+    return response.data;
+  }
+
+  async refreshCameraUrls(id: string): Promise<Printer> {
+    const response = await this.client.post<Printer>(`/printers/${id}/refresh-cameras`);
     return response.data;
   }
 
@@ -790,7 +810,7 @@ export class ApiClient {
       minFileSizeBytes?: number;
       duplicateHandling?: string;
     }
-  ): Promise<{ operationId: string }> {
+  ): Promise<{ queueItemId: string }> {
     const payload = {
       printerId,
       includeSubdirectories: opts?.includeSubdirectories ?? true,
@@ -805,7 +825,7 @@ export class ApiClient {
       duplicateHandling: opts?.duplicateHandling,
     };
     const response = await this.client.post("/gcode-harvest/start", payload);
-    return response.data as { operationId: string };
+    return response.data as { queueItemId: string };
   }
 
   async startBulkHarvest(
@@ -838,7 +858,7 @@ export class ApiClient {
     return {
       operationIds: results
         .filter((r) => r !== null)
-        .map((r) => (r as { operationId: string }).operationId),
+        .map((r) => (r as { queueItemId: string }).queueItemId),
     };
   }
 
@@ -866,6 +886,29 @@ export class ApiClient {
       `/gcode-harvest/operations/${id}`
     );
     return response.data;
+  }
+
+  async waitForHarvestOperationCreated(
+    printerId: string,
+    timeoutMs: number = 10000
+  ): Promise<string | null> {
+    const startTime = Date.now();
+    const pollInterval = 200; // Poll every 200ms
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        const operations = await this.getHarvestOperations(printerId, "Processing");
+        if (operations.length > 0) {
+          return operations[0].id;
+        }
+      } catch (err) {
+        // Continue polling even if endpoint errors
+        console.debug("Polling for harvest operation creation...");
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    }
+
+    return null;
   }
 
   async getActiveHarvestForPrinter(

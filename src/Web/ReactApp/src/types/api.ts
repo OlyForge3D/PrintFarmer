@@ -88,6 +88,7 @@ export interface Printer {
   bedTemp?: number;
   hotendTarget?: number;
   bedTarget?: number;
+  homedAxes?: string;
   backend: PrinterBackend;
   apiKey?: string;
   originalServerUrl?: string;
@@ -104,6 +105,23 @@ export interface PrinterCameraUrls {
   name: string;
   cameraStreamUrl?: string;
   cameraSnapshotUrl?: string;
+}
+
+export interface PrinterBackendCapabilitiesDto {
+  printerId: string;
+  printerName: string;
+  backend: PrinterBackend;
+  supportsCamera: boolean;
+  supportsFileDownload: boolean;
+  supportsFileList: boolean;
+  supportsFileUpload: boolean;
+  supportsStartPrint: boolean;
+  supportsControlOperations: boolean;
+  supportsFileMetadata: boolean;
+  supportsMovement: boolean;
+  supportsTemperatureControl: boolean;
+  supportsPrinterInformation: boolean;
+  supportsHistory: boolean;
 }
 
 export interface PrinterFast {
@@ -123,6 +141,18 @@ export interface PrinterFast {
   frontendPort?: number;
   inMaintenance?: boolean;
   isEnabled?: boolean;
+  // Camera URLs from database (discovered during printer registration)
+  cameraStreamUrl?: string;
+  cameraSnapshotUrl?: string;
+  // Temperature data (may be populated from real-time status)
+  hotendTemp?: number;
+  bedTemp?: number;
+  hotendTarget?: number;
+  bedTarget?: number;
+  // Position data
+  x?: number;
+  y?: number;
+  z?: number;
 }
 
 export enum PrinterBackend {

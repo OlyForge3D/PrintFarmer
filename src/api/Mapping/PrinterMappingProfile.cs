@@ -11,16 +11,17 @@ namespace Farm.Web.Api.Mapping
         public PrinterMappingProfile()
         {
             // Moonraker service models -> Shared DTOs
+            // Note: Both source and destination use Unix timestamps (double), so no conversion needed
             _ = CreateMap<HistoryJob, SharedModels.HistoryJob>()
                 .ForMember(dest => dest.JobId, opt => opt.MapFrom(src => src.JobId))
                 .ForMember(dest => dest.Exists, opt => opt.MapFrom(src => src.Exists))
                 .ForMember(dest => dest.Filename, opt => opt.MapFrom(src => src.Filename))
                 .ForMember(dest => dest.User, opt => opt.MapFrom(src => src.User))
                 .ForMember(dest => dest.Metadata, opt => opt.MapFrom(src => src.Metadata))
-                .ForMember(dest => dest.PrintDuration, opt => opt.MapFrom(src => src.GetPrintDuration()))
-                .ForMember(dest => dest.TotalDuration, opt => opt.MapFrom(src => src.GetTotalDuration()))
-                .ForMember(dest => dest.StartTime, opt => opt.MapFrom(src => src.GetStartTimeAsDateTime()))
-                .ForMember(dest => dest.EndTime, opt => opt.MapFrom(src => src.GetEndTimeAsDateTime()))
+                .ForMember(dest => dest.PrintDuration, opt => opt.MapFrom(src => src.PrintDuration))
+                .ForMember(dest => dest.TotalDuration, opt => opt.MapFrom(src => src.TotalDuration))
+                .ForMember(dest => dest.StartTime, opt => opt.MapFrom(src => src.StartTime))
+                .ForMember(dest => dest.EndTime, opt => opt.MapFrom(src => src.EndTime))
                 .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status))
                 .ForMember(dest => dest.FilamentUsed, opt => opt.MapFrom(src => src.FilamentUsed))
                 .ForMember(dest => dest.AuxiliaryData, opt => opt.MapFrom(src => src.AuxiliaryData));

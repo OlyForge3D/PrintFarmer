@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Interfaces;
+﻿using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services;
 

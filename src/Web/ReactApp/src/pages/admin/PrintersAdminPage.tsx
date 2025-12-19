@@ -183,6 +183,7 @@ export function PrintersAdminPage() {
   };
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const fileInputId = React.useId();
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
@@ -192,34 +193,43 @@ export function PrintersAdminPage() {
     try {
       const f = file || (fileInputRef.current?.files ? fileInputRef.current.files[0] : undefined);
       if (!f) return;
-      
-      // Send file directly to backend - it handles CSV/JSON parsing
-      const formData = new FormData();
-      formData.append('file', f);
-      formData.append('duplicateHandling', duplicateHandling);
-      
-      const response = await fetch(`${getApiBaseUrl()}/printers/import`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: formData
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.message || `Import failed: ${response.statusText}`);
+
+      const text = await f.text();
+      let parsed: unknown = [];
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        console.error('Failed to parse import file', parseErr);
+        toast.error('Invalid file format. Expected JSON array.');
+        return;
       }
-      
-      const result = await response.json();
-      const resultsArray = Array.isArray(result?.results) ? result.results : [];
-      
-      // Map results for display
-      setImportResults(resultsArray);
-      setPreviewItems(null);
-      
-      // Refresh printers table so imported printers can be edited
-      await refetch();
-      
-      toast.success(`Import complete: ${resultsArray.length} items processed`);
+
+      if (!Array.isArray(parsed)) {
+        toast.error('Import file must contain a JSON array');
+        return;
+      }
+
+      const mapped: PreviewItem[] = parsed.map((item, idx) => {
+        const rec = (item ?? {}) as Record<string, unknown>;
+        return {
+          __index: idx,
+          raw: rec,
+          name: typeof rec.name === 'string' ? rec.name : '',
+          serverUrl: typeof rec.serverUrl === 'string' ? rec.serverUrl : '',
+          backend: typeof rec.backend === 'number' ? rec.backend : 1,
+          apiKey: typeof rec.apiKey === 'string' ? rec.apiKey : undefined,
+          notes: typeof rec.notes === 'string' ? rec.notes : undefined,
+          manufacturerId: typeof rec.manufacturerId === 'string' ? rec.manufacturerId : undefined,
+          modelId: typeof rec.modelId === 'string' ? rec.modelId : undefined,
+          manufacturerName: typeof rec.manufacturerName === 'string' ? rec.manufacturerName : undefined,
+          modelName: typeof rec.modelName === 'string' ? rec.modelName : undefined,
+          valid: Boolean(rec.name) && Boolean(rec.serverUrl)
+        };
+      });
+
+      setPreviewItems(mapped);
+      setImportResults(null);
+      setImporting(false);
     } catch (err) {
       console.error('Import failed', err);
       toast.error(err instanceof Error ? err.message : 'Failed to import file');
@@ -267,7 +277,9 @@ export function PrintersAdminPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       
       // Also refetch for immediate local update
-      await refetch();
+      if (refetch) {
+        await refetch();
+      }
     } catch (err) {
       console.error('Batch import failed', err);
       toast.error('Import encountered errors');
@@ -498,7 +510,14 @@ export function PrintersAdminPage() {
               ) : 'Export printers'}
             </Button>
             <Button variant="primary" aria-label="Open file picker to import printers" onClick={handleImportClick}>Import printers</Button>
-            <FileUpload aria-label="Import printers CSV or JSON file" ref={fileInputRef} accept=".csv,.json,text/csv,application/json" onChange={(files) => handleFile(files?.[0])} className="hidden" />
+            <FileUpload
+              id={fileInputId}
+              label="Import printers JSON file"
+              ref={fileInputRef}
+              accept=".csv,.json,text/csv,application/json"
+              onChange={(files) => handleFile(files?.[0])}
+              className=""
+            />
           </div>
 
           {showExportOptions && (
@@ -779,11 +798,18 @@ export function PrintersAdminPage() {
                                       <span className="text-pf-text-secondary">Pending</span>
                                     </div>
                                   )}
-                                  {importResult.status === 'Imported' && <span className="text-pf-success-text font-semibold">Imported</span>}
+                                  {importResult.status === 'Imported' && (
+                                    <div className="flex flex-col items-start gap-1">
+                                      <span className="text-pf-success-text font-semibold">Imported</span>
+                                      {importResult.id && (
+                                        <a href={`/printers/${importResult.id}`} className="text-pf-accent underline text-xs">Open</a>
+                                      )}
+                                    </div>
+                                  )}
                                   {importResult.status === 'Skipped' && <span className="text-pf-warning-text font-semibold">Skipped</span>}
                                   {importResult.status === 'Failed' && (
                                     <div className="flex flex-col gap-1">
-                                      <span className="text-pf-error-text font-semibold">Failed</span>
+                                      <span className="text-pf-error-text font-semibold">Failed{importResult.reason ? ':' : ''}</span>
                                       {importResult.reason && <span className="text-pf-error-text text-xs">{importResult.reason}</span>}
                                     </div>
                                   )}
@@ -801,7 +827,7 @@ export function PrintersAdminPage() {
                                   onClick={() => handleRetryRow(item)}
                                   aria-label={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Retry (only available for failed imports)'}
                                 >
-                                  {retryingIndex === item.__index ? '↻' : '↻'}
+                                  {retryingIndex === item.__index ? 'Retrying...' : 'Retry'}
                                 </Button>
                               </Tooltip>
                             </td>
@@ -824,7 +850,7 @@ export function PrintersAdminPage() {
                   <Button size="sm" variant="primary" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport}>{importing ? 'Importing...' : 'Confirm Import'}</Button>
                   <Button size="sm" variant="secondary" disabled={importing} aria-label="Return to main printers table to see imported printers" onClick={() => { setPreviewItems(null); setImportResults(null); }}>{importing ? 'Importing...' : 'Close'}</Button>
                   <Tooltip content={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'}>
-                    <Button size="sm" variant="secondary" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" onClick={handleRetryAllFailed}>Retry All</Button>
+                    <Button size="sm" variant="secondary" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" onClick={handleRetryAllFailed}>Retry all failed</Button>
                   </Tooltip>
                 </div>
               </div>

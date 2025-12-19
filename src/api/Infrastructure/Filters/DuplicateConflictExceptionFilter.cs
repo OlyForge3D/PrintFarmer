@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Infrastructure.Exceptions;
+﻿using Farm.Infrastructure.Exceptions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 

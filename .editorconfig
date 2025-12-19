@@ -6,6 +6,7 @@ dotnet_diagnostic.SA1402.severity = none
 # Suppress primary constructor and namespace/file mismatch issues globally
 dotnet_diagnostic.IDE0290.severity = none
 dotnet_diagnostic.SA1400.severity = none
+dotnet_diagnostic.CA1510.severity = none
 # EditorConfig is awesome: https://EditorConfig.org
 
 # top-most EditorConfig file

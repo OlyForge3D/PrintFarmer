@@ -55,6 +55,31 @@ log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" >&2; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
+# Get the host IP for Docker extra_hosts configuration
+get_host_ip() {
+    # Try to get primary host IP address
+    # First try hostname -I (Linux)
+    if command -v hostname &>/dev/null; then
+        local ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+        if [[ -n "$ip" ]]; then
+            echo "$ip"
+            return 0
+        fi
+    fi
+    # Fallback to ifconfig (macOS)
+    if command -v ifconfig &>/dev/null; then
+        local ip=$(ifconfig 2>/dev/null | grep -E "inet " | grep -v "127.0.0.1" | head -1 | awk '{print $2}' || echo "")
+        if [[ -n "$ip" ]]; then
+            echo "$ip"
+            return 0
+        fi
+    fi
+    # Last resort: use localhost for loopback
+    echo "127.0.0.1"
+}
+
+HOST_IP="${HOST_IP:-$(get_host_ip)}"
+
 show_usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
@@ -710,9 +735,10 @@ generate_compose() {
     if [[ "$arch" == "microservices" ]]; then
         log_info "Applying microservices adjustments: removing frontend host ports (keep bridge network)"
 
-    python3 - "$compose_file" <<'PY'
+    python3 - "$compose_file" "$HOST_IP" <<'PY'
 import sys
 path = sys.argv[1]
+host_ip = sys.argv[2]
 txt = open(path,'r').read().splitlines()
 
 def find_block(lines, name):
@@ -766,13 +792,13 @@ if start is not None:
         for idx in range(1, len(block)):
             if block[idx].lstrip().startswith('volumes:') or block[idx].lstrip().startswith('ports:') or block[idx].lstrip().startswith('environment:'):
                 block.insert(idx, '    extra_hosts:')
-                block.insert(idx+1, '      - "host.docker.internal:host-gateway"')
+                block.insert(idx+1, f'      - "host.docker.internal:{host_ip}"')
                 inserted = True
                 break
         if not inserted:
             # append at end of block (before next service)
             block.append('    extra_hosts:')
-            block.append('      - "host.docker.internal:host-gateway"')
+            block.append(f'      - "host.docker.internal:{host_ip}"')
     txt = txt[:start] + block + txt[end:]
 
 open(path,'w').write('\n'.join(txt) + '\n')

@@ -79,11 +79,12 @@ public enum MotionType
 /// <param name="ApiKey">API key / token for the backend if required.</param>
 /// <param name="OriginalServerUrl">Original user-entered URL prior to normalization.</param>
 /// <param name="IpAddress">Resolved IP address when known.</param>
+/// <param name="BackendUrl">Calculated backend URL with port (7125 for Moonraker, etc).</param>
+/// <param name="FrontendUrl">Calculated frontend URL (typically port 80 for web UI).</param>
 /// <param name="SpoolInfo">Active spool information (Moonraker + Spoolman integration).</param>
-public partial record PrinterDto(
+public record PrinterDto(
     Guid Id,
     string Name,
-    string ServerUrl,
     string? Notes,
     bool IsOnline,
     string? State,
@@ -105,27 +106,19 @@ public partial record PrinterDto(
     string? ApiKey = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null,
+    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint), 8080 (SDCP). See PrinterBackendHelpers.GetDefaultPort()
+    int? FrontendPort = null,
     PrinterSpoolInfoDto? SpoolInfo = null,
-    int? BackendPort = null,
-    int? FrontendPort = null);
-
-// Non-breaking typed accessors for URL-like fields (ignored in JSON)
-public partial record PrinterDto
-{
-    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
-    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out Uri? u) ? u : null);
-    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out Uri? u) ? u : null);
-    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
-}
+    string? BackendUrl = null,
+    string? FrontendUrl = null);
 
 // Basic printer info without live status (for fast loading)
 /// <summary>
 /// Basic printer information without live status values; optimized for list views / dropdowns.
 /// </summary>
-public partial record PrinterBasicDto(
+public record PrinterBasicDto(
     Guid Id,
     string Name,
-    string ServerUrl,
     string? Notes,
     string? ManufacturerName = null,
     string? ModelName = null,
@@ -133,38 +126,29 @@ public partial record PrinterBasicDto(
     string? ApiKey = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null,
-    int? BackendPort = null,
-    int? FrontendPort = null);
-
-public partial record PrinterBasicDto
-{
-    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
-}
+    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint), 8080 (SDCP). See PrinterBackendHelpers.GetDefaultPort()
+    int? FrontendPort = null,
+    string? BackendUrl = null,
+    string? FrontendUrl = null);
 
 // Camera URLs for all printers (static configuration without external API calls)
 /// <summary>
 /// Lightweight camera URL information for printers without external API overhead.
 /// </summary>
-public partial record PrinterCameraUrlsDto(
+public record PrinterCameraUrlsDto(
     Guid Id,
     string Name,
     string? CameraStreamUrl = null,
     string? CameraSnapshotUrl = null);
 
-public partial record PrinterCameraUrlsDto
-{
-    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out Uri? u) ? u : null);
-    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
-}
-
-// Fast printer info optimized for performance - excludes camera URLs and real-time status
+// Fast printer info optimized for performance - includes camera URLs from database (discovered at registration)
 /// <summary>
-/// Fast printer information for dashboard loading - excludes camera URLs which are available via separate endpoint.
+/// Fast printer information for dashboard loading - includes camera URLs discovered during printer registration.
+/// Camera URLs are stored in the database and returned directly without additional API calls.
 /// </summary>
-public partial record PrinterFastDto(
+public record PrinterFastDto(
     Guid Id,
     string Name,
-    string ServerUrl,
     string? Notes,
     bool IsOnline,
     string? State,
@@ -174,21 +158,59 @@ public partial record PrinterFastDto(
     string? ApiKey = null,
     string? OriginalServerUrl = null,
     string? IpAddress = null,
-    int? BackendPort = null,
+    int BackendPort = 80,
     int? FrontendPort = null,
     bool InMaintenance = false,
-    bool IsEnabled = true);
+    bool IsEnabled = true,
+    string? CameraStreamUrl = null,
+    string? CameraSnapshotUrl = null,
+    string? BackendUrl = null,
+    string? FrontendUrl = null);
 
-public partial record PrinterFastDto
-{
-    [JsonIgnore] public Uri? ServerUri => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
-}
+/// Complete printer DTO combining static config with live real-time status from SignalR.
+/// This is the primary response from GET /api/printers to avoid client-side merge logic.
+/// Real-time status is merged server-side from the in-memory SignalR cache.
+/// </summary>
+public record CompletePrinterDto(
+    // Static configuration from database
+    Guid Id,
+    string Name,
+    string? Notes,
+    string? ManufacturerName,
+    string? ModelName,
+    PrinterBackend Backend,
+    string? ApiKey,
+    string? OriginalServerUrl,
+    string? IpAddress,
+    int BackendPort,
+    int? FrontendPort,
+    bool InMaintenance,
+    bool IsEnabled,
+    
+    // Live status from SignalR cache (merged at API response time)
+    bool IsOnline,
+    string? State,
+    double? Progress,
+    string? JobName,
+    string? ThumbnailUrl,
+    string? CameraStreamUrl,
+    double? X,
+    double? Y,
+    double? Z,
+    double? HotendTemp,
+    double? BedTemp,
+    double? HotendTarget,
+    double? BedTarget,
+    string? HomedAxes,
+    PrinterSpoolInfoDto? SpoolInfo,
+    string? BackendUrl = null,
+    string? FrontendUrl = null);
 
 // Live status info for a specific printer
 /// <summary>
 /// Lightweight real-time status snapshot for SignalR / polling scenarios.
 /// </summary>
-public partial record PrinterStatusDto(
+public record PrinterStatusDto(
     Guid Id,
     bool IsOnline,
     string? State,
@@ -205,13 +227,6 @@ public partial record PrinterStatusDto(
     double? HotendTarget = null,
     double? BedTarget = null,
     PrinterSpoolInfoDto? SpoolInfo = null);
-
-public partial record PrinterStatusDto
-{
-    [JsonIgnore] public Uri? ThumbnailUri => string.IsNullOrWhiteSpace(ThumbnailUrl) ? null : (Uri.TryCreate(ThumbnailUrl, UriKind.Absolute, out Uri? u) ? u : null);
-    [JsonIgnore] public Uri? CameraStreamUri => string.IsNullOrWhiteSpace(CameraStreamUrl) ? null : (Uri.TryCreate(CameraStreamUrl, UriKind.Absolute, out Uri? u) ? u : null);
-    [JsonIgnore] public Uri? CameraSnapshotUri => string.IsNullOrWhiteSpace(CameraSnapshotUrl) ? null : (Uri.TryCreate(CameraSnapshotUrl, UriKind.Absolute, out Uri? u) ? u : null);
-}
 
 /// <summary>
 /// File information including G-code file name and thumbnail URL.
@@ -318,6 +333,25 @@ public class CreatePrinterDto : PrinterInfoDto
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
+    /// Hardware specification fields - populated from exported printer data or discovery
+    /// </summary>
+    public double? MaxBuildVolumeX { get; set; }
+    public double? MaxBuildVolumeY { get; set; }
+    public double? MaxBuildVolumeZ { get; set; }
+    public bool HasHeatedBed { get; set; } = true;
+    public bool HasEnclosure { get; set; } = false;
+    public bool MultiMaterial { get; set; } = false;
+    public bool SupportsAutoLeveling { get; set; } = false;
+    public double? NozzleDiameter { get; set; }
+    public string[]? SupportedMaterials { get; set; }
+    public int? MinHotendTemp { get; set; }
+    public int? MaxHotendTemp { get; set; }
+    public int? MinBedTemp { get; set; }
+    public int? MaxBedTemp { get; set; }
+    public string? CurrentMaterial { get; set; }
+    public int? CurrentSpoolId { get; set; }
+
+    /// <summary>
     /// Create from discovered printer info with optional catalog metadata.
     /// </summary>
     public static CreatePrinterDto FromDiscovered(
@@ -404,15 +438,14 @@ public record MoveRequest(double? X, double? Y, double? Z, double? F);
 /// Configuration settings for integrating with an external Spoolman instance.
 /// </summary>
 // Made BaseUrl nullable so that an empty JSON object posted to probe endpoint doesn't trigger automatic 400 from [ApiController].
-public partial record SpoolmanConfigDto(string? BaseUrl);
-public partial record SpoolmanConfigDto
+public record SpoolmanConfigDto(string? BaseUrl)
 {
     [JsonIgnore] public Uri? BaseUri => string.IsNullOrWhiteSpace(BaseUrl) ? null : (Uri.TryCreate(BaseUrl, UriKind.Absolute, out Uri? u) ? u : null);
 }
 /// <summary>
 /// Represents a single filament spool entity retrieved from Spoolman.
 /// </summary>
-public partial record SpoolmanSpoolDto(
+public record SpoolmanSpoolDto(
     int Id,
     string Name,
     string Material,
@@ -432,9 +465,7 @@ public partial record SpoolmanSpoolDto(
     double? UsedLengthMm = null,
     string? Location = null,
     string? LotNumber = null,
-    bool? Archived = null);
-
-public partial record SpoolmanSpoolDto
+    bool? Archived = null)
 {
     public double? UsedPercent
     {
@@ -1375,6 +1406,43 @@ public class GcodeHarvestResultDto
         Errors = errors;
     }
 }
+
+// G-code Harvest Queue DTOs
+/// <summary>
+/// Status of a harvest operation in the queue.
+/// </summary>
+public enum GcodeHarvestQueueItemStatus
+{
+    Pending = 0,      // Waiting to be processed
+    Processing = 1,   // Currently being processed
+    Completed = 2,    // Successfully completed
+    Failed = 3,       // Failed during processing
+    Cancelled = 4     // Cancelled by user
+}
+
+/// <summary>
+/// DTO representing a queued harvest operation (for API responses).
+/// </summary>
+public record GcodeHarvestQueueItemDto(
+    Guid Id,
+    Guid PrinterId,
+    string PrinterName,
+    DateTime QueuedAt,
+    DateTime? ProcessingStartedAt = null,
+    DateTime? CompletedAt = null,
+    GcodeHarvestQueueItemStatus Status = GcodeHarvestQueueItemStatus.Pending,
+    int Priority = 0,
+    string? ErrorMessage = null,
+    int? FilesFound = null,
+    int? FilesAdded = null);
+
+/// <summary>
+/// Response when a harvest operation is queued.
+/// </summary>
+public record QueueHarvestResponseDto(
+    Guid QueueItemId,
+    string Message,
+    GcodeHarvestQueueItemStatus Status);
 
 // G-code Metadata Extraction
 /// <summary>

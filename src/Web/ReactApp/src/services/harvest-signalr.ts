@@ -25,8 +25,17 @@ export type HarvestOperationProgress = {
   filesSkipped: number;
   filesErrored: number;
 };
+export type HarvestOperationCompletedEvent = {
+  operationId: string;
+  status: string;
+  filesAdded: number;
+  filesSkipped: number;
+  filesErrored: number;
+  completedAt: string;
+};
 type HarvestFileProgressCallback = (progress: HarvestFileProgress) => void;
 type HarvestOperationProgressCallback = (progress: HarvestOperationProgress) => void;
+type HarvestOperationCompletedCallback = (evt: HarvestOperationCompletedEvent) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
 type ConnectionStateCallback = (connected: boolean) => void;
 // HarvestFileDiscovered event type
@@ -64,6 +73,7 @@ export class SignalRService {
   private connection: HubConnection | null = null;
   private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
   private harvestOperationProgressCallbacks: HarvestOperationProgressCallback[] = [];
+  private harvestOperationCompletedCallbacks: HarvestOperationCompletedCallback[] = [];
   private harvestDiscoveryRestartedCallbacks: HarvestDiscoveryRestartedCallback[] = [];
   private harvestDiscoveryCompleteCallbacks: HarvestDiscoveryCompleteCallback[] = [];
   private reconnectAttempts = 0;
@@ -165,6 +175,17 @@ export class SignalRService {
       const index = this.harvestOperationProgressCallbacks.indexOf(callback);
       if (index > -1) {
         this.harvestOperationProgressCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  // ============ Harvest Operation Completed Event Subscription ============
+  onHarvestOperationCompleted(callback: HarvestOperationCompletedCallback): () => void {
+    this.harvestOperationCompletedCallbacks.push(callback);
+    return () => {
+      const index = this.harvestOperationCompletedCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestOperationCompletedCallbacks.splice(index, 1);
       }
     };
   }
@@ -308,6 +329,21 @@ export class SignalRService {
           callback(data);
         } catch (error) {
           console.error('Error in harvest discovery complete callback:', error);
+        }
+      });
+    });
+
+    // NEW: Operation completed event (from HarvestWorkerService)
+    this.connection.on('harvestoperationcompleted', (data: HarvestOperationCompletedEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Harvest operation completed:', data.operationId, 'Added:', data.filesAdded, 'Skipped:', data.filesSkipped, 'Errored:', data.filesErrored);
+      }
+      // Notify all operation completed callbacks
+      this.harvestOperationCompletedCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in harvest operation completed callback:', error);
         }
       });
     });
@@ -541,6 +577,10 @@ export class SignalRService {
     this.harvestUpdateCallbacks = [];
     this.harvestFileProgressCallbacks = [];
     this.harvestFileDiscoveredCallbacks = [];
+    this.harvestOperationProgressCallbacks = [];
+    this.harvestOperationCompletedCallbacks = [];
+    this.harvestDiscoveryRestartedCallbacks = [];
+    this.harvestDiscoveryCompleteCallbacks = [];
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
 

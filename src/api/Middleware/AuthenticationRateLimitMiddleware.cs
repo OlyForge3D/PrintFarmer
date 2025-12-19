@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.RateLimiting;
+﻿using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;

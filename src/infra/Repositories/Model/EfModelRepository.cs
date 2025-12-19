@@ -116,14 +116,23 @@ namespace Farm.Infrastructure.Repositories.Model
 
         public async Task<IReadOnlyList<Model3D>> SearchAsync(string? query, Guid[]? tagIds, string sortBy, bool descending, int skip, int take, CancellationToken ct)
         {
-            IQueryable<Model3D> queryable = _db.Models3D.Where(m => m.IsValid).AsQueryable();
+            // Load all valid models with includes first (required for SQLite compatibility with case-insensitive Contains)
+            List<Model3D> allModels = await _db.Models3D
+                .Where(m => m.IsValid)
+                .Include(m => m.TagMappings)
+                .ThenInclude(tm => tm.Tag)
+                .ToListAsync(ct);
 
-            // Text search
+            // Apply client-side filtering for text search and tags
+            var queryable = allModels.AsEnumerable();
+
+            // Text search (case-insensitive)
             if (!string.IsNullOrWhiteSpace(query))
             {
-                string searchTerm = query.ToLower();
-                queryable = queryable.Where(m => m.DisplayName.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase) ||
-                                                (m.Description != null && m.Description.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase)));
+                string searchTerm = query.ToLowerInvariant();
+                queryable = queryable.Where(m => 
+                    m.DisplayName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    (m.Description != null && m.Description.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)));
             }
 
             // Tag filtering (AND logic - must have all tags)
@@ -143,12 +152,10 @@ namespace Farm.Infrastructure.Repositories.Model
                 _ => descending ? queryable.OrderByDescending(m => m.UploadedAt) : queryable.OrderBy(m => m.UploadedAt)
             };
 
-            return await queryable
+            return queryable
                 .Skip(skip)
                 .Take(take)
-                .Include(m => m.TagMappings)
-                .ThenInclude(tm => tm.Tag)
-                .ToListAsync(ct);
+                .ToList();
         }
 
         public async Task RemoveAsync(Model3D model, CancellationToken ct)

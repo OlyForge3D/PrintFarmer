@@ -171,12 +171,15 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
         {breadcrumbs.map((crumb, idx) => (
           <React.Fragment key={crumb.path}>
             {idx > 0 && <ChevronRightIcon className="w-4 h-4 flex-shrink-0" />}
-            <button
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
               onClick={() => handleNavigate(crumb.path)}
-              className="text-pf-link hover:text-pf-link-hover font-medium whitespace-nowrap"
+              className="text-pf-link hover:text-pf-link-hover font-medium whitespace-nowrap !p-0"
             >
               {crumb.name}
-            </button>
+            </Button>
           </React.Fragment>
         ))}
       </div>
@@ -283,13 +286,17 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
                   </td>
                   <td className="px-4 py-3 text-right flex justify-end gap-2">
                     {onFileSelect && (
-                      <button
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
                         onClick={() => onFileSelect(file)}
-                        className="text-pf-link hover:text-pf-link-hover"
+                        className="text-pf-link hover:text-pf-link-hover !p-0"
                         title="Select"
+                        aria-label={`Select ${file.name}`}
                       >
                         <DocumentIcon className="w-5 h-5" />
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>

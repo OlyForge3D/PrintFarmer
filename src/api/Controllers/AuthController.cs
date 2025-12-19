@@ -2,8 +2,8 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordRequest;

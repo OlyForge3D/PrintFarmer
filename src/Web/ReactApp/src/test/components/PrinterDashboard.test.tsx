@@ -6,6 +6,7 @@ import { TestRouter } from '@/test/utils/TestRouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PrinterDashboard } from '@/components/PrinterDashboard';
 import type { Printer } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
 
 // Mock the API hooks
 vi.mock('@/hooks/useApi', async () => ({

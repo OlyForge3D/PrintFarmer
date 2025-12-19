@@ -24,7 +24,16 @@ type PrinterImportProgressCallback = (progress: unknown) => void;
 
 export class PrinterSignalRService {
   // Keep a local cache of last statuses for debugging
-  private lastStatuses: Map<string, unknown> = new Map();
+  private lastStatuses: Map<string, PrinterStatusUpdate> = new Map();
+
+  public getLastStatus(printerId: string): PrinterStatusUpdate | undefined {
+    return this.lastStatuses.get(printerId);
+  }
+
+  public getLastStatuses(): Map<string, PrinterStatusUpdate> {
+    // Return a defensive copy so callers can't mutate internal state.
+    return new Map(this.lastStatuses);
+  }
 
   private buildConnection(): void {
     const printersSignalrUrl = getHubUrl("/hubs/printers");
@@ -119,7 +128,7 @@ export class PrinterSignalRService {
       }
       // Cache the last status (best-effort)
       try {
-        this.lastStatuses.set(status.id, status as unknown);
+        this.lastStatuses.set(status.id, status);
       } catch {
         // ignore cache failures
       }

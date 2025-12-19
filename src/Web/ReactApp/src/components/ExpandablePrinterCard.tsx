@@ -112,12 +112,9 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
 
   // Camera URL logic: prioritize real-time status, fallback to printer config
   const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
-  // Only support cameras for Moonraker and OctoPrint backends
-  const supportsCameras = printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint;
-  // Only enable camera button if snapshot URL is available
-  const hasCameraUrls = supportsCameras && (
-    typeof cameraSnapshotUrl === 'string' && cameraSnapshotUrl.trim().length > 0
-  );
+  const cameraStreamUrl = status?.cameraStreamUrl ?? printer.cameraStreamUrl;
+  // Check if printer has camera URLs - the presence of URLs is the source of truth
+  const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
   // Update last known values when new data is available
   // useLayoutEffect runs synchronously after DOM mutations but before browser paint
@@ -572,28 +569,26 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   {/* Camera mode toggle */}
                   {hasCameraUrls && printer.cameraStreamUrl && (
                     <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
-                      <button
+                      <Button
+                        type="button"
                         onClick={() => setCameraMode('snapshot')}
                         title="Snapshot"
-                        className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                          cameraMode === 'snapshot'
-                            ? 'bg-pf-primary text-pf-text-primary'
-                            : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                        }`}
+                        variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
+                        size="sm"
+                        className="flex-1 p-2 flex items-center justify-center"
                       >
                         <Image className="h-4 w-4" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        type="button"
                         onClick={() => setCameraMode('stream')}
                         title="Stream"
-                        className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                          cameraMode === 'stream'
-                            ? 'bg-pf-primary text-pf-text-primary'
-                            : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                        }`}
+                        variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
+                        size="sm"
+                        className="flex-1 p-2 flex items-center justify-center"
                       >
                         <Video className="h-4 w-4" />
-                      </button>
+                      </Button>
                     </div>
                   )}
                   
@@ -696,30 +691,28 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               <div className="mt-2 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
                 {/* Camera mode toggle */}
                 {hasCameraUrls && printer.cameraStreamUrl && (
-                  <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
-                    <button
-                      onClick={() => setCameraMode('snapshot')}
-                      title="Snapshot"
-                      className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                        cameraMode === 'snapshot'
-                          ? 'bg-pf-primary text-pf-text-primary'
-                          : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                      }`}
-                    >
-                      <Image className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setCameraMode('stream')}
-                      title="Stream"
-                      className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                        cameraMode === 'stream'
-                          ? 'bg-pf-primary text-pf-text-primary'
-                          : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                      }`}
-                    >
-                      <Video className="h-4 w-4" />
-                    </button>
-                  </div>
+                    <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
+                      <Button
+                        type="button"
+                        onClick={() => setCameraMode('snapshot')}
+                        title="Snapshot"
+                        variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
+                        size="sm"
+                        className="flex-1 p-2 flex items-center justify-center"
+                      >
+                        <Image className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => setCameraMode('stream')}
+                        title="Stream"
+                        variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
+                        size="sm"
+                        className="flex-1 p-2 flex items-center justify-center"
+                      >
+                        <Video className="h-4 w-4" />
+                      </Button>
+                    </div>
                 )}
                 
                 {/* Camera display */}

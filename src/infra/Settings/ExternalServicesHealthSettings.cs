@@ -16,7 +16,7 @@ namespace Farm.Infrastructure.Settings
 
         [JsonPropertyName("printersToCheck")]
         [SettingDisplay(Name = "Printers To Check", Description = "Number of registered printers to probe during external services health check. -1 = all, 0 = none, >0 = number to check.", InputType = SettingInputType.Number, MinValue = -1, MaxValue = 100, Order = 20)]
-        public int PrintersToCheck { get; set; } = -1; // -1 = all printers, 0 = none, >0 = number to check
+        public int PrintersToCheck { get; set; } = 0; // 0 = none (default), -1 = all printers, >0 = number to check
 
         public void Validate()
         {

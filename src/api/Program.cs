@@ -16,9 +16,9 @@ using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Web.Api;
 using Farm.Web.Api.Health;
-using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Infrastructure.Caching;
@@ -384,6 +384,9 @@ builder.Services.Configure<Farm.Web.Api.Services.Workers.JobDispatchRetrySetting
 builder.Services.Configure<Farm.Web.Api.Services.Workers.CircuitBreakerSettings>(builder.Configuration.GetSection("CircuitBreaker"));
 builder.Services.AddSingleton<Farm.Web.Api.Services.Workers.IWorkerCircuitBreakerService, Farm.Web.Api.Services.Workers.WorkerCircuitBreakerService>();
 builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.JobTimeoutScannerHostedService>();
+// Stale worker cleanup service
+builder.Services.Configure<Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings>(builder.Configuration.GetSection(Farm.Web.Api.Services.Workers.StaleWorkerCleanupSettings.SectionName));
+builder.Services.AddHostedService<Farm.Web.Api.Services.Workers.StaleWorkerCleanupHostedService>();
 
 // Register asset service for OrcaSlicer printer images and bed textures
 builder.Services.AddSingleton<IAssetService, AssetService>();
@@ -655,7 +658,7 @@ app.MapControllers();
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 // Slicer registry events hub (worker registration, heartbeat, deregistration)
-app.MapHub<SlicerHub>("/hubs/slicer-registry");
+// app.MapHub<SlicerHub>("/hubs/slicer-registry");  // TODO: SlicerHub deleted, needs refactoring
 // Slicer progress hub for job processing progress events
 app.MapHub<SlicerProgressHub>("/hubs/slicers");
 
@@ -704,7 +707,6 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 // Network discovery settings now available via UnifiedSettingsController:
 // GET /api/settings/network-discovery  
 // POST /api/settings/network-discovery
-// (Legacy endpoints removed - use unified controller instead)
 app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettings body) =>
 {
     NetworkValidationResult validation = NetworkValidationService.ValidateSettings(body);
@@ -720,7 +722,6 @@ app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "Req
 // SignalR settings now available via UnifiedSettingsController:
 // GET /api/settings/signalr
 // POST /api/settings/signalr
-// (Legacy endpoints removed - use unified controller instead)
 app.MapPost("/api/network-discovery/auto-detect", [Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
 app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "RequireAdmin")] ([FromServices] ISettingsService settingsService) =>
 {
@@ -736,24 +737,6 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 // Basic health endpoint for UI ping and tests
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
-app.MapGet("/diagnostics/temp-root", ([FromServices] IWebHostEnvironment env, [FromServices] ITempPathProvider provider) =>
-    env.IsProduction()
-        ? Results.StatusCode(StatusCodes.Status404NotFound)
-        : Results.Ok(new { tempRoot = provider.GetTempRoot() })
-);
-// Combined diagnostics (non-sensitive) for UI consumption
-app.MapGet("/api/diagnostics/summary", ([FromServices] ISpoolmanService spoolmanSvc, [FromServices] ISettingsService settingsService) =>
-{
-    SpoolmanConfigDto? spoolCfg = spoolmanSvc.GetConfig();
-    NetworkDiscoverySettings discovery = settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
-    return Results.Ok(new
-    {
-        spoolman = new { configured = spoolCfg is not null && !string.IsNullOrWhiteSpace(spoolCfg.BaseUrl), baseUrl = spoolCfg?.BaseUrl },
-        discovery
-    });
-});
-// Compatibility alias sometimes requested by clients/proxies expecting under /api prefix
-app.MapGet("/api/healthz", () => Results.Ok(new { status = "ok" }));
 
 // Final log just before entering host run loop (diagnostic)
 app.Logger.LogInformation("[Startup] Reached app.Run() - binding to configured URLs");
@@ -794,7 +777,6 @@ app.MapGet("/api/debug/db-info", async (AppDbContext db,
         [nameof(db.SpoolmanConfigs)] = await db.SpoolmanConfigs.CountAsync(ct),
         [nameof(db.GcodeFiles)] = await db.GcodeFiles.CountAsync(ct),
         [nameof(db.PrintJobs)] = await db.PrintJobs.CountAsync(ct),
-        [nameof(db.PrinterCapabilities)] = await db.PrinterCapabilities.CountAsync(ct),
         [nameof(db.GcodeHarvestOperations)] = await db.GcodeHarvestOperations.CountAsync(ct),
         [nameof(db.HarvestDiscoveredFiles)] = await db.HarvestDiscoveredFiles.CountAsync(ct),
         [nameof(db.Models3D)] = await db.Models3D.CountAsync(ct),
@@ -951,7 +933,7 @@ catch (Exception ex)
 try
 {
     await using AsyncServiceScope storageScope = app.Services.CreateAsyncScope();
-    var storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Web.Api.Services.StorageManagement.IStoragePathService>();
+    var storagePathService = storageScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
     await storagePathService.EnsureDirectoriesExistAsync();
 }
 catch (Exception ex)

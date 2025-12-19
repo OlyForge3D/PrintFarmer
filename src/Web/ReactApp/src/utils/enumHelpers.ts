@@ -13,11 +13,18 @@ export interface EnumOption {
  * This automatically includes all backends defined in the enum
  */
 export function getPrinterBackendOptions(): EnumOption[] {
-  return Object.entries(PrinterBackend)
-    .filter(([, value]) => typeof value === 'number')
-    .map(([key, value]) => ({
-      value: value as number,
-      label: key,
+  const orderedBackends = [
+    PrinterBackend.Moonraker,
+    PrinterBackend.PrusaLink,
+    PrinterBackend.SDCP,
+    PrinterBackend.OctoPrint,
+  ];
+
+  return orderedBackends
+    .filter((backend) => backend !== undefined)
+    .map((backend) => ({
+      value: backend,
+      label: PrinterBackend[backend],
     }));
 }
 

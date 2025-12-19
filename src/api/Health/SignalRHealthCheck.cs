@@ -1,5 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Hubs;
+﻿using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 

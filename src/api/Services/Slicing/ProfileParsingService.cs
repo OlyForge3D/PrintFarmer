@@ -82,7 +82,7 @@ public sealed class ProfileParsingService : IProfileParsingService
         }
 
         Dictionary<string, JsonNode?> sanitized = new(StringComparer.Ordinal);
-        Dictionary<string, JsonNode?> metadata = new(StringComparer.Ordinal);
+        Dictionary<string, object?> metadata = new(StringComparer.Ordinal);
 
         foreach (KeyValuePair<string, JsonNode?> kv in obj)
         {
@@ -98,23 +98,35 @@ public sealed class ProfileParsingService : IProfileParsingService
             // Collect metadata if key recognized and value is primitive/number/string
             if (value is JsonValue v && MetadataKeyMap.TryGetValue(key, out string? canonicalValue) && canonicalValue is not null)
             {
-                metadata[canonicalValue!] = v;
+                // Extract the actual value from JsonValue instead of storing the JsonNode
+                // This avoids the "node already has a parent" error when adding to metadata dict
+                metadata[canonicalValue!] = ExtractPrimitiveValue(v);
             }
 
             sanitized[key] = value; // Preserve other keys verbatim (without volatile ones)
         }
 
         // Produce deterministic ordering by sorting keys alphabetically
+        // Clone each node to avoid parent conflicts (each JsonNode can only have one parent)
         JsonObject sanitizedOrdered = new();
         foreach (string key in sanitized.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
-            sanitizedOrdered[key] = sanitized[key];
+            sanitizedOrdered[key] = CloneJsonNode(sanitized[key]);
         }
 
         JsonObject metadataOrdered = new();
-        foreach (string key in metadata.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        foreach (var kvp in metadata.OrderBy(k => k.Key, StringComparer.Ordinal))
         {
-            metadataOrdered[key] = metadata[key];
+            // Create new JsonValue for each metadata entry to avoid parent conflicts
+            metadataOrdered[kvp.Key] = kvp.Value switch
+            {
+                string s => JsonValue.Create(s),
+                int i => JsonValue.Create(i),
+                double d => JsonValue.Create(d),
+                float f => JsonValue.Create((double)f),
+                bool b => JsonValue.Create(b),
+                _ => JsonValue.Create(kvp.Value?.ToString() ?? "")
+            };
         }
 
         string sanitizedJson = sanitizedOrdered.ToJsonString(new JsonSerializerOptions
@@ -145,5 +157,60 @@ public sealed class ProfileParsingService : IProfileParsingService
             _ = sb.Append(b.ToString("x2")); // lower-case hex for consistency
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Extracts the primitive value from a JsonValue node.
+    /// Returns the actual .NET type (string, int, double, bool, etc.) instead of the JsonValue wrapper.
+    /// </summary>
+    private static object? ExtractPrimitiveValue(JsonValue value)
+    {
+        try
+        {
+            if (value.TryGetValue(out string? s))
+                return s;
+            if (value.TryGetValue(out int i))
+                return i;
+            if (value.TryGetValue(out double d))
+                return d;
+            if (value.TryGetValue(out float f))
+                return f;
+            if (value.TryGetValue(out bool b))
+                return b;
+            if (value.TryGetValue(out long l))
+                return l;
+            if (value.TryGetValue(out decimal dec))
+                return dec;
+            
+            // Fallback: try to parse as string
+            return value.ToString();
+        }
+        catch
+        {
+            // If extraction fails, return string representation
+            return value.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Deep clones a JsonNode to avoid parent conflicts.
+    /// System.Text.Json enforces that each JsonNode can only have one parent.
+    /// </summary>
+    private static JsonNode? CloneJsonNode(JsonNode? node)
+    {
+        if (node is null)
+            return null;
+
+        return node switch
+        {
+            JsonObject obj => new JsonObject(obj.Select(kvp => 
+                new KeyValuePair<string, JsonNode?>(kvp.Key, CloneJsonNode(kvp.Value)))),
+            
+            JsonArray arr => new JsonArray(arr.Select(CloneJsonNode).ToArray()),
+            
+            JsonValue val => JsonValue.Create(val.GetValue<object>()),
+            
+            _ => node
+        };
     }
 }

@@ -1,12 +1,15 @@
 import React from 'react';
 import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard, Edit, Trash2 } from 'lucide-react';
+import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard, Edit, Trash2, Grid2x2, Grid3x3, List } from 'lucide-react';
 import { ImagePlaceholder } from '@/components/icons';
 import { toast } from 'sonner';
 import type { Printer } from '@/types/api';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
+import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
+import { PrinterCompactCard } from '@/components/PrinterCompactCard';
+import { PrinterTableView } from '@/components/PrinterTableView';
 import { DetailedSystemHealth } from '@/components/SystemHealth';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui';
@@ -55,15 +58,30 @@ export const PrinterDashboard: React.FC = () => {
   const [editPrinterId, setEditPrinterId] = React.useState<string | null>(null);
   const [showEditModal, setShowEditModal] = React.useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = React.useState<{ isOpen: boolean; printers: Printer[] }>({ isOpen: false, printers: [] });
-  const [failedImages, setFailedImages] = React.useState<Record<string, boolean>>({});
+  const [viewMode, setViewMode] = React.useState<'compact' | 'expandable' | 'table'>(() => {
+    // Load from localStorage if available
+    const saved = localStorage.getItem('printerViewMode');
+    return (saved as 'compact' | 'expandable' | 'table') || 'table';
+  });
+
+  // Save view mode preference to localStorage
+  React.useEffect(() => {
+    localStorage.setItem('printerViewMode', viewMode);
+  }, [viewMode]);
 
   const stats = React.useMemo(() => {
     const userPrinters = printers ?? [];
     const total = userPrinters.length;
     const online = userPrinters.filter(p => {
       const status = getPrinterStatus?.(p.id);
-      const s = (status?.state ?? p.state ?? '') as string;
-      return (s && (s.toLowerCase().includes('operational') || s.toLowerCase().includes('ready') || s.toLowerCase().includes('idle'))) || !!p.isOnline;
+      // If we have real-time status from SignalR, use it. Otherwise use cached state.
+      if (status) {
+        const s = status.state ?? '';
+        return (s && (s.toLowerCase().includes('operational') || s.toLowerCase().includes('ready') || s.toLowerCase().includes('idle'))) || status.isOnline;
+      }
+      // Fallback to cached state if no real-time status yet
+      const s = (p.state ?? '') as string;
+      return s && (s.toLowerCase().includes('operational') || s.toLowerCase().includes('ready') || s.toLowerCase().includes('idle'));
     }).length;
     const printing = userPrinters.filter(p => ((getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string).toLowerCase().includes('printing')).length;
     const paused = userPrinters.filter(p => ((getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string).toLowerCase().includes('paused')).length;
@@ -141,86 +159,86 @@ export const PrinterDashboard: React.FC = () => {
             {/* Printers list - accessible list with test ids for tests */}
             {printers && printers.length > 0 && (
               <div className="mt-6">
-                <ul role="list" aria-label="Printers list" data-testid="printers-list" className="space-y-4">
-                  {printers.map((p) => {
-                    const status = (getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string;
-                    const isPrinting = status.toLowerCase().includes('printing');
-                    const isOnline = !!p.isOnline || ['operational', 'ready', 'idle'].some(x => status.toLowerCase().includes(x));
-                    const backendName = (() => {
-                      switch (p.backend) {
-                        case 0: return 'Moonraker';
-                        case 1: return 'PrusaLink';
-                        case 2: return 'SDCP';
-                        case 3: return 'OctoPrint';
-                        default: return 'Unknown';
-                      }
-                    })();
+                {/* View Mode Toggle */}
+                <div className="mb-6 flex items-center gap-2">
+                  <span className="text-sm font-medium text-pf-text-secondary">View:</span>
+                  <div className="flex gap-1 bg-pf-bg-1 p-1 rounded-lg border border-pf-border">
+                    <Button
+                      variant={viewMode === 'table' ? 'primary' : 'subtle'}
+                      size="sm"
+                      onClick={() => setViewMode('table')}
+                      title="Table View"
+                      className="!p-2"
+                    >
+                      <List className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant={viewMode === 'compact' ? 'primary' : 'subtle'}
+                      size="sm"
+                      onClick={() => setViewMode('compact')}
+                      title="Compact Cards"
+                      className="!p-2"
+                    >
+                      <Grid2x2 className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant={viewMode === 'expandable' ? 'primary' : 'subtle'}
+                      size="sm"
+                      onClick={() => setViewMode('expandable')}
+                      title="Expandable Cards"
+                      className="!p-2"
+                    >
+                      <Grid3x3 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
 
-                    return (
-                      <li
+                {/* Expandable Cards View */}
+                {viewMode === 'expandable' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {printers.map((p) => (
+                      <ExpandablePrinterCard
                         key={p.id}
-                        role="listitem"
-                        aria-label={`Printer ${p.name}`}
-                        data-testid={`printer-item-${p.id}`}
-                        className="bg-pf-bg-1 rounded-lg p-4 shadow flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-4">
-                          {/* Thumbnail / snapshot placeholder */}
-                          <div className="w-12 h-12 md:w-16 md:h-16 bg-pf-border flex items-center justify-center rounded overflow-hidden">
-                            {/* Show image when available and not failed; otherwise show a skeleton placeholder */}
-                            {p.thumbnailUrl && !failedImages[p.id] ? (
-                              <img
-                                src={p.thumbnailUrl}
-                                alt={`${p.name} thumbnail`}
-                                className="w-full h-full object-cover rounded"
-                                loading="lazy"
-                                onError={() => setFailedImages(prev => ({ ...prev, [p.id]: true }))}
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center bg-pf-loading animate-pulse">
-                                <ImagePlaceholder className="w-6 h-6 text-pf-text-secondary" />
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <div className="text-base font-medium">{p.name}</div>
-                            <div className="text-sm text-pf-text-secondary">
-                              {p.manufacturerName ? `${p.manufacturerName} ${p.modelName ?? ''}` : (p.modelName ?? '')}
-                            </div>
-                            <div className="mt-1 flex items-center gap-2">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${isOnline ? 'bg-pf-status-online-bg text-pf-status-online-text' : 'bg-pf-border-medium text-pf-text-secondary'}`}>
-                                {isOnline ? 'Online' : 'Offline'}
-                              </span>
-                              {isPrinting && <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-warning text-pf-text-primary">Printing</span>}
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pf-bg-2 text-pf-text-secondary">{backendName}</span>
-                            </div>
-                          </div>
-                        </div>
+                        printer={p}
+                        onEdit={() => handleEditPrinter(p.id)}
+                      />
+                    ))}
+                  </div>
+                )}
 
-                        <div className="flex items-center gap-2">
-                          <Button
-                            aria-label={`Edit ${p.name}`}
-                            title="Edit"
-                            variant="subtle"
-                            onClick={() => handleEditPrinter(p.id)}
-                          >
-                            <Edit className="w-5 h-5 text-pf-text-secondary" />
-                          </Button>
-                          <Button
-                            aria-label={`Delete ${p.name}`}
-                            title="Delete"
-                            variant="subtle"
-                            onClick={() => handleDeleteSinglePrinter(p)}
-                          >
-                            <Trash2 className="w-5 h-5 text-pf-text-secondary" />
-                          </Button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                {/* Compact Cards View */}
+                {viewMode === 'compact' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {printers.map((p) => (
+                      <PrinterCompactCard
+                        key={p.id}
+                        printer={p}
+                        onEdit={(printer) => handleEditPrinter(printer.id)}
+                        onDelete={handleDeleteSinglePrinter}
+                        getPrinterStatus={getPrinterStatus}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Table View */}
+                {viewMode === 'table' && (
+                  <PrinterTableView
+                    printers={printers}
+                    onEdit={(printer) => handleEditPrinter(printer.id)}
+                    onDelete={(printersToDelete) => {
+                      setDeleteConfirmation({ isOpen: true, printers: printersToDelete });
+                      toast(`Delete: ${printersToDelete.length} printer${printersToDelete.length > 1 ? 's' : ''} — confirm to proceed`, { duration: 3000 });
+                    }}
+                    onBulkSetMaintenance={() => {
+                      // Placeholder for maintenance mode functionality
+                      toast('Maintenance mode not yet implemented', { duration: 3000 });
+                    }}
+                  />
+                )}
               </div>
             )}
+
             {/* Edit/Delete Modals for inline actions */}
             {showEditModal && (
               <EditPrinterModal

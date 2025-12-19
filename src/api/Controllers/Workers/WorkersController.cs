@@ -288,4 +288,63 @@ public class WorkersController : ControllerBase
             DisabledReason = worker.DisabledReason
         };
     }
+
+    /// <summary>
+    /// Delete offline workers (stale/inactive workers)
+    /// </summary>
+    /// <remarks>
+    /// Removes all workers with status "Offline". Useful for cleaning up accumulated stale workers.
+    /// </remarks>
+    /// <returns>Count of deleted workers</returns>
+    [HttpPost("cleanup/offline")]
+    [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
+    public async Task<IActionResult> DeleteOfflineWorkersAsync()
+    {
+        var allWorkers = await _workerRepository.GetAllAsync(int.MaxValue, 0);
+        var offlineWorkers = allWorkers.Where(w => w.Status == WorkerStatus.Offline).ToList();
+
+        int deletedCount = 0;
+        foreach (var worker in offlineWorkers)
+        {
+            await _workerRepository.DeleteAsync(worker.Id);
+            deletedCount++;
+            _logger.LogInformation("Deleted offline worker '{WorkerName}' (ID: {WorkerId})", worker.Name, worker.Id);
+        }
+
+        return Ok(new { deletedCount });
+    }
+
+    /// <summary>
+    /// Delete workers without recent heartbeat activity
+    /// </summary>
+    /// <remarks>
+    /// Removes workers that haven't sent a heartbeat within the specified minutes.
+    /// </remarks>
+    /// <param name="staleAfterMinutes">Minutes of inactivity to consider a worker stale</param>
+    /// <returns>Count of deleted workers</returns>
+    [HttpPost("cleanup/stale")]
+    [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
+    public async Task<IActionResult> DeleteStaleWorkersAsync([FromQuery] int staleAfterMinutes = 1440)
+    {
+        var cutoffTime = DateTime.UtcNow.AddMinutes(-staleAfterMinutes);
+        var allWorkers = await _workerRepository.GetAllAsync(int.MaxValue, 0);
+
+        var staleWorkers = allWorkers
+            .Where(w => w.LastHeartbeat == null || w.LastHeartbeat < cutoffTime)
+            .ToList();
+
+        int deletedCount = 0;
+        foreach (var worker in staleWorkers)
+        {
+            await _workerRepository.DeleteAsync(worker.Id);
+            deletedCount++;
+            _logger.LogInformation(
+                "Deleted stale worker '{WorkerName}' (ID: {WorkerId}) - Last heartbeat: {LastHeartbeat}",
+                worker.Name,
+                worker.Id,
+                worker.LastHeartbeat?.ToString("O") ?? "Never");
+        }
+
+        return Ok(new { deletedCount, staleAfterMinutes });
+    }
 }

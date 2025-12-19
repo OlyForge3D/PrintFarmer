@@ -18,19 +18,25 @@ namespace Farm.Infrastructure.Repositories.Gcode
             _db = db ?? throw new ArgumentNullException(nameof(db));
         }
 
-        public Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct)
+        public async Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct)
         {
-            IQueryable<GcodeFile> query = _db.GcodeFiles
+            // Load all files with includes first (required for SQLite compatibility with string.Contains)
+            List<GcodeFile> allFiles = await _db.GcodeFiles
                 .Include(g => g.SourcePrinter)
                 .Include(g => g.TargetPrinter)
                 .Include(g => g.TargetModel)
-                .AsQueryable();
+                .ToListAsync(ct);
+
+            // Apply client-side filtering for case-insensitive search
+            var query = allFiles.AsEnumerable();
 
             if (!string.IsNullOrEmpty(search))
             {
-                query = query.Where(g => g.OriginalFileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                                         g.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                                         (g.Description != null && g.Description.Contains(search, StringComparison.OrdinalIgnoreCase)));
+                var searchLower = search.ToLowerInvariant();
+                query = query.Where(g => 
+                    (g.OriginalFileName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (g.DisplayName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (g.Description != null && g.Description.Contains(searchLower, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (!string.IsNullOrEmpty(material))
@@ -49,7 +55,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 query = query.Where(g => g.TargetPrinterId == targetPrinterId.Value);
             }
 
-            return query.OrderByDescending(g => g.UploadedAt).ToListAsync(ct);
+            return query.OrderByDescending(g => g.UploadedAt).ToList();
         }
 
         public Task<GcodeFile?> GetByIdWithIncludesAsync(Guid id, CancellationToken ct)

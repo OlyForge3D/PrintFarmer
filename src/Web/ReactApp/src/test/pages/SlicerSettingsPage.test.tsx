@@ -4,6 +4,14 @@ import { render } from '@testing-library/react';
 import { fireEvent, screen, waitFor } from '@testing-library/dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/services/slicerRegistry', () => ({
+  slicerRegistry: {
+    getSlicers: vi.fn().mockResolvedValue([
+      { slicerType: 'OrcaSlicer', name: 'OrcaSlicer', version: '2.3.1' }
+    ])
+  }
+}));
+
 type MockFetch = typeof fetch;
 
 describe('SlicerSettingsPage', () => {

@@ -17,7 +17,7 @@ import {
   Package
 } from 'lucide-react';
 import { PauseIcon, PlayIcon } from '@/components/icons/MdiIcons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, Select } from '@/components/ui';
@@ -115,6 +115,20 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
     isLoading: totalsLoading 
   } = usePrinterHistoryTotals(printer.id);
 
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   if (!isOpen) {
     return null;
   }
@@ -122,7 +136,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   const modalContent = (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black bg-opacity-75" onClick={onClose} />
+        <div className="fixed inset-0 bg-black bg-opacity-75" />
         
         <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}

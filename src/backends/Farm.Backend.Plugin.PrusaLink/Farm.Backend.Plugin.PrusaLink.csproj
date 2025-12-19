@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Farm.Backend.Plugin.PrusaLink</RootNamespace>
+    <AssemblyName>Farm.Backend.Plugin.PrusaLink</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../../signalr/Farm.SignalR/Farm.SignalR.csproj" />
+  </ItemGroup>
+
+</Project>

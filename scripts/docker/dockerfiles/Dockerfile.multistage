@@ -26,15 +26,8 @@ WORKDIR /src
 # Copy all project files for dependency resolution
 COPY Directory.Build.props ./
 COPY global.json ./
-COPY src/infra/*.csproj ./infra/
-COPY src/import/*.csproj ./import/
-COPY src/api/*.csproj ./api/
-COPY src/worker-shared/*.csproj ./worker-shared/
-COPY src/orcaslicer-worker/*.csproj ./orcaslicer-worker/
-COPY src/printer-discovery/*.csproj ./printer-discovery/
-COPY src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/*.csproj ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/
-# Place proto at filesystem root so ../../proto from /src/api resolves
 COPY proto /proto
+COPY src/ ./
 
 # Restore all dependencies in one go
 RUN dotnet restore ./api/Farm.Web.Api.csproj && \
@@ -42,32 +35,42 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
     dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj
 
-# Copy all source code
-COPY src/ ./
-# Ensure proto still present at /proto
-COPY proto /proto
-
 # Build and publish all services: sequential restore, then sequential publish
 # Using BUILD_VERBOSITY argument: quiet, minimal, normal, or detailed
 RUN --mount=type=cache,target=/root/.nuget/packages \
     dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
     echo "Publishing API..." && \
     dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing OrcaSlicer Worker..." && \
     dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Printer Discovery..." && \
-    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
+    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Building backend plugins..." && \
+    dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
 
 # Verify critical runtime files exist and fail immediately if any are missing
 RUN echo "Checking published artifacts..." && \
     echo "API publish directory:" && ls -lah /app/publish/api/ 2>&1 | head -20 && \
     echo "OrcaSlicer Worker publish directory:" && ls -lah /app/publish/orcaslicer-worker/ 2>&1 | head -20 && \
     echo "Printer Discovery publish directory:" && ls -lah /app/publish/printer-discovery/ 2>&1 | head -20 && \
+    echo "Checking for plugin DLLs in API directory:" && ls -lah /app/publish/api/Farm.Backend.Plugin.*.dll 2>&1 && \
     ([ -f /app/publish/api/Farm.Web.Api.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Web.Api.dll"; exit 1)) && \
     ([ -f /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll ] || (echo "✗ MISSING: /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll"; exit 1)) && \
     ([ -f /app/publish/printer-discovery/PrinterDiscoveryService.dll ] || (echo "✗ MISSING: /app/publish/printer-discovery/PrinterDiscoveryService.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Core.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Core.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Moonraker.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Moonraker.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.Sdcp.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Sdcp.dll"; exit 1)) && \
     echo "✓ All .NET builds completed successfully"
 
 ############################################################
@@ -77,8 +80,15 @@ FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
 WORKDIR /app
 EXPOSE 5000
 
+# Install runtime tools that are present in the upgraded image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates iputils-ping iproute2 net-tools dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
+
 # Create necessary directories with proper ownership
-# Note: appuser (UID 1000) is pre-created in base image, tools are pre-installed
 RUN mkdir -p /app/gcode /app/uploads /app/slicers && \
     chown -R appuser:appuser /app
 
@@ -113,7 +123,10 @@ ARG GITHUB_TOKEN
 ARG _SKIP_ORCA_BINARY_BUILD=0
 WORKDIR /tmp
 
-# Note: All extraction tools (curl, jq, p7zip-full, squashfs-tools, etc.) are pre-installed in base image
+# Install AppImage/tooling stack (matches upgraded base image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Download and extract OrcaSlicer binaries with robust error handling
 RUN set -e; \
@@ -247,7 +260,15 @@ RUN set -e; \
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
 WORKDIR /app
 
-# Note: All runtime dependencies (libgtk-3-0, xvfb, fuse, etc.) and appuser are pre-installed in base image
+# Install OrcaSlicer runtime deps (matches upgraded aspnet image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates \
+        libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 \
+        xvfb fuse squashfs-tools file p7zip-full \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create appuser if it doesn't exist (for standard base images)
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
 
 # Create necessary directories and set ownership for appuser
 RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
@@ -339,6 +360,9 @@ RUN VITE_API_BASE_URL=${VITE_API_BASE_URL} \
 FROM nginx:${NGINX_TAG} AS frontend-runtime
 WORKDIR /usr/share/nginx/html
 
+# Ensure curl present for health checks when using standard nginx tag
+RUN apk update && apk add --no-cache curl && rm -rf /var/cache/apk/*
+
 # Copy built React app
 COPY --from=frontend-build /app/dist .
 
@@ -363,8 +387,10 @@ CMD ["nginx", "-g", "daemon off;"]
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
 WORKDIR /app
 
+# Install curl for health checks (standard base images don't have it)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Create discovery user (different from appuser for service isolation)
-# Note: curl and other tools are pre-installed in base image
 RUN groupadd -r discovery && useradd -r -g discovery discovery && \
     chown -R discovery:discovery /app
 

@@ -63,8 +63,8 @@ public class EfWorkerRepository : IWorkerRepository
     {
         return await _context.Workers
             .AsNoTracking()
-            .Where(w => w.Status == WorkerStatus.Online && w.FreeSlots > 0 && !w.IsDisabled)
-            .OrderByDescending(w => w.FreeSlots) // Prefer workers with more capacity
+            .Where(w => w.Status == WorkerStatus.Online && (w.TotalSlots - w.ActiveJobs) > 0 && !w.IsDisabled)
+            .OrderByDescending(w => w.TotalSlots - w.ActiveJobs) // Prefer workers with more capacity
             .ThenBy(w => w.ActiveJobs) // Then prefer less loaded workers
             .Take(limit)
             .ToListAsync();
@@ -83,7 +83,7 @@ public class EfWorkerRepository : IWorkerRepository
         // Note: This is not optimal for large datasets, but works for typical worker counts
         List<Worker> availableWorkers = await _context.Workers
             .AsNoTracking()
-            .Where(w => w.Status == WorkerStatus.Online && w.FreeSlots > 0 && !w.IsDisabled)
+            .Where(w => w.Status == WorkerStatus.Online && (w.TotalSlots - w.ActiveJobs) > 0 && !w.IsDisabled)
             .ToListAsync();
 
         List<Worker> matchingWorkers = availableWorkers

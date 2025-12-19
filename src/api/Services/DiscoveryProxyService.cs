@@ -1,9 +1,10 @@
 ﻿using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Hubs;
+using Farm.SignalR.Hubs;
 using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.SignalR;
 

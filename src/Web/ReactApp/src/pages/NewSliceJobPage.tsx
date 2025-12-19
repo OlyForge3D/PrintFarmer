@@ -90,6 +90,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
   const [useProfile, setUseProfile] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
   const [rawProfileJson, setRawProfileJson] = useState('');
   const [requiredCapabilitiesJson, setRequiredCapabilitiesJson] = useState('[]');
   const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
@@ -100,12 +101,18 @@ export const NewSliceJobPage: React.FC = () => {
   const [isPrinterSelectorOpen, setIsPrinterSelectorOpen] = useState(false);
 
   // === Queries ===
-  const { data: availableWorkers = [] } = useQuery<WorkerResponse[], Error>({
+  const { data: availableWorkers = [], error: workersError, isLoading: workersLoading } = useQuery<WorkerResponse[], Error>({
     queryKey: ['workers-available'],
     queryFn: () => workersService.getAvailableWorkers(),
     staleTime: 10_000,
     refetchInterval: 15_000,
   });
+
+  useEffect(() => {
+    if (!selectedWorkerId && availableWorkers.length > 0) {
+      setSelectedWorkerId(availableWorkers[0].id);
+    }
+  }, [availableWorkers, selectedWorkerId]);
 
   const { data: availableSlicers = [] } = useQuery({
     queryKey: ['slicers-available'],
@@ -460,6 +467,13 @@ export const NewSliceJobPage: React.FC = () => {
       if (ext === 'ply') return 'ply';
     }
     return 'stl';
+  };
+
+  const formatWorkerCapacity = (worker: WorkerResponse) => {
+    if (typeof worker.freeSlots === 'number' && typeof worker.totalSlots === 'number') {
+      return `${worker.freeSlots}/${worker.totalSlots} slots`;
+    }
+    return 'Capacity unknown';
   };
 
   return (
@@ -966,6 +980,47 @@ export const NewSliceJobPage: React.FC = () => {
 
         {/* RIGHT SIDE: 3D Model Preview */}
         <div className="flex-1 hidden lg:flex flex-col gap-4 min-h-screen">
+          <div className="card bg-pf-panel border border-pf-border">
+            <div className="card-header flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-pf-text">Available Workers</h3>
+                <p className="text-sm text-pf-text-secondary">Select a worker to process this job</p>
+              </div>
+              {workersLoading && <span className="text-xs text-pf-text-secondary">Loading...</span>}
+            </div>
+            <div className="card-body gap-3">
+              {workersError && <Alert type="error">Failed to load workers</Alert>}
+              {!workersLoading && availableWorkers.length === 0 ? (
+                <div className="text-sm text-pf-text-secondary">No workers available</div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {availableWorkers.map(worker => (
+                    <div
+                      key={worker.id}
+                      data-testid={`worker-card-${worker.id}`}
+                      role="button"
+                      onClick={() => setSelectedWorkerId(worker.id)}
+                      className={`border border-pf-border rounded-lg p-3 bg-pf-bg-0 hover:border-pf-accent transition cursor-pointer ${selectedWorkerId === worker.id ? 'ring-2 ring-pf-accent' : ''}`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="font-medium text-pf-text">{worker.name}</div>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-pf-bg-2 border border-pf-border text-pf-text-secondary">{worker.status || 'Unknown'}</span>
+                      </div>
+                      <div className="text-xs text-pf-text-secondary mb-2">{formatWorkerCapacity(worker)}</div>
+                      <div className="flex flex-wrap gap-1">
+                        {(worker.capabilities || []).map(cap => (
+                          <span key={`${worker.id}-${cap}`} className="text-[11px] px-2 py-1 rounded bg-pf-bg-1 border border-pf-border text-pf-text-secondary">
+                            {cap}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="card bg-pf-panel border border-pf-border flex-1 overflow-hidden flex flex-col">
             <div className="card-header flex-shrink-0">
               <h3 className="font-semibold text-pf-text">

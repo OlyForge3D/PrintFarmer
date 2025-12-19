@@ -1,9 +1,11 @@
-﻿using System.Net;
+﻿using System;
+using System.Net;
 using System.Net.Http.Json;
+using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services.Authentication;
+using Farm.Infrastructure.Services.Authentication;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -11,13 +13,23 @@ using LoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
 
 namespace Farm.Web.Api.Tests.Integration;
 
-public class AuthenticationLockoutIntegrationTests : IClassFixture<CustomWebApplicationFactory>
+public class AuthenticationLockoutIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public AuthenticationLockoutIntegrationTests(CustomWebApplicationFactory factory)
+    public AuthenticationLockoutIntegrationTests()
     {
-        _factory = factory;
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
     }
 
     [Fact]

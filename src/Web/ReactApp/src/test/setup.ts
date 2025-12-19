@@ -44,11 +44,16 @@ vi.mock('@microsoft/signalr', () => {
     stop: vi.fn().mockResolvedValue(undefined),
     on: vi.fn(),
     off: vi.fn(),
+    onclose: vi.fn(),
+    onreconnecting: vi.fn(),
+    onreconnected: vi.fn(),
+    state: 'Disconnected'
   };
 
   const mockBuilder = {
     withUrl: vi.fn().mockReturnThis(),
     withAutomaticReconnect: vi.fn().mockReturnThis(),
+    configureLogging: vi.fn().mockReturnThis(),
     build: vi.fn().mockReturnValue(mockConnection),
   };
 
@@ -57,6 +62,20 @@ vi.mock('@microsoft/signalr', () => {
     HubConnectionState: {
       Connected: 'Connected',
       Disconnected: 'Disconnected',
+    },
+    HttpTransportType: {
+      WebSockets: 1,
+      ServerSentEvents: 2,
+      LongPolling: 4,
+    },
+    LogLevel: {
+      Trace: 0,
+      Debug: 1,
+      Information: 2,
+      Warning: 3,
+      Error: 4,
+      Critical: 5,
+      None: 6,
     },
   };
 });

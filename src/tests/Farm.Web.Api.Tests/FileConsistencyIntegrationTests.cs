@@ -39,7 +39,10 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        // Reset database to ensure clean state for this test
+        await _factory.ResetDatabaseAsync();
+        
+        _client = await _factory.CreateAuthenticatedClientAsync();
         IServiceScope scope = _factory.Services.CreateScope();
         _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         // Setup test storage directories
@@ -47,8 +50,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _gcodeStoragePath = Path.Combine(Path.GetTempPath(), "test_gcode_" + Guid.NewGuid());
         _ = Directory.CreateDirectory(_modelStoragePath);
         _ = Directory.CreateDirectory(_gcodeStoragePath);
-
-        _ = await _dbContext.Database.EnsureCreatedAsync();
     }
 
     public async Task DisposeAsync()
@@ -274,23 +275,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         JsonElement root = doc.RootElement;
         // 2 healthy out of 4 files = 50%
         _ = root.GetProperty("overallHealthPercentage").GetDouble().Should().Be(50.0);
-    }
-
-    [Fact(Skip = "Factory always adds test authentication via FallbackPolicy; endpoint authorization is verified via [Authorize] attribute inspection")]
-    public async Task FileConsistencyController_RequiresAuthorization()
-    {
-        // Arrange - use an unauthenticated client
-        CustomWebApplicationFactory factoryWithoutAuth = new CustomWebApplicationFactory();
-        HttpClient clientWithoutAuth = factoryWithoutAuth.CreateClient(
-            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-
-        // Act
-        HttpResponseMessage response = await clientWithoutAuth.GetAsync("/api/fileconsistency/health/summary");
-
-        // Assert
-        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        factoryWithoutAuth.Dispose();
-        clientWithoutAuth.Dispose();
     }
 
     // Helper methods

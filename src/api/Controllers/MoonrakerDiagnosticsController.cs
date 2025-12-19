@@ -1,7 +1,6 @@
-﻿using Farm.Infrastructure.Contracts.Printers.Moonraker;
+﻿using Farm.Backend.Plugin.Moonraker;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;

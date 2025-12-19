@@ -292,7 +292,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         {
             // Select printers to probe for external service health based on settings
             List<Printer> printers;
-            int printersToCheck = 3; // default fallback
+            int printersToCheck = 0; // default fallback: don't check external printers by default
             try
             {
                 Farm.Infrastructure.Settings.ExternalServicesHealthSettings s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();

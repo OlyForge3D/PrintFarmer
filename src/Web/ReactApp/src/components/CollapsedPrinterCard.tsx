@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw, FileText, Image, Video
 } from 'lucide-react';
@@ -64,32 +64,21 @@ export function CollapsedPrinterCard({
   const [showFiles, setShowFiles] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
-  // Real-time status updates
+  // Get real-time status updates from SignalR
   const { printerStatuses } = usePrinterStatusUpdates();
-  const status = printerStatuses.get(printer.id);
+  const realtimeStatus = printerStatuses.get(printer.id);
   
-  // Merge SignalR status updates with printer data
-  // Only override camera URLs if status provides them, otherwise keep original printer values
-  const displayPrinter = status ? {
-    ...printer,
-    isOnline: status.isOnline,
-    state: status.state,
-    progress: status.progress,
-    jobName: status.jobName,
-    thumbnailUrl: status.thumbnailUrl,
-    cameraStreamUrl: status.cameraStreamUrl ?? printer.cameraStreamUrl,
-    cameraSnapshotUrl: status.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
-  } : printer;
-  
-  // State helpers
-  const isOnline = displayPrinter.isOnline ?? false;
-  const state = displayPrinter.state ?? 'Unknown';
+  // Merge API data with real-time SignalR status (prefer SignalR when available)
+  const isOnline = realtimeStatus?.isOnline ?? printer.isOnline ?? false;
+  const state = realtimeStatus?.state ?? printer.state ?? 'Unknown';
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
-  // Only support cameras for Moonraker and OctoPrint backends
-  const supportsCameras = printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint;
-  const hasCameraUrls = supportsCameras && !!displayPrinter.cameraSnapshotUrl;
+  // Check if printer has camera URLs - the presence of URLs is the source of truth
+  const hasCameraUrls = !!(
+    (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ||
+    (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl)
+  );
 
   // State color classes
   const getStateColorClasses = (isOnline: boolean, state: string): string => {
@@ -261,18 +250,18 @@ export function CollapsedPrinterCard({
       </div>
 
       {/* Progress bar for active prints */}
-      {isOnline && status?.progress !== undefined && status.progress > 0 && (
+      {isOnline && (realtimeStatus?.progress ?? printer.progress) !== undefined && (realtimeStatus?.progress ?? printer.progress) > 0 && (
         <div className="mt-3">
           <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-            <span className="truncate flex-1">{status.jobName || 'Printing...'}</span>
-            <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
+            <span className="truncate flex-1">{(realtimeStatus?.jobName ?? printer.jobName) || 'Printing...'}</span>
+            <span className="font-semibold ml-2">{Math.round(realtimeStatus?.progress ?? printer.progress)}%</span>
           </div>
           <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
             <div
               ref={collapsedProgressRef}
               className="bg-pf-success h-2 rounded-full transition-all duration-300"
             >
-              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, status.progress))) }%</span>
+              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, realtimeStatus?.progress ?? printer.progress))) }%</span>
             </div>
           </div>
         </div>
@@ -280,48 +269,62 @@ export function CollapsedPrinterCard({
 
       {showCamera && (
         <div className="mt-4 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-          {/* Camera mode toggle */}
-          {hasCameraUrls && displayPrinter.cameraStreamUrl && (
+          {/* Camera mode toggle - show if both snapshot and stream are available */}
+          {hasCameraUrls && (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) && (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl) && (
             <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
-              <button
+              <Button
+                type="button"
                 onClick={() => setCameraMode('snapshot')}
                 title="Snapshot"
-                className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                  cameraMode === 'snapshot'
-                    ? 'bg-pf-primary text-pf-text-primary'
-                    : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                }`}
+                variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
+                size="sm"
+                className="flex-1 p-2 flex items-center justify-center"
               >
                 <Image className="h-4 w-4" />
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
                 onClick={() => setCameraMode('stream')}
                 title="Stream"
-                className={`flex-1 p-2 rounded transition-colors flex items-center justify-center ${
-                  cameraMode === 'stream'
-                    ? 'bg-pf-primary text-pf-text-primary'
-                    : 'bg-pf-border text-pf-text-secondary hover:bg-pf-border-light'
-                }`}
+                variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
+                size="sm"
+                className="flex-1 p-2 flex items-center justify-center"
               >
                 <Video className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
           )}
           
           {/* Camera display */}
           <div className="min-h-32 flex items-center justify-center overflow-hidden">
             {hasCameraUrls ? (
-              cameraMode === 'snapshot' && displayPrinter.cameraSnapshotUrl ? (
+              cameraMode === 'snapshot' && (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ? (
                 <img 
-                  src={displayPrinter.cameraSnapshotUrl}
+                  src={realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl}
                   alt="webcam snapshot"
                   className="max-w-full max-h-full object-contain"
                   onError={() => {}}
                   onLoad={() => {}}
                 />
-              ) : cameraMode === 'stream' && displayPrinter.cameraStreamUrl ? (
+              ) : cameraMode === 'stream' && (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl) ? (
                 <img 
-                  src={displayPrinter.cameraStreamUrl}
+                  src={realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl}
+                  alt="webcam stream"
+                  className="max-w-full max-h-full object-contain"
+                  onError={() => {}}
+                  onLoad={() => {}}
+                />
+              ) : (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ? (
+                <img 
+                  src={realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl}
+                  alt="webcam snapshot"
+                  className="max-w-full max-h-full object-contain"
+                  onError={() => {}}
+                  onLoad={() => {}}
+                />
+              ) : (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl) ? (
+                <img 
+                  src={realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl}
                   alt="webcam stream"
                   className="max-w-full max-h-full object-contain"
                   onError={() => {}}

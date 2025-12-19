@@ -19,15 +19,26 @@ namespace Farm.Web.Api.Tests.Slicing;
 /// Tests for OrcaSlicer preset mapping accuracy and fuzzy matching logic.
 /// Validates that the mapping service correctly matches Orca presets to PrintFarmer entities.
 /// </summary>
-public class OrcaMappingAccuracyTests : IClassFixture<CustomWebApplicationFactory>
+public class OrcaMappingAccuracyTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
-    private readonly HttpClient _client;
+    private HttpClient _client = null!;
 
-    public OrcaMappingAccuracyTests(CustomWebApplicationFactory factory)
+    public OrcaMappingAccuracyTests()
     {
-        _factory = factory;
-        _client = _factory.CreateClient();
+        _factory = new CustomWebApplicationFactory();
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDatabaseAsync();
+        _client = await _factory.CreateAdminClientAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     [Fact(DisplayName = "Fuzzy matching handles name variations correctly")]

@@ -7,22 +7,31 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Catalog;
+using Farm.Infrastructure.Services.Catalog.Caching;
+using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.Email;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.JobDispatch;
-using Farm.Web.Api.Services.RateLimiting;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
+using StackExchange.Redis;
 using Farm.Web.Api.Services.Slicing.Abstractions;
+using Farm.Web.Api.Services.StorageManagement;
+using Farm.Web.Api.Services.Workers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 
@@ -149,11 +158,12 @@ public static class ServiceCollectionExtensions
         RegisterImportingServices(services);
         RegisterCatalogServices(services);
         RegisterSlicingServices(services, configuration);
-        RegisterPrinterServices(services);
+        RegisterBackendClientPlugins(services);  // Register backend client plugins FIRST - they register HTTP clients
+        RegisterHttpClients(services);
+        RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
         RegisterArtifactServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
-        RegisterHttpClients(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
 
         return services;
@@ -175,14 +185,18 @@ public static class ServiceCollectionExtensions
         // Circuit breaker for resilient external calls
         _ = services.AddSingleton<ICircuitBreakerService, CircuitBreakerService>();
 
+        // Application path provider abstraction (bridges ASP.NET Core to Infrastructure layer)
+        _ = services.AddSingleton<Farm.Infrastructure.Services.StorageManagement.IApplicationPathProvider, AspNetCorePathProvider>();
+
         // Storage path service for multi-deployment support (Docker and Kubernetes)
-        _ = services.AddSingleton<Services.StorageManagement.IStoragePathService, Services.StorageManagement.StoragePathService>();
+        // Now registered from Infrastructure layer with abstracted path provider
+        _ = services.AddSingleton<Farm.Infrastructure.Services.StorageManagement.IStoragePathService, Farm.Infrastructure.Services.StorageManagement.StoragePathService>();
 
         // File Management Services
         _ = services.AddSingleton<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
         _ = services.AddSingleton<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
         _ = services.AddSingleton<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
-        _ = services.AddSingleton<Services.FileManagement.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
         _ = services.AddSingleton<Services.IO.IFileSystem, Services.IO.SystemFileSystem>();
@@ -191,7 +205,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IStartupStatus, StartupStatus>();
 
         // Discovery progress cache for real-time updates
-        _ = services.AddSingleton<Services.IDiscoveryProgressCache, Services.DiscoveryProgressCache>();
+        _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
         _ = services.AddScoped<Services.Interfaces.IDiscoveryProxyService, Services.DiscoveryProxyService>();
@@ -208,7 +222,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.PrinterCapabilities.IPrinterCapabilitiesRepository, Farm.Infrastructure.Repositories.PrinterCapabilities.EfPrinterCapabilitiesRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Harvest.IHarvestRepository, Farm.Infrastructure.Repositories.Harvest.EfHarvestRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileConsistencyRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileConsistencyRepository>();
 
@@ -244,6 +257,9 @@ public static class ServiceCollectionExtensions
 
         // Model repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Model.IModelRepository, Farm.Infrastructure.Repositories.Model.EfModelRepository>();
+
+        // Authentication audit repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Authentication.IAuthAuditLogRepository, Farm.Infrastructure.Repositories.Authentication.EfAuthAuditLogRepository>();
     }
 
     #endregion
@@ -283,12 +299,12 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterAuthenticationServices(IServiceCollection services)
     {
-        _ = services.AddScoped<IPasswordHashingService, PasswordHashingService>();
-        _ = services.AddScoped<IAuthenticationService, AuthenticationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasswordHashingService, Farm.Infrastructure.Services.Authentication.PasswordHashingService>();
+        _ = services.AddScoped<IAuthenticationService, Farm.Infrastructure.Services.Authentication.AuthenticationService>();
         _ = services.AddScoped<Services.PasswordPolicy.IPasswordPolicyService, Services.PasswordPolicy.PasswordPolicyService>();
-        _ = services.AddScoped<Services.Authentication.IAccountLockoutService, Services.Authentication.AccountLockoutService>();
-        _ = services.AddScoped<Services.Authentication.IAuthAuditService, Services.Authentication.AuthAuditService>();
-        _ = services.AddScoped<Services.Authentication.ITokenRevocationService, Services.Authentication.TokenRevocationService>();
+        _ = services.AddScoped<IAccountLockoutService, Farm.Infrastructure.Services.Authentication.AccountLockoutService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
         _ = services.AddScoped<Services.Users.IUsersService, Services.Users.UsersService>();
     }
@@ -312,9 +328,9 @@ public static class ServiceCollectionExtensions
             IUnifiedLoggingService logger = sp.GetRequiredService<IUnifiedLoggingService>();
             EmailOptions opts = sp.GetRequiredService<EmailOptions>();
             IEmailTemplateRenderer renderer = sp.GetRequiredService<IEmailTemplateRenderer>();
-            return opts.Provider?.Equals("mailjet", StringComparison.OrdinalIgnoreCase) == true
-                ? new Farm.Web.Api.Services.Email.MailjetEmailService(logger, opts, renderer)
-                : new Farm.Web.Api.Services.Email.ConsoleEmailService(logger, renderer);
+            return opts.Mailjet?.ApiKey != null
+                ? new MailjetEmailService(logger, opts, renderer)
+                : new ConsoleEmailService(logger);
         });
     }
 
@@ -331,7 +347,7 @@ public static class ServiceCollectionExtensions
             cfg.GetSection("RateLimiting").Bind(opts);
             return opts;
         });
-        _ = services.AddSingleton<IRateLimitService, InMemoryRateLimitService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.RateLimiting.IRateLimitService, Farm.Infrastructure.Services.RateLimiting.InMemoryRateLimitService>();
     }
 
     #endregion
@@ -342,7 +358,6 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddScoped<Importing.Services.Import.IImportParserService, Importing.Services.Import.ImportParserService>();
         _ = services.AddScoped<Importing.Services.Import.IImportProcessorService, Importing.Services.Import.ImportProcessorService>();
-        _ = services.AddScoped<Importing.Services.Adapters.IPrinterCapabilityDiscoveryAdapter, Services.Adapters.PrinterCapabilityDiscoveryAdapter>();
         _ = services.AddScoped<Importing.Services.Adapters.IDefaultCatalogAdapter, Services.Adapters.DefaultCatalogAdapter>();
     }
 
@@ -352,8 +367,16 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterCatalogServices(IServiceCollection services)
     {
-        _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogService>();
-        _ = services.AddScoped<IDefaultCatalogService, DefaultCatalogService>();
+        // Register cache adapter that wraps API-specific ICatalogCache for Infrastructure use
+        _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.Caching.ICatalogCacheProvider, Services.Catalog.CatalogCacheAdapter>();
+        
+        // Register Infrastructure catalog service with cache abstraction
+        _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.ICatalogService, Farm.Infrastructure.Services.Catalog.CatalogService>();
+        
+        // Register API adapter that wraps Infrastructure service to work with request DTOs
+        _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
+        
+        _ = services.AddScoped<Farm.Infrastructure.Services.IDefaultCatalogService, Farm.Infrastructure.Services.DefaultCatalogService>();
         _ = services.AddScoped<Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
     }
 
@@ -415,10 +438,65 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterPrinterServices(IServiceCollection services)
     {
-        _ = services.AddScoped<Services.Printers.IPrintersService, Services.Printers.PrintersService>();
-        _ = services.AddScoped<Services.Interfaces.IMoonrakerDiagnosticsService, Services.MoonrakerDiagnosticsService>();
-        _ = services.AddScoped<Services.Interfaces.IPrinterCapabilityDiscoveryService, Services.PrinterCapabilityDiscoveryService>();
-        _ = services.AddScoped<Services.PrinterCapabilities.IPrinterCapabilitiesService, Services.PrinterCapabilities.PrinterCapabilitiesService>();
+        // Register the backend client factory for unified access to all backend clients
+        // The factory dynamically discovers clients from plugins via IBackendPluginRegistry
+        // This eliminates the need to pass individual backend clients (Moon, Prusa, SDCP, OctoPrint)
+        // to PrintersService, making it easier to add new backends without modifying the constructor
+        // IMPORTANT: Must be SCOPED because backend clients (e.g., IMoonrakerClient) are scoped services
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IBackendClientFactory>(provider =>
+        {
+            var serviceProvider = provider;
+            var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            
+            return new Farm.Infrastructure.Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, logger);
+        });
+        
+        // Register the backend capability factory for capability-aware client retrieval
+        // This factory now integrates with the plugin registry for backend metadata
+        // while maintaining backward compatibility with reflection-based detection
+        // IMPORTANT: Must be SCOPED because it depends on IBackendClientFactory which is scoped
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IBackendCapabilityFactory>(provider =>
+        {
+            var clientFactory = provider.GetRequiredService<Farm.Infrastructure.Services.Printers.IBackendClientFactory>();
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            var pluginRegistry = provider.GetService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            
+            return new Farm.Infrastructure.Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
+        });
+
+        // Register the factory for getting printer status clients from plugins
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusClientFactory>(provider =>
+        {
+            var serviceProvider = provider;
+            var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
+            var logger = provider.GetRequiredService<IUnifiedLoggingService>();
+            
+            return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
+        });
+        
+        // Register the printer status cache (singleton in Infrastructure - shared across all layers)
+        var printerStatusCache = new Farm.Infrastructure.Services.Printers.PrinterStatusCache();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(printerStatusCache);
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(printerStatusCache);
+
+        // Register the printer status update receiver (scoped - one per request)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusUpdateReceiver, Farm.Infrastructure.Services.Printers.PrinterStatusUpdateReceiver>();
+
+        // Register the printer status fallback service for timeout and circuit breaker management
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusFallbackService, Farm.Infrastructure.Services.Printers.PrinterStatusFallbackService>();
+        
+        // Register the backend capabilities service for exposing plugin capabilities to the UI
+        _ = services.AddScoped<Services.Printers.IPrinterBackendCapabilitiesService, Services.Printers.PrinterBackendCapabilitiesService>();
+
+        // Register the multi-printer status coordinator for parallel operation orchestration
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IMultiPrinterStatusCoordinator, Farm.Infrastructure.Services.Printers.MultiPrinterStatusCoordinator>();
+
+        // Register SignalR printer status broadcaster - abstracts real-time broadcasting for any UI implementation
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusBroadcaster, Services.Printers.SignalRPrinterStatusBroadcaster>();
+
+        // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();
     }
 
     #endregion
@@ -441,21 +519,47 @@ public static class ServiceCollectionExtensions
 
         // Harvest configuration and services
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
-        _ = services.AddSingleton<IHarvestQueue, InMemoryHarvestQueue>();
-        _ = services.AddScoped<IGcodeHarvestService, GcodeHarvestService>();
+        
+        // Configure harvest queue - Redis or In-Memory based on configuration
+        string harvestQueueType = configuration["HarvestQueue:Type"] ?? "memory";
+        if (string.Equals(harvestQueueType, "redis", StringComparison.OrdinalIgnoreCase))
+        {
+            // Redis-backed distributed queue
+            string redisConnection = configuration["HarvestQueue:Redis:Connection"] ?? "localhost:6379";
+            
+            // Register Redis connection
+            _ = services.AddSingleton<IConnectionMultiplexer>(sp =>
+            {
+                var options = ConfigurationOptions.Parse(redisConnection);
+                options.AbortOnConnectFail = false; // Graceful degradation
+                return ConnectionMultiplexer.Connect(options);
+            });
+            
+            _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IHarvestQueue, Farm.Infrastructure.Services.Gcode.RedisHarvestQueue>();
+        }
+        else
+        {
+            // Default: In-memory queue (for development and local deployment)
+            _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IHarvestQueue, Farm.Infrastructure.Services.Gcode.InMemoryHarvestQueue>();
+        }
+        
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Services.Gcode.IGcodeLibraryService, Services.Gcode.GcodeLibraryService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, Services.Gcode.SignalRHarvestEventBroadcaster>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
+        _ = services.AddHostedService<Farm.Infrastructure.Services.Gcode.HarvestWorkerService>();
+
+        // Gcode harvest queue (async processing)
+        _ = services.AddScoped<Farm.Infrastructure.Services.GcodeHarvest.IGcodeHarvestQueue, Farm.Infrastructure.Services.GcodeHarvest.EfGcodeHarvestQueue>();
+        if (!disableBackgroundServices)
+        {
+            _ = services.AddHostedService<Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService>();
+        }
 
         // Gcode upload settings and quota
         _ = services.AddSingleton<IGcodeUploadSettings, InMemoryGcodeUploadSettings>();
         _ = services.AddSingleton<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
-
-        // Harvest worker (background)
-        if (!disableBackgroundServices)
-        {
-            _ = services.AddHostedService<HarvestWorkerService>();
-        }
     }
 
     #endregion
@@ -486,33 +590,28 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
     }
 
+    private static void RegisterBackendClientPlugins(IServiceCollection services)
+    {
+        // Discover and register all backend client plugins
+        // This will scan all loaded assemblies for IBackendClientPlugin implementations
+        services.AddBackendClientPlugins();
+    }
+
     #endregion
 
     #region HTTP Clients
 
     private static void RegisterHttpClients(IServiceCollection services)
     {
-        _ = services.AddHttpClient<IMoonrakerClient, MoonrakerClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
+        // Backend-specific HTTP clients are now registered by their respective plugins
+        // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:
+        // - Moonraker HTTP client (10s timeout)
+        // - PrusaLink HTTP client (10s timeout)
+        // - OctoPrint HTTP client (10s timeout)
+        // - SDCP HTTP client (10s timeout)
+        // This keeps backend-specific HTTP client configuration encapsulated in plugins
 
-        _ = services.AddHttpClient<IPrusaLinkClient, PrusaLinkClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        _ = services.AddHttpClient<IOctoPrintClient, OctoPrintClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        _ = services.AddHttpClient<ISdcpClient, SdcpClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        // Spoolman Integration
+        // Spoolman Integration (not backend-specific, registered centrally)
         _ = services.AddHttpClient<ISpoolmanService, SpoolmanService>("SpoolmanService", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
@@ -527,23 +626,31 @@ public static class ServiceCollectionExtensions
     {
         if (!disableBackgroundServices)
         {
-            // System log cleanup
+            // System log cleanup (common service, not plugin-specific)
             _ = services.AddHostedService<SystemLogCleanupService>();
 
-            // Realtime update service for Klipper/Moonraker printers
-            _ = services.AddHostedService<MoonrakerSubscriptionService>();
+            // Stale worker cleanup service
+            _ = services.AddHostedService<Services.Workers.StaleWorkerCleanupHostedService>();
 
-            // Polling update service for PrusaLink printers (HTTP polling every 5 seconds)
-            _ = services.AddHostedService<PrusaLinkPollingService>();
-
-            // Polling update service for OctoPrint printers (HTTP polling every 10 seconds)
-            _ = services.AddHostedService<OctoPrintPollingService>();
+            // Backend-specific background services are now registered by their respective plugins
+            // via the IExtendedBackendPlugin.RegisterAdditionalServices() method:
+            // - MoonrakerSubscriptionService (real-time WebSocket subscriptions)
+            // - PrusaLinkPollingService (HTTP polling every 5 seconds)
+            // - OctoPrintPollingService (HTTP polling every 10 seconds)
+            // This keeps backend-specific logic encapsulated in plugins
         }
     }
 
     #endregion
 
     #region Helpers
+
+    private static void RegisterStatusClientsFromPlugins(IServiceCollection services)
+    {
+        // Status clients are now registered by their respective plugins via RegisterAdditionalServices
+        // This method is a placeholder for any common status client setup if needed in the future
+        // For now, plugins handle all status client registration independently
+    }
 
     private static bool ShouldDisableBackgroundServices()
     {

@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.RateLimiting;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.RateLimiting;

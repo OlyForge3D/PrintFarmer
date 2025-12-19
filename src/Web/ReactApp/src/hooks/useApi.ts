@@ -91,72 +91,84 @@ export function usePrinterCameraUrls(options?: UseQueryOptions<PrinterCameraUrls
   });
 }
 
+export function usePrinterBackendCapabilities(options?: UseQueryOptions<PrinterBackendCapabilitiesDto[], ApiError>) {
+  return useQuery({
+    queryKey: [...queryKeys.printers, 'backend-capabilities'],
+    queryFn: () => apiClient.getPrinterBackendCapabilities(),
+    staleTime: 600000, // 10 minutes - backend capabilities rarely change
+    ...options,
+  });
+}
+
+export function usePrinterBackendCapabilitiesSingle(printerId: string | null, options?: UseQueryOptions<PrinterBackendCapabilitiesDto, ApiError>) {
+  return useQuery({
+    queryKey: [...queryKeys.printers, printerId, 'backend-capabilities'],
+    queryFn: () => {
+      if (!printerId) throw new Error('printerId is required');
+      return apiClient.getPrinterBackendCapabilitiesSingle(printerId);
+    },
+    enabled: !!printerId,
+    staleTime: 600000, // 10 minutes
+    ...options,
+  });
+}
+
+/**
+ * Hook to get printers with camera URLs.
+ * Camera URLs are now included directly in PrinterFastDto from the database,
+ * so this simply transforms PrinterFast to Printer interface.
+ * 
+ * SIMPLIFIED: No longer merges data from multiple endpoints - camera URLs
+ * are stored in DB during printer discovery and returned with printer data.
+ */
 export function usePrintersWithCameraUrls(includeDisabled = false) {
   const printersQuery = usePrintersFast(includeDisabled);
-  const cameraUrlsQuery = usePrinterCameraUrls();
-
-  // Compute derived values based on query states
-  const isLoading = printersQuery.isLoading || cameraUrlsQuery.isLoading;
-  const isError = printersQuery.isError || cameraUrlsQuery.isError;
-  const error = printersQuery.error || cameraUrlsQuery.error;
-  const isSuccess = (printersQuery.isSuccess && cameraUrlsQuery.isSuccess) || (!!printersQuery.data && !!cameraUrlsQuery.data);
-  const isFetching = printersQuery.isFetching || cameraUrlsQuery.isFetching;
 
   return useMemo(() => {
-    if (printersQuery.data && cameraUrlsQuery.data) {
-      // Create a map of camera URLs by printer ID for efficient lookup
-      const cameraUrlsMap = new Map<string, PrinterCameraUrls>();
-      cameraUrlsQuery.data.forEach(camera => {
-        cameraUrlsMap.set(camera.id, camera);
-      });
-
-      // Merge camera URLs into printer data and convert PrinterFast to Printer
-      const printersWithCameraUrls: Printer[] = printersQuery.data.map(printerFast => {
-        const cameraUrls = cameraUrlsMap.get(printerFast.id);
-        const merged = {
-          ...printerFast,
-          isReachable: printerFast.isOnline, // Add missing property for Printer interface
-          cameraStreamUrl: cameraUrls?.cameraStreamUrl,
-          cameraSnapshotUrl: cameraUrls?.cameraSnapshotUrl,
-          // Add other missing Printer properties with defaults
-          progress: undefined,
-          jobName: undefined,
-          thumbnailUrl: undefined,
-          x: undefined,
-          y: undefined,
-          z: undefined,
-          hotendTemp: undefined,
-          bedTemp: undefined,
-          hotendTarget: undefined,
-          bedTarget: undefined,
-          spoolInfo: undefined,
-        } as Printer;
-        
-        return merged;
-      });
+    if (printersQuery.data) {
+      // Transform PrinterFast to Printer interface - camera URLs are already included
+      const printers: Printer[] = printersQuery.data.map(printerFast => ({
+        ...printerFast,
+        isReachable: printerFast.isOnline,
+        // Camera URLs from database (discovered at registration)
+        cameraStreamUrl: printerFast.cameraStreamUrl,
+        cameraSnapshotUrl: printerFast.cameraSnapshotUrl,
+        // Optional runtime properties (not available from fast endpoint)
+        progress: undefined,
+        jobName: undefined,
+        thumbnailUrl: undefined,
+        x: undefined,
+        y: undefined,
+        z: undefined,
+        hotendTemp: undefined,
+        bedTemp: undefined,
+        hotendTarget: undefined,
+        bedTarget: undefined,
+        spoolInfo: undefined,
+      } as Printer));
 
       return {
-        data: printersWithCameraUrls,
-        isLoading,
-        isError,
-        error,
+        data: printers,
+        isLoading: printersQuery.isLoading,
+        isError: printersQuery.isError,
+        error: printersQuery.error,
         refetch: printersQuery.refetch,
-        isSuccess,
-        isFetching,
+        isSuccess: printersQuery.isSuccess,
+        isFetching: printersQuery.isFetching,
       };
     }
     
     // Return loading/error states when data is not ready
     return {
       data: undefined,
-      isLoading,
-      isError,
-      error,
+      isLoading: printersQuery.isLoading,
+      isError: printersQuery.isError,
+      error: printersQuery.error,
       refetch: printersQuery.refetch,
       isSuccess: false,
-      isFetching,
+      isFetching: printersQuery.isFetching,
     };
-  }, [printersQuery.data, printersQuery.refetch, cameraUrlsQuery.data, isLoading, isError, error, isSuccess, isFetching]);
+  }, [printersQuery.data, printersQuery.refetch, printersQuery.isLoading, printersQuery.isError, printersQuery.error, printersQuery.isSuccess, printersQuery.isFetching]);
 }
 
 export function usePrinter(id: string, options?: UseQueryOptions<Printer, ApiError>) {

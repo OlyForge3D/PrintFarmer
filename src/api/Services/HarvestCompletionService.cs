@@ -46,6 +46,14 @@ public class HarvestCompletionService(
         await using AsyncServiceScope scope = _serviceProvider.CreateAsyncScope();
         IHarvestRepository harvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
 
+        await ProcessOperationsAsync(harvestRepo, ct);
+    }
+
+    /// <summary>
+    /// Testable hook that processes a batch of operations using an already-resolved repository.
+    /// </summary>
+    internal async Task ProcessOperationsAsync(IHarvestRepository harvestRepo, CancellationToken ct)
+    {
         // Find running operations that might be completed
         List<GcodeHarvestOperation> runningOperations = await harvestRepo.GetRunningOperationsWithFilesFoundAsync(ct);
 

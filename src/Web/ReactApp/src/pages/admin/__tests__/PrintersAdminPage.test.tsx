@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import PrintersAdminPage from '../PrintersAdminPage';
 import * as api from '@/services/api';
@@ -10,6 +11,15 @@ vi.mock('@/services/api');
 vi.mock('@/components/auth/ProtectedRoute', () => ({
   ProtectedRoute: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
 }));
+
+function renderWithProviders(ui: React.ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      {ui}
+    </QueryClientProvider>
+  );
+}
 
 describe('PrintersAdminPage', () => {
   beforeEach(() => {
@@ -22,7 +32,7 @@ describe('PrintersAdminPage', () => {
   });
 
   it('parses uploaded JSON and shows preview items', async () => {
-    render(<PrintersAdminPage />);
+    renderWithProviders(<PrintersAdminPage />);
 
     const file = {
       name: 'printers.json',
@@ -40,7 +50,7 @@ describe('PrintersAdminPage', () => {
   it('calls bulk endpoint on confirm import and shows results', async () => {
     const bulkMock = vi.spyOn(api.apiClient, 'bulkCreatePrinters').mockResolvedValue({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Imported', id: 'id-1' }] });
 
-    render(<PrintersAdminPage />);
+    renderWithProviders(<PrintersAdminPage />);
     const file = { name: 'printers.json', async text() { return JSON.stringify([{ name: 'P1', serverUrl: 'http://1' }]); } } as unknown as File;
     const input = screen.getByLabelText('Import printers JSON file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
@@ -60,7 +70,7 @@ describe('PrintersAdminPage', () => {
       .mockResolvedValueOnce({ importedCount: 0, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Failed', reason: 'bad' }] })
       .mockResolvedValueOnce({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Imported', id: 'id-1' }] });
 
-    render(<PrintersAdminPage />);
+    renderWithProviders(<PrintersAdminPage />);
   const file = { name: 'printers.json', async text() { return JSON.stringify([{ name: 'P1', serverUrl: 'http://1' }]); } } as unknown as File;
     const input = screen.getByLabelText('Import printers JSON file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
@@ -81,7 +91,7 @@ describe('PrintersAdminPage', () => {
       .mockResolvedValueOnce({ importedCount: 0, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Failed', reason: 'bad' }] })
       .mockResolvedValueOnce({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Imported', id: 'id-1' }] });
 
-    render(<PrintersAdminPage />);
+    renderWithProviders(<PrintersAdminPage />);
   const file = { name: 'printers.json', async text() { return JSON.stringify([{ name: 'P1', serverUrl: 'http://1' }]); } } as unknown as File;
     const input = screen.getByLabelText('Import printers JSON file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });

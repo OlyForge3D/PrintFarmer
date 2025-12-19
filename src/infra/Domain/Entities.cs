@@ -14,7 +14,7 @@ public class Printer
     public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use OriginalServerUri for typed access")]
     public string? OriginalServerUrl { get; set; } // Original URL/host (for re-resolving if IP changes)
-    public int? BackendPort { get; set; } // null for non-Moonraker, 7125 for Moonraker by default
+    public int BackendPort { get; set; } // Port for backend connection: 7125 (Moonraker), 80 (PrusaLink/OctoPrint), 8080 (SDCP). ALWAYS SET BY DISCOVERY PROBES - NEVER DEFAULT!
     public int? FrontendPort { get; set; } // null for non-Moonraker, 80 for Moonraker by default
     [NotMapped]
     public Uri? ServerUri
@@ -28,6 +28,82 @@ public class Printer
         get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out Uri? u) ? u : null);
         set => OriginalServerUrl = value?.ToString();
     }
+    
+    /// <summary>
+    /// Constructs the backend URL by combining ServerUrl with BackendPort.
+    /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
+    /// </summary>
+    [NotMapped]
+    public string BackendUrl
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ServerUrl))
+            {
+                return ServerUrl;
+            }
+            
+            try
+            {
+                Uri baseUri = new(ServerUrl);
+                int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
+                
+                // Only include port in URL if it's non-standard
+                if (BackendPort == defaultPort)
+                {
+                    return baseUri.ToString().TrimEnd('/');
+                }
+                
+                UriBuilder ub = new(baseUri) { Port = BackendPort };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                return ServerUrl;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Constructs the frontend URL by combining ServerUrl with FrontendPort.
+    /// For Moonraker, this typically points to the web UI on port 80.
+    /// Returns BackendUrl if FrontendPort is not set.
+    /// </summary>
+    [NotMapped]
+    public string FrontendUrl
+    {
+        get
+        {
+            if (!FrontendPort.HasValue || FrontendPort.Value == 0)
+            {
+                return BackendUrl; // Fall back to backend URL if no frontend port specified
+            }
+            
+            if (string.IsNullOrWhiteSpace(ServerUrl))
+            {
+                return ServerUrl;
+            }
+            
+            try
+            {
+                Uri baseUri = new(ServerUrl);
+                int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
+                
+                // Only include port in URL if it's non-standard
+                if (FrontendPort.Value == defaultPort)
+                {
+                    return baseUri.ToString().TrimEnd('/');
+                }
+                
+                UriBuilder ub = new(baseUri) { Port = FrontendPort.Value };
+                return ub.Uri.ToString().TrimEnd('/');
+            }
+            catch
+            {
+                return BackendUrl; // Fall back to backend URL on error
+            }
+        }
+    }
     public string? IpAddress { get; set; } // Last resolved IPv4/IPv6 string for convenience
     public string? Notes { get; set; }
     public int Backend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
@@ -39,7 +115,41 @@ public class Printer
     public Guid ModelId { get; set; } // No longer nullable - uses default "Unknown Model"
     public PrinterModel? Model { get; set; }
     public DateTime? DateAcquired { get; set; }
-    public PrinterCapabilities? Capabilities { get; set; }
+    
+    // Hardware Specifications (previously in PrinterCapabilities)
+    public double? MaxBuildVolumeX { get; set; }
+    public double? MaxBuildVolumeY { get; set; }
+    public double? MaxBuildVolumeZ { get; set; }
+    public bool HasHeatedBed { get; set; } = true;
+    public bool HasEnclosure { get; set; }
+    public bool MultiMaterial { get; set; }
+    public bool SupportsAutoLeveling { get; set; }
+    public int? MaxPrintSpeed { get; set; }
+    
+    // Bed temperature ranges
+    [ImportExport(ImportExportTargets.Import)]
+    public int? MinBedTemp { get; set; }
+    public int? MaxBedTemp { get; set; }
+    
+    // Material and job tracking
+    [ImportExport(ImportExportTargets.Import)]
+    public string? CurrentMaterial { get; set; } // From Spoolman integration
+    [ImportExport(ImportExportTargets.Import)]
+    public int? CurrentSpoolId { get; set; } // Spoolman spool ID
+    
+    // Availability
+    [ImportExport(ImportExportTargets.Import)]
+    public bool IsAvailable { get; set; } = true; // Can accept new jobs
+    public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
+    
+    // Multi-toolhead support (one-to-many with Toolhead)
+    /// <summary>
+    /// Collection of toolheads (hotends/nozzles) for this printer.
+    /// For single-toolhead printers, this will have one entry.
+    /// For multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.), this will have multiple entries.
+    /// </summary>
+    public ICollection<Toolhead> Toolheads { get; set; } = new List<Toolhead>();
+    
     public bool InMaintenance { get; set; } = false;
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
 }
@@ -479,41 +589,6 @@ public class PrintJob
     public DateTime QueuedAt { get; set; }
 }
 
-// Printer Capabilities (extends Printer entity conceptually)
-#pragma warning disable CA1724 // Type name conflicts with namespace Farm.Infrastructure.Repositories.PrinterCapabilities
-public class PrinterCapabilities
-#pragma warning restore CA1724
-{
-    public Guid Id { get; set; }
-    public Guid PrinterId { get; set; }
-    public Printer Printer { get; set; } = null!;
-    public double? NozzleDiameter { get; set; }
-    public string[]? SupportedMaterials { get; set; } // JSON array: ["PLA", "PETG", "ABS"]
-    public double? MaxBuildVolumeX { get; set; }
-    public double? MaxBuildVolumeY { get; set; }
-    public double? MaxBuildVolumeZ { get; set; }
-    public bool HasHeatedBed { get; set; } = true;
-    public bool HasEnclosure { get; set; }
-    public bool MultiMaterial { get; set; }
-    public int NumberOfExtruders { get; set; } = 1;
-    public int? MinHotendTemp { get; set; }
-    public int? MaxHotendTemp { get; set; }
-    [ImportExport(ImportExportTargets.Import)]
-    public int? MinBedTemp { get; set; }
-    public int? MaxBedTemp { get; set; }
-    [ImportExport(ImportExportTargets.Import)]
-    public string? CurrentMaterial { get; set; } // From Spoolman integration
-    [ImportExport(ImportExportTargets.Import)]
-    public int? CurrentSpoolId { get; set; } // Spoolman spool ID
-    [ImportExport(ImportExportTargets.Import)]
-    public bool IsAvailable { get; set; } = true; // Can accept new jobs
-    public DateTime LastUpdated { get; set; }
-    public bool SupportsAutoLeveling { get; set; }
-    public int? MaxPrintSpeed { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-}
-
 // User Management and Authentication System
 public class User
 {
@@ -804,4 +879,58 @@ public class Model3DTagMapping
     // Navigation properties
     public Model3D? Model3D { get; set; }
     public Model3DTag? Tag { get; set; }
+}
+/// <summary>
+/// Queue item for G-code harvest operations. Decouples the API request from the background processing.
+/// Allows multiple harvest requests to be queued and processed sequentially or with priority.
+/// </summary>
+public class GcodeHarvestQueueItem
+{
+    public Guid Id { get; set; }
+    public Guid PrinterId { get; set; }
+    public DateTime QueuedAt { get; set; }
+    public DateTime? ProcessingStartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public int Priority { get; set; } = 0; // Higher = process sooner
+    
+    /// <summary>
+    /// Current status of the queue item.
+    /// </summary>
+    public GcodeHarvestQueueItemStatus Status { get; set; } = GcodeHarvestQueueItemStatus.Pending;
+    
+    /// <summary>
+    /// Serialized StartGcodeHarvestDto parameters as JSON for deferred processing.
+    /// </summary>
+    public string Parameters { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Error message if processing failed.
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+    
+    /// <summary>
+    /// Error details for debugging (stack trace, additional context).
+    /// </summary>
+    public string? ErrorDetails { get; set; }
+    
+    // Results cached after completion
+    public int FilesFound { get; set; }
+    public int FilesAdded { get; set; }
+    public int FilesSkipped { get; set; }
+    public int FilesErrored { get; set; }
+    
+    // Navigation
+    public Printer? Printer { get; set; }
+}
+
+/// <summary>
+/// Status of a harvest operation in the queue.
+/// </summary>
+public enum GcodeHarvestQueueItemStatus
+{
+    Pending = 0,      // Waiting to be processed
+    Processing = 1,   // Currently being processed
+    Completed = 2,    // Successfully completed
+    Failed = 3,       // Failed during processing
+    Cancelled = 4     // Cancelled by user
 }
