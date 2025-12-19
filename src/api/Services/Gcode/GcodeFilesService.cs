@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -593,7 +594,7 @@ namespace Farm.Web.Api.Services.Gcode
                 return "/" + childName;
             }
 
-            return (baseVirtual ?? "/").TrimEnd('/') + "/" + childName;
+            return UrlNormalizer.CombineUrl(baseVirtual ?? "/", childName);
         }
 
         private static string NormalizeVirtualPath(string? path)

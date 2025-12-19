@@ -20,6 +20,7 @@ using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
@@ -1633,11 +1634,7 @@ namespace Farm.Infrastructure.Services.Printers
                 {
                     if (thumbnailValue is string thumbnailStr && !string.IsNullOrEmpty(thumbnailStr))
                     {
-                        if (thumbnailStr.StartsWith("http://") || thumbnailStr.StartsWith("https://"))
-                        {
-                            return thumbnailStr;
-                        }
-                        return $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailStr}";
+                        return UrlNormalizer.CombineUrlSmart(printerServerUrl, $"/server/files/gcodes/{thumbnailStr}");
                     }
 
                     if (thumbnailValue is JsonElement jsonElement && jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
@@ -1650,7 +1647,7 @@ namespace Farm.Infrastructure.Services.Printers
                                 string? thumbnailPath = array[0].GetString();
                                 if (!string.IsNullOrEmpty(thumbnailPath))
                                 {
-                                    return thumbnailPath.StartsWith("http") ? thumbnailPath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{thumbnailPath}";
+                                    return UrlNormalizer.CombineUrlSmart(printerServerUrl, $"/server/files/gcodes/{thumbnailPath}");
                                 }
                             }
                             else if (array[0].ValueKind == System.Text.Json.JsonValueKind.Object)
@@ -1670,7 +1667,7 @@ namespace Farm.Infrastructure.Services.Printers
                                     string? relativePath = relativePathProp.GetString();
                                     if (!string.IsNullOrEmpty(relativePath))
                                     {
-                                        return relativePath.StartsWith("http") ? relativePath : $"{printerServerUrl.TrimEnd('/')}/server/files/gcodes/{relativePath}";
+                                        return UrlNormalizer.CombineUrlSmart(printerServerUrl, $"/server/files/gcodes/{relativePath}");
                                     }
                                 }
                             }

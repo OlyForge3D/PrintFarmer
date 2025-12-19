@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Thumbnails;
@@ -184,7 +185,7 @@ namespace Farm.Web.Api.Services.Model
             {
                 return "/" + name;
             }
-            return parentPath.TrimEnd('/') + "/" + name;
+            return UrlNormalizer.CombineUrl(parentPath, name);
         }
 
         private static bool IsMatch(string name, string? search)

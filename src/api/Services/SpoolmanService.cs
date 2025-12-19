@@ -6,6 +6,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Interfaces;
@@ -47,7 +48,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         // Use provided URL (normalization is lightweight here)
-        string normalized = raw.TrimEnd('/');
+        string normalized = UrlNormalizer.NormalizeBaseUrl(raw);
         string[] probePaths = new[] { "/api/v1/health", "/api/v1/info" };
 
         foreach (string path in probePaths)
@@ -156,7 +157,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     public void SetConfig(SpoolmanConfigDto config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        string? baseUrl = NormalizeBaseUrl(config.BaseUrl);
+        string? baseUrl = UrlNormalizer.NormalizeBaseUrlNullable(config.BaseUrl);
 
         SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
         settings.BaseUrl = baseUrl ?? string.Empty;
@@ -168,22 +169,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
         settings.BaseUrl = string.Empty;
         settingsService.Save(settings);
-    }
-
-    private static string? NormalizeBaseUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return url; // allow null/empty to propagate (controller returns 200 with success=false)
-        }
-
-        string t = url.Trim();
-        if (!t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !t.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            t = "http://" + t;
-        }
-        return t.TrimEnd('/');
     }
 
     public async Task<IReadOnlyList<SpoolmanSpoolDto>> ListSpoolsAsync(CancellationToken ct)
