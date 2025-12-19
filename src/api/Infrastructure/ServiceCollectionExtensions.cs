@@ -28,6 +28,7 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
+using StackExchange.Redis;
 using Farm.Web.Api.Services.Slicing.Abstractions;
 using Farm.Web.Api.Services.StorageManagement;
 using Farm.Web.Api.Services.Workers;
@@ -518,7 +519,30 @@ public static class ServiceCollectionExtensions
 
         // Harvest configuration and services
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
-        _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IHarvestQueue, Farm.Infrastructure.Services.Gcode.InMemoryHarvestQueue>();
+        
+        // Configure harvest queue - Redis or In-Memory based on configuration
+        string harvestQueueType = configuration["HarvestQueue:Type"] ?? "memory";
+        if (string.Equals(harvestQueueType, "redis", StringComparison.OrdinalIgnoreCase))
+        {
+            // Redis-backed distributed queue
+            string redisConnection = configuration["HarvestQueue:Redis:Connection"] ?? "localhost:6379";
+            
+            // Register Redis connection
+            _ = services.AddSingleton<IConnectionMultiplexer>(sp =>
+            {
+                var options = ConfigurationOptions.Parse(redisConnection);
+                options.AbortOnConnectFail = false; // Graceful degradation
+                return ConnectionMultiplexer.Connect(options);
+            });
+            
+            _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IHarvestQueue, Farm.Infrastructure.Services.Gcode.RedisHarvestQueue>();
+        }
+        else
+        {
+            // Default: In-memory queue (for development and local deployment)
+            _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IHarvestQueue, Farm.Infrastructure.Services.Gcode.InMemoryHarvestQueue>();
+        }
+        
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Services.Gcode.IGcodeLibraryService, Services.Gcode.GcodeLibraryService>();
