@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, within } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { TestRouter } from '@/test/utils/TestRouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -22,6 +22,11 @@ vi.mock('@/hooks/useApi', async () => ({
   useModels: vi.fn(() => ({ data: [] })),
   useFilamentTypes: vi.fn(() => ({ data: [] })),
   useUpdatePrinter: () => ({ mutateAsync: vi.fn() }),
+  useJobQueue: vi.fn(() => ({ 
+    data: [], 
+    isLoading: false, 
+    error: null 
+  })),
   usePrinterHistory: vi.fn(() => ({ 
     data: { jobs: [], total: 0 }, 
     isLoading: false, 

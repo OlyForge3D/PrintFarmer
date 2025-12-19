@@ -901,7 +901,7 @@ export class ApiClient {
         if (operations.length > 0) {
           return operations[0].id;
         }
-      } catch (err) {
+      } catch {
         // Continue polling even if endpoint errors
         console.debug("Polling for harvest operation creation...");
       }

@@ -63,20 +63,6 @@ export function usePrinterDisplay(printer: Printer): PrinterDisplay {
   }, [
     printer,
     signalRStatus,
-    signalRStatus?.isOnline,
-    signalRStatus?.state,
-    signalRStatus?.progress,
-    signalRStatus?.jobName,
-    signalRStatus?.thumbnailUrl,
-    signalRStatus?.cameraStreamUrl,
-    signalRStatus?.cameraSnapshotUrl,
-    signalRStatus?.x,
-    signalRStatus?.y,
-    signalRStatus?.z,
-    signalRStatus?.hotendTemp,
-    signalRStatus?.bedTemp,
-    signalRStatus?.hotendTarget,
-    signalRStatus?.bedTarget,
   ]);
 }
 

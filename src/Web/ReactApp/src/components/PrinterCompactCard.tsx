@@ -8,7 +8,7 @@ interface PrinterCompactCardProps {
   printer: Printer;
   onEdit: (printer: Printer) => void;
   onDelete: (printer: Printer) => void;
-  getPrinterStatus?: (id: string) => any;
+  getPrinterStatus?: (id: string) => { state?: string; isOnline?: boolean } | undefined;
 }
 
 export function PrinterCompactCard({
