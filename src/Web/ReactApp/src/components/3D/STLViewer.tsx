@@ -208,11 +208,11 @@ export const STLViewer: React.FC<STLViewerProps> = ({
       <div className="w-full h-full flex items-center justify-center rounded-lg" style={{
         background: 'linear-gradient(to bottom, var(--pf-bg-0), var(--pf-bg-1))',
       }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ display: 'inline-block' }}>
+        <div className="text-center">
+          <div className="inline-block">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--pf-accent-2)' }}></div>
           </div>
-          <p className="mt-4" style={{ color: 'var(--pf-text-secondary)' }}>Loading STL model...</p>
+          <p className="mt-4 text-pf-text-secondary">Loading STL model...</p>
         </div>
       </div>
     );
@@ -220,14 +220,8 @@ export const STLViewer: React.FC<STLViewerProps> = ({
 
   if (error) {
     return (
-      <div className="w-full h-full flex items-center justify-center rounded-lg" style={{
-        backgroundColor: 'var(--pf-error-bg)',
-      }}>
-        <div style={{
-          textAlign: 'center',
-          color: 'var(--pf-error)',
-          padding: '1rem',
-        }}>
+      <div className="w-full h-full flex items-center justify-center rounded-lg bg-pf-error-bg">
+        <div className="text-center text-pf-error p-4">
           <p className="font-semibold">Error Loading Model</p>
           <p className="text-sm mt-2">{error}</p>
         </div>
@@ -237,10 +231,8 @@ export const STLViewer: React.FC<STLViewerProps> = ({
 
   if (!geometry) {
     return (
-      <div className="w-full h-full flex items-center justify-center rounded-lg" style={{
-        backgroundColor: 'var(--pf-bg-2)',
-      }}>
-        <p style={{ color: 'var(--pf-text-secondary)' }}>No model loaded</p>
+      <div className="w-full h-full flex items-center justify-center rounded-lg bg-pf-bg-2">
+        <p className="text-pf-text-secondary">No model loaded</p>
       </div>
     );
   }

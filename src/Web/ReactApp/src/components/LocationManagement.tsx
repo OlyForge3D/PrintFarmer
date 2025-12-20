@@ -108,11 +108,7 @@ export const LocationManagement: React.FC = () => {
         {!showForm && (
           <button
             onClick={() => setShowForm(true)}
-            className="font-bold py-2 px-4 rounded transition-opacity"
-            style={{
-              backgroundColor: 'var(--pf-accent-bg)',
-              color: 'white',
-            }}
+            className="bg-pf-accent-bg text-white font-bold py-2 px-4 rounded transition-opacity hover:opacity-90"
           >
             Add Location
           </button>
@@ -121,28 +117,21 @@ export const LocationManagement: React.FC = () => {
 
       {/* Error message */}
       {error && (
-        <div className="px-4 py-3 rounded" style={{
-          backgroundColor: 'var(--pf-error-bg)',
-          border: '1px solid var(--pf-error)',
-          color: 'var(--pf-error)',
-        }}>
+        <div className="px-4 py-3 rounded bg-pf-error-bg border border-pf-error text-pf-error">
           {error}
         </div>
       )}
 
       {/* Create/Edit Form */}
       {showForm && (
-        <div className="shadow rounded-lg p-6" style={{
-          backgroundColor: 'var(--pf-bg-1)',
-          border: '1px solid var(--pf-border)',
-        }}>
-          <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--pf-text-primary)' }}>
+        <div className="shadow rounded-lg p-6 bg-pf-bg-1 border border-pf-border">
+          <h2 className="text-xl font-semibold mb-4 text-pf-text-primary">
             {editingId ? 'Edit Location' : 'Create New Location'}
           </h2>
           <form onSubmit={handleCreateOrUpdate} className="space-y-4">
             {/* Name field */}
             <div>
-              <label htmlFor="name" className="block text-sm font-medium" style={{ color: 'var(--pf-text-primary)' }}>
+              <label htmlFor="name" className="block text-sm font-medium text-pf-text-primary">
                 Location Name *
               </label>
               <input
@@ -151,19 +140,14 @@ export const LocationManagement: React.FC = () => {
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g., RACK1-01"
-                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none"
-                style={{
-                  backgroundColor: 'var(--pf-bg-0)',
-                  color: 'var(--pf-text-primary)',
-                  border: '1px solid var(--pf-border)',
-                }}
+                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
                 required
               />
             </div>
 
             {/* Description field */}
             <div>
-              <label htmlFor="description" className="block text-sm font-medium" style={{ color: 'var(--pf-text-primary)' }}>
+              <label htmlFor="description" className="block text-sm font-medium text-pf-text-primary">
                 Description
               </label>
               <textarea
@@ -172,12 +156,7 @@ export const LocationManagement: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="e.g., Main warehouse rack, first column"
                 rows={3}
-                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none"
-                style={{
-                  backgroundColor: 'var(--pf-bg-0)',
-                  color: 'var(--pf-text-primary)',
-                  border: '1px solid var(--pf-border)',
-                }}
+                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
               />
             </div>
 
@@ -186,22 +165,14 @@ export const LocationManagement: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="font-bold py-2 px-4 rounded transition-opacity disabled:opacity-50"
-                style={{
-                  backgroundColor: 'var(--pf-accent-bg)',
-                  color: 'white',
-                }}
+                className="bg-pf-accent-bg text-white font-bold py-2 px-4 rounded transition-opacity disabled:opacity-50 hover:opacity-90"
               >
                 {loading ? 'Saving...' : editingId ? 'Update' : 'Create'}
               </button>
               <button
                 type="button"
                 onClick={handleCancel}
-                className="font-bold py-2 px-4 rounded transition-opacity"
-                style={{
-                  backgroundColor: 'var(--pf-border-medium)',
-                  color: 'var(--pf-text-primary)',
-                }}
+                className="bg-pf-border-medium text-pf-text-primary font-bold py-2 px-4 rounded transition-opacity hover:opacity-80"
               >
                 Cancel
               </button>
@@ -211,79 +182,50 @@ export const LocationManagement: React.FC = () => {
       )}
 
       {/* Locations List */}
-      <div className="shadow overflow-hidden rounded-lg" style={{
-        backgroundColor: 'var(--pf-bg-1)',
-        border: '1px solid var(--pf-border)',
-      }}>
+      <div className="shadow overflow-hidden rounded-lg bg-pf-bg-1 border border-pf-border">
         {loading && !showForm ? (
-          <div className="p-6 text-center" style={{ color: 'var(--pf-text-primary)' }}>Loading locations...</div>
+          <div className="p-6 text-center text-pf-text-primary">Loading locations...</div>
         ) : locations.length === 0 ? (
-          <div className="p-6 text-center" style={{ color: 'var(--pf-text-secondary)' }}>
+          <div className="p-6 text-center text-pf-text-secondary">
             No locations found. Create one to get started!
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full" style={{ borderCollapse: 'collapse' }}>
+            <table className="min-w-full border-collapse">
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--pf-border)' }}>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
-                    backgroundColor: 'var(--pf-bg-0)',
-                    color: 'var(--pf-text-secondary)',
-                  }}>
+                <tr className="border-b border-pf-border">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider bg-pf-bg-0 text-pf-text-secondary">
                     Name
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
-                    backgroundColor: 'var(--pf-bg-0)',
-                    color: 'var(--pf-text-secondary)',
-                  }}>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider bg-pf-bg-0 text-pf-text-secondary">
                     Description
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
-                    backgroundColor: 'var(--pf-bg-0)',
-                    color: 'var(--pf-text-secondary)',
-                  }}>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider bg-pf-bg-0 text-pf-text-secondary">
                     Printers
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
-                    backgroundColor: 'var(--pf-bg-0)',
-                    color: 'var(--pf-text-secondary)',
-                  }}>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider bg-pf-bg-0 text-pf-text-secondary">
                     Created
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
-                    backgroundColor: 'var(--pf-bg-0)',
-                    color: 'var(--pf-text-secondary)',
-                  }}>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider bg-pf-bg-0 text-pf-text-secondary">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody style={{ borderCollapse: 'collapse' }}>
+              <tbody>
                 {locations.map((location) => (
-                  <tr key={location.id} style={{
-                    borderBottom: '1px solid var(--pf-border)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--pf-bg-0)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: 'var(--pf-text-primary)' }}>
+                  <tr key={location.id} className="border-b border-pf-border hover:bg-pf-bg-0">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-pf-text-primary">
                       {location.name}
                     </td>
-                    <td className="px-6 py-4 text-sm" style={{ color: 'var(--pf-text-secondary)' }}>
+                    <td className="px-6 py-4 text-sm text-pf-text-secondary">
                       {location.description || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium" style={{
-                        backgroundColor: 'var(--pf-accent-bg)',
-                        color: 'white',
-                      }}>
+                      <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium bg-pf-accent-bg text-white">
                         {location.printerCount}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--pf-text-secondary)' }}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-pf-text-secondary">
                       {new Date(location.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">

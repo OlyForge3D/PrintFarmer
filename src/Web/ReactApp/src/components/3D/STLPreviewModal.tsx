@@ -83,36 +83,19 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
   const shouldShowViewer = file || fileUrl;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    }}>
-      <div className="rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" style={{
-        backgroundColor: 'var(--pf-bg-1)',
-        border: '1px solid var(--pf-border)',
-      }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-pf-bg-1 border border-pf-border">
         {/* Header */}
-        <div className="px-6 py-4 flex items-center justify-between" style={{
+        <div className="px-6 py-4 flex items-center justify-between border-b border-pf-border" style={{
           background: 'linear-gradient(to right, var(--pf-bg-0), var(--pf-bg-1))',
-          borderBottom: '1px solid var(--pf-border)',
         }}>
           <div>
-            <h2 className="text-xl font-bold" style={{ color: 'var(--pf-text-primary)' }}>STL Model Preview</h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--pf-text-secondary)' }}>{displayFileName}</p>
+            <h2 className="text-xl font-bold text-pf-text-primary">STL Model Preview</h2>
+            <p className="text-sm mt-1 text-pf-text-secondary">{displayFileName}</p>
           </div>
           <button
             onClick={onClose}
-            className="transition-colors p-2 rounded"
-            style={{
-              color: 'var(--pf-text-secondary)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--pf-text-primary)';
-              e.currentTarget.style.backgroundColor = 'var(--pf-border-medium)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--pf-text-secondary)';
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
+            className="transition-colors p-2 rounded text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-border-medium"
             aria-label="Close"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,9 +107,8 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
         {/* Content */}
         <div className="flex-1 flex gap-4 p-4 min-h-0">
           {/* 3D Viewer */}
-          <div className="flex-1 rounded-lg overflow-hidden" style={{
+          <div className="flex-1 rounded-lg overflow-hidden border border-pf-border" style={{
             background: 'linear-gradient(to bottom, var(--pf-bg-0), var(--pf-bg-1))',
-            border: '1px solid var(--pf-border)',
           }}>
             {shouldShowViewer && (
               file ? (
@@ -138,44 +120,41 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
           </div>
 
           {/* Info Panel */}
-          <div className="w-64 rounded-lg p-4 overflow-y-auto" style={{
-            backgroundColor: 'var(--pf-bg-0)',
-            border: '1px solid var(--pf-border)',
-          }}>
-            <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--pf-text-primary)' }}>Model Information</h3>
+          <div className="w-64 rounded-lg p-4 overflow-y-auto bg-pf-bg-0 border border-pf-border">
+            <h3 className="text-lg font-semibold mb-4 text-pf-text-primary">Model Information</h3>
 
             {modelInfo ? (
               <div className="space-y-4">
                 {/* File Size */}
                 <div>
-                  <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>File Size</label>
-                  <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.fileSize}</p>
+                  <label className="block text-sm mb-1 text-pf-text-secondary">File Size</label>
+                  <p className="text-lg font-mono text-pf-text-primary">{modelInfo.fileSize}</p>
                 </div>
 
                 {/* Triangle Count */}
                 {modelInfo.triangles > 0 && (
                   <div>
-                    <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>Triangles</label>
-                    <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.triangles.toLocaleString()}</p>
+                    <label className="block text-sm mb-1 text-pf-text-secondary">Triangles</label>
+                    <p className="text-lg font-mono text-pf-text-primary">{modelInfo.triangles.toLocaleString()}</p>
                   </div>
                 )}
 
                 {/* Vertex Count */}
                 {modelInfo.vertices > 0 && (
                   <div>
-                    <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>Vertices</label>
-                    <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.vertices.toLocaleString()}</p>
+                    <label className="block text-sm mb-1 text-pf-text-secondary">Vertices</label>
+                    <p className="text-lg font-mono text-pf-text-primary">{modelInfo.vertices.toLocaleString()}</p>
                   </div>
                 )}
 
                 {/* Format */}
                 <div>
-                  <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>Format</label>
-                  <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.format}</p>
+                  <label className="block text-sm mb-1 text-pf-text-secondary">Format</label>
+                  <p className="text-lg font-mono text-pf-text-primary">{modelInfo.format}</p>
                 </div>
 
                 {/* Separator */}
-                <div style={{ borderTop: '1px solid var(--pf-border)', margin: '0.5rem 0' }}></div>
+                <div className="border-t border-pf-border my-2"></div>
 
                 {/* Controls Info */}
                 <div className="bg-gray-900 rounded p-3">

@@ -30,14 +30,14 @@ const TemperatureGauge: React.FC<{
 
   return (
     <div className="space-y-1">
-      <div className="flex justify-between text-xs" style={{ color: 'var(--pf-text-secondary)' }}>
+      <div className="flex justify-between text-xs text-pf-text-secondary">
         <span>{label}</span>
-        <span style={{ color: 'var(--pf-text-primary)', fontFamily: 'monospace' }}>
+        <span className="text-pf-text-primary font-mono">
           {Math.round(current)}°C
-          {target > 0 && <span style={{ color: 'var(--pf-text-secondary)' }}>→{target}°C</span>}
+          {target > 0 && <span className="text-pf-text-secondary">→{target}°C</span>}
         </span>
       </div>
-      <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--pf-border-dark)' }}>
+      <div className="h-2 rounded-full overflow-hidden bg-pf-border-dark">
         <div
           className="h-full transition-all duration-300"
           style={{
@@ -57,69 +57,34 @@ const TemperatureGauge: React.FC<{
 const StatusBadge: React.FC<{
   state: PrinterStatus['state'];
 }> = ({ state }) => {
-  const badgeStyles: Record<PrinterStatus['state'], { bg: string; dot: string; text: string }> = {
-    Idle: {
-      bg: 'bg-opacity-0',
-      dot: 'opacity-60',
-      text: 'opacity-75',
-    },
-    Printing: {
-      bg: 'bg-opacity-0',
-      dot: 'opacity-100',
-      text: 'opacity-100',
-    },
-    Paused: {
-      bg: 'bg-opacity-0',
-      dot: 'opacity-100',
-      text: 'opacity-100',
-    },
-    Error: {
-      bg: 'bg-opacity-0',
-      dot: 'opacity-100',
-      text: 'opacity-100',
-    },
-    Offline: {
-      bg: 'bg-opacity-0',
-      dot: 'opacity-50',
-      text: 'opacity-50',
-    },
+  const statusClasses: Record<PrinterStatus['state'], string> = {
+    Idle: 'bg-pf-border-medium',
+    Printing: 'bg-pf-success-bg',
+    Paused: 'bg-pf-warning-bg',
+    Error: 'bg-pf-error-bg',
+    Offline: 'bg-pf-border-dark',
   };
 
-  const style = badgeStyles[state];
-  const statusColors: Record<PrinterStatus['state'], { bg: string; dot: string; text: string }> = {
-    Idle: {
-      bg: 'var(--pf-border-medium)',
-      dot: 'var(--pf-border)',
-      text: 'var(--pf-text-secondary)',
-    },
-    Printing: {
-      bg: 'var(--pf-success-bg)',
-      dot: 'var(--pf-success)',
-      text: 'white',
-    },
-    Paused: {
-      bg: 'var(--pf-warning-bg)',
-      dot: 'var(--pf-warning)',
-      text: 'white',
-    },
-    Error: {
-      bg: 'var(--pf-error-bg)',
-      dot: 'var(--pf-error)',
-      text: 'white',
-    },
-    Offline: {
-      bg: 'var(--pf-border-dark)',
-      dot: 'var(--pf-border-medium)',
-      text: 'var(--pf-text-secondary)',
-    },
+  const statusTextClasses: Record<PrinterStatus['state'], string> = {
+    Idle: 'text-pf-text-secondary',
+    Printing: 'text-white',
+    Paused: 'text-white',
+    Error: 'text-white',
+    Offline: 'text-pf-text-secondary',
   };
 
-  const colors = statusColors[state];
+  const statusDotClasses: Record<PrinterStatus['state'], string> = {
+    Idle: 'bg-pf-border opacity-60',
+    Printing: 'bg-pf-success',
+    Paused: 'bg-pf-warning',
+    Error: 'bg-pf-error',
+    Offline: 'bg-pf-border-medium opacity-50',
+  };
 
   return (
-    <div className={`${style.bg} inline-flex items-center gap-2 px-3 py-1 rounded-full`} style={{ backgroundColor: colors.bg }}>
-      <div className={`w-2 h-2 rounded-full ${style.dot} animate-pulse`} style={{ backgroundColor: colors.dot }} />
-      <span className={`text-sm font-semibold ${style.text}`} style={{ color: colors.text }}>{state}</span>
+    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${statusClasses[state]}`}>
+      <div className={`w-2 h-2 rounded-full animate-pulse ${statusDotClasses[state]}`} />
+      <span className={`text-sm font-semibold ${statusTextClasses[state]}`}>{state}</span>
     </div>
   );
 };
