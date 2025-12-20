@@ -13,7 +13,6 @@ import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton';
 import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
 import { PrinterCompactCard } from '@/components/PrinterCompactCard';
-import { PrinterBedCard } from '@/components/3D/PrinterBedCard';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
@@ -21,6 +20,7 @@ import type { Printer, PrinterModelDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
 import { Box, Printer as PrinterIcon } from 'lucide-react';
+import { mdiViewList, mdiViewGrid, mdiViewComfy, mdiViewQuilt } from '@mdi/js';
 import { toast } from 'sonner';
 
 // Helper component for MDI icons
@@ -39,7 +39,7 @@ function MdiIcon({ path, size = 'w-4 h-4' }: { path: string; size?: string }) {
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
-type ViewMode = 'collapsed' | 'compact' | 'expandable' | 'table' | '3d';
+type ViewMode = 'collapsed' | 'compact' | 'expandable' | 'table';
 
 // Helper function to get backend name from enum value
 function getBackendName(backend: PrinterBackend | string | number): string {
@@ -282,16 +282,6 @@ export function PrintersPage() {
             </Button>
             <Button
               type="button"
-              onClick={() => setViewMode('3d')}
-              variant={viewMode === '3d' ? 'primary' : 'subtle'}
-              size="sm"
-              className="!p-2"
-              title="3D Bed View"
-            >
-              <Box className="w-4 h-4" />
-            </Button>
-            <Button
-              type="button"
               onClick={() => setViewMode('table')}
               variant={viewMode === 'table' ? 'primary' : 'subtle'}
               size="sm"
@@ -330,7 +320,6 @@ export function PrintersPage() {
                     key={printer.id}
                     printer={printer}
                     onExpand={() => setExpandedPrinterId(printer.id)}
-                    onDelete={() => handleDeleteSinglePrinter(printer)}
                     onEdit={() => handleEditPrinter(printer)}
                   />
                 ))}
@@ -363,42 +352,6 @@ export function PrintersPage() {
                   onEdit={() => handleEditPrinter(p)}
                 />
               ))}
-            </div>
-          ) : viewMode === '3d' ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {userPrinters.map((p) => {
-                // Create printer model from printer data
-                const printerModel: PrinterModelDto = {
-                  id: p.modelId || 'unknown',
-                  name: p.modelName || 'Unknown Model',
-                  manufacturerId: p.manufacturerId || 'unknown',
-                  maxX: 200,
-                  maxY: 200,
-                  maxZ: 250,
-                };
-
-                return (
-                  <PrinterBedCard
-                    key={p.id}
-                    printerModel={printerModel}
-                    status={{
-                      printerId: p.id,
-                      name: p.name,
-                      state: p.isOnline ? ((p.state || 'Idle') as any) : 'Offline',
-                      nozzlePosition: p.x && p.y && p.z ? { x: p.x, y: p.y, z: p.z } : undefined,
-                      temperatures: {
-                        hotend: p.hotendTemp ?? 0,
-                        hotendTarget: p.hotendTarget ?? 0,
-                        bed: p.bedTemp ?? 0,
-                        bedTarget: p.bedTarget ?? 0,
-                      },
-                      progress: p.progress,
-                      jobName: p.jobName,
-                    }}
-                    width="full"
-                  />
-                );
-              })}
             </div>
           ) : (
             <PrinterTableView
