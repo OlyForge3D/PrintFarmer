@@ -1,8 +1,7 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { DeleteIcon } from '@/components/icons/MdiIcons';
-import { Box, Eye, Tag, Grid3x3, List, FileText, FolderOpen } from 'lucide-react';
+import { DeleteIcon, CloseIcon, SettingsIcon, CubeIcon, EyeIcon, TagIcon, GridViewIcon, ListViewIcon, FileIcon, FolderIcon, UploadIcon, SearchIcon } from '@/components/icons/MdiIcons';
 import { PageTemplate } from '@/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
 import { Button, Input, FileUpload } from '@/components/ui';
@@ -23,8 +22,6 @@ const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>
 import { slicerService } from '@/services/slicerService';
 import type { SlicedModelSummary } from '@/services/slicerService';
 import { ViewerSkeleton } from '@/components/3d/ViewerSkeleton';
-
-// Backend currently returns a SlicedModelSummary; we extend with optional UI enrichment fields.
 type Model = SlicedModelSummary & {
   fileName?: string;
   fileSize?: number;
@@ -199,7 +196,7 @@ export const ModelsPage: React.FC = () => {
       <PageTemplate
         title="3D Models"
         subtitle="Upload and manage your 3D models for slicing and printing"
-        icon={Box}
+        icon={CubeIcon}
         maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center h-64">
@@ -213,7 +210,7 @@ export const ModelsPage: React.FC = () => {
     <PageTemplate
       title="3D Models"
       subtitle="Upload and manage your 3D models for slicing and printing"
-      icon={Box}
+      icon={CubeIcon}
       maxWidth="max-w-7xl"
     >
       {/* Upload Area */}
@@ -227,7 +224,7 @@ export const ModelsPage: React.FC = () => {
         >
           <div className="space-y-4">
             <div className="mx-auto w-16 h-16 bg-pf-bg-2 rounded-full flex items-center justify-center">
-              <Box className="w-8 h-8 text-pf-text-tertiary" />
+              <CubeIcon className="w-8 h-8 text-pf-text-tertiary" />
             </div>
 
             <div>
@@ -264,7 +261,7 @@ export const ModelsPage: React.FC = () => {
               {selectedFiles.map((file, index) => (
                 <div key={index} className="flex items-center justify-between bg-pf-bg-2 p-3 rounded">
                   <div className="flex items-center space-x-3">
-                    <Box className="w-5 h-5 text-pf-text-tertiary" />
+                    <CubeIcon className="w-5 h-5 text-pf-text-tertiary" />
                     <div>
                       <div className="font-medium text-sm text-pf-text-primary">{file.name}</div>
                       <div className="text-xs text-pf-text-secondary">{formatFileSize(file.size)}</div>
@@ -309,7 +306,7 @@ export const ModelsPage: React.FC = () => {
                 onClick={uploadFiles}
                 disabled={uploadMutation.isPending}
               >
-                <Upload className="w-4 h-4 mr-2" />
+                <UploadIcon className="w-4 h-4 mr-2" />
                 {uploadMutation.isPending ? 'Uploading...' : 'Upload Files'}
               </Button>
             </div>
@@ -322,7 +319,7 @@ export const ModelsPage: React.FC = () => {
         <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center">
           {/* Search box */}
           <div className="flex-1 relative">
-            <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary pointer-events-none" />
+            <SearchIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary pointer-events-none" />
             <Input
               type="text"
               placeholder="Search models by name or description..."
@@ -338,7 +335,7 @@ export const ModelsPage: React.FC = () => {
             onClick={() => setShowTagFilter(!showTagFilter)}
             className="flex items-center gap-2"
           >
-            <Tag className="w-4 h-4" />
+            <TagIcon className="w-4 h-4" />
             Tags {selectedTags.length > 0 && `(${selectedTags.length})`}
           </Button>
 
@@ -348,7 +345,7 @@ export const ModelsPage: React.FC = () => {
             onClick={() => setShowBulkTagModal(true)}
             title="Assign tags to multiple models at once"
           >
-            <Tag className="w-4 h-4 mr-1" />
+            <TagIcon className="w-4 h-4 mr-1" />
             Bulk Tag
           </Button>
 
@@ -358,7 +355,7 @@ export const ModelsPage: React.FC = () => {
             onClick={() => setShowBrowser(!showBrowser)}
             title="Browse files by folder"
           >
-            <FolderOpen className="w-4 h-4 mr-1" />
+            <FolderIcon className="w-4 h-4 mr-1" />
             {showBrowser ? 'Hide Browser' : 'File Browser'}
           </Button>
 
@@ -370,7 +367,7 @@ export const ModelsPage: React.FC = () => {
               size="sm"
               title="Grid view"
             >
-              <Grid3x3 className="w-4 h-4" />
+              <GridViewIcon className="w-4 h-4" />
             </Button>
             <Button
               onClick={() => setViewMode('list')}
@@ -378,7 +375,7 @@ export const ModelsPage: React.FC = () => {
               size="sm"
               title="List view"
             >
-              <List className="w-4 h-4" />
+              <ListViewIcon className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -431,7 +428,7 @@ export const ModelsPage: React.FC = () => {
         <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-pf-text-primary flex items-center gap-2">
-              <FolderOpen className="w-5 h-5" />
+              <FolderIcon className="w-5 h-5" />
               Browse Models by Folder
             </h3>
             <Button
@@ -440,7 +437,7 @@ export const ModelsPage: React.FC = () => {
               onClick={() => setShowBrowser(false)}
               title="Close browser"
             >
-              <X className="w-4 h-4" />
+              <CloseIcon className="w-4 h-4" />
             </Button>
           </div>
           <HierarchicalFileBrowser
@@ -462,7 +459,7 @@ export const ModelsPage: React.FC = () => {
       {/* Models Display */}
       {models.length === 0 && !showBrowser ? (
         <div className="text-center py-12">
-          <Box className="w-12 h-12 text-pf-text-tertiary mx-auto mb-4 opacity-50" />
+          <CubeIcon className="w-12 h-12 text-pf-text-tertiary mx-auto mb-4 opacity-50" />
           <p className="text-pf-text-secondary">No models found</p>
         </div>
       ) : viewMode === 'grid' ? (
@@ -480,7 +477,7 @@ export const ModelsPage: React.FC = () => {
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
-                    <Box className="w-12 h-12 text-pf-text-tertiary" />
+                    <CubeIcon className="w-12 h-12 text-pf-text-tertiary" />
                   </div>
                 )}
 
@@ -494,7 +491,7 @@ export const ModelsPage: React.FC = () => {
                     size="sm"
                     title="View 3D Model"
                   >
-                    <Eye className="w-4 h-4" />
+                    <EyeIcon className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
@@ -533,7 +530,7 @@ export const ModelsPage: React.FC = () => {
                     title="View Details"
                     className="flex-1"
                   >
-                    <FileText className="w-4 h-4 mr-1" />
+                    <FileIcon className="w-4 h-4 mr-1" />
                     Details
                   </Button>
                   <Button
@@ -543,7 +540,7 @@ export const ModelsPage: React.FC = () => {
                     title="Slice this model"
                     className="flex-1"
                   >
-                    <Settings className="w-4 h-4 mr-1" />
+                    <SettingsIcon className="w-4 h-4 mr-1" />
                     Slice
                   </Button>
                   <Button
@@ -611,7 +608,7 @@ export const ModelsPage: React.FC = () => {
                         size="sm"
                         title="View 3D Model"
                       >
-                        <Eye className="w-4 h-4" />
+                        <EyeIcon className="w-4 h-4" />
                       </Button>
                       <Button
                         onClick={() => navigate(`/models/${model.id}`)}
@@ -619,7 +616,7 @@ export const ModelsPage: React.FC = () => {
                         size="sm"
                         title="View Details"
                       >
-                        <FileText className="w-4 h-4" />
+                        <FileIcon className="w-4 h-4" />
                       </Button>
                       <Button
                         onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
@@ -627,7 +624,7 @@ export const ModelsPage: React.FC = () => {
                         size="sm"
                         title="Slice Model"
                       >
-                        <Settings className="w-4 h-4" />
+                        <SettingsIcon className="w-4 h-4" />
                       </Button>
                       <Button
                         onClick={() => deleteMutation.mutate(model.id)}
@@ -658,7 +655,7 @@ export const ModelsPage: React.FC = () => {
                 variant="subtle"
                 size="sm"
               >
-                <X className="w-5 h-5" />
+                <CloseIcon className="w-5 h-5" />
               </Button>
             </div>
             <div className="p-4">
@@ -687,7 +684,7 @@ export const ModelsPage: React.FC = () => {
                 variant="subtle"
                 size="sm"
               >
-                <X className="w-5 h-5" />
+                <CloseIcon className="w-5 h-5" />
               </Button>
             </div>
             <div className="p-4">

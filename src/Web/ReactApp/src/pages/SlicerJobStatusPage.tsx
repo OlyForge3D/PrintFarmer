@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PageTemplate } from '@/components/PageTemplate';
-import { ClipboardList } from 'lucide-react';
+import { ListIcon } from '@/components/icons/MdiIcons';
 import { Button, Input, FormField, Alert, Card } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
@@ -47,7 +47,7 @@ export const SlicerJobStatusPage: React.FC = () => {
         <PageTemplate
             title="Slicer Job Status"
             subtitle="Query a job to view scheduling and retry metadata"
-            icon={ClipboardList}
+            icon={ListIcon}
             maxWidth="max-w-4xl"
         >
 

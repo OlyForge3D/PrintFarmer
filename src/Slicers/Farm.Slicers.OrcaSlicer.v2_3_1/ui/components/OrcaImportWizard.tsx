@@ -13,8 +13,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { UploadIcon, CheckIcon } from '@/components/icons/MdiIcons';
-import { FileJson, AlertCircle, ArrowLeft, ArrowRight } from 'lucide-react';
+import { UploadIcon, CheckIcon, FileJsonIcon, AlertCircleIcon, ArrowLeftIcon, ArrowRightIcon } from '@/components/icons/MdiIcons';
 import { useMutation } from '@tanstack/react-query';
 import { orcaProfilesService } from '../services/orcaProfilesService';
 import { OrcaBundlePreview } from '../types/orcaProfiles';
@@ -126,7 +125,7 @@ export const OrcaImportWizard: React.FC = () => {
     const renderUploadStep = () => (
         <div className="max-w-2xl mx-auto">
             <div className="text-center mb-6">
-                <FileJson className="w-16 h-16 mx-auto mb-4 text-pf-accent-2" />
+                <FileJsonIcon className="w-16 h-16 mx-auto mb-4 text-pf-accent-2" />
                 <h2 className="text-2xl font-bold mb-2 text-pf-text-primary">Upload OrcaSlicer Bundle</h2>
                 <p className="text-pf-text-secondary">
                     Select a config bundle JSON file exported from OrcaSlicer to import presets.
@@ -174,7 +173,7 @@ export const OrcaImportWizard: React.FC = () => {
             {previewMutation.isError && (
                 <div className="mt-4 p-4 bg-pf-error-bg border border-pf-error rounded-lg">
                     <div className="flex items-start">
-                        <AlertCircle className="w-5 h-5 text-pf-error mr-2 mt-0.5" />
+                        <AlertCircleIcon className="w-5 h-5 text-pf-error mr-2 mt-0.5" />
                         <div>
                             <p className="font-semibold text-pf-error">Failed to parse bundle</p>
                             <p className="text-sm text-pf-error mt-1">
@@ -381,7 +380,7 @@ export const OrcaImportWizard: React.FC = () => {
                         onClick={() => setCurrentStep('upload')}
                         className="px-6 py-2 border border-pf-border rounded-lg font-medium hover:bg-pf-bg-2 transition-colors flex items-center text-pf-text-primary"
                     >
-                        <ArrowLeft className="w-4 h-4 mr-2" />
+                        <ArrowLeftIcon className="w-4 h-4 mr-2" />
                         Back
                     </button>
                     <button
@@ -402,7 +401,7 @@ export const OrcaImportWizard: React.FC = () => {
                         ) : (
                             <>
                                 Import Selected
-                                <ArrowRight className="w-4 h-4 ml-2" />
+                                <ArrowRightIcon className="w-4 h-4 ml-2" />
                             </>
                         )}
                     </button>
@@ -411,7 +410,7 @@ export const OrcaImportWizard: React.FC = () => {
                 {importMutation.isError && (
                     <div className="mt-4 p-4 bg-pf-error-bg border border-pf-error rounded-lg">
                         <div className="flex items-start">
-                            <AlertCircle className="w-5 h-5 text-pf-error mr-2 mt-0.5" />
+                            <AlertCircleIcon className="w-5 h-5 text-pf-error mr-2 mt-0.5" />
                             <div>
                                 <p className="font-semibold text-pf-error">Import failed</p>
                                 <p className="text-sm text-pf-error mt-1">

@@ -1,8 +1,18 @@
 import React, { useRef, useState } from 'react';
 import {
-  PanelRightOpen, History, Camera, ExternalLink, RotateCcw, FileText, Image, Video
-} from 'lucide-react';
-import { PauseIcon, PlayIcon, EmergencyStopIcon, EditIcon } from '@/components/icons/MdiIcons';
+  HistoryIcon,
+  FileIcon,
+  RefreshIcon,
+  PauseIcon, 
+  PlayIcon, 
+  EmergencyStopIcon, 
+  EditIcon,
+  CameraIcon,
+  ExternalLinkIcon,
+  PanelRightIcon,
+  ImageIcon,
+  VideoIcon
+} from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/components/PrinterFilesModal';
@@ -146,7 +156,7 @@ export function CollapsedPrinterCard({
           className="!p-1 !h-auto"
           title="Open details sidebar"
         >
-          <PanelRightOpen className="h-4 w-4" />
+          <PanelRightIcon className="h-4 w-4" />
         </Button>
         
         {/* External link */}
@@ -158,7 +168,7 @@ export function CollapsedPrinterCard({
           aria-label={`Open printer ${printer.name} in new tab`}
           title={`Open printer ${printer.name}`}
         >
-          <ExternalLink className="h-4 w-4" />
+          <ExternalLinkIcon className="h-4 w-4" />
         </a>
         
         {/* Camera button */}
@@ -172,7 +182,7 @@ export function CollapsedPrinterCard({
           aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
           title={hasCameraUrls ? `Camera available` : 'No camera configured'}
         >
-          <Camera className="h-4 w-4" />
+          <CameraIcon className="h-4 w-4" />
         </Button>
         
         {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
@@ -185,7 +195,7 @@ export function CollapsedPrinterCard({
             className="!p-1 !h-auto"
             title="View print history"
           >
-            <History className="h-4 w-4" />
+            <HistoryIcon className="h-4 w-4" />
           </Button>
         )}
         
@@ -198,7 +208,7 @@ export function CollapsedPrinterCard({
           className="!p-1 !h-auto"
           title="View printer files"
         >
-          <FileText className="h-4 w-4" />
+          <FileIcon className="h-4 w-4" />
         </Button>
         
         {/* Edit button */}
@@ -245,7 +255,7 @@ export function CollapsedPrinterCard({
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           className="w-full h-full !p-0"
         >
-          {isShutdown ? <RotateCcw className="h-6 w-6" /> : <EmergencyStopIcon className="h-6 w-6" />}
+          {isShutdown ? <RefreshIcon className="h-6 w-6" /> : <EmergencyStopIcon className="h-6 w-6" />}
         </Button>
       </div>
 
@@ -280,7 +290,7 @@ export function CollapsedPrinterCard({
                 size="sm"
                 className="flex-1 p-2 flex items-center justify-center"
               >
-                <Image className="h-4 w-4" />
+                <ImageIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -290,7 +300,7 @@ export function CollapsedPrinterCard({
                 size="sm"
                 className="flex-1 p-2 flex items-center justify-center"
               >
-                <Video className="h-4 w-4" />
+                <VideoIcon className="h-4 w-4" />
               </Button>
             </div>
           )}
@@ -332,13 +342,13 @@ export function CollapsedPrinterCard({
                 />
               ) : (
                 <div className="text-center text-pf-text-secondary p-4">
-                  <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
                   <p className="text-sm">Camera mode not available</p>
                 </div>
               )
             ) : (
               <div className="text-center text-pf-text-secondary p-4 w-full">
-                <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">No camera configured</p>
               </div>
             )}

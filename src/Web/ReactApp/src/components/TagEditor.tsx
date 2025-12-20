@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 
 interface Tag {
@@ -103,7 +103,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                             className="!p-0 !h-auto hover:opacity-80"
                             title="Remove tag"
                         >
-                            <X className="w-3 h-3" />
+                            <CloseIcon className="w-3 h-3" />
                         </Button>
                     </div>
                 ))}

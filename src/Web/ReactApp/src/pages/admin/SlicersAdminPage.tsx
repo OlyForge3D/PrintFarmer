@@ -2,8 +2,7 @@ import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { slicerRegistry, SlicerDto } from '@/services/slicerRegistry';
 import { SlicerConfirmModal } from '@/components/SlicerConfirmModal';
-import { DeleteIcon } from '@/components/icons/MdiIcons';
-import { Server } from 'lucide-react';
+import { DeleteIcon, ServerIcon } from '@/components/icons/MdiIcons';
 import { PageTemplate } from '@/components/PageTemplate';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { toast } from 'sonner';
@@ -29,7 +28,7 @@ function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregist
         <div className="card-body">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Server className="w-6 h-6 text-pf-text-secondary" />
+              <ServerIcon className="w-6 h-6 text-pf-text-secondary" />
               <div>
                 <div className="text-lg font-medium text-pf-text-primary">{s.name}</div>
                 <div className="text-sm text-pf-text-secondary">{s.slicerType || 'unknown'} • {s.version || 'n/a'}</div>

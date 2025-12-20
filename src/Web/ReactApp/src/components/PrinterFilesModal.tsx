@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { DeleteIcon } from '@/components/icons/MdiIcons';
-import { FileText, AlertCircle, Play, Copy, Image, ArrowUpDown, X } from 'lucide-react';
+import { DeleteIcon, CloseIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon } from '@/components/icons/MdiIcons';
 import { Button, Select } from '@/components/ui';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
@@ -191,7 +190,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               className="!p-2 !h-auto"
               title="Close"
             >
-              <X className="h-5 w-5" />
+              <CloseIcon className="h-5 w-5" />
             </Button>
           </div>
 
@@ -204,7 +203,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               </div>
             ) : error ? (
               <div className="text-center py-8">
-                <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+                <AlertIcon className="h-12 w-12 text-red-500 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-pf-text-primary mb-2">Failed to Load Files</h3>
                 <p className="text-pf-text-secondary mb-4">{error}</p>
                 <Button
@@ -217,7 +216,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               </div>
             ) : !files || files.length === 0 ? (
               <div className="text-center py-8">
-                <FileText className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                <TextIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-pf-text-primary mb-2">No Files</h3>
                 <p className="text-pf-text-secondary">
                   No G-code files found on this printer.
@@ -249,7 +248,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                       className="!p-2 !h-auto"
                       title={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
                     >
-                      <ArrowUpDown className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+                      <SortIcon className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
                     </Button>
                   </div>
                 </div>
@@ -276,7 +275,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           </div>
                         ) : (
                           <div className="h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border flex items-center justify-center">
-                            <Image className="h-6 w-6 text-pf-text-tertiary" />
+                            <ImageIcon className="h-6 w-6 text-pf-text-tertiary" />
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
@@ -298,7 +297,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           className="!p-2 !h-auto"
                           title="Queue for printing"
                         >
-                          <Play className="h-4 w-4" />
+                          <PlayIcon className="h-4 w-4" />
                         </Button>
 
                         <Button
@@ -309,7 +308,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           className="!p-2 !h-auto"
                           title={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
                         >
-                          <Copy className="h-4 w-4" />
+                          <CopyIcon className="h-4 w-4" />
                         </Button>
 
                         <Button
@@ -387,7 +386,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               onClick={() => setConfirmDialog(null)}
               className="!p-2 !h-auto"
             >
-              <X className="h-5 w-5" />
+              <CloseIcon className="h-5 w-5" />
             </Button>
           </div>
 

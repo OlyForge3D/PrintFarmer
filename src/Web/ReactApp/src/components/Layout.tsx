@@ -4,25 +4,25 @@ import { EmailConfirmationBanner } from '@/components/EmailConfirmationBanner';
 import { BuildInfo } from '@/components/BuildInfo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui';
+import { 
+  CloseIcon, 
+  FileIcon,
+  HomeIcon,
+  PrinterIcon,
+  CubeIcon,
+  LayersIcon,
+  SettingsIcon,
+  MenuIcon,
+  AccountCheckIcon,
+  AccountIcon,
+  LogoutIcon,
+  LoginIcon,
+  ChevronDownIcon,
+  UsersIcon,
+  GearIcon
+} from '@/components/icons/MdiIcons';
 import { useAuth } from '@/contexts/AuthHooks';
 import { useSignalRConnection } from '@/hooks/useSignalR';
-import {
-  Box,
-  ChevronRight,
-  Cog,
-  FileText,
-  Home,
-  Layers,
-  LogIn,
-  LogOut,
-  Menu,
-  Printer,
-  Settings,
-  User,
-  UserCheck,
-  Users,
-  X
-} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import DebugPrinterSignalRPanel from '@/components/DebugPrinterSignalRPanel';
@@ -39,64 +39,64 @@ interface NavigationItem {
 }
 
 const navigation: NavigationItem[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: Home },
+  { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
   {
     name: 'Printers',
     href: '/printers',
-    icon: Printer,
+    icon: PrinterIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
   },
   {
     name: '3D Models',
     href: '/models',
-    icon: Box,
+    icon: CubeIcon,
     requiredPermission: { resource: 'models', action: 'read' }
   },
   {
     name: 'Slice Jobs',
     href: '/jobs',
-    icon: Layers,
+    icon: LayersIcon,
     requiredPermission: { resource: 'models', action: 'read' },
     children: [
-      { name: 'Queue', href: '/jobs', icon: Layers },
-      { name: 'New Job', href: '/jobs/new', icon: FileText }
+      { name: 'Queue', href: '/jobs', icon: LayersIcon },
+      { name: 'New Job', href: '/jobs/new', icon: FileIcon }
     ]
   },
   {
     name: 'G-code',
     href: '/harvest',
-    icon: Cog,
+    icon: GearIcon,
     requiredPermission: { resource: 'gcode_harvest', action: 'read' },
     children: [
-      { name: 'Harvest', href: '/harvest', icon: Cog },
-      { name: 'History', href: '/harvest/history', icon: FileText },
-      { name: 'G-Code Library', href: '/files', icon: FileText }
+      { name: 'Harvest', href: '/harvest', icon: GearIcon },
+      { name: 'History', href: '/harvest/history', icon: FileIcon },
+      { name: 'G-Code Library', href: '/files', icon: FileIcon }
     ]
   },
   {
     name: 'Admin',
     href: '#',
-    icon: Settings,
+    icon: SettingsIcon,
     requiredRole: 'farm_admin',
     children: [
-      { name: 'Printers', href: '/admin/printers', icon: Printer },
-      { name: 'Locations', href: '/admin/locations', icon: Layers },
-      { name: 'Workers', href: '/admin/workers', icon: Cog },
-      { name: 'File Health', href: '/admin/file-health', icon: FileText },
-      { name: 'Catalog', href: '/catalog', icon: Layers },
-      { name: 'Settings', href: '/settings', icon: Settings },
-      { name: 'Spools', href: '/spools', icon: Box },
-      { name: 'User Management', href: '/admin/users', icon: Users },
-      { name: 'Observability', href: '/admin/observability', icon: Cog },
-      { name: 'Slicer Dry Run', href: '/admin/slicer/dry-run', icon: FileText },
-      { name: 'Slicer Job Status', href: '/admin/slicer/job-status', icon: FileText }
+      { name: 'Printers', href: '/admin/printers', icon: PrinterIcon },
+      { name: 'Locations', href: '/admin/locations', icon: LayersIcon },
+      { name: 'Workers', href: '/admin/workers', icon: GearIcon },
+      { name: 'File Health', href: '/admin/file-health', icon: FileIcon },
+      { name: 'Catalog', href: '/catalog', icon: LayersIcon },
+      { name: 'Settings', href: '/settings', icon: SettingsIcon },
+      { name: 'Spools', href: '/spools', icon: CubeIcon },
+      { name: 'User Management', href: '/admin/users', icon: UsersIcon },
+      { name: 'Observability', href: '/admin/observability', icon: GearIcon },
+      { name: 'Slicer Dry Run', href: '/admin/slicer/dry-run', icon: FileIcon },
+      { name: 'Slicer Job Status', href: '/admin/slicer/job-status', icon: FileIcon }
     ]
   },
   // Direct access (admin-only) to the new Slicer Profiles management page
   {
     name: 'Slicer Profiles',
     href: '/slicer-profiles',
-    icon: FileText,
+    icon: FileIcon,
     requiredRole: 'farm_admin'
   },
 ];
@@ -303,7 +303,7 @@ export function Layout() {
               className="lg:hidden"
               onClick={() => setSidebarOpen(true)}
             >
-              <Menu className="h-5 w-5" />
+              <MenuIcon className="h-5 w-5" />
             </Button>
 
             {/* App logo and name */}
@@ -342,14 +342,14 @@ export function Layout() {
               >
                 {isAuthenticated && user ? (
                   <>
-                    <UserCheck className="h-5 w-5 text-green-500" />
+                    <AccountCheckIcon className="h-5 w-5 text-green-500" />
                     <span className="hidden sm:block text-sm font-medium">
                       {user.firstName || user.username}
                     </span>
                   </>
                 ) : (
                   <>
-                    <User className="h-5 w-5 text-gray-400" />
+                    <AccountIcon className="h-5 w-5 text-gray-400" />
                     <span className="hidden sm:block text-sm">Guest</span>
                   </>
                 )}
@@ -371,7 +371,7 @@ export function Layout() {
                           size="sm"
                           className="flex items-center gap-2 w-full !justify-start"
                         >
-                          <Settings className="h-4 w-4" />
+                          <SettingsIcon className="h-4 w-4" />
                           <span>Profile</span>
                         </Button>
                         <Button
@@ -381,7 +381,7 @@ export function Layout() {
                           size="sm"
                           className="flex items-center gap-2 w-full !justify-start"
                         >
-                          <LogOut className="h-4 w-4" />
+                          <LogoutIcon className="h-4 w-4" />
                           <span>Sign out</span>
                         </Button>
                       </>
@@ -397,7 +397,7 @@ export function Layout() {
                           size="sm"
                           className="flex items-center gap-2 w-full !justify-start"
                         >
-                          <LogIn className="h-4 w-4" />
+                          <LoginIcon className="h-4 w-4" />
                           <span>Sign In</span>
                         </Button>
                         <Button
@@ -438,7 +438,7 @@ export function Layout() {
                   className="ml-1 !p-2 h-10 w-10"
                   onClick={() => setSidebarOpen(false)}
                 >
-                  <X className="h-6 w-6" />
+                  <CloseIcon className="h-6 w-6" />
                 </Button>
               </div>
 
@@ -464,7 +464,7 @@ export function Layout() {
                           >
                             <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
                             <span className="flex-1 text-left">{item.name}</span>
-                            <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+                            <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
                           </summary>
                           <div className="ml-8 space-y-1 mt-1">
                             {item.children!.map(child => {
@@ -537,7 +537,7 @@ export function Layout() {
                         >
                           <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
                           <span className="flex-1 text-left">{item.name}</span>
-                          <ChevronRight className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+                          <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
                         </summary>
                         <div className="ml-8 space-y-1 mt-1">
                           {item.children!.map(child => {

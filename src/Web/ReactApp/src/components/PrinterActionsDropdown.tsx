@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Printer } from '@/types/api';
 import { Button } from '@/components/ui';
-import { MoreVertical } from 'lucide-react';
+import { MoreVerticalIcon } from '@/components/icons/MdiIcons';
 import { EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
 
 interface PrinterActionsDropdownProps {
@@ -32,7 +32,7 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
         className="!p-2 !h-auto flex-shrink-0"
         aria-label="Printer actions"
       >
-        <MoreVertical className="w-5 h-5" />
+        <MoreVerticalIcon className="w-5 h-5" />
       </Button>
 
       {isOpen && (

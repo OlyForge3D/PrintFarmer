@@ -9,8 +9,7 @@ import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Button } from '@/components/ui';
-import { Cog } from 'lucide-react';
-import { PlayIcon, PauseIcon, StopIcon } from '@/components/icons/MdiIcons';
+import { PlayIcon, PauseIcon, StopIcon, GearIcon } from '@/components/icons/MdiIcons';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/services/api';
 import type { PrintJobStatusDto } from '@/types/api';
@@ -316,7 +315,7 @@ export function PrinterCard({
                 size="sm"
                 className="!p-2 !h-auto text-pf-accent"
               >
-                <Cog className="h-4 w-4" />
+                <GearIcon className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -480,7 +479,7 @@ export function PrinterCard({
             size="sm"
             className="flex-1 justify-center flex items-center gap-2"
           >
-            <Cog className="h-4 w-4" />
+            <GearIcon className="h-4 w-4" />
             <span>Manage</span>
           </Button>
           {/* OctoPrint/Moonraker/PrusaLink: Only show controls if supported */}

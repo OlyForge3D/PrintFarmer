@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-// No MdiIcons used in this component
-import { Eye, EyeOff, Key, CheckCircle } from 'lucide-react';
+import { EyeIcon, EyeOffIcon, LockIcon, CheckCircleIcon, CloseIcon } from '@/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { Button, Input, FormField, Alert } from '@/components/ui';
 import { apiClient } from '@/services/api';
@@ -98,7 +97,7 @@ export default function ResetPasswordPage() {
               <PrintFarmerLogo size={32} className="mr-2" />
               <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
               <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-                <CheckCircle className="h-5 w-5 mr-2" />
+              <CheckCircleIcon className="h-5 w-5 mr-2" />
                 Password Reset
               </span>
             </div>
@@ -110,7 +109,7 @@ export default function ResetPasswordPage() {
               aria-label="Close"
               title="Close"
             >
-              <X className="h-5 w-5" />
+              <CloseIcon className="h-5 w-5" />
             </Button>
           </div>
 
@@ -140,7 +139,7 @@ export default function ResetPasswordPage() {
             <PrintFarmerLogo size={32} className="mr-2" />
             <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
             <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-              <Key className="h-5 w-5 mr-2" />
+              <LockIcon className="h-5 w-5 mr-2" />
               Reset Password
             </span>
           </div>
@@ -154,7 +153,7 @@ export default function ResetPasswordPage() {
             aria-label="Close reset password"
             title="Close"
           >
-            <X className="h-5 w-5" />
+            <CloseIcon className="h-5 w-5" />
           </Button>
         </div>
 
@@ -206,7 +205,7 @@ export default function ResetPasswordPage() {
                 aria-label={showNewPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >
-                {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showNewPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               </Button>
             </div>
           </FormField>
@@ -232,7 +231,7 @@ export default function ResetPasswordPage() {
                 aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >
-                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showConfirmPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               </Button>
             </div>
           </FormField>
@@ -257,7 +256,7 @@ export default function ResetPasswordPage() {
                 <>Resetting...</>
               ) : (
                 <>
-                  <Key className="h-4 w-4 mr-2" />
+                  <LockIcon className="h-4 w-4 mr-2" />
                   Reset Password
                 </>
               )}

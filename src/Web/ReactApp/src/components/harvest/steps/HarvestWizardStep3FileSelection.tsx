@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle, AlertCircle, Loader } from 'lucide-react';
+import { CheckCircleIcon, AlertCircleIcon, LoaderIcon } from '@/components/icons/MdiIcons';
 import type { HarvestOptions, HarvestDiscoveredFile } from '../HarvestWizard';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
@@ -75,7 +75,7 @@ export function HarvestWizardStep3FileSelection({
         {isDiscovering && (
           <Alert type="info">
             <div className="flex items-center gap-3">
-              <Loader className="w-5 h-5 animate-spin" />
+              <LoaderIcon className="w-5 h-5 animate-spin" />
               <span>Scanning printer for G-code files...</span>
             </div>
           </Alert>
@@ -84,7 +84,7 @@ export function HarvestWizardStep3FileSelection({
         {!isDiscovering && files.length > 0 && (
           <Alert type="success">
             <div className="flex items-center gap-3">
-              <CheckCircle className="w-5 h-5" />
+              <CheckCircleIcon className="w-5 h-5" />
               <span className="font-medium">Scan complete. {files.length} file{files.length !== 1 ? 's' : ''} discovered.</span>
             </div>
           </Alert>
@@ -93,7 +93,7 @@ export function HarvestWizardStep3FileSelection({
         {!isDiscovering && files.length === 0 && (
           <Alert type="warning">
             <div className="flex items-center gap-3">
-              <AlertCircle className="w-5 h-5" />
+              <AlertCircleIcon className="w-5 h-5" />
               <span>No G-code files found on the printer.</span>
             </div>
           </Alert>
@@ -150,7 +150,7 @@ export function HarvestWizardStep3FileSelection({
           {selectedFileIds.size > 0 && (
             <Alert type="success">
               <div className="flex items-center gap-2">
-                <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                <CheckCircleIcon className="w-5 h-5 flex-shrink-0" />
                 <span>
                   {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected for import
                 </span>
@@ -161,7 +161,7 @@ export function HarvestWizardStep3FileSelection({
           {selectedFileIds.size === 0 && files.length > 0 && (
             <Alert type="warning">
               <div className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <AlertCircleIcon className="w-5 h-5 flex-shrink-0" />
                 <span>
                   Please select at least one file to continue
                 </span>

@@ -31,7 +31,7 @@ interface ModelListItem {
 
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea, Toggle } from '@/components/ui';
-import { Layers, Eye } from 'lucide-react';
+import { LayersIcon, EyeIcon } from '@/components/icons/MdiIcons';
 import { useAuth } from '@/contexts/AuthHooks';
 import { STLPreviewModal } from '@/components/3D/STLPreviewModal';
 import { useSTLFile } from '@/hooks/useSTLFile';
@@ -484,7 +484,7 @@ export const NewSliceJobPage: React.FC = () => {
     <PageTemplate
       title="New Slice Job"
       subtitle="OrcaSlicer-style distributed slicing"
-      icon={Layers}
+      icon={LayersIcon}
       maxWidth="max-w-7xl"
     >
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
@@ -895,7 +895,7 @@ export const NewSliceJobPage: React.FC = () => {
                 size="sm"
                 className="w-full flex items-center justify-center gap-2"
               >
-                <Eye size={16} />
+                <EyeIcon className="w-4 h-4" />
                 Preview 3D Model
               </Button>
             )}

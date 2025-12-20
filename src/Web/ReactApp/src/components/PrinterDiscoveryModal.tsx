@@ -8,8 +8,7 @@ import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
-// No MdiIcons used in this component
-import { X } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -234,7 +233,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
               aria-label="Close discovery modal"
               onClick={onClose}
             >
-              <X className="h-5 w-5" />
+              <CloseIcon className="h-5 w-5" />
             </Button>
           </div>
 

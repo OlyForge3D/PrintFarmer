@@ -2,8 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Alert } from '@/components/ui';
-import { UploadIcon, DeleteIcon } from '@/components/icons/MdiIcons';
-import { Box as CubeIcon, Eye } from 'lucide-react';
+import { UploadIcon, DeleteIcon, CubeIcon, EyeIcon } from '@/components/icons/MdiIcons';
 import { STLPreviewModal } from '@/components/3D/STLPreviewModal';
 import { useSTLFile } from '@/hooks/useSTLFile';
 import { assetService } from '@/services/assetService';
@@ -47,7 +46,7 @@ export const Models3DViewerPage: React.FC = () => {
   });
 
   const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
@@ -55,8 +54,8 @@ export const Models3DViewerPage: React.FC = () => {
       setUploadSuccess(null);
 
       // Validate STL file
-      const validation = validateSTLFile(file, { maxSizeMB: 100 });
-      if (!validation.isValid) {
+      const validation = await validateSTLFile(file, { maxSizeMB: 100 });
+      if (!validation.valid) {
         setUploadError(validation.errors.join(', '));
         return;
       }
@@ -70,7 +69,7 @@ export const Models3DViewerPage: React.FC = () => {
   );
 
   const handleDragAndDrop = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
+    async (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
 
@@ -80,8 +79,8 @@ export const Models3DViewerPage: React.FC = () => {
       setUploadError(null);
       setUploadSuccess(null);
 
-      const validation = validateSTLFile(file, { maxSizeMB: 100 });
-      if (!validation.isValid) {
+      const validation = await validateSTLFile(file, { maxSizeMB: 100 });
+      if (!validation.valid) {
         setUploadError(validation.errors.join(', '));
         return;
       }
@@ -132,13 +131,13 @@ export const Models3DViewerPage: React.FC = () => {
           <h2 className="text-lg font-semibold text-pf-text mb-4">Upload Model</h2>
 
           {uploadError && (
-            <Alert variant="error" title="Upload Error" closeable onClose={() => setUploadError(null)}>
+            <Alert type="error" title="Upload Error" onClose={() => setUploadError(null)}>
               {uploadError}
             </Alert>
           )}
 
           {uploadSuccess && (
-            <Alert variant="success" title="File Ready" closeable onClose={() => setUploadSuccess(null)}>
+            <Alert type="success" title="File Ready" onClose={() => setUploadSuccess(null)}>
               {uploadSuccess}
             </Alert>
           )}
@@ -161,7 +160,7 @@ export const Models3DViewerPage: React.FC = () => {
               id="file-input"
             />
             <label htmlFor="file-input">
-              <Button as="span" variant="primary" size="sm">
+              <Button variant="primary" size="sm">
                 Select File
               </Button>
             </label>
@@ -184,12 +183,12 @@ export const Models3DViewerPage: React.FC = () => {
               </div>
             </div>
           ) : error ? (
-            <Alert variant="error" title="Load Error">
+            <Alert type="error" title="Load Error">
               Failed to load models: {error.message}
             </Alert>
           ) : models.length === 0 ? (
             <div className="text-center py-12">
-              <CubeIcon size={48} className="mx-auto mb-3 text-pf-text-muted opacity-50" />
+              <CubeIcon className="w-12 h-12 mx-auto mb-3 text-pf-text-muted opacity-50" />
               <p className="text-pf-text-muted">No models uploaded yet</p>
               <p className="text-sm text-pf-text-muted mt-2">Upload a 3D model to get started</p>
             </div>
@@ -202,7 +201,7 @@ export const Models3DViewerPage: React.FC = () => {
                 >
                   {/* Model Icon/Thumbnail */}
                   <div className="bg-gradient-to-br from-pf-accent to-blue-700 rounded-lg h-32 flex items-center justify-center mb-3 group-hover:shadow-lg transition-shadow">
-                    <CubeIcon size={48} className="text-white opacity-75" />
+                    <CubeIcon className="w-12 h-12 text-white opacity-75" />
                   </div>
 
                   {/* Model Info */}
@@ -226,7 +225,7 @@ export const Models3DViewerPage: React.FC = () => {
                       size="sm"
                       className="flex-1 flex items-center justify-center gap-2"
                     >
-                      <Eye size={16} />
+                      <EyeIcon className="w-4 h-4" />
                       Preview
                     </Button>
                     <Button

@@ -1,7 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState } from 'react';
 // No MdiIcons used in this component
-import { CheckCircle, AlertCircle } from 'lucide-react';
+import { CloseIcon, CheckCircleIcon, AlertCircleIcon } from '@/components/icons/MdiIcons';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
 
 interface AvailablePrinter {
@@ -174,7 +174,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
             aria-label="Close slicing configuration"
             title="Close"
           >
-            <X className="w-5 h-5" />
+            <CloseIcon className="w-5 h-5" />
           </button>
         </div>
 
@@ -203,9 +203,9 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                 validationResult.valid ? 'text-green-700' : 'text-red-700'
               }`}>
                 {validationResult.valid ? (
-                  <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <CheckCircleIcon className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 ) : (
-                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <AlertCircleIcon className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 )}
                 <div>
                   {validationResult.valid ? (

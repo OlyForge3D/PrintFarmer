@@ -19,7 +19,7 @@ import { Select } from '@/components/ui/Select';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
-import { Printer as PrinterIcon } from 'lucide-react';
+import { PrinterIcon } from '@/components/icons/MdiIcons';
 import { mdiViewList, mdiViewGrid, mdiViewComfy, mdiViewQuilt } from '@mdi/js';
 import { toast } from 'sonner';
 

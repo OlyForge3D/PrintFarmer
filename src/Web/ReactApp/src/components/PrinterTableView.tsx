@@ -6,8 +6,8 @@ import styles from './PrinterTableView.module.css';
 import { Printer, PrinterBackend } from '@/types/api';
 import { usePrinterDisplays } from '@/hooks/usePrinterDisplay';
 import { useAuth } from '@/contexts/AuthHooks';
-import { DeleteIcon, EditIcon } from '@/components/icons/MdiIcons';
-import { CheckCircle2, Circle, AlertTriangle, Wrench } from 'lucide-react';
+import { CloseIcon, DeleteIcon, EditIcon } from '@/components/icons/MdiIcons';
+import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, WrenchIcon } from '@/components/icons/MdiIcons';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button } from '@/components/ui';
 
@@ -149,7 +149,7 @@ export function PrinterTableView({
               size="sm"
               className="flex items-center gap-1"
             >
-              <Check className="w-4 h-4" />
+              <CheckIcon className="w-4 h-4" />
               Apply
             </Button>
             
@@ -160,7 +160,7 @@ export function PrinterTableView({
               size="sm"
               className="flex items-center gap-1"
             >
-              <X className="w-4 h-4" />
+              <CloseIcon className="w-4 h-4" />
               Cancel
             </Button>
           </div>
@@ -181,11 +181,11 @@ export function PrinterTableView({
                   className="!p-0 !h-auto"
                 >
                   {selectedPrinters.size === printers.length ? (
-                    <CheckCircle2 className="w-5 h-5" />
+                    <CheckCircleIcon className="w-5 h-5" />
                   ) : selectedPrinters.size > 0 ? (
-                    <AlertTriangle className="w-5 h-5" />
+                    <AlertIcon className="w-5 h-5" />
                   ) : (
-                    <Circle className="w-5 h-5" />
+                    <CircleIcon className="w-5 h-5" />
                   )}
                 </Button>
               </th>
@@ -230,9 +230,9 @@ export function PrinterTableView({
                       className="!p-0 !h-auto"
                     >
                       {selectedPrinters.has(printer.id) ? (
-                        <CheckCircle2 className="w-5 h-5" />
+                        <CheckCircleIcon className="w-5 h-5" />
                       ) : (
-                        <Circle className="w-5 h-5" />
+                        <CircleIcon className="w-5 h-5" />
                       )}
                     </Button>
                   </td>
@@ -314,7 +314,7 @@ export function PrinterTableView({
                         className="!p-2 !h-auto"
                         title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
                       >
-                        <Wrench className="w-4 h-4" />
+                        <WrenchIcon className="w-4 h-4" />
                       </Button>
                       
                       {hasPermission('printers', 'update') && (

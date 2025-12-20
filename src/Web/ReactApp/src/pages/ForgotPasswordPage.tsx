@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-// No MdiIcons used in this component
-import { Mail, ArrowLeft } from 'lucide-react';
+import { EmailIcon, ArrowLeftIcon, CloseIcon } from '@/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { Button, Input, FormField  } from '@/components/ui';
 import { apiClient } from '@/services/api';
@@ -51,7 +50,7 @@ export default function ForgotPasswordPage() {
               <PrintFarmerLogo size={32} className="mr-2" />
               <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
               <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-                <Mail className="h-5 w-5 mr-2" />
+                <EmailIcon className="h-5 w-5 mr-2" />
                 Reset Email Sent
               </span>
             </div>
@@ -64,7 +63,7 @@ export default function ForgotPasswordPage() {
               aria-label="Close"
               title="Close"
             >
-              <X className="h-5 w-5" />
+              <CloseIcon className="h-5 w-5" />
             </Button>
           </div>
 
@@ -85,7 +84,7 @@ export default function ForgotPasswordPage() {
               variant="primary"
               className="w-full justify-center flex items-center gap-2"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeftIcon className="h-4 w-4" />
               Back to Sign In
             </Button>
           </div>
@@ -102,7 +101,7 @@ export default function ForgotPasswordPage() {
             <PrintFarmerLogo size={32} className="mr-2" />
             <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
             <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-              <Mail className="h-5 w-5 mr-2" />
+              <EmailIcon className="h-5 w-5 mr-2" />
               Forgot Password
             </span>
           </div>
@@ -116,7 +115,7 @@ export default function ForgotPasswordPage() {
             aria-label="Close forgot password"
             title="Close"
           >
-            <X className="h-5 w-5" />
+            <CloseIcon className="h-5 w-5" />
           </Button>
         </div>
 
@@ -164,10 +163,10 @@ export default function ForgotPasswordPage() {
               className="flex-1 flex items-center justify-center gap-2"
             >
               {isLoading ? (
-                <>Processing...</>
+                <>Processing</>
               ) : (
                 <>
-                  <Mail className="h-4 w-4" />
+                  <EmailIcon className="h-4 w-4" />
                   Send Reset Link
                 </>
               )}

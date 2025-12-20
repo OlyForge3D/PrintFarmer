@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 // No MdiIcons used in this component
-import { ChevronsRight, ChevronsLeft } from 'lucide-react';
+import { ChevronsRightIcon, ChevronsLeftIcon, SettingsIcon } from '@/components/icons/MdiIcons';
 import { Button } from './ui/Button';
 import type { FilamentTypeDto } from '@/types/api';
 
@@ -109,7 +109,7 @@ export function FilamentTypeSelector({
             size="sm"
             onClick={() => setShowSelector(true)}
             title="Configure supported materials"
-            iconLeft={<Settings className="w-4 h-4" />}
+            iconLeft={<SettingsIcon className="w-4 h-4" />}
           >
             Configure
           </Button>
@@ -181,7 +181,7 @@ export function FilamentTypeSelector({
               disabled={available.length === 0}
               size="sm"
               title="Add all materials"
-              iconLeft={<ChevronsRight className="w-5 h-5" />}
+              iconLeft={<ChevronsRightIcon className="w-5 h-5" />}
             >
               Add All
             </Button>
@@ -190,7 +190,7 @@ export function FilamentTypeSelector({
               disabled={selected.length === 0}
               size="sm"
               title="Remove all materials"
-              iconLeft={<ChevronsLeft className="w-5 h-5" />}
+              iconLeft={<ChevronsLeftIcon className="w-5 h-5" />}
             >
               Remove All
             </Button>

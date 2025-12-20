@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui';
-import { Sparkles } from 'lucide-react';
+// Sparkles icon - using ActivityIcon as close substitute
+import { ActivityIcon } from '@/components/icons/MdiIcons';
 import { 
   Printer, 
   GcodeHarvestStatus,
@@ -140,7 +141,7 @@ export const HarvestPage: React.FC = () => {
     <PageTemplate
       title="G-code Harvest"
       subtitle="Start harvesting G-code files from your printers"
-      icon={Sparkles}
+      icon={ActivityIcon}
       maxWidth="max-w-5xl"
     >
       {/* Details panel overlay */}

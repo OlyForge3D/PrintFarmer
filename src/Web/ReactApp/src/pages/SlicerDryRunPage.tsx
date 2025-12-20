@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, Select, Textarea, FormField } from '@/components/ui';
 import { PageTemplate } from '@/components/PageTemplate';
-import { TestTube } from 'lucide-react';
+import { TestIcon } from '@/components/icons/MdiIcons';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { slicerRegistry } from '@/services/slicerRegistry';
 
@@ -70,7 +70,7 @@ export const SlicerDryRunPage: React.FC = () => {
         <PageTemplate
             title="Slicer Args Dry Run"
             subtitle="Validate argument templates without executing the slicer binary"
-            icon={TestTube}
+            icon={TestIcon}
             maxWidth="max-w-4xl"
         >
 

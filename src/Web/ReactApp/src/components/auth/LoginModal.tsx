@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
-import { Eye, EyeOff, X } from 'lucide-react';
-import { LogIn } from 'lucide-react';
+import { CloseIcon, EyeIcon, EyeOffIcon, LoginIcon } from '@/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Button, Input } from '@/components/ui';
@@ -69,7 +68,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             <PrintFarmerLogo size={32} className="mr-2" />
             <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
             <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-              <LogIn className="h-5 w-5 mr-2" />Sign In
+              <LoginIcon className="h-5 w-5 mr-2" />Sign In
             </span>
           </div>
           <Button
@@ -81,7 +80,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             title="Close"
             className="!p-0 !h-auto"
           >
-            <X className="h-5 w-5" />
+            <CloseIcon className="h-5 w-5" />
           </Button>
         </div>
         {isLoading && (
@@ -132,7 +131,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
                 disabled={isLoading}
                 className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
               >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               </Button>
             </div>
           </div>
@@ -169,7 +168,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
                 </>
               ) : (
                 <>
-                  <LogIn className="h-4 w-4" />
+                  <LoginIcon className="h-4 w-4" />
                   <span>Sign In</span>
                 </>
               )}

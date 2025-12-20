@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Filter, RefreshCw, ExternalLink, Package, Pencil, LayoutGrid, Table as TableIcon, Settings2 } from 'lucide-react';
+import { 
+  FilterIcon, 
+  RefreshIcon, 
+  ExternalLinkIcon, 
+  PackageIcon, 
+  EditIcon, 
+  GridIcon, 
+  TableIcon, 
+  GearIcon 
+} from '@/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/utils/colorFamilies';
 import { normalizeSpoolmanBaseUrl } from '@/utils/validation';
 import { Button, Checkbox, Select } from '@/components/ui';
@@ -99,7 +108,7 @@ export function SpoolsPage() {
           aria-label={title}
           title={title}
         >
-          <Pencil className="h-3 w-3" />
+          <EditIcon className="h-3 w-3" />
         </a>
       );
     } }
@@ -149,7 +158,7 @@ export function SpoolsPage() {
               aria-label={title}
               title={title}
             >
-              <Pencil className="h-3 w-3" />
+              <EditIcon className="h-3 w-3" />
             </a>
           );
         }
@@ -414,7 +423,7 @@ export function SpoolsPage() {
       <PageTemplate
         title="Spools"
         subtitle="Manage and monitor your filament spools from Spoolman"
-        icon={Package}
+        icon={PackageIcon}
       >
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" aria-label="Loading spools">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -441,7 +450,7 @@ export function SpoolsPage() {
     <PageTemplate
       title="Spools"
       subtitle="Manage and monitor your filament spools from Spoolman"
-      icon={Package}
+      icon={PackageIcon}
     >
       {health && (!health.configured || !health.success) && (
         <div className="bg-amber-900/40 border border-amber-700 text-amber-200 px-4 py-3 rounded">
@@ -467,7 +476,7 @@ export function SpoolsPage() {
                   aria-controls="column-config-panel"
                   onClick={() => setShowColumnConfig(false)}
                 >
-                  <Settings2 className="h-4 w-4" />
+                  <GearIcon className="h-4 w-4" />
                 </Button>
               ) : (
                 <Button
@@ -480,7 +489,7 @@ export function SpoolsPage() {
                   aria-controls="column-config-panel"
                   onClick={() => setShowColumnConfig(true)}
                 >
-                  <Settings2 className="h-4 w-4" />
+                  <GearIcon className="h-4 w-4" />
                 </Button>
               )}
               {showColumnConfig && (
@@ -549,7 +558,7 @@ export function SpoolsPage() {
               onClick={() => setViewMode('cards')}
               className="flex items-center gap-1"
             >
-              <LayoutGrid className="h-4 w-4" />
+              <GridIcon className="h-4 w-4" />
             </Button>
             <Button
               variant={viewMode === 'table' ? 'primary' : 'secondary'}
@@ -570,7 +579,7 @@ export function SpoolsPage() {
             title="Refresh spools"
             className="flex items-center gap-2"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshIcon className="h-4 w-4" />
           </Button>
           {spoolmanBaseUrl && (
             <a
@@ -581,7 +590,7 @@ export function SpoolsPage() {
               aria-label="Open Spoolman"
               title="Open Spoolman"
             >
-              <ExternalLink className="h-4 w-4" />
+              <ExternalLinkIcon className="h-4 w-4" />
             </a>
           )}
         </div>
@@ -589,7 +598,7 @@ export function SpoolsPage() {
 
       {spoolmanError && (
         <div className="bg-red-900/50 border border-red-700 text-red-100 px-4 py-3 rounded flex items-center gap-3">
-          <Package className="h-5 w-5 flex-shrink-0" />
+          <PackageIcon className="h-5 w-5 flex-shrink-0" />
           <div>
             <div className="font-medium">Spoolman Connection Error</div>
             <div className="text-sm">{spoolmanError}</div>
@@ -610,7 +619,7 @@ export function SpoolsPage() {
           <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4">
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-pf-text-secondary" />
+                <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
                 <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
               </div>
               
@@ -859,7 +868,7 @@ export function SpoolsPage() {
 
       {!spoolmanError && spools.length === 0 && !loading && (
         <div className="text-center py-8">
-          <Package className="h-16 w-16 text-pf-text-secondary mx-auto mb-4" />
+          <PackageIcon className="h-16 w-16 text-pf-text-secondary mx-auto mb-4" />
           <div className="text-pf-text-secondary">
             No spools found. Make sure your Spoolman instance is running and accessible.
           </div>

@@ -1,3 +1,4 @@
+import { CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 // No MdiIcons used in this component
@@ -142,7 +143,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                         size="sm"
                         className="!p-0 !h-auto"
                     >
-                        <X className="w-6 h-6" />
+                        <CloseIcon className="w-6 h-6" />
                     </Button>
                 </div>
 
@@ -265,7 +266,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                     {/* Success Message */}
                     {assignTagsMutation.isSuccess && (
                         <div className="p-4 bg-pf-success bg-opacity-10 border border-pf-success text-pf-success rounded-lg flex items-center gap-2">
-                            <Check className="w-5 h-5" />
+                            <CheckIcon className="w-5 h-5" />
                             Tags assigned successfully!
                         </div>
                     )}

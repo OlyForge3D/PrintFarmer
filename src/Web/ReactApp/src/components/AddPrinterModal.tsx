@@ -1,8 +1,7 @@
 // ...existing code...
 import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-// No MdiIcons used in this component
-import { Loader2, X, Check } from 'lucide-react';
+import { LoadingIcon, CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
@@ -218,7 +217,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               title="Close"
               className="!p-1 !h-auto"
             >
-              <X className="w-6 h-6" />
+              <CloseIcon className="w-6 h-6" />
             </Button>
           </div>
 
@@ -427,12 +426,12 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <LoadingIcon className="w-4 h-4 mr-2" />
                     Adding...
                   </>
                 ) : (
                   <>
-                    <Check className="w-4 h-4 mr-2" />
+                    <CheckIcon className="w-4 h-4 mr-2" />
                     Add Printer
                   </>
                 )}

@@ -51,16 +51,14 @@ import {
   PauseIcon, 
   EmergencyStopIcon, 
   HomeIcon,
-  DisableMotorsIcon
+  DisableMotorsIcon,
+  HistoryIcon,
+  RefreshIcon,
+  ChevronDownIcon,
+  ExternalLinkIcon,
+  CameraIcon,
+  MinusIcon
 } from '@/components/icons/MdiIcons';
-import { 
-  ChevronDown, 
-  ExternalLink,
-  History,
-  Camera,
-  Minus,
-  RotateCcw
-} from 'lucide-react';
 
 interface ExpandablePrinterCardProps {
   printer: Printer;
@@ -454,7 +452,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   aria-label={`Open printer ${printer.name} in new tab`}
                   title={`Open printer ${printer.name}`}
                 >
-                  <ExternalLink className="h-4 w-4" />
+                  <ExternalLinkIcon className="h-4 w-4" />
                 </a>
                 {/* Camera button - always visible, enabled/disabled based on camera URLs */}
                 <Button
@@ -467,7 +465,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                   title={hasCameraUrls ? `Camera available` : 'No camera configured'}
                 >
-                  <Camera className="h-4 w-4" />
+                  <CameraIcon className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -487,7 +485,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               className="!p-1 !h-auto"
               title="Expand card"
             >
-              <ChevronDown className="h-4 w-4" />
+              <ChevronDownIcon className="h-4 w-4" />
             </Button>
             <Button
               type="button"
@@ -497,7 +495,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               className="!p-1 !h-auto"
               title="View print history"
             >
-              <History className="h-4 w-4" />
+              <HistoryIcon className="h-4 w-4" />
             </Button>
             <Button
               type="button"
@@ -540,7 +538,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             disabled={!isOnline}
             title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           >
-            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <EmergencyStopIcon className="h-3 w-3 mr-1" />}
+            {isShutdown ? <RefreshIcon className="h-3 w-3 mr-1" /> : <EmergencyStopIcon className="h-3 w-3 mr-1" />}
           </Button>
         </div>
 
@@ -574,7 +572,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                     />
                   ) : (
                     <div className="text-center text-pf-text-secondary p-4">
-                      <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
                       <p className="text-sm">No camera configured</p>
                     </div>
                   )}
@@ -625,7 +623,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 aria-label={`Open printer ${printer.name} in new tab`}
                 title={`Open printer ${printer.name}`}
               >
-                <ExternalLink className="h-4 w-4" />
+                <ExternalLinkIcon className="h-4 w-4" />
               </a>
               {/* Camera button - always visible, enabled/disabled based on camera URLs */}
               <Button
@@ -638,7 +636,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                 title={hasCameraUrls ? `Camera available` : 'No camera configured'}
               >
-                <Camera className="h-4 w-4" />
+                <CameraIcon className="h-4 w-4" />
               </Button>
             </div>
             {showCamera && (
@@ -653,7 +651,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                     />
                   ) : (
                   <div className="text-center text-pf-text-secondary p-4">
-                    <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <CameraIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
                     <p className="text-sm">No camera configured</p>
                   </div>
                 )}
@@ -676,7 +674,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             className="!p-1 !h-auto"
             title="Collapse card"
           >
-            <Minus className="h-4 w-4" />
+            <MinusIcon className="h-4 w-4" />
           </Button>
           <Button
             type="button"
@@ -686,7 +684,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             className="!p-1 !h-auto"
             title="View print history"
           >
-            <History className="h-4 w-4" />
+            <HistoryIcon className="h-4 w-4" />
           </Button>
           <Button
             type="button"
@@ -967,7 +965,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                   className="w-full h-full !p-0"
                 >
-                  {isShutdown ? <RotateCcw className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
+                  {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
                 </Button>
               </div>
               

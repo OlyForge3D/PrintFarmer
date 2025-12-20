@@ -1,8 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useEffect, useCallback } from 'react';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
-// No MdiIcons used in this component
-import { UserPlus } from 'lucide-react';
+import { CloseIcon, EyeIcon, EyeOffIcon, UserPlusIcon } from '@/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Button } from '@/components/ui';
@@ -135,7 +134,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             <PrintFarmerLogo size={32} className="mr-2" />
             <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
             <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-              <UserPlus className="h-5 w-5 mr-2" />Create Account
+              <UserPlusIcon className="h-5 w-5 mr-2" />Create Account
             </span>
           </div>
           <Button
@@ -145,7 +144,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             aria-label="Close registration modal"
             title="Close"
           >
-            <X className="h-5 w-5" />
+            <CloseIcon className="h-5 w-5" />
           </Button>
         </div>
         {isLoading && (
@@ -247,7 +246,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 disabled={isLoading}
                 className="absolute right-3 top-1/2 transform -translate-y-1/2"
               >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               </Button>
             </div>
           </div>
@@ -273,7 +272,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 disabled={isLoading}
                 className="absolute right-3 top-1/2 transform -translate-y-1/2"
               >
-                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showConfirmPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               </Button>
             </div>
           </div>
@@ -300,7 +299,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                 </>
               ) : (
                 <>
-                  <UserPlus className="h-4 w-4" />
+                  <UserPlusIcon className="h-4 w-4" />
                   <span>Create Account</span>
                 </>
               )}

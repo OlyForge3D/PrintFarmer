@@ -1,6 +1,6 @@
 import { useBasicHealth, useHealthStatus } from '@/hooks/useApi';
 import { isDetailedHealthStatus } from '@/types/api';
-import { AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { AlertCircleIcon, CheckCircleIcon, XCircleIcon } from '@/components/icons/MdiIcons';
 import { SystemHealthSkeleton } from './skeletons/SystemHealthSkeleton';
 
 
@@ -12,7 +12,7 @@ export function SystemHealth() {
   if (error || !basic) {
     return (
       <div className="flex items-center space-x-2">
-        <XCircle className="h-4 w-4 text-pf-error" />
+        <XCircleIcon className="h-4 w-4 text-pf-error" />
         <span className="text-xs text-pf-error-text">System Offline</span>
       </div>
     );
@@ -23,9 +23,9 @@ export function SystemHealth() {
   return (
     <div className="flex items-center space-x-2">
       {isHealthy ? (
-        <CheckCircle className="h-4 w-4 text-pf-success" />
+        <CheckCircleIcon className="h-4 w-4 text-pf-success" />
       ) : (
-        <AlertCircle className="h-4 w-4 text-pf-warning" />
+        <AlertCircleIcon className="h-4 w-4 text-pf-warning" />
       )}
       <span className={`text-xs ${isHealthy ? 'text-pf-success' : 'text-pf-warning-text'}`}>
         System {isHealthy ? 'Healthy' : 'Warning'}
@@ -49,7 +49,7 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
       <div className={`bg-pf-bg-1 rounded-lg shadow p-4 ${className}`}>
         <h3 className="text-lg font-medium mb-4 text-pf-text-primary">System Health</h3>
         <div className="flex items-center space-x-3 p-4 bg-pf-error-bg rounded-lg">
-          <XCircle className="h-6 w-6 text-pf-error" />
+          <XCircleIcon className="h-6 w-6 text-pf-error" />
           <div>
             <p className="text-sm font-medium text-pf-error-text">Unable to check system health</p>
             <p className="text-xs text-pf-error-text">API server may be offline</p>
@@ -80,13 +80,13 @@ export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthPro
 
     let icon, colorClass;
     if (isHealthy) {
-      icon = <CheckCircle className="h-5 w-5 text-white" />;
+      icon = <CheckCircleIcon className="h-5 w-5 text-white" />;
       colorClass = 'text-white bg-pf-success-bg';
     } else if (isWarning) {
-      icon = <AlertCircle className="h-5 w-5 text-white" />;
+      icon = <AlertCircleIcon className="h-5 w-5 text-white" />;
       colorClass = 'text-white bg-pf-warning';
     } else {
-      icon = <XCircle className="h-5 w-5 text-white" />;
+      icon = <XCircleIcon className="h-5 w-5 text-white" />;
       colorClass = 'text-white bg-pf-error-bg';
     }
 

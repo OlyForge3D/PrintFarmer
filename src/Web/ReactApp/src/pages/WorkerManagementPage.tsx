@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
 import { Input } from '@/components/ui/Input';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { RefreshCw, Wrench, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon } from '@/components/icons/MdiIcons';
 
 export default function WorkerManagementPage() {
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
@@ -241,7 +241,7 @@ export default function WorkerManagementPage() {
       <PageTemplate
         title="Worker Management"
         subtitle="Monitor and manage your Slicer workers"
-        icon={Wrench}
+        icon={WrenchIcon}
         maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center py-12">
@@ -255,14 +255,14 @@ export default function WorkerManagementPage() {
     <PageTemplate
       title="Worker Management"
       subtitle="Monitor and manage your Slicer workers"
-      icon={Wrench}
+      icon={WrenchIcon}
       maxWidth="max-w-7xl"
       actions={
         <Button
           variant="secondary"
           size="md"
           onClick={loadWorkers}
-          iconLeft={<RefreshCw className="h-4 w-4" />}
+          iconLeft={<RefreshIcon className="h-4 w-4" />}
         >
           Refresh
         </Button>
@@ -327,9 +327,9 @@ export default function WorkerManagementPage() {
                         variant="subtle"
                       >
                         {expandedWorker === worker.id ? (
-                          <ChevronDown size={18} />
+                          <ChevronDownIcon className="w-5 h-5" />
                         ) : (
-                          <ChevronRight size={18} />
+                          <ChevronRightIcon className="w-5 h-5" />
                         )}
                       </Button>
                       <div className="flex flex-col">

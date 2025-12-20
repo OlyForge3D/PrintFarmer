@@ -1,8 +1,7 @@
 import React from 'react';
 import { usePrintersWithCameraUrls, useJobQueue, usePrinterHistory } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { SettingsIcon } from '@/components/icons/MdiIcons';
-import { Printer as PrinterIcon, CheckCircle, Play, Pause, LayoutDashboard, AlertCircle, Wrench, TrendingUp } from 'lucide-react';
+import { SettingsIcon, PlayIcon, PauseIcon, PrinterIcon, WrenchIcon, CheckCircleIcon, AlertCircleIcon, DashboardIcon, TrendingUpIcon } from '@/components/icons/MdiIcons';
 import { DetailedSystemHealth } from '@/components/SystemHealth';
 import { PageTemplate } from '@/components/PageTemplate';
 
@@ -47,14 +46,13 @@ export const PrinterDashboard: React.FC = () => {
   const { getPrinterStatus } = usePrinterStatusUpdates();
   
   // Fetch global job queue for active jobs
-  const { data: globalQueue } = useJobQueue(undefined, { enabled: !isLoading && printers && printers.length > 0 });
+  const { data: globalQueue } = useJobQueue(undefined);
   
   // Fetch history for the first printer (or any printer) to show recent prints
   const firstPrinterId = printers?.[0]?.id;
   const { data: recentHistory } = usePrinterHistory(
     firstPrinterId || '',
-    { limit: 5, order: 'desc' },
-    { enabled: !!firstPrinterId && !isLoading }
+    { limit: 5, order: 'desc' }
   );
 
   const stats = React.useMemo(() => {
@@ -80,17 +78,17 @@ export const PrinterDashboard: React.FC = () => {
     <PageTemplate
       title="Printer Dashboard"
       subtitle="Overview of your 3D printer farm status"
-      icon={LayoutDashboard}
+      icon={DashboardIcon}
       maxWidth="max-w-7xl"
     >
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />
-          <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircle} />
-          <StatsCard title="Printing" value={stats.printing} color="yellow" icon={Play} />
-          <StatsCard title="Paused" value={stats.paused} color="yellow" icon={Pause} />
+          <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircleIcon} />
+          <StatsCard title="Printing" value={stats.printing} color="yellow" icon={PlayIcon} />
+          <StatsCard title="Paused" value={stats.paused} color="yellow" icon={PauseIcon} />
           <StatsCard title="Offline" value={stats.offline} color="gray" icon={SettingsIcon} />
           {stats.maintenance > 0 && (
-            <StatsCard title="In Maintenance" value={stats.maintenance} color="gray" icon={Wrench} />
+            <StatsCard title="In Maintenance" value={stats.maintenance} color="gray" icon={WrenchIcon} />
           )}
         </div>
 
@@ -125,13 +123,13 @@ export const PrinterDashboard: React.FC = () => {
             {stats.offline > 0 || stats.maintenance > 0 ? (
               <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 shadow">
                 <div className="flex items-center gap-2 mb-4">
-                  <AlertCircle className="h-5 w-5 text-pf-error-text" />
+                  <AlertCircleIcon className="h-5 w-5 text-pf-error-text" />
                   <h2 className="text-lg font-semibold text-pf-text-primary">Alerts</h2>
                 </div>
                 <div className="space-y-3">
                   {stats.offline > 0 && (
                     <div className="flex items-start gap-2 p-3 bg-pf-error-bg rounded border border-pf-error-border">
-                      <AlertCircle className="h-4 w-4 text-pf-error-text flex-shrink-0 mt-0.5" />
+                      <AlertCircleIcon className="h-4 w-4 text-pf-error-text flex-shrink-0 mt-0.5" />
                       <div>
                         <p className="text-sm font-medium text-pf-error-text">{stats.offline} Printer{stats.offline > 1 ? 's' : ''} Offline</p>
                         <p className="text-xs text-pf-error-text opacity-80">Check network connection and printer status</p>
@@ -140,7 +138,7 @@ export const PrinterDashboard: React.FC = () => {
                   )}
                   {stats.maintenance > 0 && (
                     <div className="flex items-start gap-2 p-3 bg-pf-warning-bg rounded border border-pf-warning-border">
-                      <Wrench className="h-4 w-4 text-pf-warning-text flex-shrink-0 mt-0.5" />
+                      <WrenchIcon className="h-4 w-4 text-pf-warning-text flex-shrink-0 mt-0.5" />
                       <div>
                         <p className="text-sm font-medium text-pf-warning-text">{stats.maintenance} Printer{stats.maintenance > 1 ? 's' : ''} in Maintenance</p>
                         <p className="text-xs text-pf-warning-text opacity-80">These printers are not available for printing</p>
@@ -155,7 +153,7 @@ export const PrinterDashboard: React.FC = () => {
             {globalQueue && globalQueue.length > 0 ? (
               <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 shadow">
                 <div className="flex items-center gap-2 mb-4">
-                  <Play className="h-5 w-5 text-pf-loading" />
+                  <PlayIcon className="h-5 w-5 text-pf-loading" />
                   <h2 className="text-lg font-semibold text-pf-text-primary">Active & Queued Jobs</h2>
                 </div>
                 <div className="space-y-3 max-h-64 overflow-y-auto">
@@ -181,21 +179,21 @@ export const PrinterDashboard: React.FC = () => {
             {recentHistory && recentHistory.jobs && recentHistory.jobs.length > 0 ? (
               <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 shadow">
                 <div className="flex items-center gap-2 mb-4">
-                  <TrendingUp className="h-5 w-5 text-pf-status-online-text" />
+                  <TrendingUpIcon className="h-5 w-5 text-pf-status-online-text" />
                   <h2 className="text-lg font-semibold text-pf-text-primary">Recent Prints</h2>
                 </div>
                 <div className="space-y-3 max-h-64 overflow-y-auto">
                   {recentHistory.jobs.slice(0, 5).map((job) => (
-                    <div key={job.id} className="flex items-start justify-between p-3 bg-pf-bg-2 rounded border border-pf-border">
+                    <div key={job.jobId} className="flex items-start justify-between p-3 bg-pf-bg-2 rounded border border-pf-border">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-pf-text-primary truncate">{job.jobName}</p>
+                        <p className="text-sm font-medium text-pf-text-primary truncate">{job.filename}</p>
                         <p className="text-xs text-pf-text-tertiary">
                           {job.status === 'Success' ? '✓ Completed' : job.status === 'Failed' ? '✗ Failed' : job.status}
                         </p>
                       </div>
                       <div className="ml-2 text-right">
                         <p className="text-xs font-medium text-pf-text-secondary">
-                          {job.printTime ? Math.floor((job.printTime ?? 0) / 60) : 0}m
+                          {job.printDuration ? Math.floor((job.printDuration ?? 0) / 60) : 0}m
                         </p>
                         <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
                           job.status === 'Success' 

@@ -1,3 +1,4 @@
+import { CloseIcon } from '@/components/icons/MdiIcons';
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useEffect, useCallback } from 'react';
 import clsx from 'clsx';
@@ -115,7 +116,7 @@ export const Modal: React.FC<ModalProps> = ({
                 className="p-1 text-pf-text-tertiary hover:text-pf-text-primary hover:bg-pf-bg-2 rounded transition-colors"
                 aria-label="Close modal"
               >
-                <X className="w-5 h-5" />
+                <CloseIcon className="w-5 h-5" />
               </button>
             )}
           </div>

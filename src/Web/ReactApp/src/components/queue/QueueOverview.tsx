@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Clock, Printer, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { ClockIcon, PrinterIcon, AlertCircleIcon, CheckCircleIcon, XCircleIcon } from '@/components/icons/MdiIcons';
 import { QueueCardSkeleton } from '@/components/skeletons/QueueCardSkeleton';
 import { queueService } from '@/services/queueService';
 import { Button } from '@/components/ui';
@@ -19,15 +19,15 @@ interface QueueOverview {
 const QueueCard: React.FC<{ queue: QueueOverview }> = ({ queue }) => {
   const getStatusIcon = () => {
     if (!queue.isAvailable) {
-      return <XCircle className="w-5 h-5 text-red-500" />;
+      return <XCircleIcon className="w-5 h-5 text-red-500" />;
     }
     if (queue.currentJobId) {
       return <div className="w-5 h-5 bg-green-500 rounded-full animate-pulse" />;
     }
     if (queue.queuedJobsCount > 0) {
-      return <Clock className="w-5 h-5 text-yellow-500" />;
+      return <ClockIcon className="w-5 h-5 text-yellow-500" />;
     }
-    return <CheckCircle className="w-5 h-5 text-green-500" />;
+    return <CheckCircleIcon className="w-5 h-5 text-green-500" />;
   };
 
   const getStatusText = () => {
@@ -59,7 +59,7 @@ const QueueCard: React.FC<{ queue: QueueOverview }> = ({ queue }) => {
     <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200 hover:shadow-lg transition-shadow">
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center space-x-3">
-          <Printer className="w-6 h-6 text-gray-600" />
+          <PrinterIcon className="w-6 h-6 text-gray-600" />
           <div>
             <h3 className="font-semibold text-lg text-gray-900">{queue.printerName}</h3>
             <p className="text-sm text-gray-500">{queue.printerModel}</p>
@@ -141,7 +141,7 @@ export const QueueOverview: React.FC = () => {
       <div className="space-y-6">
         <h2 className="text-2xl font-bold text-gray-900">Print Queue Overview</h2>
         <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-          <AlertCircle className="w-8 h-8 text-red-600 mx-auto mb-2" />
+          <AlertCircleIcon className="w-8 h-8 text-red-600 mx-auto mb-2" />
           <p className="text-red-800 font-medium">Failed to load queue data</p>
           <p className="text-red-600 text-sm mt-1">Please check your connection and try again</p>
         </div>
@@ -172,7 +172,7 @@ export const QueueOverview: React.FC = () => {
 
       {queues.length === 0 ? (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-12 text-center">
-          <Printer className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <PrinterIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">No Printers Available</h3>
           <p className="text-gray-600">Add printers to your farm to start managing print queues</p>
         </div>

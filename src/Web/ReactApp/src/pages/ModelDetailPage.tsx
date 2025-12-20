@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-// No MdiIcons used in this component
-import { ArrowLeft, Tag, Edit2 } from 'lucide-react';
+import { CloseIcon, ArrowLeftIcon, TagIcon, EditIcon, SaveIcon, PlusIcon } from '@/components/icons/MdiIcons';
 import { PageTemplate } from '@/components/PageTemplate';
 import { TagEditor } from '@/components/TagEditor';
 import { Button, Input, FormField } from '@/components/ui';
@@ -173,7 +172,7 @@ export const ModelDetailPage: React.FC = () => {
             <PageTemplate
                 title="Model Detail"
                 subtitle="View and manage model details"
-                icon={Tag}
+                icon={TagIcon}
                 maxWidth="max-w-4xl"
             >
                 <div className="flex items-center justify-center h-64">
@@ -188,7 +187,7 @@ export const ModelDetailPage: React.FC = () => {
             <PageTemplate
                 title="Model Not Found"
                 subtitle="The requested model could not be found"
-                icon={Tag}
+                icon={TagIcon}
                 maxWidth="max-w-4xl"
             >
                 <div className="text-center py-8">
@@ -222,7 +221,7 @@ export const ModelDetailPage: React.FC = () => {
         <PageTemplate
             title={model.name}
             subtitle="Model details and tag management"
-            icon={Tag}
+            icon={TagIcon}
             maxWidth="max-w-4xl"
         >
             {/* Header */}
@@ -232,7 +231,7 @@ export const ModelDetailPage: React.FC = () => {
                     onClick={() => navigate('/models')}
                     className="flex items-center gap-2"
                 >
-                    <ArrowLeft className="w-5 h-5" />
+                    <ArrowLeftIcon className="w-5 h-5" />
                     Back to Models
                 </Button>
             </div>
@@ -250,7 +249,7 @@ export const ModelDetailPage: React.FC = () => {
                             />
                         ) : (
                             <div className="text-pf-text-tertiary">
-                                <Tag className="w-12 h-12" />
+                                <TagIcon className="w-12 h-12" />
                             </div>
                         )}
                     </div>
@@ -282,7 +281,7 @@ export const ModelDetailPage: React.FC = () => {
                                             }}
                                             disabled={updateNameMutation.isPending}
                                         >
-                                            <Save className="w-4 h-4" />
+                                            <SaveIcon className="w-4 h-4" />
                                         </Button>
                                         <Button
                                             variant="secondary"
@@ -292,7 +291,7 @@ export const ModelDetailPage: React.FC = () => {
                                                 setIsEditingName(false);
                                             }}
                                         >
-                                            <X className="w-4 h-4" />
+                                            <CloseIcon className="w-4 h-4" />
                                         </Button>
                                     </div>
                                 ) : (
@@ -304,7 +303,7 @@ export const ModelDetailPage: React.FC = () => {
                                             onClick={() => setIsEditingName(true)}
                                             className="p-1"
                                         >
-                                            <Edit2 className="w-4 h-4" />
+                                            <EditIcon className="w-4 h-4" />
                                         </Button>
                                     </div>
                                 )}
@@ -350,7 +349,7 @@ export const ModelDetailPage: React.FC = () => {
             {/* Tags Section */}
             <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-6">
                 <h3 className="text-lg font-medium text-pf-text-primary mb-4 flex items-center gap-2">
-                    <Tag className="w-5 h-5" />
+                    <TagIcon className="w-5 h-5" />
                     Tags
                 </h3>
 
@@ -387,7 +386,7 @@ export const ModelDetailPage: React.FC = () => {
                                 }
                                 disabled={updateTagsMutation.isPending || !hasUnsavedChanges}
                                 variant="primary"
-                                iconLeft={<Save className="w-4 h-4" />}
+                                iconLeft={<SaveIcon className="w-4 h-4" />}
                             >
                                 {updateTagsMutation.isPending ? 'Saving...' : 'Save Tags'}
                             </Button>
@@ -426,7 +425,7 @@ export const ModelDetailPage: React.FC = () => {
                                             className="!p-0 !h-auto ml-1"
                                             title="Remove tag"
                                         >
-                                            <X className="w-3 h-3" />
+                                            <CloseIcon className="w-3 h-3" />
                                         </Button>
                                     </div>
                                 ))}
@@ -438,7 +437,7 @@ export const ModelDetailPage: React.FC = () => {
                                     className="!p-1 !h-auto"
                                     title="Add a new tag"
                                 >
-                                    <Plus className="w-4 h-4" />
+                                    <PlusIcon className="w-4 h-4" />
                                 </Button>
                             </div>
                         ) : (
@@ -452,7 +451,7 @@ export const ModelDetailPage: React.FC = () => {
                                     className="!p-1 !h-auto"
                                     title="Add a new tag"
                                 >
-                                    <Plus className="w-4 h-4" />
+                                    <PlusIcon className="w-4 h-4" />
                                 </Button>
                             </div>
                         )}

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { DeleteIcon } from '@/components/icons/MdiIcons';
-import { Tag, Edit2, Loader } from 'lucide-react';
+import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon } from '@/components/icons/MdiIcons';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Input, FormField, Alert } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
@@ -156,7 +155,7 @@ export const TagAdminPage: React.FC = () => {
             <PageTemplate
                 title="Tag Management"
                 subtitle="Manage all 3D model tags"
-                icon={Tag}
+                icon={TagIcon}
                 maxWidth="max-w-6xl"
             >
                 <div className="flex items-center justify-center h-64">
@@ -170,7 +169,7 @@ export const TagAdminPage: React.FC = () => {
         <PageTemplate
             title="Tag Management"
             subtitle="Manage all 3D model tags"
-            icon={Tag}
+            icon={TagIcon}
             maxWidth="max-w-6xl"
         >
             <div className="space-y-6">
@@ -178,7 +177,7 @@ export const TagAdminPage: React.FC = () => {
                 <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-6">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-lg font-medium text-pf-text-primary flex items-center gap-2">
-                            <Plus className="w-5 h-5" />
+                            <PlusIcon className="w-5 h-5" />
                             Create New Tag
                         </h2>
                         <Button
@@ -195,7 +194,7 @@ export const TagAdminPage: React.FC = () => {
                             size="sm"
                             className="!p-0 !h-auto"
                         >
-                            <X className="w-5 h-5" />
+                            <CloseIcon className="w-5 h-5" />
                         </Button>
                     </div>
 
@@ -204,7 +203,7 @@ export const TagAdminPage: React.FC = () => {
                             <FormField
                                 label="Tag Name *"
                                 error={newTagName.trim() === '' ? 'Tag name is required' : undefined}
-                                helperText="e.g., Miniature, Character, Utility..."
+                                helper="e.g., Miniature, Character, Utility..."
                             >
                                 <Input
                                     type="text"
@@ -256,7 +255,7 @@ export const TagAdminPage: React.FC = () => {
                                     disabled={createTagMutation.isPending || !newTagName.trim()}
                                 >
                                     {createTagMutation.isPending && (
-                                        <Loader className="w-4 h-4 animate-spin mr-2" />
+                                        <LoadingIcon className="w-4 h-4 mr-2" />
                                     )}
                                     Create Tag
                                 </Button>
@@ -282,7 +281,7 @@ export const TagAdminPage: React.FC = () => {
                             onClick={() => setShowNewTagForm(true)}
                             className="w-full"
                         >
-                            <Plus className="w-4 h-4 mr-2" />
+                            <PlusIcon className="w-4 h-4 mr-2" />
                             Add New Tag
                         </Button>
                     )}
@@ -374,7 +373,7 @@ export const TagAdminPage: React.FC = () => {
                                                         className="!p-2 !h-auto"
                                                         title="Save changes"
                                                     >
-                                                        <Check className="w-4 h-4" />
+                                                        <CheckIcon className="w-4 h-4" />
                                                     </Button>
                                                     <Button
                                                         type="button"
@@ -384,7 +383,7 @@ export const TagAdminPage: React.FC = () => {
                                                         className="!p-2 !h-auto"
                                                         title="Cancel editing"
                                                     >
-                                                        <X className="w-4 h-4" />
+                                                        <CloseIcon className="w-4 h-4" />
                                                     </Button>
                                                 </div>
                                             ) : (
@@ -398,7 +397,7 @@ export const TagAdminPage: React.FC = () => {
                                                         title="Edit tag"
                                                         disabled={deleteTagMutation.isPending}
                                                     >
-                                                        <Edit2 className="w-4 h-4" />
+                                                        <EditIcon className="w-4 h-4" />
                                                     </Button>
                                                     <Button
                                                         type="button"
@@ -410,7 +409,7 @@ export const TagAdminPage: React.FC = () => {
                                                         disabled={deleteTagMutation.isPending || (tag.usageCount || 0) > 0}
                                                     >
                                                         {deleteTagMutation.isPending ? (
-                                                            <Loader className="w-4 h-4 animate-spin" />
+                                                            <LoadingIcon className="w-4 h-4" />
                                                         ) : (
                                                             <DeleteIcon className="w-4 h-4" />
                                                         )}
@@ -423,7 +422,7 @@ export const TagAdminPage: React.FC = () => {
                             ) : (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-8 text-center text-pf-text-secondary">
-                                        <Tag className="w-12 h-12 mx-auto mb-2 text-pf-text-tertiary" />
+                                        <TagIcon className="w-12 h-12 mx-auto mb-2 text-pf-text-tertiary" />
                                         No tags created yet. Create one to get started!
                                     </td>
                                 </tr>

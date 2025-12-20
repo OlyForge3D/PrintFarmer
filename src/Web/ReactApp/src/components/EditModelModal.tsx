@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check } from 'lucide-react';
+import { CheckIcon } from '@/components/icons/MdiIcons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes } from '@/hooks/useApi';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
@@ -196,7 +196,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
         variant={isAddMode ? 'success' : 'primary'}
         size="lg"
         disabled={isAddMode ? createMutation.status === 'pending' : updateMutation.status === 'pending'}
-        iconRight={<Check className="w-4 h-4" />}
+        iconRight={<CheckIcon className="w-4 h-4" />}
         onClick={handleSubmit}
       >
         {isAddMode 

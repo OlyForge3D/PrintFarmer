@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-// No MdiIcons used in this component
-import { CheckCircle, AlertCircle, Loader } from 'lucide-react';
+import { CloseIcon, CheckCircleIcon, AlertCircleIcon, LoaderIcon } from '@/components/icons/MdiIcons';
 import { signalRService } from '@/services/harvest-signalr';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
@@ -234,13 +233,13 @@ export function HarvestWizardStep4Progress({
                       <div className="w-5 h-5 border-2 border-pf-border rounded-full" />
                     )}
                     {file.status === 'importing' && (
-                      <Loader className="w-5 h-5 text-pf-accent animate-spin" />
+                      <LoaderIcon className="w-5 h-5 text-pf-accent animate-spin" />
                     )}
                     {file.status === 'completed' && (
-                      <CheckCircle className="w-5 h-5 text-pf-success" />
+                      <CheckCircleIcon className="w-5 h-5 text-pf-success" />
                     )}
                     {file.status === 'failed' && (
-                      <AlertCircle className="w-5 h-5 text-pf-error" />
+                      <AlertCircleIcon className="w-5 h-5 text-pf-error" />
                     )}
                     {file.status === 'skipped' && (
                       <div className="w-5 h-5 border-2 border-pf-warning rounded-full flex items-center justify-center">
@@ -343,7 +342,7 @@ export function HarvestWizardStep4Progress({
             variant="secondary"
             size="md"
             onClick={onCancel}
-            iconLeft={<X className="w-4 h-4" />}
+            iconLeft={<CloseIcon className="w-4 h-4" />}
             className="flex-1"
           >
             Cancel Import
@@ -354,7 +353,7 @@ export function HarvestWizardStep4Progress({
             variant="primary"
             size="md"
             onClick={onCompleted}
-            iconLeft={<CheckCircle className="w-4 h-4" />}
+            iconLeft={<CheckCircleIcon className="w-4 h-4" />}
             className="flex-1"
           >
             Complete

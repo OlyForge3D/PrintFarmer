@@ -1,7 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useEffect } from 'react';
-// No MdiIcons used in this component
-import { User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, Info, Wifi } from 'lucide-react';
+import { AccountIcon, EmailIcon, LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, NetworkIcon, ServerIcon, ThermometerIcon, LayersIcon, InfoIcon, WiFiIcon, SearchIcon, AlertIcon } from '@/components/icons/MdiIcons';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Button } from '@/components/ui';
@@ -485,7 +484,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       {/* Name Fields */}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="firstName" className="block text-sm font-medium text-pf-text-primary mb-2"><User className="inline h-4 w-4 mr-1"/>First Name *</label>
+          <label htmlFor="firstName" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>First Name *</label>
           <input id="firstName" type="text" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="given-name" disabled={submitting} />
           {fieldErrors.firstName && <p className="text-xs text-red-500" role="alert">{fieldErrors.firstName}</p>}
         </div>
@@ -496,17 +495,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       </div>
       <div>
-        <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-2"><User className="inline h-4 w-4 mr-1"/>Username *</label>
+        <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>Username *</label>
         <input id="username" value={formData.username} onChange={e => handleInputChange('username', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="username" disabled={submitting} />
         {fieldErrors.username && <p className="text-xs text-red-500" role="alert">{fieldErrors.username}</p>}
       </div>
       <div>
-        <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-2"><Mail className="inline h-4 w-4 mr-1"/>Email *</label>
+        <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-2"><EmailIcon className="inline h-4 w-4 mr-1"/>Email *</label>
         <input id="email" type="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="email" disabled={submitting} />
         {fieldErrors.email && <p className="text-xs text-red-500" role="alert">{fieldErrors.email}</p>}
       </div>
       <div>
-        <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-2"><Lock className="inline h-4 w-4 mr-1"/>Password *</label>
+        <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Password *</label>
         <div className="relative">
           <input id="password" type={showPassword ? 'text':'password'} value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10" disabled={submitting} />
           <Button
@@ -518,7 +517,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             disabled={submitting}
             title={showPassword ? 'Hide password' : 'Show password'}
           >
-            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
           </Button>
         </div>
         <ul className="mt-2 text-xs space-y-0.5">
@@ -531,7 +530,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         {fieldErrors.password && <p className="text-xs text-red-500" role="alert">{fieldErrors.password}</p>}
       </div>
       <div>
-        <label htmlFor="confirmPassword" className="block text-sm font-medium text-pf-text-primary mb-2"><Lock className="inline h-4 w-4 mr-1"/>Confirm Password *</label>
+        <label htmlFor="confirmPassword" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Confirm Password *</label>
         <input id="confirmPassword" type="password" value={formData.confirmPassword} onChange={e => handleInputChange('confirmPassword', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-none focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" disabled={submitting} />
         {fieldErrors.confirmPassword && <p className="text-xs text-red-500" role="alert">{fieldErrors.confirmPassword}</p>}
       </div>
@@ -543,7 +542,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           variant="primary"
           className="flex items-center gap-2"
         >
-          <CheckCircle className="h-4 w-4" />
+          <CheckCircleIcon className="h-4 w-4" />
           Next
         </Button>
       </div>
@@ -554,7 +553,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const renderNetworkStep = () => (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold flex items-center gap-2"><Network className="h-5 w-5"/>Network Discovery</h2>
+        <h2 className="text-lg font-semibold flex items-center gap-2"><NetworkIcon className="h-5 w-5"/>Network Discovery</h2>
         <p className="text-sm text-pf-text-secondary">Provide CIDR ranges to scan for printers (e.g. 192.168.1.0/24). Leave empty to disable discovery.</p>
       </div>
       <div className="space-y-2">
@@ -651,7 +650,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const renderSpoolmanStep = () => (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold flex items-center gap-2"><Server className="h-5 w-5"/>Spoolman Integration</h2>
+        <h2 className="text-lg font-semibold flex items-center gap-2"><ServerIcon className="h-5 w-5"/>Spoolman Integration</h2>
         <p className="text-sm text-pf-text-secondary">Optionally connect to a Spoolman instance now or later in Settings.</p>
       </div>
       <div className="flex items-center gap-2">
@@ -664,7 +663,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Wifi className="h-4 w-4 text-pf-accent" />
+                <WiFiIcon className="h-4 w-4 text-pf-accent" />
                 <span className="text-sm font-medium">Network Discovery</span>
               </div>
               <button
@@ -673,7 +672,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 disabled={isScanning}
                 className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent text-white rounded text-sm hover:bg-pf-accent-dark disabled:opacity-50"
               >
-                <Search className="h-4 w-4" />
+                <SearchIcon className="h-4 w-4" />
                 {isScanning ? 'Scanning...' : 'Scan Network'}
               </button>
             </div>
@@ -744,7 +743,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           )}
           {!spoolmanTestOk && spoolmanErrorCategory && (
             <div className="relative text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2 flex gap-2 group">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <AlertIcon className="h-4 w-4 shrink-0" />
               <div className="space-y-1">
                 <div className="font-semibold">{getSpoolmanFriendly(spoolmanErrorCategory)}</div>
                 {spoolmanErrorMeta[spoolmanErrorCategory]?.hint && (
@@ -753,7 +752,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 {/* Info icon with tooltip raw message */}
                 {spoolmanTestResult && (
                   <div className="flex items-center gap-1 text-pf-text-tertiary">
-                    <Info className="h-3 w-3" />
+                    <InfoIcon className="h-3 w-3" />
                     <span className="truncate max-w-[220px]" title={spoolmanTestResult}>{spoolmanTestResult}</span>
                   </div>
                 )}
@@ -780,7 +779,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const renderFilamentStep = () => (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold flex items-center gap-2"><Thermometer className="h-5 w-5"/>Filament Presets</h2>
+        <h2 className="text-lg font-semibold flex items-center gap-2"><ThermometerIcon className="h-5 w-5"/>Filament Presets</h2>
         <p className="text-sm text-pf-text-secondary">Select which material presets to enable. You can edit temperatures or manage later.</p>
       </div>
       {/* Material Types Selection */}
@@ -836,7 +835,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     return (
       <div className="space-y-6">
         <div>
-          <h2 className="text-lg font-semibold flex items-center gap-2"><Layers className="h-5 w-5"/>Summary</h2>
+          <h2 className="text-lg font-semibold flex items-center gap-2"><LayersIcon className="h-5 w-5"/>Summary</h2>
           <p className="text-sm text-pf-text-secondary">Review your initial configuration before finishing setup.</p>
         </div>
         <div className="text-sm space-y-2">
@@ -852,7 +851,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   (last test: {getSpoolmanFriendly(spoolmanErrorCategory)}{getSpoolmanFriendly(spoolmanErrorCategory) !== spoolmanErrorCategory ? ` [${spoolmanErrorCategory}]` : ''})
                   {spoolmanTestResult && (
                     <span className="text-pf-text-tertiary" title={spoolmanTestResult}>
-                      <Info className="h-3 w-3" />
+                      <InfoIcon className="h-3 w-3" />
                     </span>
                   )}
                 </span>
@@ -885,7 +884,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </>
             ) : (
               <>
-                <CheckCircle className="h-4 w-4" />
+                <CheckCircleIcon className="h-4 w-4" />
                 Finish Setup
               </>
             )}

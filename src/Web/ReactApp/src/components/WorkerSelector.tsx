@@ -6,7 +6,7 @@ import {
   calculateWorkerUtilization,
   getWorkerStatusColor,
 } from '@/types/worker';
-import { Server, Activity, Zap } from 'lucide-react';
+import { ServerIcon, ActivityIcon, BatteryIcon } from '@/components/icons/MdiIcons';
 
 interface WorkerSelectorProps {
   workers: WorkerResponse[];
@@ -34,7 +34,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8 text-pf-text-muted">
-        <Activity className="w-5 h-5 mr-2 animate-spin" />
+        <ActivityIcon className="w-5 h-5 mr-2 animate-spin" />
         <span>Loading workers...</span>
       </div>
     );
@@ -51,7 +51,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
   if (workers.length === 0) {
     return (
       <div className="p-8 text-center text-pf-text-muted">
-        <Server className="w-12 h-12 mx-auto mb-2 opacity-50" />
+        <ServerIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
         <p className="text-sm">No workers available</p>
         <p className="text-xs mt-1">Workers matching your capabilities will appear here</p>
       </div>
@@ -87,7 +87,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <Server className="w-4 h-4 text-pf-text-muted" />
+                  <ServerIcon className="w-4 h-4 text-pf-text-muted" />
                   <span className="font-semibold text-sm">{worker.name}</span>
                   <span
                     className={`text-xs px-2 py-0.5 rounded-full text-white ${getWorkerStatusColor(worker.status)}`}
@@ -95,7 +95,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
                     {worker.status}
                   </span>
                   {available && (
-                    <Zap className="w-3.5 h-3.5 text-green-500" aria-label="Available for jobs" />
+                    <BatteryIcon className="w-3.5 h-3.5 text-green-500" aria-label="Available for jobs" />
                   )}
                 </div>
 
@@ -129,9 +129,9 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
                     <span>
                       <strong>Jobs:</strong> {worker.activeJobs} active, {worker.completedJobs} completed
                     </span>
-                    {worker.averageProcessingTimeSeconds > 0 && (
+                    {(worker.averageProcessingTimeSeconds ?? 0) > 0 && (
                       <span>
-                        <strong>Avg time:</strong> {Math.round(worker.averageProcessingTimeSeconds)}s
+                        <strong>Avg time:</strong> {Math.round(worker.averageProcessingTimeSeconds ?? 0)}s
                       </span>
                     )}
                   </div>

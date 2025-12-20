@@ -1,5 +1,5 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { AlertIcon, CloseIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 
 interface SlicerConfirmModalProps {
@@ -17,7 +17,7 @@ export function SlicerConfirmModal({ isOpen, slicer, onConfirm, onCancel }: Slic
       <div className="bg-pf-panel border border-pf-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
           <div className="flex items-center">
-            <AlertTriangle className="w-6 h-6 text-pf-error-text mr-3" />
+            <AlertIcon className="w-6 h-6 text-pf-error-text mr-3" />
             <h3 className="text-lg font-bold text-pf-text-primary">Deregister Slicer</h3>
           </div>
           <Button
@@ -28,7 +28,7 @@ export function SlicerConfirmModal({ isOpen, slicer, onConfirm, onCancel }: Slic
             size="sm"
             className="!p-0 !h-auto"
           >
-            <X className="w-5 h-5" />
+            <CloseIcon className="w-5 h-5" />
           </Button>
         </div>
         <div className="p-6">

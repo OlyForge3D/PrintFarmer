@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
-// No MdiIcons used in this component
-import { Mail, RefreshCw } from 'lucide-react';
+import { CloseIcon, EmailIcon, RefreshIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 
 export function EmailConfirmationBanner() {
@@ -41,7 +40,7 @@ export function EmailConfirmationBanner() {
         <div className="flex items-center justify-between flex-wrap">
           <div className="flex items-center flex-1">
             <span className="flex p-2 rounded-lg bg-yellow-500/20">
-              <Mail className="h-5 w-5 text-yellow-600" aria-hidden="true" />
+              <EmailIcon className="h-5 w-5 text-yellow-600" />
             </span>
             <p className="ml-3 font-medium text-yellow-800 dark:text-yellow-200">
               <span className="md:hidden">Please verify your email</span>
@@ -59,12 +58,12 @@ export function EmailConfirmationBanner() {
             >
               {sending ? (
                 <>
-                  <RefreshCw className="animate-spin h-4 w-4 mr-2" />
+                  <RefreshIcon className="h-4 w-4 mr-2" />
                   Sending...
                 </>
               ) : (
                 <>
-                  <Mail className="h-4 w-4 mr-2" />
+                  <EmailIcon className="h-4 w-4 mr-2" />
                   Resend Email
                 </>
               )}
@@ -76,7 +75,7 @@ export function EmailConfirmationBanner() {
               aria-label="Dismiss"
               className="p-1"
             >
-              <X className="h-5 w-5 text-yellow-600" />
+              <CloseIcon className="h-5 w-5 text-yellow-600" />
             </Button>
           </div>
         </div>

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { CloseIcon, EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
-import { Save, Database, Image as ImageIcon, Plus, X } from 'lucide-react';
+import { CloseIcon, EditIcon, DeleteIcon, SaveIcon, DatabaseIcon, ImageIcon, PlusIcon } from '@/components/icons/MdiIcons';
 import type { ManufacturerDto, PrinterModelDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/components/EditModelModal';
 import { PageTemplate } from '@/components/PageTemplate';
@@ -171,7 +170,7 @@ export function CatalogPage() {
       <PageTemplate
         title="Catalog"
         subtitle="Manage printer manufacturers, models, and filament types"
-        icon={Database}
+        icon={DatabaseIcon}
         maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center h-64">
@@ -185,7 +184,7 @@ export function CatalogPage() {
     <PageTemplate
       title="Catalog"
       subtitle="Manage printer manufacturers, models, and filament types"
-      icon={Database}
+      icon={DatabaseIcon}
       maxWidth="max-w-7xl"
     >
       {error && (
@@ -211,7 +210,7 @@ export function CatalogPage() {
                   disabled={!newManufacturer.trim()}
                   size="sm"
                 >
-                  <Plus className="h-4 w-4" />
+                  <PlusIcon className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -245,7 +244,7 @@ export function CatalogPage() {
                             size="sm"
                             title="Save manufacturer name"
                           >
-                            <Save className="h-4 w-4 text-green-400" />
+                            <SaveIcon className="h-4 w-4 text-green-400" />
                           </Button>
                           <Button
                             onClick={(e) => {
@@ -256,7 +255,7 @@ export function CatalogPage() {
                             size="sm"
                             title="Cancel edit"
                           >
-                            <X className="h-4 w-4 text-red-400" />
+                            <CloseIcon className="h-4 w-4 text-red-400" />
                           </Button>
                         </div>
                       ) : (
@@ -317,7 +316,7 @@ export function CatalogPage() {
                   size="sm"
                   title="Add new model"
                 >
-                  <Plus className="h-4 w-4" />
+                  <PlusIcon className="h-4 w-4" />
                 </Button>
               )}
             </div>
@@ -345,7 +344,7 @@ export function CatalogPage() {
                                 size="sm"
                                 title="Save model name"
                               >
-                                <Save className="h-4 w-4 text-green-400" />
+                                <SaveIcon className="h-4 w-4 text-green-400" />
                               </Button>
                               <Button
                                 onClick={() => setEditingModel(null)}

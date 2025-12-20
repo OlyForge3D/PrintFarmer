@@ -3,20 +3,8 @@ if (!window.PrintFarmerDebug) {
 }
 import { usePrinterHistory, usePrinterHistoryTotals } from '@/hooks/useApi';
 import type { HistoryJob, Printer } from '@/types/api';
-import { 
-  Calendar, 
-  Clock, 
-  FileText, 
-  CheckCircle, 
-  XCircle, 
-  User,
-  Layers,
-  X,
-  BarChart3,
-  Timer,
-  Package
-} from 'lucide-react';
-import { PauseIcon, PlayIcon } from '@/components/icons/MdiIcons';
+import { CalendarIcon, ClockIcon, XCircleIcon, AccountIcon, LayersIcon, ChartIcon, TimerIcon, PackageIcon } from '@/components/icons/MdiIcons';
+import { PauseIcon, PlayIcon, CloseIcon, CheckCircleIcon, FileIcon } from '@/components/icons/MdiIcons';
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { renderUnknown } from '@/utils/renderUnknown';
@@ -64,15 +52,15 @@ function formatDate(timestamp: number): string {
 function getStatusIcon(status: string) {
   switch (status.toLowerCase()) {
     case 'completed':
-      return <CheckCircle className="h-4 w-4 text-green-500" />;
+      return <CheckCircleIcon className="h-4 w-4 text-green-500" />;
     case 'cancelled':
-      return <XCircle className="h-4 w-4 text-red-500" />;
+      return <XCircleIcon className="h-4 w-4 text-red-500" />;
     case 'paused':
       return <PauseIcon className="h-4 w-4" ariaLabel="Paused" />;
     case 'printing':
       return <PlayIcon className="h-4 w-4" ariaLabel="Printing" />;
     default:
-      return <FileText className="h-4 w-4 text-gray-500" />;
+      return <FileIcon className="h-4 w-4 text-gray-500" />;
   }
 }
 
@@ -183,7 +171,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                 className="!p-2 !h-auto"
                 title="Close"
               >
-                <X className="h-5 w-5" />
+                <CloseIcon className="h-5 w-5" />
               </Button>
             </div>
           </div>
@@ -197,7 +185,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
               </div>
             ) : error ? (
               <div className="text-center py-8">
-                <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+                <XCircleIcon className="h-12 w-12 text-red-500 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-pf-text-primary mb-2">Failed to Load History</h3>
                 <p className="text-pf-text-secondary mb-4">{error.message}</p>
                 <Button
@@ -210,7 +198,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
               </div>
             ) : !historyData || historyData.jobs.length === 0 ? (
               <div className="text-center py-8">
-                <FileText className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                <FileIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-pf-text-primary mb-2">No Print History</h3>
                 <p className="text-pf-text-secondary">
                   No print jobs found for this printer yet.
@@ -222,14 +210,14 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                 {totalsData && totalsData.jobTotals && !totalsLoading && (
                   <div className="bg-pf-bg-0 border border-pf-border rounded-lg p-4 mb-6">
                     <h3 className="text-lg font-medium text-pf-text-primary mb-4 flex items-center">
-                      <BarChart3 className="h-5 w-5 mr-2" />
+                      <ChartIcon className="h-5 w-5 mr-2" />
                       Print Statistics
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {/* Total Jobs */}
                       <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                         <div className="flex items-center space-x-2 mb-2">
-                          <FileText className="h-4 w-4 text-pf-accent" />
+                          <FileIcon className="h-4 w-4 text-pf-accent" />
                           <span className="text-sm font-medium text-pf-text-secondary">Total Jobs</span>
                         </div>
                         <div className="text-2xl font-bold text-pf-text-primary">
@@ -240,7 +228,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                       {/* Total Print Time */}
                       <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                         <div className="flex items-center space-x-2 mb-2">
-                          <Timer className="h-4 w-4 text-blue-500" />
+                          <TimerIcon className="h-4 w-4 text-blue-500" />
                           <span className="text-sm font-medium text-pf-text-secondary">Total Print Time</span>
                         </div>
                         <div className="text-2xl font-bold text-pf-text-primary">
@@ -251,7 +239,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                       {/* Total Filament */}
                       <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                         <div className="flex items-center space-x-2 mb-2">
-                          <Package className="h-4 w-4 text-green-500" />
+                          <PackageIcon className="h-4 w-4 text-green-500" />
                           <span className="text-sm font-medium text-pf-text-secondary">Total Filament</span>
                         </div>
                         <div className="text-2xl font-bold text-pf-text-primary">
@@ -263,7 +251,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                       {(totalsData.jobTotals.longestPrint || 0) > 0 && (
                         <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                           <div className="flex items-center space-x-2 mb-2">
-                            <Clock className="h-4 w-4 text-purple-500" />
+                            <ClockIcon className="h-4 w-4 text-purple-500" />
                             <span className="text-sm font-medium text-pf-text-secondary">Longest Print</span>
                           </div>
                           <div className="text-2xl font-bold text-pf-text-primary">
@@ -275,7 +263,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                       {(totalsData.jobTotals.longestJob || 0) > 0 && (totalsData.jobTotals.longestJob || 0) !== (totalsData.jobTotals.longestPrint || 0) && (
                         <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                           <div className="flex items-center space-x-2 mb-2">
-                            <Calendar className="h-4 w-4 text-orange-500" />
+                            <CalendarIcon className="h-4 w-4 text-orange-500" />
                             <span className="text-sm font-medium text-pf-text-secondary">Longest Job</span>
                           </div>
                           <div className="text-2xl font-bold text-pf-text-primary">
@@ -336,12 +324,12 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                           {/* Job Details */}
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                             <div className="flex items-center space-x-1 text-pf-text-secondary">
-                              <Calendar className="h-3 w-3" />
+                              <CalendarIcon className="h-3 w-3" />
                               <span className="text-xs">{formatDate(job.startTime)}</span>
                             </div>
                             
                             <div className="flex items-center space-x-1 text-pf-text-secondary">
-                              <Clock className="h-3 w-3" />
+                              <ClockIcon className="h-3 w-3" />
                               <span className="text-xs">
                                 {formatDuration(job.printDuration)}
                               </span>
@@ -349,7 +337,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
 
                             {job.filamentUsed > 0 && (
                               <div className="flex items-center space-x-1 text-pf-text-secondary">
-                                <Layers className="h-3 w-3" />
+                                <LayersIcon className="h-3 w-3" />
                                 <span className="text-xs">
                                   {formatFilamentUsed(job.filamentUsed)}
                                 </span>
@@ -358,7 +346,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
 
                             {job.user && (
                               <div className="flex items-center space-x-1 text-pf-text-secondary">
-                                <User className="h-3 w-3" />
+                                <AccountIcon className="h-3 w-3" />
                                 <span className="text-xs">{job.user}</span>
                               </div>
                             )}

@@ -3,7 +3,7 @@ import { apiClient } from '@/services/api';
 import { GcodeFile } from '@/types/api';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Input, Select, FormField, Alert } from '@/components/ui';
-import { FolderOpen } from 'lucide-react';
+import { FolderIcon } from '@/components/icons/MdiIcons';
 
 export const HarvestedFilesLibrary: React.FC = () => {
   const [files, setFiles] = useState<GcodeFile[]>([]);
@@ -34,7 +34,7 @@ export const HarvestedFilesLibrary: React.FC = () => {
     <PageTemplate
       title="Harvested G-code Files"
       subtitle="Browse and manage G-code files collected from your printers"
-      icon={FolderOpen}
+      icon={FolderIcon}
       maxWidth="max-w-7xl"
     >
       <div className="flex flex-wrap gap-4 mb-4 items-end">
@@ -50,22 +50,20 @@ export const HarvestedFilesLibrary: React.FC = () => {
           <Select
             value={sortBy}
             onChange={e => setSortBy(e.target.value as 'name' | 'size' | 'date')}
-            options={[
-              { value: 'name', label: 'Name' },
-              { value: 'size', label: 'Size' },
-              { value: 'date', label: 'Date' }
-            ]}
-          />
+          >
+            <option value="name">Name</option>
+            <option value="size">Size</option>
+            <option value="date">Date</option>
+          </Select>
         </FormField>
         <FormField label="Order">
           <Select
             value={sortOrder}
             onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}
-            options={[
-              { value: 'desc', label: 'Newest' },
-              { value: 'asc', label: 'Oldest' }
-            ]}
-          />
+          >
+            <option value="desc">Newest</option>
+            <option value="asc">Oldest</option>
+          </Select>
         </FormField>
       </div>
       {loading ? (

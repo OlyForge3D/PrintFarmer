@@ -2,7 +2,7 @@ import React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FileBrowser } from '@/components/files/FileBrowser';
 import { PageTemplate } from '@/components/PageTemplate';
-import { FileCode } from 'lucide-react';
+import { FileIcon } from '@/components/icons/MdiIcons';
 
 export const FilesPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -13,7 +13,7 @@ export const FilesPage: React.FC = () => {
     <PageTemplate
       title="G-code Files"
       subtitle="Browse and manage your harvested G-code files"
-      icon={FileCode}
+      icon={FileIcon}
       maxWidth="max-w-7xl"
     >
       <FileBrowser

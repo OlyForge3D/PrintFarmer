@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { Line, OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button, Checkbox, Select } from '@/components/ui';
-import { Cog } from 'lucide-react';
+import { GearIcon } from '@/components/icons/MdiIcons';
 
 interface GCodePoint {
   x: number;
@@ -338,7 +338,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                 className="p-2 rounded-md text-gray-300 hover:text-white bg-transparent border-none shadow-none focus:ring-0"
                 title="Settings"
               >
-                <Cog size={20} />
+                <GearIcon className="w-5 h-5" />
               </Button>
               
               {/* Settings Dropdown */}

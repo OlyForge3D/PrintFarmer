@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useMemo } from 'react';
-// No MdiIcons used in this component
+import { CloseIcon, SearchIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { assetService } from '@/services/assetService';
 
@@ -60,14 +60,14 @@ export function PrinterSelectorModal({
                         className="!p-2 !h-auto"
                         title="Close"
                     >
-                        <X className="w-6 h-6" />
+                        <CloseIcon className="w-6 h-6" />
                     </Button>
                 </div>
 
                 {/* Search */}
                 <div className="px-6 pt-4 pb-2">
                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-pf-text-secondary" />
+                        <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-pf-text-secondary" />
                         <input
                             type="text"
                             placeholder="Search printers..."

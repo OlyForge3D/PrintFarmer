@@ -4,7 +4,7 @@ import type { Span } from '@opentelemetry/api';
 import { ChartBarIcon, ClockIcon, ServerIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import UnifiedLoggingDashboard from './UnifiedLoggingDashboard';
 import { PageTemplate } from '@/components/PageTemplate';
-import { Activity } from 'lucide-react';
+import { ActivityIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 
 interface TelemetryStats {
@@ -99,7 +99,7 @@ export function ObservabilityDashboard() {
     <PageTemplate
       title="System Observability"
       subtitle="Real-time system monitoring and telemetry data"
-      icon={Activity}
+      icon={ActivityIcon}
       maxWidth="max-w-7xl"
       actions={
         <Button

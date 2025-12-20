@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 // No MdiIcons used in this component
-import { FileText } from 'lucide-react';
 import { usePrinter } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
@@ -21,13 +20,13 @@ import {
   ArrowUpIcon,
   ArrowDownIcon,
   ArrowLeftIcon,
-  ArrowRightIcon
+  ArrowRightIcon,
+  FileIcon,
+  RefreshIcon,
+  HistoryIcon,
+  CloseIcon,
+  MinusIcon
 } from '@/components/icons/MdiIcons';
-import { 
-  Minus,
-  RotateCcw,
-} from 'lucide-react';
-import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 
 // Animation styles
 const sidebarAnimationStyles = `
@@ -346,7 +345,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           className="!p-1 !h-auto flex-shrink-0"
           title="Close sidebar"
         >
-          <X className="h-6 w-6" />
+          <CloseIcon className="h-6 w-6" />
         </Button>
       </div>
 
@@ -392,7 +391,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 className="w-full h-full !p-0"
               >
                 {isShutdown ? (
-                  <RotateCcw className="h-6 w-6" />
+                  <RefreshIcon className="h-6 w-6" />
                 ) : (
                   <EmergencyStopIcon className="h-6 w-6" />
                 )}
@@ -407,7 +406,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => setStep(Math.max(1, step - 5))}
                 className="flex-1 p-0 text-xs"
               >
-                <Minus className="h-3 w-3" />
+                <MinusIcon className="h-3 w-3" />
               </Button>
               <span className="text-xs text-pf-text-secondary flex-1 text-center">{step}mm</span>
               <Button
@@ -567,7 +566,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
               className="flex items-center justify-center gap-2"
               title="View printer files"
             >
-              <FileText className="h-4 w-4" />
+              <FileIcon className="h-4 w-4" />
               <span>Files</span>
             </Button>
             <Button
@@ -578,7 +577,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
               className="flex items-center justify-center gap-2"
               title="View print history"
             >
-              <History className="h-4 w-4" />
+              <HistoryIcon className="h-4 w-4" />
               <span>History</span>
             </Button>
           </div>

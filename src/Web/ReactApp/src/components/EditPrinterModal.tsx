@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-// No MdiIcons used in this component
-import { Loader2, RotateCcw, X, Check } from 'lucide-react';
+import { LoadingIcon, RefreshIcon, CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
@@ -182,7 +181,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               title="Close"
               className="!p-1 !h-auto"
             >
-              <X className="w-6 h-6" />
+              <CloseIcon className="w-6 h-6" />
             </Button>
           </div>
 
@@ -364,7 +363,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 <h4 className="text-lg font-medium text-pf-text-primary">Printer Capabilities</h4>
                 {isLoadingCapabilities && formData.modelId && (
                   <div className="flex items-center text-sm text-pf-text-secondary">
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <LoadingIcon className="w-4 h-4 mr-2" />
                     Loading defaults...
                   </div>
                 )}
@@ -500,7 +499,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 disabled={isRefreshingCameras}
                 title="Refresh camera URLs from the printer backend"
               >
-                <RotateCcw className={`w-4 h-4 mr-1 ${isRefreshingCameras ? 'animate-spin' : ''}`} />
+                <RefreshIcon className={`w-4 h-4 mr-1 ${isRefreshingCameras ? 'animate-spin' : ''}`} />
                 {isRefreshingCameras ? 'Detecting...' : 'Detect Cameras'}
               </Button>
               <div className="flex gap-2">
@@ -516,7 +515,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   variant="primary"
                   disabled={updateMutation.status === 'pending'}
                 >
-                  <Check className="w-4 h-4 mr-1" />
+                  <CheckIcon className="w-4 h-4 mr-1" />
                   {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>

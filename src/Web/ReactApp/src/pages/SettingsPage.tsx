@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { SettingsPagelet, SettingMetadata, SettingValue } from '../components/SettingsPagelet';
 import { SettingInputType } from '../types/SettingInputType';
 import { PageTemplate } from '@/components/PageTemplate';
-import { Settings } from 'lucide-react';
+import { SettingsIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import {
   fetchSettingsMetadata,
@@ -172,7 +172,7 @@ export function SettingsPage() {
     <PageTemplate
       title="Settings"
       subtitle="Configure PrintFarmer application settings"
-      icon={Settings}
+      icon={SettingsIcon}
       maxWidth="max-w-3xl"
     >
       {loading ? (

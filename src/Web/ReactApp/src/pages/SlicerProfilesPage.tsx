@@ -14,7 +14,7 @@ import slicerProfilesService, {
 import { officialProfilesService } from '@/services/officialProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
-import { Filter } from 'lucide-react';
+import { FilterIcon, GearIcon, UploadIcon, DownloadIcon, SearchIcon } from '@/components/icons/MdiIcons';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
@@ -314,13 +314,13 @@ export const SlicerProfilesPage: React.FC = () => {
     <PageTemplate
       title="Slicer Profiles"
       subtitle="Manage imported slicer profiles (OrcaSlicer / PrusaSlicer)"
-      icon={Settings}
+      icon={GearIcon}
       maxWidth="max-w-6xl"
     >
       {/* OrcaSlicer Quick Actions */}
       <div className="mb-6 bg-pf-panel rounded-lg shadow p-4">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Settings className="w-5 h-5" />
+          <GearIcon className="w-5 h-5" />
           OrcaSlicer Integration
         </h3>
         <div className="flex flex-wrap gap-3">
@@ -329,7 +329,7 @@ export const SlicerProfilesPage: React.FC = () => {
             onClick={() => navigate('/profiles/import/orca')}
             className="flex items-center gap-2"
           >
-            <Upload className="w-4 h-4" />
+            <UploadIcon className="w-4 h-4" />
             Import from OrcaSlicer
           </Button>
           <Button
@@ -337,7 +337,7 @@ export const SlicerProfilesPage: React.FC = () => {
             onClick={() => navigate('/profiles/import/official')}
             className="flex items-center gap-2"
           >
-            <Download className="w-4 h-4" />
+            <DownloadIcon className="w-4 h-4" />
             Import for Printers
           </Button>
           <Button
@@ -346,7 +346,7 @@ export const SlicerProfilesPage: React.FC = () => {
             loading={exportingBundle}
             className="flex items-center gap-2"
           >
-            <Download className="w-4 h-4" />
+            <DownloadIcon className="w-4 h-4" />
             Export to OrcaSlicer
           </Button>
           <Button
@@ -380,7 +380,7 @@ export const SlicerProfilesPage: React.FC = () => {
             loading={isReseedingProfiles}
             className="flex items-center gap-2"
           >
-            <Upload className="w-4 h-4" />
+            <UploadIcon className="w-4 h-4" />
             Force Reseed System Profiles
           </Button>
           <div className="flex-1" />
@@ -452,7 +452,7 @@ export const SlicerProfilesPage: React.FC = () => {
             <div className="p-4 border-b border-pf-border">
               <div className="flex items-center gap-4 mb-4">
                 <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-muted" />
+                  <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-muted" />
                   <input
                     type="text"
                     placeholder="Search profiles by name, material, or manufacturer..."
@@ -467,7 +467,7 @@ export const SlicerProfilesPage: React.FC = () => {
                   className="flex items-center gap-2"
                   size="sm"
                 >
-                  <Filter className="w-4 h-4" />
+                  <FilterIcon className="w-4 h-4" />
                   Filters
                 </Button>
               </div>

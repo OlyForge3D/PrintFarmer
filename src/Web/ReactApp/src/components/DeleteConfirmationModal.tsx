@@ -1,5 +1,5 @@
 import { Printer } from '@/types/api';
-// No MdiIcons used in this component
+import { AlertIcon, CloseIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 
 interface DeleteConfirmationModalProps {
@@ -24,7 +24,7 @@ export function DeleteConfirmationModal({
       <div className="bg-pf-panel border border-pf-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
           <div className="flex items-center">
-            <AlertTriangle className="w-6 h-6 text-pf-error-text mr-3" />
+            <AlertIcon className="w-6 h-6 text-pf-error-text mr-3" />
             <h3 className="text-lg font-bold text-pf-text-primary">
               Delete Printer{isMultiple ? 's' : ''}
             </h3>
@@ -35,7 +35,7 @@ export function DeleteConfirmationModal({
             onClick={onCancel}
             className="p-1"
           >
-            <X className="w-5 h-5" />
+            <CloseIcon className="w-5 h-5" />
           </Button>
         </div>
 

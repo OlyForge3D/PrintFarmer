@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
-import { Sun, Moon, Monitor } from 'lucide-react';
+import { SunIcon, MoonIcon, MonitorIcon } from '@/components/icons/MdiIcons';
 import { useTheme } from '@/contexts/ThemeHooks';
 import type { ThemeName } from '@/contexts/ThemeContext';
 
@@ -21,9 +21,9 @@ export function ThemeToggle({
   const { theme, setTheme, computedTheme } = useTheme();
 
   const themes: { value: ThemeName; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { value: 'light', label: 'Light', icon: Sun },
-    { value: 'dark', label: 'Dark', icon: Moon },
-    { value: 'system', label: 'System', icon: Monitor },
+    { value: 'light', label: 'Light', icon: SunIcon },
+    { value: 'dark', label: 'Dark', icon: MoonIcon },
+    { value: 'system', label: 'System', icon: MonitorIcon },
   ];
 
   const sizeClasses = {

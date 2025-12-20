@@ -9,8 +9,7 @@ import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { toast } from 'sonner';
-import { DeleteIcon, EditIcon } from '@/components/icons/MdiIcons';
-import { CheckSquare, Square } from 'lucide-react';
+import { DeleteIcon, EditIcon, CheckCircleIcon, CircleIcon } from '@/components/icons/MdiIcons';
 import { Alert, Button, Checkbox, FileUpload, Label, Select, Tooltip } from '@/components/ui';
 import type { Printer } from '@/types/api';
 
@@ -561,12 +560,12 @@ export function PrintersAdminPage() {
                     <div className="flex items-center gap-1">
                       <Tooltip content="Select all">
                         <Button size="sm" variant="secondary" onClick={() => { setSelectedIds(printers.map(p => p.id)); }}>
-                          <CheckSquare className="w-4 h-4" />
+                          <CheckCircleIcon className="w-4 h-4" />
                         </Button>
                       </Tooltip>
                       <Tooltip content="Select none">
                         <Button size="sm" variant="secondary" onClick={() => { setSelectedIds([]); }}>
-                          <Square className="w-4 h-4" />
+                          <CircleIcon className="w-4 h-4" />
                         </Button>
                       </Tooltip>
                     </div>

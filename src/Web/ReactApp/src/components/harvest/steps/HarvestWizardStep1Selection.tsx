@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Printer, PrinterBackend, GcodeHarvestOperation } from '@/types/api';
 // No MdiIcons used in this component
-import { CheckCircle } from 'lucide-react';
+import { CloseIcon, CheckCircleIcon } from '@/components/icons/MdiIcons';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
@@ -178,7 +178,7 @@ export function HarvestWizardStep1Selection({
                 variant="secondary"
                 size="sm"
                 onClick={clearFilters}
-                iconLeft={<X className="w-4 h-4" />}
+                iconLeft={<CloseIcon className="w-4 h-4" />}
               >
                 Clear
               </Button>
@@ -287,7 +287,7 @@ export function HarvestWizardStep1Selection({
               variant="secondary"
               size="sm"
               onClick={clearFilters}
-              iconLeft={<X className="w-4 h-4" />}
+              iconLeft={<CloseIcon className="w-4 h-4" />}
               className="flex-shrink-0"
             >
               Clear
@@ -334,7 +334,7 @@ export function HarvestWizardStep1Selection({
                 </div>
               </div>
               {selectedPrinterId === printer.id && !hasActiveHarvest && (
-                <CheckCircle className="w-5 h-5 text-pf-accent flex-shrink-0" />
+                <CheckCircleIcon className="w-5 h-5 text-pf-accent flex-shrink-0" />
               )}
             </div>
           </button>

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
 import { Link } from 'react-router-dom';
 import { PageTemplate } from '@/components/PageTemplate';
-import { History } from 'lucide-react';
+import { HistoryIcon } from '@/components/icons/MdiIcons';
 import { Select, Alert, Button, FormField } from '@/components/ui';
 
 
@@ -90,7 +90,7 @@ export function HarvestHistoryPage() {
       <PageTemplate
         title="Harvest History"
         subtitle="View and analyze past harvest operations"
-        icon={History}
+        icon={HistoryIcon}
         maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center py-12">
@@ -105,7 +105,7 @@ export function HarvestHistoryPage() {
       <PageTemplate
         title="Harvest History"
         subtitle="View and analyze past harvest operations"
-        icon={History}
+        icon={HistoryIcon}
         maxWidth="max-w-7xl"
       >
         <Alert type="error" title="Error Loading Harvest History">
@@ -127,7 +127,7 @@ export function HarvestHistoryPage() {
     <PageTemplate
       title="Harvest History"
       subtitle="View and analyze past harvest operations"
-      icon={History}
+      icon={HistoryIcon}
       maxWidth="max-w-7xl"
       actions={
         <Link
