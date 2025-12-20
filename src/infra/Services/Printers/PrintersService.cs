@@ -43,6 +43,7 @@ namespace Farm.Infrastructure.Services.Printers
         private readonly IPrinterStatusFallbackService _fallbackService;
         private readonly IPrinterStatusClientFactory _statusClientFactory;
         private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _statusCache;
+        private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService;
 
         public PrintersService(
             Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo,
@@ -58,7 +59,8 @@ namespace Farm.Infrastructure.Services.Printers
             IMultiPrinterStatusCoordinator coordinator,
             IPrinterStatusFallbackService fallbackService,
             IPrinterStatusClientFactory statusClientFactory,
-            Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache)
+            Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
+            Farm.Infrastructure.Services.Locations.ILocationService locationService)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
@@ -74,6 +76,7 @@ namespace Farm.Infrastructure.Services.Printers
             _statusCache = statusCache ?? throw new ArgumentNullException(nameof(statusCache));
             _fallbackService = fallbackService ?? throw new ArgumentNullException(nameof(fallbackService));
             _statusClientFactory = statusClientFactory ?? throw new ArgumentNullException(nameof(statusClientFactory));
+            _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
         }
 
         /// <summary>
@@ -635,7 +638,7 @@ namespace Farm.Infrastructure.Services.Printers
             IQueryable<Printer> query = printers.AsQueryable();
             
             // Export fields matching AdminCli CSV format for consistency
-            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired" };
+            List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired", "LocationName" };
             
             await writer.WriteLineAsync(string.Join(',', headerParts));
             
@@ -650,7 +653,8 @@ namespace Farm.Infrastructure.Services.Printers
                 string cameraStreamUrl = p.CameraStreamUrl ?? "";
                 string cameraSnapshotUrl = p.CameraSnapshotUrl ?? "";
                 string dateAcquired = p.DateAcquired?.ToString("O") ?? "";
-                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired}";
+                string locationName = p.Location?.Name ?? "";
+                string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
                 await writer.WriteLineAsync(csvLine);
             }
             
@@ -665,15 +669,14 @@ namespace Farm.Infrastructure.Services.Printers
         public async Task<byte[]> BuildExportJsonAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
-            IQueryable<Printer> query = printers.AsQueryable();
 
             using MemoryStream ms = new MemoryStream();
             await using StreamWriter writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
             
             await writer.WriteAsync("[");
             bool first = true;
-            // Include Toolheads in query to access toolhead data during export
-            await foreach (Printer? p in query.Include(pr => pr.Toolheads).AsAsyncEnumerable().WithCancellation(ct))
+            // Process each printer and include toolheads data
+            foreach (Printer? p in printers)
             {
                 if (!first)
                 {
@@ -762,41 +765,42 @@ namespace Farm.Infrastructure.Services.Printers
         {
             Dictionary<string, object?> dict = new Dictionary<string, object?>
             {
-                ["Id"] = p.Id,
-                ["Name"] = p.Name,
-                ["ServerUrl"] = p.ServerUrl,
-                ["OriginalServerUrl"] = p.OriginalServerUrl,
-                ["Notes"] = p.Notes,
-                ["Manufacturer"] = p.Manufacturer?.Name,
-                ["Model"] = p.Model?.Name,
-                ["Backend"] = p.Backend,
-                ["ApiKey"] = p.ApiKey,
-                ["DateAcquired"] = p.DateAcquired,
+                ["id"] = p.Id,
+                ["name"] = p.Name,
+                ["serverUrl"] = p.ServerUrl,
+                ["originalServerUrl"] = p.OriginalServerUrl,
+                ["notes"] = p.Notes,
+                ["manufacturer"] = p.Manufacturer?.Name,
+                ["model"] = p.Model?.Name,
+                ["locationName"] = p.Location?.Name,
+                ["backend"] = p.Backend,
+                ["apiKey"] = p.ApiKey,
+                ["dateAcquired"] = p.DateAcquired,
                 // Export hardware specs directly from Printer (merged from legacy PrinterCapabilities)
-                ["MaxBuildVolumeX"] = p.MaxBuildVolumeX,
-                ["MaxBuildVolumeY"] = p.MaxBuildVolumeY,
-                ["MaxBuildVolumeZ"] = p.MaxBuildVolumeZ,
-                ["HasHeatedBed"] = p.HasHeatedBed,
-                ["HasEnclosure"] = p.HasEnclosure,
-                ["MultiMaterial"] = p.MultiMaterial,
-                ["SupportsAutoLeveling"] = p.SupportsAutoLeveling,
-                ["NumberOfExtruders"] = p.Toolheads?.Count ?? 1,
-                ["MinBedTemp"] = p.MinBedTemp,
-                ["MaxBedTemp"] = p.MaxBedTemp,
-                ["CurrentMaterial"] = p.CurrentMaterial,
-                ["CurrentSpoolId"] = p.CurrentSpoolId,
-                ["IsAvailable"] = p.IsAvailable,
-                ["LastUpdated"] = p.LastCapabilityUpdate
+                ["maxBuildVolumeX"] = p.MaxBuildVolumeX,
+                ["maxBuildVolumeY"] = p.MaxBuildVolumeY,
+                ["maxBuildVolumeZ"] = p.MaxBuildVolumeZ,
+                ["hasHeatedBed"] = p.HasHeatedBed,
+                ["hasEnclosure"] = p.HasEnclosure,
+                ["multiMaterial"] = p.MultiMaterial,
+                ["supportsAutoLeveling"] = p.SupportsAutoLeveling,
+                ["numberOfExtruders"] = p.Toolheads?.Count ?? 1,
+                ["minBedTemp"] = p.MinBedTemp,
+                ["maxBedTemp"] = p.MaxBedTemp,
+                ["currentMaterial"] = p.CurrentMaterial,
+                ["currentSpoolId"] = p.CurrentSpoolId,
+                ["isAvailable"] = p.IsAvailable,
+                ["lastUpdated"] = p.LastCapabilityUpdate
             };
 
             // Export primary toolhead specs if available
             Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
             if (primaryToolhead != null)
             {
-                dict["NozzleDiameter"] = primaryToolhead.NozzleDiameter;
-                dict["SupportedMaterials"] = primaryToolhead.SupportedMaterials;
-                dict["MinHotendTemp"] = primaryToolhead.MinHotendTemp;
-                dict["MaxHotendTemp"] = primaryToolhead.MaxHotendTemp;
+                dict["nozzleDiameter"] = primaryToolhead.NozzleDiameter;
+                dict["supportedMaterials"] = primaryToolhead.SupportedMaterials;
+                dict["minHotendTemp"] = primaryToolhead.MinHotendTemp;
+                dict["maxHotendTemp"] = primaryToolhead.MaxHotendTemp;
             }
 
             return dict;
@@ -855,19 +859,10 @@ namespace Farm.Infrastructure.Services.Printers
             if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
             {
                 string name = dto.NewManufacturerName!.Trim();
-                try
-                {
-                    ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct).ConfigureAwait(false);
-                    manufacturerId = created.Id;
-                }
-                catch (Infrastructure.Exceptions.DuplicateEntityException ex)
-                {
-                    // Manufacturer already exists, use its ID
-                    if (ex.ExistingDto is ManufacturerDto existingMfg)
-                    {
-                        manufacturerId = existingMfg.Id;
-                    }
-                }
+                // CreateManufacturerAsync now returns existing manufacturer if it already exists (no exception thrown)
+                ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct).ConfigureAwait(false);
+                manufacturerId = created.Id;
+                _logger.LogInformation($"Resolved manufacturer '{name}' to ID {manufacturerId}");
             }
 
             Guid modelId = dto.ModelId ?? Guid.Empty;
@@ -883,29 +878,20 @@ namespace Farm.Infrastructure.Services.Printers
                     MaxZ: null,
                     DefaultBackend: null,
                     SupportedFilamentTypeIds: null);
-                try
-                {
-                    PrinterModelDto createdModel = await _catalogService.CreateModelAsync(
-                        createReq.ManufacturerId,
-                        createReq.Name,
-                        createReq.Type,
-                        createReq.MaxX,
-                        createReq.MaxY,
-                        createReq.MaxZ,
-                        createReq.DefaultBackend,
-                        createReq.SupportedFilamentTypeIds,
-                        createReq.DefaultNozzleDiameter,
-                        ct).ConfigureAwait(false);
-                    modelId = createdModel.Id;
-                }
-                catch (Infrastructure.Exceptions.DuplicateEntityException ex)
-                {
-                    // Model already exists, use its ID
-                    if (ex.ExistingDto is PrinterModelDto existingModel)
-                    {
-                        modelId = existingModel.Id;
-                    }
-                }
+                // CreateModelAsync now returns existing model if it already exists (no exception thrown)
+                PrinterModelDto createdModel = await _catalogService.CreateModelAsync(
+                    createReq.ManufacturerId,
+                    createReq.Name,
+                    createReq.Type,
+                    createReq.MaxX,
+                    createReq.MaxY,
+                    createReq.MaxZ,
+                    createReq.DefaultBackend,
+                    createReq.SupportedFilamentTypeIds,
+                    createReq.DefaultNozzleDiameter,
+                    ct).ConfigureAwait(false);
+                modelId = createdModel.Id;
+                _logger.LogInformation($"Resolved model '{mname}' to ID {modelId}");
             }
 
             if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
@@ -986,6 +972,21 @@ namespace Farm.Infrastructure.Services.Printers
                 NozzleDiameter = 0.4 // Standard default nozzle size
             };
             p.Toolheads.Add(defaultToolhead);
+
+            // Assign location if provided
+            if (!string.IsNullOrWhiteSpace(dto.LocationName))
+            {
+                Location? location = await _locationService.FindByNameAsync(dto.LocationName.Trim(), ct).ConfigureAwait(false);
+                if (location != null)
+                {
+                    p.LocationId = location.Id;
+                    _logger.LogInformation($"[CreatePrinterFromDto] Assigned printer {p.Name} to location {location.Name}");
+                }
+                else
+                {
+                    _logger.LogWarning($"[CreatePrinterFromDto] Location '{dto.LocationName}' not found for printer {p.Name} - printer will have no location");
+                }
+            }
 
             await AddAsync(p, ct).ConfigureAwait(false);
 
@@ -1735,6 +1736,8 @@ namespace Farm.Infrastructure.Services.Printers
                             _logger.LogInformation($"[BulkCreate] Removing duplicate printer: {existingByIp.Name} (IP: {existingByIp.IpAddress})");
                             await RemoveAsync(existingByIp, ct);
                             await SaveChangesAsync(ct);
+                            // Load a fresh copy of the CSV printer data (not the one we're removing)
+                            // This avoids EF Core tracking conflicts when creating the new printer
                             createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
                             await SaveChangesAsync(ct);
                             createdPrinters.Add(createdDto);
@@ -1954,6 +1957,7 @@ namespace Farm.Infrastructure.Services.Printers
                     int cameraStreamIdx = Array.IndexOf(headers, "camerastreamurl");
                     int cameraSnapshotIdx = Array.IndexOf(headers, "camerasnapshoturl");
                     int dateAcquiredIdx = Array.IndexOf(headers, "dateacquired");
+                    int locationNameIdx = Array.IndexOf(headers, "locationname");
 
                     // Validate required columns
                     if (nameIdx < 0 || ipAddressIdx < 0 || backendIdx < 0)
@@ -2019,8 +2023,9 @@ namespace Farm.Infrastructure.Services.Printers
                                 CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
                                 CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,
 #pragma warning disable S6580 // SonarSource: format provider is already specified (InvariantCulture)
-                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime da) ? da : null
+                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime da) ? da : null,
 #pragma warning restore S6580
+                                LocationName = locationNameIdx >= 0 && locationNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[locationNameIdx]) ? values[locationNameIdx] : null
                             };
 
                             if (string.IsNullOrWhiteSpace(printer.Name))

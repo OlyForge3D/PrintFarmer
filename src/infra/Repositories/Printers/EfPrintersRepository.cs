@@ -30,11 +30,19 @@ public class EfPrintersRepository : IPrintersRepository
 
     public async Task RemoveAsync(Printer p, CancellationToken ct)
     {
+        // Ensure we have a tracked instance of the printer to remove (in case p is untracked)
+        Printer? trackedPrinter = await FindByIdAsync(p.Id, ct);
+        if (trackedPrinter == null)
+        {
+            // Printer doesn't exist, nothing to remove
+            return;
+        }
+
         // Clean up dependent records that have NoAction delete behavior to prevent FK constraint violations
 
         // Remove GcodeFile records that reference this printer as source or target
         List<GcodeFile> gcodeFilesReferencing = await _db.GcodeFiles
-            .Where(gf => gf.SourcePrinterId == p.Id || gf.TargetPrinterId == p.Id)
+            .Where(gf => gf.SourcePrinterId == trackedPrinter.Id || gf.TargetPrinterId == trackedPrinter.Id)
             .ToListAsync(ct);
         if (gcodeFilesReferencing.Any())
         {
@@ -43,7 +51,7 @@ public class EfPrintersRepository : IPrintersRepository
 
         // Remove PrintJob records assigned to this printer
         List<PrintJob> jobsForPrinter = await _db.PrintJobs
-            .Where(j => j.AssignedPrinterId == p.Id)
+            .Where(j => j.AssignedPrinterId == trackedPrinter.Id)
             .ToListAsync(ct);
         if (jobsForPrinter.Any())
         {
@@ -52,7 +60,7 @@ public class EfPrintersRepository : IPrintersRepository
 
         // Remove GcodeHarvestOperation records for this printer
         List<GcodeHarvestOperation> harvestOpsForPrinter = await _db.GcodeHarvestOperations
-            .Where(h => h.PrinterId == p.Id)
+            .Where(h => h.PrinterId == trackedPrinter.Id)
             .ToListAsync(ct);
         if (harvestOpsForPrinter.Any())
         {
@@ -61,16 +69,30 @@ public class EfPrintersRepository : IPrintersRepository
 
         // SpoolmanSpool references will be set to NULL by the database (SetNull behavior), so no need to handle them
 
-        // Now remove the printer itself
-        _ = _db.Printers.Remove(p);
+        // Now remove the tracked printer
+        _ = _db.Printers.Remove(trackedPrinter);
         _ = await _db.SaveChangesAsync(ct);
     }
 
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);
 
+    public void Detach(Printer p)
+    {
+        // Remove the entity from the tracker so it can be re-added without conflicts
+        var entry = _db.Entry(p);
+        if (entry != null && entry.State != EntityState.Detached)
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
     public async Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct)
     {
-        IQueryable<Printer> q = _db.Printers.AsNoTracking().Include(p => p.Manufacturer).Include(p => p.Model);
+        IQueryable<Printer> q = _db.Printers
+            .AsNoTracking()
+            .Include(p => p.Manufacturer)
+            .Include(p => p.Model)
+            .Include(p => p.Location);
         if (ids != null && ids.Length > 0)
         {
             q = q.Where(p => ids.Contains(p.Id));

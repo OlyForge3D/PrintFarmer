@@ -224,6 +224,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Harvest.IHarvestRepository, Farm.Infrastructure.Repositories.Harvest.EfHarvestRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileConsistencyRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileConsistencyRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Locations.ILocationRepository, Farm.Infrastructure.Repositories.Locations.EfLocationRepository>();
 
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
@@ -494,6 +495,9 @@ public static class ServiceCollectionExtensions
 
         // Register SignalR printer status broadcaster - abstracts real-time broadcasting for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusBroadcaster, Services.Printers.SignalRPrinterStatusBroadcaster>();
+
+        // Register LocationService from Infrastructure layer - location management service
+        _ = services.AddScoped<Farm.Infrastructure.Services.Locations.ILocationService, Farm.Infrastructure.Services.Locations.LocationService>();
 
         // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();

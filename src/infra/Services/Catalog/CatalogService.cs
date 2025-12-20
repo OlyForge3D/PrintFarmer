@@ -56,36 +56,39 @@ public class CatalogService : ICatalogService
         string normalized = CatalogNameNormalizer.NormalizeManufacturer(original);
         _normLogger.Log("Manufacturer", original, normalized, "create");
 
+        // Check if manufacturer already exists - return it without creating
         IReadOnlyList<(Guid Id, string Name)> manufacturerRows = await _repo.GetManufacturersAsync(ct);
         (Guid Id, string Name) existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
         
         if (existing.Id != Guid.Empty)
         {
-            throw new InvalidOperationException(
-                $"A manufacturer with the normalized name '{existing.Name}' already exists.");
+            _logger.LogInformation($"Manufacturer '{normalized}' already exists with ID {existing.Id}, returning existing manufacturer");
+            return new ManufacturerDto(existing.Id, existing.Name);
         }
 
+        // Manufacturer doesn't exist, create it
         Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = normalized };
         await _repo.AddManufacturerAsync(mfg.Id, mfg.Name, ct);
 
         try
         {
             await _repo.SaveChangesAsync(ct);
+            _logger.LogInformation($"Created new manufacturer '{normalized}' with ID {mfg.Id}");
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
-            (Guid Id, string Name)? existingNow = await _repo.GetManufacturerByIdAsync(mfg.Id, ct);
-            if (existingNow == null)
+            // Race condition: another thread created the manufacturer between our check and insert
+            // Fetch the existing manufacturer and return it
+            _logger.LogInformation($"Race condition detected for manufacturer '{normalized}', fetching existing");
+            (Guid Id, string Name) found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
+            if (found.Id != Guid.Empty)
             {
-                (Guid Id, string Name) found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
-                existingNow = found == default ? ((Guid, string)?)null : found;
+                _logger.LogInformation($"Found existing manufacturer '{normalized}' with ID {found.Id} after race condition");
+                return new ManufacturerDto(found.Id, found.Name);
             }
-
-            Guid existingId = existingNow.HasValue ? existingNow.Value.Id : Guid.Empty;
-            string existingName = existingNow.HasValue ? existingNow.Value.Name : normalized;
             
             throw new InvalidOperationException(
-                $"A manufacturer with the normalized name '{existingName}' already exists.");
+                $"Failed to create or retrieve manufacturer '{normalized}' due to database constraint", ex);
         }
 
         _cacheProvider.InvalidateManufacturers();
@@ -137,15 +140,17 @@ public class CatalogService : ICatalogService
             throw new KeyNotFoundException("Manufacturer not found");
         }
 
+        // Check if model already exists - return it without creating
         List<PrinterModelDto> candidateModels = (await _repo.GetModelsCachedAsync(manufacturerId, ct)).ToList();
         PrinterModelDto? existing = candidateModels.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         
         if (existing is not null)
         {
-            throw new InvalidOperationException(
-                $"A model with the normalized name '{existing.Name}' already exists for this manufacturer.");
+            _logger.LogInformation($"Model '{normalizedName}' already exists for manufacturer {manufacturerId}, returning existing model");
+            return existing;
         }
 
+        // Model doesn't exist, create it
         PrinterModel model = new()
         {
             Id = Guid.NewGuid(),
@@ -164,14 +169,22 @@ public class CatalogService : ICatalogService
         try
         {
             await _repo.SaveChangesAsync(ct);
+            _logger.LogInformation($"Created new model '{normalizedName}' with ID {model.Id} for manufacturer {manufacturerId}");
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
+            // Race condition: another thread created the model between our check and insert
+            // Fetch the existing model and return it
+            _logger.LogInformation($"Race condition detected for model '{normalizedName}', fetching existing");
             PrinterModelDto? existingNowDto = (await _repo.GetModelsCachedAsync(manufacturerId, ct)).FirstOrDefault(m => m.Name == normalizedName);
-            string existingName = existingNowDto?.Name ?? normalizedName;
+            if (existingNowDto is not null)
+            {
+                _logger.LogInformation($"Found existing model '{normalizedName}' with ID {existingNowDto.Id} after race condition");
+                return existingNowDto;
+            }
             
             throw new InvalidOperationException(
-                $"A model with the normalized name '{existingName}' already exists for this manufacturer.");
+                $"Failed to create or retrieve model '{normalizedName}' due to database constraint", ex);
         }
 
         if (supportedFilamentTypeIds?.Length > 0)

@@ -323,6 +323,12 @@ public class CreatePrinterDto : PrinterInfoDto
     public string? NewModelName { get; set; }
 
     /// <summary>
+    /// Location name to assign printer to during import.
+    /// Location must already exist or will be skipped.
+    /// </summary>
+    public string? LocationName { get; set; }
+
+    /// <summary>
     /// Date the printer was acquired (optional metadata).
     /// </summary>
     public DateTime? DateAcquired { get; set; }

@@ -11,6 +11,7 @@ public interface IPrintersRepository
     Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct);
     Task AddAsync(Printer p, CancellationToken ct);
     Task RemoveAsync(Printer p, CancellationToken ct);
+    void Detach(Printer p);  // Detach entity from EF Core tracking to avoid conflicts
     Task SaveChangesAsync(CancellationToken ct);
     // Return printers suitable for export (includes Manufacturer and Model, AsNoTracking).
     Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct);
