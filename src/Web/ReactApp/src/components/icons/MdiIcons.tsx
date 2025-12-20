@@ -49,7 +49,7 @@ import {
   mdiWrench,
   mdiViewDashboard,
   mdiTrendingUp,
-  mdiPanRight,
+  mdiPageLayoutSidebarRight,
   mdiImage,
   mdiVideo,
   mdiMenu,
@@ -1432,7 +1432,7 @@ export function PanelRightIcon({ className = 'w-4 h-4', ariaLabel = 'Open panel'
       aria-label={ariaLabel}
       role="img"
     >
-      <path fill="currentColor" d={mdiPanRight} />
+      <path fill="currentColor" d={mdiPageLayoutSidebarRight} />
     </svg>
   );
 }

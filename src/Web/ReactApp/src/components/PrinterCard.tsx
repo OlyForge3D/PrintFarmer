@@ -487,14 +487,14 @@ export function PrinterCard({
             <>
               {/* Only show Pause if printer is printing and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && currentStatus.state === 'printing' && (
-                <Button variant="danger" size="sm" className="flex items-center gap-2">
+                <Button variant="danger" size="sm" className="inline-flex items-center gap-2">
                   <PauseIcon className="h-4 w-4" />
                   <span>Pause</span>
                 </Button>
               )}
               {/* Only show Resume/Start if printer is paused or ready and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                <Button variant="success" size="sm" className="flex items-center gap-2">
+                <Button variant="success" size="sm" className="inline-flex items-center gap-2">
                   <PlayIcon className="h-4 w-4" />
                   <span>{currentStatus.state === 'paused' ? 'Resume' : 'Start'}</span>
                 </Button>

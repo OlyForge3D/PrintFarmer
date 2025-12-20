@@ -343,9 +343,6 @@ export function Layout() {
                 {isAuthenticated && user ? (
                   <>
                     <AccountCheckIcon className="h-5 w-5 text-green-500" />
-                    <span className="hidden sm:block text-sm font-medium">
-                      {user.firstName || user.username}
-                    </span>
                   </>
                 ) : (
                   <>

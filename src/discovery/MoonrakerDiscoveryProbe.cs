@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Printers;
 
 namespace Farm.Infrastructure.Discovery;
 
@@ -13,13 +14,20 @@ namespace Farm.Infrastructure.Discovery;
 /// Features:
 /// - Validates Klipper-specific response fields with confidence scoring
 /// - Discovers frontend port for web interface
-/// - Attempts to extract actual camera URLs from Moonraker API
+/// - Uses IMoonrakerClient to extract actual camera URLs from Moonraker API
 /// - Extracts hostname from response or via reverse DNS
 /// </summary>
 public class MoonrakerDiscoveryProbe : BaseDiscoveryProbe
 {
     // Moonraker backend always on 7125; frontend ports to probe: 80, 8080, 8808
     private static readonly int[] FrontendPorts = new[] { 80, 8080, 8808 };
+    
+    private readonly IMoonrakerClient _moonrakerClient;
+
+    public MoonrakerDiscoveryProbe(IMoonrakerClient moonrakerClient)
+    {
+        _moonrakerClient = moonrakerClient ?? throw new ArgumentNullException(nameof(moonrakerClient));
+    }
 
     public override string DisplayName => "Moonraker";
     protected override int[] Ports => new[] { 7125 };
@@ -200,39 +208,20 @@ public class MoonrakerDiscoveryProbe : BaseDiscoveryProbe
     }
 
     /// <summary>
-    /// Attempts to discover camera URLs from common endpoints.
-    /// This is a basic implementation; a more advanced version with IMoonrakerClient would be more reliable.
+    /// Attempts to discover camera URLs using IMoonrakerClient.
+    /// This delegates to the proper Moonraker client implementation instead of duplicating API logic.
     /// </summary>
     private async Task<(string? StreamUrl, string? SnapshotUrl)> DiscoverCameraUrlsAsync(
         string ipAddress, int frontendPort, HttpClient client, int timeoutMs, CancellationToken cancellationToken)
     {
         try
         {
-            // Try common camera endpoint paths
-            string[] cameraPaths = new[]
-            {
-                "/webcam/?action=stream",  // Common MJPEG stream
-                "/api/webcams",            // Moonraker webcams API endpoint
-                "/webcam/stream"           // Alternative stream endpoint
-            };
-
-            foreach (string path in cameraPaths)
-            {
-                try
-                {
-                    string cameraUrl = $"http://{ipAddress}:{frontendPort}{path}";
-                    using CancellationTokenSource cameraTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    cameraTimeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Min(timeoutMs / 3, 1000)));
-
-                    HttpResponseMessage response = await client.GetAsync(cameraUrl, cameraTimeoutCts.Token);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        // Found a responsive camera endpoint
-                        return (cameraUrl, $"http://{ipAddress}:{frontendPort}/webcam/?action=snapshot");
-                    }
-                }
-                catch { }
-            }
+            // Use IMoonrakerClient to get camera URLs from the actual Moonraker API
+            string baseUrl = $"http://{ipAddress}";
+            string? streamUrl = await _moonrakerClient.GetCameraStreamUrlAsync(baseUrl, frontendPort, apiKey: null, cancellationToken);
+            string? snapshotUrl = await _moonrakerClient.GetCameraSnapshotUrlAsync(baseUrl, frontendPort, apiKey: null, cancellationToken);
+            
+            return (streamUrl, snapshotUrl);
         }
         catch { }
 

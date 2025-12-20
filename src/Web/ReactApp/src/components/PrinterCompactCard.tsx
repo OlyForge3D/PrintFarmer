@@ -50,12 +50,12 @@ export function PrinterCompactCard({
         <Button
           aria-label={`Edit ${p.name}`}
           title="Edit"
-          variant="primary"
+          variant="subtle"
           size="sm"
           onClick={() => onEdit(p)}
-          className="flex-1"
+          className="!p-1 !h-auto"
         >
-          <EditIcon className="w-4 h-4 mr-1" /> Edit
+          <EditIcon className="w-4 h-4" />
         </Button>
         <Button
           aria-label={`Delete ${p.name}`}
@@ -63,6 +63,7 @@ export function PrinterCompactCard({
           variant="subtle"
           size="sm"
           onClick={() => onDelete(p)}
+          className="!p-1 !h-auto hover:text-pf-error"
         >
           <DeleteIcon className="w-4 h-4" />
         </Button>

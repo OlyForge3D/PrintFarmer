@@ -2,15 +2,23 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Printers;
 
 namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Discovery probe for PrusaLink-based 3D printers (Prusa MK series).
 /// Probes ports 80 and 8080, validates response contains PrusaLink-specific fields.
+/// Uses IPrusaLinkClient for all API interactions to ensure consistency with backend client implementation.
 /// </summary>
 public class PrusaLinkDiscoveryProbe : BaseDiscoveryProbe
 {
+    private readonly IPrusaLinkClient _prusaLinkClient;
+
+    public PrusaLinkDiscoveryProbe(IPrusaLinkClient prusaLinkClient)
+    {
+        _prusaLinkClient = prusaLinkClient;
+    }
     public override string DisplayName => "PrusaLink";
     protected override int[] Ports => new[] { 80, 8080 };
     protected override string EndpointPath => "/api/v1/info";

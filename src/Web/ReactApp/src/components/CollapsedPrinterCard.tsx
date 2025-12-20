@@ -11,7 +11,8 @@ import {
   ExternalLinkIcon,
   PanelRightIcon,
   ImageIcon,
-  VideoIcon
+  VideoIcon,
+  DeleteIcon
 } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
@@ -61,12 +62,14 @@ interface CollapsedPrinterCardProps {
   printer: Printer;
   onExpand: () => void;
   onEdit?: (printer: Printer) => void;
+  onDelete?: (printer: Printer) => void;
 }
 
 export function CollapsedPrinterCard({
   printer,
   onExpand,
-  onEdit
+  onEdit,
+  onDelete
 }: CollapsedPrinterCardProps) {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
@@ -84,11 +87,10 @@ export function CollapsedPrinterCard({
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
-  // Check if printer has camera URLs - the presence of URLs is the source of truth
-  const hasCameraUrls = !!(
-    (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ||
-    (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl)
-  );
+  // Check if printer has camera URLs - just verify if URLs have values from database
+  const cameraSnapshotUrl = realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
+  const cameraStreamUrl = realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl;
+  const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
   // State color classes
   const getStateColorClasses = (isOnline: boolean, state: string): string => {
@@ -222,6 +224,18 @@ export function CollapsedPrinterCard({
         >
           <EditIcon className="h-4 w-4" />
         </Button>
+        
+        {/* Delete button */}
+        <Button
+          type="button"
+          variant="danger"
+          size="sm"
+          onClick={() => onDelete?.(printer)}
+          className="!p-1 !h-auto"
+          title="Delete printer"
+        >
+          <DeleteIcon className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Control buttons in collapsed view - same size as XY pad buttons */}
@@ -260,22 +274,25 @@ export function CollapsedPrinterCard({
       </div>
 
       {/* Progress bar for active prints */}
-      {isOnline && (realtimeStatus?.progress ?? printer.progress) !== undefined && (realtimeStatus?.progress ?? printer.progress) > 0 && (
-        <div className="mt-3">
-          <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-            <span className="truncate flex-1">{(realtimeStatus?.jobName ?? printer.jobName) || 'Printing...'}</span>
-            <span className="font-semibold ml-2">{Math.round(realtimeStatus?.progress ?? printer.progress)}%</span>
-          </div>
-          <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
-            <div
-              ref={collapsedProgressRef}
-              className="bg-pf-success h-2 rounded-full transition-all duration-300"
-            >
-              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, realtimeStatus?.progress ?? printer.progress))) }%</span>
+      {(() => {
+        const progress = realtimeStatus?.progress ?? printer.progress ?? 0;
+        return isOnline && progress !== undefined && progress > 0 && (
+          <div className="mt-3">
+            <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
+              <span className="truncate flex-1">{(realtimeStatus?.jobName ?? printer.jobName) || 'Printing...'}</span>
+              <span className="font-semibold ml-2">{Math.round(progress)}%</span>
+            </div>
+            <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
+              <div
+                ref={collapsedProgressRef}
+                className="bg-pf-success h-2 rounded-full transition-all duration-300"
+              >
+                <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, progress)))}%</span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {showCamera && (
         <div className="mt-4 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">

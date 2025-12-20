@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Printers;
 using PrinterDiscovery.BackgroundServices;
 using PrinterDiscovery.Services;
 
@@ -10,6 +11,12 @@ string apiBaseUrl = builder.Configuration["Discovery:ApiBaseUrl"] ?? "http://api
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+
+// Register backend clients for use in discovery probes
+builder.Services.AddHttpClient<IMoonrakerClient, MoonrakerClient>();
+builder.Services.AddHttpClient<IPrusaLinkClient, PrusaLinkClient>();
+builder.Services.AddHttpClient<IOctoPrintClient, OctoPrintClient>();
+builder.Services.AddHttpClient<ISDCPClient, SDCPClient>();
 
 // Register discovery probes as services
 builder.Services.AddSingleton<INetworkDiscoveryProbe, MoonrakerDiscoveryProbe>();

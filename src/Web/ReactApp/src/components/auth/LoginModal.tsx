@@ -159,7 +159,6 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
               type="submit"
               disabled={isLoading || !username || !password}
               variant="primary"
-              className="flex items-center gap-2"
             >
               {isLoading ? (
                 <>

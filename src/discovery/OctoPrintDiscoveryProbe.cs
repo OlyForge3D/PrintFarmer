@@ -3,17 +3,25 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Printers;
 
 namespace Farm.Infrastructure.Discovery;
 
 /// <summary>
 /// Discovery probe for OctoPrint-based 3D printers.
+/// Uses IOctoPrintClient for all API interactions to ensure consistency with backend client implementation.
 /// Note: When OctoPrint runs with Moonraker compatibility mode, the server element may contain
 /// both OctoPrint and Moonraker. In this case, confidence is 0 to allow the Moonraker probe
 /// to take precedence (more accurate for Klipper-based systems).
 /// </summary>
 public class OctoPrintDiscoveryProbe : BaseDiscoveryProbe
 {
+    private readonly IOctoPrintClient _octoPrintClient;
+
+    public OctoPrintDiscoveryProbe(IOctoPrintClient octoPrintClient)
+    {
+        _octoPrintClient = octoPrintClient;
+    }
     public override string DisplayName => "OctoPrint";
     protected override int[] Ports => new[] { 80, 5000 }; // Probe both, but prefer 80 as default
     protected override string EndpointPath => "/api/version";

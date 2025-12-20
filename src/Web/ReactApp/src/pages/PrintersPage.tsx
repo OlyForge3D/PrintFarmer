@@ -321,6 +321,7 @@ export function PrintersPage() {
                     printer={printer}
                     onExpand={() => setExpandedPrinterId(printer.id)}
                     onEdit={() => handleEditPrinter(printer)}
+                    onDelete={() => handleDeleteSinglePrinter(printer)}
                   />
                 ))}
               </div>
