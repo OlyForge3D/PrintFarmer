@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { Plus, Edit, Trash2, Save, X, Database, Image as ImageIcon } from 'lucide-react';
+import { Plus, Save, X, Database, Image as ImageIcon } from 'lucide-react';
+import { EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
 import type { ManufacturerDto, PrinterModelDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/components/EditModelModal';
 import { PageTemplate } from '@/components/PageTemplate';
@@ -276,7 +277,7 @@ export function CatalogPage() {
                           size="sm"
                           title="Edit manufacturer"
                         >
-                          <Edit className="h-4 w-4 text-blue-400" />
+                          <EditIcon className="h-4 w-4 text-blue-400" />
                         </Button>
                         <Button
                           onClick={(e) => {
@@ -287,7 +288,7 @@ export function CatalogPage() {
                           size="sm"
                           title="Delete manufacturer"
                         >
-                          <Trash2 className="h-4 w-4 text-red-400" />
+                          <DeleteIcon className="h-4 w-4 text-red-400" />
                         </Button>
                       </div>
                     )}
@@ -391,7 +392,7 @@ export function CatalogPage() {
                               size="sm"
                               title="Edit model capabilities"
                             >
-                              <Edit className="h-4 w-4 text-blue-400" />
+                              <EditIcon className="h-4 w-4 text-blue-400" />
                             </Button>
                             <Button
                               onClick={() => deleteModel(model.id)}
@@ -399,7 +400,7 @@ export function CatalogPage() {
                               size="sm"
                               title="Delete model"
                             >
-                              <Trash2 className="h-4 w-4 text-red-400" />
+                              <DeleteIcon className="h-4 w-4 text-red-400" />
                             </Button>
                           </div>
                         )}

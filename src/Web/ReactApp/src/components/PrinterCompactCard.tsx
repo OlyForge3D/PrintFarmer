@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Printer } from '@/types/api';
-import { Edit, Trash2 } from 'lucide-react';
 import { ImagePlaceholder } from '@/components/icons';
+import { EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 
 interface PrinterCompactCardProps {
@@ -56,7 +56,7 @@ export function PrinterCompactCard({
           onClick={() => onEdit(p)}
           className="flex-1"
         >
-          <Edit className="w-4 h-4 mr-1" /> Edit
+          <EditIcon className="w-4 h-4 mr-1" /> Edit
         </Button>
         <Button
           aria-label={`Delete ${p.name}`}
@@ -65,7 +65,7 @@ export function PrinterCompactCard({
           size="sm"
           onClick={() => onDelete(p)}
         >
-          <Trash2 className="w-4 h-4" />
+          <DeleteIcon className="w-4 h-4" />
         </Button>
       </div>
     </div>

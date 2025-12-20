@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
 import { Printer } from '@/types/api';
 import { Button } from '@/components/ui';
-import { MoreVertical, Edit, Trash2 } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
+import { EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
 
 interface PrinterActionsDropdownProps {
   printer: Printer;
@@ -53,7 +54,7 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
               onClick={() => handleAction(() => onEdit(printer))}
               className="w-full text-left !justify-start"
             >
-              <Edit className="w-4 h-4 mr-3" />
+              <EditIcon className="w-4 h-4 mr-3" />
               Edit Settings
             </Button>
               
@@ -66,7 +67,7 @@ export function PrinterActionsDropdown({ printer, onEdit, onDelete }: PrinterAct
                 onClick={() => handleAction(() => onDelete(printer))}
                 className="w-full text-left !justify-start hover:text-pf-error hover:bg-pf-error-bg"
               >
-                <Trash2 className="w-4 h-4 mr-3" />
+                <DeleteIcon className="w-4 h-4 mr-3" />
                 Delete Printer
               </Button>
             </div>
