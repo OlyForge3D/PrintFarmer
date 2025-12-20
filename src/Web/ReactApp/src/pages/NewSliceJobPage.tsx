@@ -31,8 +31,10 @@ interface ModelListItem {
 
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea, Toggle } from '@/components/ui';
-import { Layers } from 'lucide-react';
+import { Layers, Eye } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthHooks';
+import { STLPreviewModal } from '@/components/3D/STLPreviewModal';
+import { useSTLFile } from '@/hooks/useSTLFile';
 
 // Material/Filament type and temperature presets
 type MaterialType = 'PLA' | 'PETG' | 'ABS' | 'TPU' | 'Nylon' | 'Carbon' | 'Other';
@@ -99,6 +101,8 @@ export const NewSliceJobPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isPrinterSelectorOpen, setIsPrinterSelectorOpen] = useState(false);
+  const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
+  const stlFile = useSTLFile();
 
   // === Queries ===
   const { data: availableWorkers = [], error: workersError, isLoading: workersLoading } = useQuery<WorkerResponse[], Error>({
@@ -882,6 +886,20 @@ export const NewSliceJobPage: React.FC = () => {
               </>
             )}
 
+            {/* STL Preview Button */}
+            {(selectedModelId || modelFileUrl) && (
+              <Button
+                type="button"
+                onClick={() => setIsSTLPreviewOpen(true)}
+                variant="secondary"
+                size="sm"
+                className="w-full flex items-center justify-center gap-2"
+              >
+                <Eye size={16} />
+                Preview 3D Model
+              </Button>
+            )}
+
             {/* Profile Selection */}
             <div className="border-t border-pf-border pt-3">
               <div className="flex gap-3 mb-2">
@@ -1054,7 +1072,22 @@ export const NewSliceJobPage: React.FC = () => {
         </div>
       </form>
 
-      {/* Printer Selector Modal */}
+      {/* STL Preview Modal */}
+      {isSTLPreviewOpen && (
+        <STLPreviewModal
+          isOpen={isSTLPreviewOpen}
+          fileUrl={modelFileUrl}
+          fileName={modelFileName}
+          onClose={() => {
+            setIsSTLPreviewOpen(false);
+            stlFile.clearFile();
+          }}
+          onUseModel={() => {
+            // Model is already selected, just close the modal
+            setIsSTLPreviewOpen(false);
+          }}
+        />
+      )}      {/* Printer Selector Modal */}
       <PrinterSelectorModal
         isOpen={isPrinterSelectorOpen}
         printers={printers}
