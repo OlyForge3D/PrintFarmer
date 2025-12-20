@@ -38,20 +38,28 @@ function getBackendIcon(backend: PrinterBackend | number | string) {
 import { useState, useLayoutEffect, useRef } from 'react';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { apiClient } from '@/services/api';
+import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/components/ui';
-import { NozzleIcon, BedIcon, HomeIcon, PlayIcon, PauseIcon, EmergencyStopIcon } from '@/components/icons/MdiIcons';
+import { 
+  NozzleIcon, 
+  BedIcon, 
+  EditIcon, 
+  PlayIcon, 
+  PauseIcon, 
+  EmergencyStopIcon, 
+  HomeIcon,
+  DisableMotorsIcon
+} from '@/components/icons/MdiIcons';
 import { 
   ChevronDown, 
   ExternalLink,
   History,
   Camera,
   Minus,
-  RotateCcw,
-  Image,
-  Video
+  RotateCcw
 } from 'lucide-react';
 
 interface ExpandablePrinterCardProps {
@@ -66,13 +74,14 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [step, setStep] = useState(10);
   const [hotendTemp, setHotendTemp] = useState<number | ''>('');
   const [bedTemp, setBedTemp] = useState<number | ''>('');
   const [moveX, setMoveX] = useState<number | ''>('');
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
+  const [collapsedImageVisible, setCollapsedImageVisible] = useState(true);
+  const [expandedImageVisible, setExpandedImageVisible] = useState(true);
   
   // State to track last known good values
   const [lastKnownHotendTemp, setLastKnownHotendTemp] = useState<number | null>(null);
@@ -105,15 +114,18 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   
   const isOnline = status?.isOnline ?? printer.isOnline;
   const state = status?.state ?? printer.state;
-  const isPrinting = state === 'printing';
-  const isPaused = state === 'paused';
-  const isShutdown = state === 'shutdown';
+  const isPrinting = state?.toLowerCase().includes('printing') ?? false;
+  const isPaused = state?.toLowerCase().includes('paused') ?? false;
+  const isShutdown = (state?.toLowerCase().includes('shutdown') ?? false) || (state?.toLowerCase().includes('error') ?? false);
 
   // Camera URL logic: prioritize real-time status, fallback to printer config
-  const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
   const cameraStreamUrl = status?.cameraStreamUrl ?? printer.cameraStreamUrl;
+  const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
   // Check if printer has camera URLs - the presence of URLs is the source of truth
-  const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
+  const hasCameraUrls = !!(
+    (cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ||
+    (cameraStreamUrl ?? printer.cameraStreamUrl)
+  );
 
   // Update last known values when new data is available
   // useLayoutEffect runs synchronously after DOM mutations but before browser paint
@@ -250,9 +262,20 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     setIsExpanded(!isExpanded);
   };
 
-  const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart') => {
+  const handleControlAction = async (action: 'pause' | 'resume' | 'stop' | 'firmware-restart' | 'disable-motors') => {
     try {
       let result;
+      // disable-motors requires a raw fetch call as it's not in apiClient
+      if (action === 'disable-motors') {
+        const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/disable-motors`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!response.ok) {
+          console.error(`Failed to disable motors:`, response.statusText);
+        }
+        return;
+      }
       switch (action) {
         case 'pause':
           result = await apiClient.pausePrint(printer.id);
@@ -400,26 +423,25 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     }
   };
 
-  // TODO: Implement set temperatures UI
-  // const handleSetTemperatures = async () => {
-  //   try {
-  //     const hotendValue = typeof hotendTemp === 'string' ? parseFloat(hotendTemp) || 0 : hotendTemp;
-  //     const bedValue = typeof bedTemp === 'string' ? parseFloat(bedTemp) || 0 : bedTemp;
-  //     
-  //     const targets: TempTargets = {
-  //       hotend: hotendValue,
-  //       bed: bedValue
-  //     };
-  //     
-  //     const result = await apiClient.setTemperatures(printer.id, targets);
-  //     
-  //     if (!result.success) {
-  //       console.error('Failed to set temperatures:', result.error);
-  //     }
-  //   } catch (error) {
-  //     console.error('Error setting temperatures:', error);
-  //   }
-  // };
+  const handleSetTemperatures = async () => {
+    try {
+      const hotendValue = typeof hotendTemp === 'string' ? parseFloat(hotendTemp) || 0 : hotendTemp;
+      const bedValue = typeof bedTemp === 'string' ? parseFloat(bedTemp) || 0 : bedTemp;
+      
+      const targets: TempTargets = {
+        hotend: hotendValue,
+        bed: bedValue
+      };
+      
+      const result = await apiClient.setTemperatures(printer.id, targets);
+      
+      if (!result.success) {
+        console.error('Failed to set temperatures:', result.error);
+      }
+    } catch (error) {
+      console.error('Error setting temperatures:', error);
+    }
+  };
 
   const handleViewHistory = () => {
     setShowHistory(true);
@@ -487,19 +509,16 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             >
               <ChevronDown className="h-4 w-4" />
             </Button>
-            {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
-            {(printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint) && (
-              <Button
-                type="button"
-                variant="subtle"
-                size="sm"
-                onClick={handleViewHistory}
-                className="!p-1 !h-auto"
-                title="View print history"
-              >
-                <History className="h-4 w-4" />
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={handleViewHistory}
+              className="!p-1 !h-auto"
+              title="View print history"
+            >
+              <History className="h-4 w-4" />
+            </Button>
             <Button
               type="button"
               variant="subtle"
@@ -508,7 +527,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               className="!p-1 !h-auto"
               title="Edit details"
             >
-              <Edit className="h-4 w-4" />
+              <EditIcon className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -541,7 +560,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             disabled={!isOnline}
             title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
           >
-            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <EmergencyStopIcon className="h-3 w-3" />}
+            {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <EmergencyStopIcon className="h-3 w-3 mr-1" />}
           </Button>
         </div>
 
@@ -564,65 +583,21 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         )}
 
               {showCamera && (
-                <div className="mt-4 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-                  {/* Camera mode toggle */}
-                  {hasCameraUrls && printer.cameraStreamUrl && (
-                    <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
-                      <Button
-                        type="button"
-                        onClick={() => setCameraMode('snapshot')}
-                        title="Snapshot"
-                        variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
-                        size="sm"
-                        className="flex-1 p-2 flex items-center justify-center"
-                      >
-                        <Image className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => setCameraMode('stream')}
-                        title="Stream"
-                        variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
-                        size="sm"
-                        className="flex-1 p-2 flex items-center justify-center"
-                      >
-                        <Video className="h-4 w-4" />
-                      </Button>
+                <div className="mt-4 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                  {cameraStreamUrl && collapsedImageVisible ? (
+                    <img 
+                      src={cameraStreamUrl} 
+                      alt="webcam snapshot"
+                      className="max-w-full max-h-full object-contain"
+                      onError={() => setCollapsedImageVisible(false)}
+                      onLoad={() => setCollapsedImageVisible(true)}
+                    />
+                  ) : (
+                    <div className="text-center text-pf-text-secondary p-4">
+                      <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No camera configured</p>
                     </div>
                   )}
-                  
-                  {/* Camera display */}
-                  <div className="min-h-32 flex items-center justify-center overflow-hidden">
-                    {hasCameraUrls ? (
-                      cameraMode === 'snapshot' && printer.cameraSnapshotUrl ? (
-                        <img 
-                          src={printer.cameraSnapshotUrl}
-                          alt="webcam snapshot"
-                          className="max-w-full max-h-full object-contain"
-                          onError={() => {}}
-                          onLoad={() => {}}
-                        />
-                      ) : cameraMode === 'stream' && printer.cameraStreamUrl ? (
-                        <img 
-                          src={printer.cameraStreamUrl}
-                          alt="webcam stream"
-                          className="max-w-full max-h-full object-contain"
-                          onError={() => {}}
-                          onLoad={() => {}}
-                        />
-                      ) : (
-                        <div className="text-center text-pf-text-secondary p-4">
-                          <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p className="text-sm">Camera mode not available</p>
-                        </div>
-                      )
-                    ) : (
-                      <div className="text-center text-pf-text-secondary p-4 w-full">
-                        <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">No camera configured</p>
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
 
@@ -687,65 +662,21 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               </Button>
             </div>
             {showCamera && (
-              <div className="mt-2 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
-                {/* Camera mode toggle */}
-                {hasCameraUrls && printer.cameraStreamUrl && (
-                    <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
-                      <Button
-                        type="button"
-                        onClick={() => setCameraMode('snapshot')}
-                        title="Snapshot"
-                        variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
-                        size="sm"
-                        className="flex-1 p-2 flex items-center justify-center"
-                      >
-                        <Image className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => setCameraMode('stream')}
-                        title="Stream"
-                        variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
-                        size="sm"
-                        className="flex-1 p-2 flex items-center justify-center"
-                      >
-                        <Video className="h-4 w-4" />
-                      </Button>
-                    </div>
-                )}
-                
-                {/* Camera display */}
-                <div className="min-h-32 flex items-center justify-center overflow-hidden">
-                  {hasCameraUrls ? (
-                    cameraMode === 'snapshot' && printer.cameraSnapshotUrl ? (
-                      <img 
-                        src={printer.cameraSnapshotUrl}
-                        alt="webcam snapshot"
-                        className="max-w-full max-h-full object-contain"
-                        onError={() => {}}
-                        onLoad={() => {}}
-                      />
-                    ) : cameraMode === 'stream' && printer.cameraStreamUrl ? (
-                      <img 
-                        src={printer.cameraStreamUrl}
-                        alt="webcam stream"
-                        className="max-w-full max-h-full object-contain"
-                        onError={() => {}}
-                        onLoad={() => {}}
-                      />
-                    ) : (
-                      <div className="text-center text-pf-text-secondary p-4">
-                        <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">Camera mode not available</p>
-                      </div>
-                    )
+              <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
+                {cameraStreamUrl && expandedImageVisible ? (
+                    <img 
+                      src={cameraStreamUrl} 
+                      alt="webcam snapshot"
+                      className="max-w-full max-h-full object-contain"
+                      onError={() => setExpandedImageVisible(false)}
+                      onLoad={() => setExpandedImageVisible(true)}
+                    />
                   ) : (
-                    <div className="text-center text-pf-text-secondary p-4 w-full">
-                      <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No camera configured</p>
-                    </div>
-                  )}
-                </div>
+                  <div className="text-center text-pf-text-secondary p-4">
+                    <Camera className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No camera configured</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -767,19 +698,16 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
           >
             <Minus className="h-4 w-4" />
           </Button>
-          {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
-          {(printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint) && (
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              onClick={handleViewHistory}
-              className="!p-1 !h-auto"
-              title="View print history"
-            >
-              <History className="h-4 w-4" />
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="subtle"
+            size="sm"
+            onClick={handleViewHistory}
+            className="!p-1 !h-auto"
+            title="View print history"
+          >
+            <History className="h-4 w-4" />
+          </Button>
           <Button
             type="button"
             variant="subtle"
@@ -788,7 +716,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
             className="!p-1 !h-auto"
             title="Edit details"
           >
-            <Edit className="h-4 w-4" />
+            <EditIcon className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -889,51 +817,6 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         </div>
       </div>
 
-      {/* Spool Info Section - Display if available */}
-      {status?.spoolInfo && status.spoolInfo.hasActiveSpool && (
-        <div className="mb-2">
-          <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">Spool</div>
-          <div className="bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md p-3 space-y-2">
-            {status.spoolInfo.vendor && (
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-pf-text-secondary">Vendor:</span>
-                <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.vendor}</span>
-              </div>
-            )}
-            {status.spoolInfo.material && (
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-pf-text-secondary">Material:</span>
-                <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.material}</span>
-              </div>
-            )}
-            {status.spoolInfo.colorHex && (
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-pf-text-secondary">Color:</span>
-                <div className="flex items-center gap-2">
-                  <div 
-                    className="w-4 h-4 rounded border border-pf-border"
-                    style={{ backgroundColor: status.spoolInfo.colorHex }}
-                    title={status.spoolInfo.colorHex}
-                  />
-                  <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.colorHex}</span>
-                </div>
-              </div>
-            )}
-            {status.spoolInfo.spoolName && (
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-pf-text-secondary">Spool:</span>
-                <span className="text-xs font-medium text-pf-text-primary">{status.spoolInfo.spoolName}</span>
-              </div>
-            )}
-            {status.spoolInfo.remainingWeightG !== undefined && status.spoolInfo.remainingWeightG !== null && (
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-pf-text-secondary">Remaining:</span>
-                <span className="text-xs font-medium text-pf-text-primary">{Math.round(status.spoolInfo.remainingWeightG)}g</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
       {/* Move and Control Section - Side by Side */}
       <div className="mb-2">
         {/* Row 1: Labels and Pads side by side */}
@@ -968,7 +851,17 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
                 >
                   ▲
                 </Button>
-                <div></div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!isOnline || isPrinting}
+                  onClick={() => handleControlAction('disable-motors')}
+                  title="Disable Motors (M84)"
+                  className="w-full h-full !p-0"
+                >
+                  <DisableMotorsIcon className="h-4 w-4" />
+                </Button>
                 
                 {/* Middle row */}
                 <Button
