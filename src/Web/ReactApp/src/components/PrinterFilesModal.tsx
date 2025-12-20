@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CloseIcon, DeleteIcon } from '@/components/icons/MdiIcons';
-import { FileText, AlertCircle, Play, Copy, Image, ArrowUpDown } from 'lucide-react';
+import { DeleteIcon } from '@/components/icons/MdiIcons';
+import { FileText, AlertCircle, Play, Copy, Image, ArrowUpDown, X } from 'lucide-react';
 import { Button, Select } from '@/components/ui';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
@@ -324,7 +324,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           {isDeleting === file.fileName ? (
                             <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
                           ) : (
-                            <Trash2 className="h-4 w-4" />
+                            <DeleteIcon className="h-4 w-4" />
                           )}
                         </Button>
                       </div>

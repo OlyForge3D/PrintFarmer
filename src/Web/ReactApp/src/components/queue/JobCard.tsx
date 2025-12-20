@@ -5,10 +5,10 @@ import {
   Package, 
   ArrowUp, 
   ArrowDown, 
-  Trash2, 
   MoreHorizontal, 
   AlertCircle 
 } from 'lucide-react';
+import { DeleteIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { PrintJob, queueService } from '@/services/queueService';
 
@@ -189,7 +189,7 @@ export const JobCard: React.FC<JobCardProps> = ({
                     title="Remove job"
                     className="w-full text-left flex items-center gap-2"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <DeleteIcon className="w-4 h-4" />
                     <span>Remove</span>
                   </Button>
                 </div>

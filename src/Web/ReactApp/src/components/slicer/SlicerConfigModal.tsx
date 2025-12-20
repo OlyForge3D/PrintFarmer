@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState } from 'react';
-import { CloseIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { CheckCircle, AlertCircle } from 'lucide-react';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
 

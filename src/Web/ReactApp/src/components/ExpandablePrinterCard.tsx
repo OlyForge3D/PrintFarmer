@@ -46,7 +46,6 @@ import { NozzleIcon, BedIcon, HomeIcon, PlayIcon, PauseIcon, EmergencyStopIcon }
 import { 
   ChevronDown, 
   ExternalLink,
-  Edit,
   History,
   Camera,
   Minus,

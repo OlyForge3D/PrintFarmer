@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckIcon } from '@/components/icons/MdiIcons';
+import { Check } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFilamentTypes } from '@/hooks/useApi';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';

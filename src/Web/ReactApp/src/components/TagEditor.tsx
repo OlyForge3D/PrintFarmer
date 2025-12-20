@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CloseIcon } from '@/components/icons/MdiIcons';
+import { X } from 'lucide-react';
 import { Button } from '@/components/ui';
 
 interface Tag {

@@ -2,7 +2,8 @@ import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { slicerRegistry, SlicerDto } from '@/services/slicerRegistry';
 import { SlicerConfirmModal } from '@/components/SlicerConfirmModal';
-import { Trash2, Server } from 'lucide-react';
+import { DeleteIcon } from '@/components/icons/MdiIcons';
+import { Server } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { toast } from 'sonner';
@@ -63,7 +64,7 @@ function SlicerRow({ s, onRequestDeregister }: { s: SlicerDto; onRequestDeregist
                 disabled={mutation.status === 'pending'}
                 className="flex items-center gap-2"
               >
-                <Trash2 className="w-4 h-4" />
+                <DeleteIcon className="w-4 h-4" />
                 {mutation.status === 'pending' ? '...' : 'Deregister'}
               </Button>
             </div>

@@ -5,14 +5,13 @@ import { toast } from 'sonner';
 import { PageTemplate } from '@/components/PageTemplate';
 import {
   Plus,
-  Edit,
-  Trash2,
   Shield,
   Users,
   UserCheck,
   UserX,
   Search
 } from 'lucide-react';
+import { DeleteIcon } from '@/components/icons/MdiIcons';
 import { Button, Input, Select, FormField, Alert, Checkbox, Modal } from '@/components/ui';
 import { TableSkeleton } from '@/components/skeletons/TableSkeleton';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -482,7 +481,7 @@ export function UserManagementPage() {
                         className="!p-2 !h-auto"
                         title="Edit user"
                       >
-                        <Edit className="h-4 w-4" />
+                        <EditIcon className="h-4 w-4" />
                       </Button>
                       <Button
                         type="button"
@@ -501,7 +500,7 @@ export function UserManagementPage() {
                         className="!p-2 !h-auto hover:text-red-500"
                         title="Delete user"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <DeleteIcon className="h-4 w-4" />
                       </Button>
                     </div>
                   </td>

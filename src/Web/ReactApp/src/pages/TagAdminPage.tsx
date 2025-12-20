@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PlusIcon, CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
-import { Tag, Trash2, Edit2, Loader } from 'lucide-react';
+import { DeleteIcon } from '@/components/icons/MdiIcons';
+import { Tag, Edit2, Loader } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Input, FormField, Alert } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
@@ -412,7 +412,7 @@ export const TagAdminPage: React.FC = () => {
                                                         {deleteTagMutation.isPending ? (
                                                             <Loader className="w-4 h-4 animate-spin" />
                                                         ) : (
-                                                            <Trash2 className="w-4 h-4" />
+                                                            <DeleteIcon className="w-4 h-4" />
                                                         )}
                                                     </Button>
                                                 </div>

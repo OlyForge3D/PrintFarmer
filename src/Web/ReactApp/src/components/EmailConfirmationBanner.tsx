@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
-import { CloseIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { Mail, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui';
 

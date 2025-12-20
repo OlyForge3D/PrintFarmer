@@ -1,5 +1,5 @@
 import { Printer } from '@/types/api';
-import { AlertIcon, CloseIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { Button } from '@/components/ui';
 
 interface DeleteConfirmationModalProps {

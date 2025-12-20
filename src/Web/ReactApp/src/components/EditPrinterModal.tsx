@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
-import { Loader2, RotateCcw } from 'lucide-react';
+// No MdiIcons used in this component
+import { Loader2, RotateCcw, X, Check } from 'lucide-react';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';

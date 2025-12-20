@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CloseIcon, HistoryIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { FileText } from 'lucide-react';
 import { usePrinter } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';

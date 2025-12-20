@@ -8,7 +8,7 @@ import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
-import { CloseIcon, SearchIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { X } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button } from '@/components/ui/Button';

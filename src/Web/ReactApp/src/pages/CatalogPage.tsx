@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { PlusIcon, CloseIcon } from '@/components/icons/MdiIcons';
-import { Save, Database, Image as ImageIcon } from 'lucide-react';
-import { EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
+import { CloseIcon, EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
+import { Save, Database, Image as ImageIcon, Plus, X } from 'lucide-react';
 import type { ManufacturerDto, PrinterModelDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/components/EditModelModal';
 import { PageTemplate } from '@/components/PageTemplate';

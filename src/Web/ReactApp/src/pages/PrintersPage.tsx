@@ -21,7 +21,6 @@ import type { Printer, PrinterModelDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
 import { Box, Printer as PrinterIcon } from 'lucide-react';
-import { mdiPrinter, mdiViewGrid, mdiViewList, mdiViewComfy, mdiViewQuilt } from '@mdi/js';
 import { toast } from 'sonner';
 
 // Helper component for MDI icons

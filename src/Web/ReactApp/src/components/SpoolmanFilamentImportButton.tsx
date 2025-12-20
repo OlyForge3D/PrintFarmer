@@ -1,5 +1,5 @@
 import React from 'react';
-import { DownloadIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { Button } from '@/components/ui';
 import { useImportFilamentTypesFromSpoolman } from '@/hooks/useApi';
 import { toast } from 'sonner';

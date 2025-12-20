@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CloseIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { CheckCircle, AlertCircle, Loader } from 'lucide-react';
 import { signalRService } from '@/services/harvest-signalr';
 import { Button } from '@/components/ui/Button';

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CloseIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { Eye, EyeOff, Key, CheckCircle } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { Button, Input, FormField, Alert } from '@/components/ui';

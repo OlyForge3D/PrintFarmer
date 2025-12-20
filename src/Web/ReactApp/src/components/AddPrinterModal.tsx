@@ -1,8 +1,8 @@
 // ...existing code...
 import React, { useState, useEffect } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
-import { Loader2 } from 'lucide-react';
+// No MdiIcons used in this component
+import { Loader2, X, Check } from 'lucide-react';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';

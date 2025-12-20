@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Printer } from '@/types/api';
-import { ImagePlaceholder } from '@/components/icons';
 import { EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 

@@ -1,8 +1,8 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { UploadIcon, SettingsIcon, SearchIcon, CloseIcon } from '@/components/icons/MdiIcons';
-import { Box, Trash2, Eye, Tag, Grid3x3, List, FileText, FolderOpen } from 'lucide-react';
+import { DeleteIcon } from '@/components/icons/MdiIcons';
+import { Box, Eye, Tag, Grid3x3, List, FileText, FolderOpen } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
 import { Button, Input, FileUpload } from '@/components/ui';
@@ -297,7 +297,7 @@ export const ModelsPage: React.FC = () => {
                       aria-label="Remove file"
                       title="Remove file"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <DeleteIcon className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
@@ -553,7 +553,7 @@ export const ModelsPage: React.FC = () => {
                     size="sm"
                     title="Delete Model"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <DeleteIcon className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
@@ -636,7 +636,7 @@ export const ModelsPage: React.FC = () => {
                         size="sm"
                         title="Delete Model"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <DeleteIcon className="w-4 h-4" />
                       </Button>
                     </div>
                   </td>

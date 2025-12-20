@@ -31,11 +31,6 @@ import {
   mdiEyeOff,
   mdiLock,
   mdiServer,
-  mdiViewGrid,
-  mdiViewList,
-  mdiViewComfy,
-  mdiViewQuilt,
-  mdiTable,
   mdiHistory
 } from '@mdi/js';
 

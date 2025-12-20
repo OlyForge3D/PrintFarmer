@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { DownloadIcon, CheckIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { AlertCircle } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Alert, Select, FormField, Checkbox } from '@/components/ui';

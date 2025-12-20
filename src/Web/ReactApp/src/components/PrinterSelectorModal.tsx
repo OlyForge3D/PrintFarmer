@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useMemo } from 'react';
-import { CloseIcon, SearchIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { Button } from '@/components/ui';
 import { assetService } from '@/services/assetService';
 

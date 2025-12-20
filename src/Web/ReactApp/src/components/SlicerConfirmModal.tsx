@@ -1,5 +1,5 @@
 import React from 'react';
-import { CloseIcon, AlertIcon } from '@/components/icons/MdiIcons';
+import { X } from 'lucide-react';
 import { Button } from '@/components/ui';
 
 interface SlicerConfirmModalProps {

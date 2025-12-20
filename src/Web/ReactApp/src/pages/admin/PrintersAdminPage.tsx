@@ -9,7 +9,8 @@ import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { toast } from 'sonner';
-import { Trash2, Edit, CheckSquare, Square } from 'lucide-react';
+import { DeleteIcon, EditIcon } from '@/components/icons/MdiIcons';
+import { CheckSquare, Square } from 'lucide-react';
 import { Alert, Button, Checkbox, FileUpload, Label, Select, Tooltip } from '@/components/ui';
 import type { Printer } from '@/types/api';
 
@@ -633,7 +634,7 @@ export function PrintersAdminPage() {
                                     onClick={() => handleEditClick(p)}
                                     className="!p-2 text-pf-text-tertiary hover:text-pf-accent hover:bg-pf-bg-2"
                                   >
-                                    <Edit className="w-4 h-4" />
+                                    <EditIcon className="w-4 h-4" />
                                   </Button>
                                 </Tooltip>
                                 <Tooltip content="Delete printer">
@@ -643,7 +644,7 @@ export function PrintersAdminPage() {
                                     onClick={() => handleDeletePrinter(p)}
                                     className="!p-2 text-pf-text-tertiary hover:text-pf-error-text hover:bg-pf-error-bg"
                                   >
-                                    <Trash2 className="w-4 h-4" />
+                                    <DeleteIcon className="w-4 h-4" />
                                   </Button>
                                 </Tooltip>
                               </div>

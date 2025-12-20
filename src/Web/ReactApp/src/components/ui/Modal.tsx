@@ -1,7 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useEffect, useCallback } from 'react';
 import clsx from 'clsx';
-import { CloseIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 

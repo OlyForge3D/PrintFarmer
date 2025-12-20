@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { Button, Checkbox } from '@/components/ui';
 

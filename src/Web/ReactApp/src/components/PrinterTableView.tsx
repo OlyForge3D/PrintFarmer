@@ -6,7 +6,7 @@ import styles from './PrinterTableView.module.css';
 import { Printer, PrinterBackend } from '@/types/api';
 import { usePrinterDisplays } from '@/hooks/usePrinterDisplay';
 import { useAuth } from '@/contexts/AuthHooks';
-import { DeleteIcon, EditIcon, CheckIcon, CloseIcon } from '@/components/icons/MdiIcons';
+import { DeleteIcon, EditIcon } from '@/components/icons/MdiIcons';
 import { CheckCircle2, Circle, AlertTriangle, Wrench } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button } from '@/components/ui';
@@ -326,7 +326,7 @@ export function PrinterTableView({
                           className="!p-2 !h-auto"
                           title="Edit printer"
                         >
-                          <Edit className="w-4 h-4" />
+                          <EditIcon className="w-4 h-4" />
                         </Button>
                       )}
                       
@@ -339,7 +339,7 @@ export function PrinterTableView({
                           className="!p-2 !h-auto"
                           title="Delete printer"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <DeleteIcon className="w-4 h-4" />
                         </Button>
                       )}
                     </div>

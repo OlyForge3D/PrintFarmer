@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SettingsIcon } from '@/components/icons/MdiIcons';
+// No MdiIcons used in this component
 import { ChevronsRight, ChevronsLeft } from 'lucide-react';
 import { Button } from './ui/Button';
 import type { FilamentTypeDto } from '@/types/api';

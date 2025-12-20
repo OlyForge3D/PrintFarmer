@@ -14,7 +14,6 @@ import slicerProfilesService, {
 import { officialProfilesService } from '@/services/officialProfilesService';
 import { orcaProfilesService } from '@farm/slicers-orcaslicer-v2_3_1';
 import { slicerRegistry } from '@/services/slicerRegistry';
-import { SettingsIcon, DownloadIcon, UploadIcon, SearchIcon } from '@/components/icons/MdiIcons';
 import { Filter } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';

@@ -1,8 +1,8 @@
 import React, { useRef, useState } from 'react';
 import {
-  PanelRightOpen, History, Edit, Camera, ExternalLink, RotateCcw, FileText, Image, Video
+  PanelRightOpen, History, Camera, ExternalLink, RotateCcw, FileText, Image, Video
 } from 'lucide-react';
-import { PauseIcon, PlayIcon, EmergencyStopIcon } from '@/components/icons/MdiIcons';
+import { PauseIcon, PlayIcon, EmergencyStopIcon, EditIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/components/PrinterFilesModal';
@@ -210,7 +210,7 @@ export function CollapsedPrinterCard({
           className="!p-1 !h-auto"
           title="Edit details"
         >
-          <Edit className="h-4 w-4" />
+          <EditIcon className="h-4 w-4" />
         </Button>
       </div>
 
