@@ -1,0 +1,6 @@
+# Auto-generated: Use prebuilt orcaslicer-binaries image instead of building
+services:
+  orcaslicer-worker:
+    build:
+      additional_contexts:
+        orcaslicer-binaries: docker-image://orcaslicer-binaries:2.3.1

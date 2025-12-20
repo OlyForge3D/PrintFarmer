@@ -12,7 +12,31 @@ import {
   mdiChevronUp,
   mdiChevronDown,
   mdiChevronLeft,
-  mdiChevronRight
+  mdiChevronRight,
+  mdiDelete,
+  mdiPencil,
+  mdiCheck,
+  mdiClose,
+  mdiDownload,
+  mdiUpload,
+  mdiPlus,
+  mdiCog,
+  mdiAlert,
+  mdiInformation,
+  mdiMagnify,
+  mdiRefresh,
+  mdiContentSave,
+  mdiEmail,
+  mdiEye,
+  mdiEyeOff,
+  mdiLock,
+  mdiServer,
+  mdiViewGrid,
+  mdiViewList,
+  mdiViewComfy,
+  mdiViewQuilt,
+  mdiTable,
+  mdiHistory
 } from '@mdi/js';
 
 interface IconProps {
@@ -175,6 +199,253 @@ export function ArrowRightIcon({ className = 'w-4 h-4', ariaLabel = 'Move right'
       role="img"
     >
       <path fill="currentColor" d={mdiChevronRight} />
+    </svg>
+  );
+}
+
+export function DeleteIcon({ className = 'w-4 h-4', ariaLabel = 'Delete' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiDelete} />
+    </svg>
+  );
+}
+
+export function EditIcon({ className = 'w-4 h-4', ariaLabel = 'Edit' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiPencil} />
+    </svg>
+  );
+}
+
+export function CheckIcon({ className = 'w-4 h-4', ariaLabel = 'Check' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiCheck} />
+    </svg>
+  );
+}
+
+export function CloseIcon({ className = 'w-4 h-4', ariaLabel = 'Close' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiClose} />
+    </svg>
+  );
+}
+
+export function DownloadIcon({ className = 'w-4 h-4', ariaLabel = 'Download' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiDownload} />
+    </svg>
+  );
+}
+
+export function UploadIcon({ className = 'w-4 h-4', ariaLabel = 'Upload' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiUpload} />
+    </svg>
+  );
+}
+
+export function PlusIcon({ className = 'w-4 h-4', ariaLabel = 'Add' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiPlus} />
+    </svg>
+  );
+}
+
+export function SettingsIcon({ className = 'w-4 h-4', ariaLabel = 'Settings' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiCog} />
+    </svg>
+  );
+}
+
+export function AlertIcon({ className = 'w-4 h-4', ariaLabel = 'Alert' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiAlert} />
+    </svg>
+  );
+}
+
+export function InfoIcon({ className = 'w-4 h-4', ariaLabel = 'Information' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiInformation} />
+    </svg>
+  );
+}
+
+export function SearchIcon({ className = 'w-4 h-4', ariaLabel = 'Search' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiMagnify} />
+    </svg>
+  );
+}
+
+export function RefreshIcon({ className = 'w-4 h-4', ariaLabel = 'Refresh' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiRefresh} />
+    </svg>
+  );
+}
+
+export function SaveIcon({ className = 'w-4 h-4', ariaLabel = 'Save' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiContentSave} />
+    </svg>
+  );
+}
+
+export function EmailIcon({ className = 'w-4 h-4', ariaLabel = 'Email' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiEmail} />
+    </svg>
+  );
+}
+
+export function EyeIcon({ className = 'w-4 h-4', ariaLabel = 'Show' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiEye} />
+    </svg>
+  );
+}
+
+export function EyeOffIcon({ className = 'w-4 h-4', ariaLabel = 'Hide' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiEyeOff} />
+    </svg>
+  );
+}
+
+export function LockIcon({ className = 'w-4 h-4', ariaLabel = 'Lock' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiLock} />
+    </svg>
+  );
+}
+
+export function ServerIcon({ className = 'w-4 h-4', ariaLabel = 'Server' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiServer} />
+    </svg>
+  );
+}
+
+export function HistoryIcon({ className = 'w-4 h-4', ariaLabel = 'History' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiHistory} />
     </svg>
   );
 }
