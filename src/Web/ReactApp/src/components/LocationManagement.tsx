@@ -108,7 +108,11 @@ export const LocationManagement: React.FC = () => {
         {!showForm && (
           <button
             onClick={() => setShowForm(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            className="font-bold py-2 px-4 rounded transition-opacity"
+            style={{
+              backgroundColor: 'var(--pf-accent-bg)',
+              color: 'white',
+            }}
           >
             Add Location
           </button>
@@ -117,21 +121,28 @@ export const LocationManagement: React.FC = () => {
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+        <div className="px-4 py-3 rounded" style={{
+          backgroundColor: 'var(--pf-error-bg)',
+          border: '1px solid var(--pf-error)',
+          color: 'var(--pf-error)',
+        }}>
           {error}
         </div>
       )}
 
       {/* Create/Edit Form */}
       {showForm && (
-        <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-xl font-semibold mb-4">
+        <div className="shadow rounded-lg p-6" style={{
+          backgroundColor: 'var(--pf-bg-1)',
+          border: '1px solid var(--pf-border)',
+        }}>
+          <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--pf-text-primary)' }}>
             {editingId ? 'Edit Location' : 'Create New Location'}
           </h2>
           <form onSubmit={handleCreateOrUpdate} className="space-y-4">
             {/* Name field */}
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="name" className="block text-sm font-medium" style={{ color: 'var(--pf-text-primary)' }}>
                 Location Name *
               </label>
               <input
@@ -140,14 +151,19 @@ export const LocationManagement: React.FC = () => {
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g., RACK1-01"
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none"
+                style={{
+                  backgroundColor: 'var(--pf-bg-0)',
+                  color: 'var(--pf-text-primary)',
+                  border: '1px solid var(--pf-border)',
+                }}
                 required
               />
             </div>
 
             {/* Description field */}
             <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="description" className="block text-sm font-medium" style={{ color: 'var(--pf-text-primary)' }}>
                 Description
               </label>
               <textarea
@@ -156,7 +172,12 @@ export const LocationManagement: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="e.g., Main warehouse rack, first column"
                 rows={3}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none"
+                style={{
+                  backgroundColor: 'var(--pf-bg-0)',
+                  color: 'var(--pf-text-primary)',
+                  border: '1px solid var(--pf-border)',
+                }}
               />
             </div>
 
@@ -165,14 +186,22 @@ export const LocationManagement: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2 px-4 rounded"
+                className="font-bold py-2 px-4 rounded transition-opacity disabled:opacity-50"
+                style={{
+                  backgroundColor: 'var(--pf-accent-bg)',
+                  color: 'white',
+                }}
               >
                 {loading ? 'Saving...' : editingId ? 'Update' : 'Create'}
               </button>
               <button
                 type="button"
                 onClick={handleCancel}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded"
+                className="font-bold py-2 px-4 rounded transition-opacity"
+                style={{
+                  backgroundColor: 'var(--pf-border-medium)',
+                  color: 'var(--pf-text-primary)',
+                }}
               >
                 Cancel
               </button>
@@ -182,50 +211,79 @@ export const LocationManagement: React.FC = () => {
       )}
 
       {/* Locations List */}
-      <div className="bg-white shadow overflow-hidden rounded-lg">
+      <div className="shadow overflow-hidden rounded-lg" style={{
+        backgroundColor: 'var(--pf-bg-1)',
+        border: '1px solid var(--pf-border)',
+      }}>
         {loading && !showForm ? (
-          <div className="p-6 text-center">Loading locations...</div>
+          <div className="p-6 text-center" style={{ color: 'var(--pf-text-primary)' }}>Loading locations...</div>
         ) : locations.length === 0 ? (
-          <div className="p-6 text-center text-gray-500">
+          <div className="p-6 text-center" style={{ color: 'var(--pf-text-secondary)' }}>
             No locations found. Create one to get started!
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <table className="min-w-full" style={{ borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--pf-border)' }}>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
+                    backgroundColor: 'var(--pf-bg-0)',
+                    color: 'var(--pf-text-secondary)',
+                  }}>
                     Name
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
+                    backgroundColor: 'var(--pf-bg-0)',
+                    color: 'var(--pf-text-secondary)',
+                  }}>
                     Description
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
+                    backgroundColor: 'var(--pf-bg-0)',
+                    color: 'var(--pf-text-secondary)',
+                  }}>
                     Printers
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
+                    backgroundColor: 'var(--pf-bg-0)',
+                    color: 'var(--pf-text-secondary)',
+                  }}>
                     Created
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{
+                    backgroundColor: 'var(--pf-bg-0)',
+                    color: 'var(--pf-text-secondary)',
+                  }}>
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody style={{ borderCollapse: 'collapse' }}>
                 {locations.map((location) => (
-                  <tr key={location.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  <tr key={location.id} style={{
+                    borderBottom: '1px solid var(--pf-border)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--pf-bg-0)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: 'var(--pf-text-primary)' }}>
                       {location.name}
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
+                    <td className="px-6 py-4 text-sm" style={{ color: 'var(--pf-text-secondary)' }}>
                       {location.description || '-'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium" style={{
+                        backgroundColor: 'var(--pf-accent-bg)',
+                        color: 'white',
+                      }}>
                         {location.printerCount}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--pf-text-secondary)' }}>
                       {new Date(location.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">

@@ -206,10 +206,14 @@ export const PrinterBedVisualization: React.FC<PrinterBedVisualizationProps> = (
   if (error) {
     return (
       <div
-        className="bg-red-900/30 border border-red-700 rounded-lg p-4 flex items-center justify-center"
-        style={{ height: `${height}px` }}
+        className="rounded-lg p-4 flex items-center justify-center"
+        style={{
+          height: `${height}px`,
+          backgroundColor: 'var(--pf-error-bg)',
+          border: '1px solid var(--pf-error)',
+        }}
       >
-        <div className="text-red-300 text-center">
+        <div style={{ textAlign: 'center', color: 'var(--pf-error)' }}>
           <p className="font-semibold">Error Loading 3D Visualization</p>
           <p className="text-sm">{error}</p>
         </div>
@@ -218,7 +222,10 @@ export const PrinterBedVisualization: React.FC<PrinterBedVisualizationProps> = (
   }
 
   return (
-    <div className="w-full bg-gray-900 rounded-lg overflow-hidden border border-gray-700">
+    <div className="w-full rounded-lg overflow-hidden" style={{
+      backgroundColor: 'var(--pf-bg-1)',
+      border: '1px solid var(--pf-border)',
+    }}>
       <Canvas
         style={{
           width: '100%',

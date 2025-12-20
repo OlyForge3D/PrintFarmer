@@ -83,17 +83,36 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
   const shouldShowViewer = file || fileUrl;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-gray-700">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    }}>
+      <div className="rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" style={{
+        backgroundColor: 'var(--pf-bg-1)',
+        border: '1px solid var(--pf-border)',
+      }}>
         {/* Header */}
-        <div className="bg-gradient-to-r from-gray-800 to-gray-900 px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+        <div className="px-6 py-4 flex items-center justify-between" style={{
+          background: 'linear-gradient(to right, var(--pf-bg-0), var(--pf-bg-1))',
+          borderBottom: '1px solid var(--pf-border)',
+        }}>
           <div>
-            <h2 className="text-xl font-bold text-white">STL Model Preview</h2>
-            <p className="text-sm text-gray-400 mt-1">{displayFileName}</p>
+            <h2 className="text-xl font-bold" style={{ color: 'var(--pf-text-primary)' }}>STL Model Preview</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--pf-text-secondary)' }}>{displayFileName}</p>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-gray-700 rounded"
+            className="transition-colors p-2 rounded"
+            style={{
+              color: 'var(--pf-text-secondary)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--pf-text-primary)';
+              e.currentTarget.style.backgroundColor = 'var(--pf-border-medium)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--pf-text-secondary)';
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
             aria-label="Close"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -105,7 +124,10 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
         {/* Content */}
         <div className="flex-1 flex gap-4 p-4 min-h-0">
           {/* 3D Viewer */}
-          <div className="flex-1 bg-gradient-to-b from-gray-800 to-gray-900 rounded-lg overflow-hidden border border-gray-700">
+          <div className="flex-1 rounded-lg overflow-hidden" style={{
+            background: 'linear-gradient(to bottom, var(--pf-bg-0), var(--pf-bg-1))',
+            border: '1px solid var(--pf-border)',
+          }}>
             {shouldShowViewer && (
               file ? (
                 <STLViewer file={file} autoRotate={false} cameraPosition={[0, 0, 150]} />
@@ -116,41 +138,44 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
           </div>
 
           {/* Info Panel */}
-          <div className="w-64 bg-gray-800 rounded-lg p-4 border border-gray-700 overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white mb-4">Model Information</h3>
+          <div className="w-64 rounded-lg p-4 overflow-y-auto" style={{
+            backgroundColor: 'var(--pf-bg-0)',
+            border: '1px solid var(--pf-border)',
+          }}>
+            <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--pf-text-primary)' }}>Model Information</h3>
 
             {modelInfo ? (
               <div className="space-y-4">
                 {/* File Size */}
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">File Size</label>
-                  <p className="text-lg text-white font-mono">{modelInfo.fileSize}</p>
+                  <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>File Size</label>
+                  <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.fileSize}</p>
                 </div>
 
                 {/* Triangle Count */}
                 {modelInfo.triangles > 0 && (
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">Triangles</label>
-                    <p className="text-lg text-white font-mono">{modelInfo.triangles.toLocaleString()}</p>
+                    <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>Triangles</label>
+                    <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.triangles.toLocaleString()}</p>
                   </div>
                 )}
 
                 {/* Vertex Count */}
                 {modelInfo.vertices > 0 && (
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">Vertices</label>
-                    <p className="text-lg text-white font-mono">{modelInfo.vertices.toLocaleString()}</p>
+                    <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>Vertices</label>
+                    <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.vertices.toLocaleString()}</p>
                   </div>
                 )}
 
                 {/* Format */}
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Format</label>
-                  <p className="text-lg text-white font-mono">{modelInfo.format}</p>
+                  <label className="block text-sm mb-1" style={{ color: 'var(--pf-text-secondary)' }}>Format</label>
+                  <p className="text-lg font-mono" style={{ color: 'var(--pf-text-primary)' }}>{modelInfo.format}</p>
                 </div>
 
                 {/* Separator */}
-                <div className="border-t border-gray-700 my-2"></div>
+                <div style={{ borderTop: '1px solid var(--pf-border)', margin: '0.5rem 0' }}></div>
 
                 {/* Controls Info */}
                 <div className="bg-gray-900 rounded p-3">

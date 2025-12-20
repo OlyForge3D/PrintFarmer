@@ -205,12 +205,14 @@ export const STLViewer: React.FC<STLViewerProps> = ({
 
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-gray-900 to-gray-800 rounded-lg">
-        <div className="text-center">
-          <div className="inline-block">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      <div className="w-full h-full flex items-center justify-center rounded-lg" style={{
+        background: 'linear-gradient(to bottom, var(--pf-bg-0), var(--pf-bg-1))',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ display: 'inline-block' }}>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--pf-accent-2)' }}></div>
           </div>
-          <p className="mt-4 text-gray-300">Loading STL model...</p>
+          <p className="mt-4" style={{ color: 'var(--pf-text-secondary)' }}>Loading STL model...</p>
         </div>
       </div>
     );
@@ -218,8 +220,14 @@ export const STLViewer: React.FC<STLViewerProps> = ({
 
   if (error) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-red-900 bg-opacity-20 rounded-lg">
-        <div className="text-center text-red-300 p-4">
+      <div className="w-full h-full flex items-center justify-center rounded-lg" style={{
+        backgroundColor: 'var(--pf-error-bg)',
+      }}>
+        <div style={{
+          textAlign: 'center',
+          color: 'var(--pf-error)',
+          padding: '1rem',
+        }}>
           <p className="font-semibold">Error Loading Model</p>
           <p className="text-sm mt-2">{error}</p>
         </div>
@@ -229,8 +237,10 @@ export const STLViewer: React.FC<STLViewerProps> = ({
 
   if (!geometry) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-gray-800 rounded-lg">
-        <p className="text-gray-400">No model loaded</p>
+      <div className="w-full h-full flex items-center justify-center rounded-lg" style={{
+        backgroundColor: 'var(--pf-bg-2)',
+      }}>
+        <p style={{ color: 'var(--pf-text-secondary)' }}>No model loaded</p>
       </div>
     );
   }
