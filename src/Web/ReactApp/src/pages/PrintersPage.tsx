@@ -13,19 +13,34 @@ import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton';
 import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
 import { PrinterCompactCard } from '@/components/PrinterCompactCard';
+import { PrinterBedCard } from '@/components/3D/PrinterBedCard';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import type { Printer } from '@/types/api';
+import type { Printer, PrinterModelDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
-import { Printer as PrinterIcon, LayoutGrid, List, Grid2x2, Grid3x3 } from 'lucide-react';
+import { Box, Printer as PrinterIcon } from 'lucide-react';
+import { mdiPrinter, mdiViewGrid, mdiViewList, mdiViewComfy, mdiViewQuilt } from '@mdi/js';
 import { toast } from 'sonner';
+
+// Helper component for MDI icons
+function MdiIcon({ path, size = 'w-4 h-4' }: { path: string; size?: string }) {
+  return (
+    <svg
+      className={size}
+      viewBox="0 0 24 24"
+      role="img"
+    >
+      <path fill="currentColor" d={path} />
+    </svg>
+  );
+}
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint';
-type ViewMode = 'collapsed' | 'compact' | 'expandable' | 'table';
+type ViewMode = 'collapsed' | 'compact' | 'expandable' | 'table' | '3d';
 
 // Helper function to get backend name from enum value
 function getBackendName(backend: PrinterBackend | string | number): string {
@@ -244,7 +259,7 @@ export function PrintersPage() {
               className="flex items-center space-x-2"
               title="Collapsed Card View"
             >
-              <LayoutGrid className="h-4 w-4" />
+              <MdiIcon path={mdiViewList} />
             </Button>
             <Button
               type="button"
@@ -254,7 +269,7 @@ export function PrintersPage() {
               className="!p-2"
               title="Compact Cards"
             >
-              <Grid2x2 className="w-4 h-4" />
+              <MdiIcon path={mdiViewGrid} />
             </Button>
             <Button
               type="button"
@@ -264,7 +279,17 @@ export function PrintersPage() {
               className="!p-2"
               title="Expandable Cards"
             >
-              <Grid3x3 className="w-4 h-4" />
+              <MdiIcon path={mdiViewComfy} />
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setViewMode('3d')}
+              variant={viewMode === '3d' ? 'primary' : 'subtle'}
+              size="sm"
+              className="!p-2"
+              title="3D Bed View"
+            >
+              <Box className="w-4 h-4" />
             </Button>
             <Button
               type="button"
@@ -274,7 +299,7 @@ export function PrintersPage() {
               className="flex items-center space-x-2"
               title="Table View"
             >
-              <List className="h-4 w-4" />
+              <MdiIcon path={mdiViewQuilt} />
             </Button>
           </div>
           {hasPermission('printers', 'create') && (
@@ -340,6 +365,42 @@ export function PrintersPage() {
                 />
               ))}
             </div>
+          ) : viewMode === '3d' ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              {userPrinters.map((p) => {
+                // Create printer model from printer data
+                const printerModel: PrinterModelDto = {
+                  id: p.modelId || 'unknown',
+                  name: p.modelName || 'Unknown Model',
+                  manufacturerId: p.manufacturerId || 'unknown',
+                  maxX: 200,
+                  maxY: 200,
+                  maxZ: 250,
+                };
+
+                return (
+                  <PrinterBedCard
+                    key={p.id}
+                    printerModel={printerModel}
+                    status={{
+                      printerId: p.id,
+                      name: p.name,
+                      state: p.isOnline ? ((p.state || 'Idle') as any) : 'Offline',
+                      nozzlePosition: p.x && p.y && p.z ? { x: p.x, y: p.y, z: p.z } : undefined,
+                      temperatures: {
+                        hotend: p.hotendTemp ?? 0,
+                        hotendTarget: p.hotendTarget ?? 0,
+                        bed: p.bedTemp ?? 0,
+                        bedTarget: p.bedTarget ?? 0,
+                      },
+                      progress: p.progress,
+                      jobName: p.jobName,
+                    }}
+                    width="full"
+                  />
+                );
+              })}
+            </div>
           ) : (
             <PrinterTableView
               printers={userPrinters}
@@ -348,6 +409,7 @@ export function PrintersPage() {
               onBulkSetMaintenance={handleBulkSetMaintenance}
             />
           )}
+
         </div>
 
         {/* Modals */}
