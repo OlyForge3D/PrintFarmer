@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { X, Eye, EyeOff, Key, CheckCircle } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
+import { Eye, EyeOff, Key, CheckCircle } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { Button, Input, FormField, Alert } from '@/components/ui';
 import { apiClient } from '@/services/api';

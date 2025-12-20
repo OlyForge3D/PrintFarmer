@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
-import { X, Eye, EyeOff, LogIn } from 'lucide-react';
+import { CloseIcon, EyeIcon, EyeOffIcon } from '@/components/icons/MdiIcons';
+import { LogIn } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Button, Input } from '@/components/ui';

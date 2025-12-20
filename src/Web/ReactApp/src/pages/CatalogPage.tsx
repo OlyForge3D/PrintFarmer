@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
-import { Plus, Save, X, Database, Image as ImageIcon } from 'lucide-react';
+import { PlusIcon, CloseIcon } from '@/components/icons/MdiIcons';
+import { Save, Database, Image as ImageIcon } from 'lucide-react';
 import { EditIcon, DeleteIcon } from '@/components/icons/MdiIcons';
 import type { ManufacturerDto, PrinterModelDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/components/EditModelModal';
@@ -353,7 +354,7 @@ export function CatalogPage() {
                                 size="sm"
                                 title="Cancel edit"
                               >
-                                <X className="h-4 w-4 text-red-400" />
+                                <CloseIcon className="h-4 w-4 text-red-400" />
                               </Button>
                             </div>
                           ) : (

@@ -1,7 +1,8 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useEffect, useCallback } from 'react';
 import { FormSkeleton } from '@/components/skeletons/FormSkeleton';
-import { X, Eye, EyeOff, UserPlus } from 'lucide-react';
+import { CloseIcon, EyeIcon, EyeOffIcon } from '@/components/icons/MdiIcons';
+import { UserPlus } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Button } from '@/components/ui';

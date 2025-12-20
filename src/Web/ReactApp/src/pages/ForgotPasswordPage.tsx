@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Mail, ArrowLeft } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
+import { Mail, ArrowLeft } from 'lucide-react';
 import { PrintFarmerLogo } from '@/components/PrintFarmerLogo';
 import { Button, Input, FormField  } from '@/components/ui';
 import { apiClient } from '@/services/api';

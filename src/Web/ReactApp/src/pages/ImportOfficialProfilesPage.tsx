@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Download, Check, AlertCircle } from 'lucide-react';
+import { DownloadIcon, CheckIcon } from '@/components/icons/MdiIcons';
+import { AlertCircle } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Alert, Select, FormField, Checkbox } from '@/components/ui';
 import officialProfilesService from '@/services/officialProfilesService';

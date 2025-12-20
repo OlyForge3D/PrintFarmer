@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useState, useMemo } from 'react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, FormField, Input, Checkbox } from '@/components/ui';
-import { Settings } from 'lucide-react';
+import { SettingsIcon } from '@/components/icons/MdiIcons';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { slicerRegistry } from '@/services/slicerRegistry';
 
@@ -75,7 +75,7 @@ export const SlicerSettingsPage: React.FC = () => {
     <PageTemplate
       title="Slicer Worker Settings"
       subtitle="Configure local slicer executables and enable/disable the local worker"
-      icon={Settings}
+      icon={SettingsIcon}
       maxWidth="max-w-4xl"
     >
       <div className="card">
@@ -92,7 +92,7 @@ export const SlicerSettingsPage: React.FC = () => {
       <PageTemplate
         title="Slicer Worker Settings"
         subtitle="Configure local slicer executables and enable/disable the local worker"
-        icon={Settings}
+        icon={SettingsIcon}
         maxWidth="max-w-4xl"
       >
         <div className="card">
@@ -140,7 +140,7 @@ export const SlicerSettingsPage: React.FC = () => {
     <PageTemplate
       title="Slicer Worker Settings"
       subtitle="Configure local slicer executables and enable/disable the local worker"
-      icon={Settings}
+      icon={SettingsIcon}
       maxWidth="max-w-4xl"
     >
       {/* Enable Worker Card */}

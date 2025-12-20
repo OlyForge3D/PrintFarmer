@@ -6,7 +6,8 @@ import styles from './PrinterTableView.module.css';
 import { Printer, PrinterBackend } from '@/types/api';
 import { usePrinterDisplays } from '@/hooks/usePrinterDisplay';
 import { useAuth } from '@/contexts/AuthHooks';
-import { Trash2, Edit, CheckCircle2, Circle, AlertTriangle, Wrench, Check, X } from 'lucide-react';
+import { DeleteIcon, EditIcon, CheckIcon, CloseIcon } from '@/components/icons/MdiIcons';
+import { CheckCircle2, Circle, AlertTriangle, Wrench } from 'lucide-react';
 import { renderUnknown } from '@/utils/renderUnknown';
 import { Button } from '@/components/ui';
 

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
-import { Mail, X, RefreshCw } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
+import { Mail, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui';
 
 export function EmailConfirmationBanner() {

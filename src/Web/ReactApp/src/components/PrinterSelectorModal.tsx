@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useMemo } from 'react';
-import { X, Search } from 'lucide-react';
+import { CloseIcon, SearchIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { assetService } from '@/services/assetService';
 

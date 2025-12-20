@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Loader2, RotateCcw } from 'lucide-react';
+import { CloseIcon, CheckIcon } from '@/components/icons/MdiIcons';
+import { Loader2, RotateCcw } from 'lucide-react';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';

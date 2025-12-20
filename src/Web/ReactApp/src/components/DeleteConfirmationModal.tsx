@@ -1,5 +1,5 @@
 import { Printer } from '@/types/api';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertIcon, CloseIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 
 interface DeleteConfirmationModalProps {

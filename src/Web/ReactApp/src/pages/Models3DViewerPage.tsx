@@ -2,7 +2,8 @@ import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button, Alert } from '@/components/ui';
-import { Cube, Eye, Upload, Trash2 } from 'lucide-react';
+import { UploadIcon, DeleteIcon } from '@/components/icons/MdiIcons';
+import { Box as CubeIcon, Eye } from 'lucide-react';
 import { STLPreviewModal } from '@/components/3D/STLPreviewModal';
 import { useSTLFile } from '@/hooks/useSTLFile';
 import { assetService } from '@/services/assetService';
@@ -122,7 +123,7 @@ export const Models3DViewerPage: React.FC = () => {
     <PageTemplate
       title="3D Models Viewer"
       subtitle="Browse, preview, and manage your 3D model files"
-      icon={Cube}
+      icon={CubeIcon}
       maxWidth="max-w-7xl"
     >
       <div className="space-y-6">
@@ -148,7 +149,7 @@ export const Models3DViewerPage: React.FC = () => {
             onDrop={handleDragAndDrop}
             className="border-2 border-dashed border-pf-border rounded-lg p-8 text-center hover:border-pf-accent transition-colors cursor-pointer bg-pf-bg-0 bg-opacity-50"
           >
-            <Upload size={48} className="mx-auto mb-3 text-pf-text-muted" />
+            <UploadIcon className="w-12 h-12 mx-auto mb-3 text-pf-text-muted" />
             <p className="text-pf-text font-medium mb-2">Drag and drop your STL file here</p>
             <p className="text-sm text-pf-text-muted mb-4">or click to browse</p>
 
@@ -188,7 +189,7 @@ export const Models3DViewerPage: React.FC = () => {
             </Alert>
           ) : models.length === 0 ? (
             <div className="text-center py-12">
-              <Cube size={48} className="mx-auto mb-3 text-pf-text-muted opacity-50" />
+              <CubeIcon size={48} className="mx-auto mb-3 text-pf-text-muted opacity-50" />
               <p className="text-pf-text-muted">No models uploaded yet</p>
               <p className="text-sm text-pf-text-muted mt-2">Upload a 3D model to get started</p>
             </div>
@@ -201,7 +202,7 @@ export const Models3DViewerPage: React.FC = () => {
                 >
                   {/* Model Icon/Thumbnail */}
                   <div className="bg-gradient-to-br from-pf-accent to-blue-700 rounded-lg h-32 flex items-center justify-center mb-3 group-hover:shadow-lg transition-shadow">
-                    <Cube size={48} className="text-white opacity-75" />
+                    <CubeIcon size={48} className="text-white opacity-75" />
                   </div>
 
                   {/* Model Info */}
@@ -238,7 +239,7 @@ export const Models3DViewerPage: React.FC = () => {
                       }}
                       title="Delete model"
                     >
-                      <Trash2 size={16} />
+                      <DeleteIcon className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>

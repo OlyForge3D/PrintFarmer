@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, AlertTriangle, Info, Search, Wifi } from 'lucide-react';
+import { AlertIcon, SearchIcon } from '@/components/icons/MdiIcons';
+import { User, Mail, Lock, Eye, EyeOff, CheckCircle, Network, Server, Thermometer, Layers, Info, Wifi } from 'lucide-react';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/contexts/AuthHooks';
 import { Button } from '@/components/ui';

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, FileText, AlertCircle, Play, Copy, Trash2, Image, ArrowUpDown } from 'lucide-react';
+import { CloseIcon, DeleteIcon } from '@/components/icons/MdiIcons';
+import { FileText, AlertCircle, Play, Copy, Image, ArrowUpDown } from 'lucide-react';
 import { Button, Select } from '@/components/ui';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';

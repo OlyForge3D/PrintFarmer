@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, X, Tag, Plus, Edit2 } from 'lucide-react';
+import { PlusIcon, CloseIcon, SaveIcon } from '@/components/icons/MdiIcons';
+import { ArrowLeft, Tag, Edit2 } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { TagEditor } from '@/components/TagEditor';
 import { Button, Input, FormField } from '@/components/ui';

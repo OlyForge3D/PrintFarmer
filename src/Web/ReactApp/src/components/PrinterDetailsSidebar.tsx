@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, FileText, History } from 'lucide-react';
+import { CloseIcon, HistoryIcon } from '@/components/icons/MdiIcons';
+import { FileText } from 'lucide-react';
 import { usePrinter } from '@/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { formatPrinterState } from '@/utils/printerStateDisplay';

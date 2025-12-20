@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState } from 'react';
-import { X, CheckCircle, AlertCircle } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
+import { CheckCircle, AlertCircle } from 'lucide-react';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
 
 interface AvailablePrinter {

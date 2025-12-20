@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, ChevronsRight, ChevronsLeft } from 'lucide-react';
+import { SettingsIcon } from '@/components/icons/MdiIcons';
+import { ChevronsRight, ChevronsLeft } from 'lucide-react';
 import { Button } from './ui/Button';
 import type { FilamentTypeDto } from '@/types/api';
 

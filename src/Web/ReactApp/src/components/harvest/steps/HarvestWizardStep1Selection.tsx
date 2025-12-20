@@ -1,7 +1,8 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useMemo } from 'react';
 import { Printer, PrinterBackend, GcodeHarvestOperation } from '@/types/api';
-import { CheckCircle, X } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
+import { CheckCircle } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';

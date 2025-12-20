@@ -1,7 +1,8 @@
 import React from 'react';
 import { usePrintersWithCameraUrls, useJobQueue, usePrinterHistory } from '@/hooks/useApi';
 import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
-import { Printer as PrinterIcon, CheckCircle, Play, Pause, Settings, LayoutDashboard, AlertCircle, Wrench, TrendingUp } from 'lucide-react';
+import { SettingsIcon } from '@/components/icons/MdiIcons';
+import { Printer as PrinterIcon, CheckCircle, Play, Pause, LayoutDashboard, AlertCircle, Wrench, TrendingUp } from 'lucide-react';
 import { DetailedSystemHealth } from '@/components/SystemHealth';
 import { PageTemplate } from '@/components/PageTemplate';
 
@@ -87,7 +88,7 @@ export const PrinterDashboard: React.FC = () => {
           <StatsCard title="Online" value={stats.online} color="green" icon={CheckCircle} />
           <StatsCard title="Printing" value={stats.printing} color="yellow" icon={Play} />
           <StatsCard title="Paused" value={stats.paused} color="yellow" icon={Pause} />
-          <StatsCard title="Offline" value={stats.offline} color="gray" icon={Settings} />
+          <StatsCard title="Offline" value={stats.offline} color="gray" icon={SettingsIcon} />
           {stats.maintenance > 0 && (
             <StatsCard title="In Maintenance" value={stats.maintenance} color="gray" icon={Wrench} />
           )}

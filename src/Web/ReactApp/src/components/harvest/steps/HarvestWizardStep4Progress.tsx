@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, AlertCircle, Loader, X } from 'lucide-react';
+import { CloseIcon } from '@/components/icons/MdiIcons';
+import { CheckCircle, AlertCircle, Loader } from 'lucide-react';
 import { signalRService } from '@/services/harvest-signalr';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';

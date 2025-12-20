@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download } from 'lucide-react';
+import { DownloadIcon } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
 import { useImportFilamentTypesFromSpoolman } from '@/hooks/useApi';
 import { toast } from 'sonner';

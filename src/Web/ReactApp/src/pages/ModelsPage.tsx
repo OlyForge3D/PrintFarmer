@@ -1,7 +1,8 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Box, Trash2, Eye, Settings, Search, Tag, Grid3x3, List, X, FileText, FolderOpen } from 'lucide-react';
+import { UploadIcon, SettingsIcon, SearchIcon, CloseIcon } from '@/components/icons/MdiIcons';
+import { Box, Trash2, Eye, Tag, Grid3x3, List, FileText, FolderOpen } from 'lucide-react';
 import { PageTemplate } from '@/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
 import { Button, Input, FileUpload } from '@/components/ui';
