@@ -16,10 +16,10 @@ import { PrinterCompactCard } from '@/components/PrinterCompactCard';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import type { Printer, PrinterModelDto } from '@/types/api';
+import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
-import { Box, Printer as PrinterIcon } from 'lucide-react';
+import { Printer as PrinterIcon } from 'lucide-react';
 import { mdiViewList, mdiViewGrid, mdiViewComfy, mdiViewQuilt } from '@mdi/js';
 import { toast } from 'sonner';
 
