@@ -16,6 +16,10 @@
   <ItemGroup>
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
+    <ProjectReference Include="../backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj" />
   </ItemGroup>
 
 </Project>

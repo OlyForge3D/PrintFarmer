@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Farm.Backend.Plugin.Moonraker;
+using Farm.Backend.Plugin.OctoPrint;
+using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using FluentAssertions;

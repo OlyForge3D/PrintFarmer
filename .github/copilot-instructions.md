@@ -452,6 +452,70 @@ npm run dev
 
 ## Development Guidelines
 
+### ⚠️ CRITICAL: Code Change Validation Workflow
+
+**MANDATORY PROCESS - NO EXCEPTIONS:**
+Every code change MUST follow this validation workflow BEFORE declaring completion:
+
+**Step 1: Make the code change(s)**
+- Edit the necessary files
+- Keep changes focused and minimal
+
+**Step 2: Build locally to verify compilation**
+```bash
+# For .NET changes:
+cd /home/pi/pfarm/src
+dotnet build ./farm-web.sln -c Release
+
+# For React changes:
+cd /home/pi/pfarm/src/Web/ReactApp
+npm run build  # (if applicable)
+```
+- **WAIT for build to complete - do NOT cancel**
+- **MUST see: "built successfully" or "✓ built"**
+- **If build fails**: Fix the compilation errors immediately, re-build, then proceed
+- **If build succeeds**: Continue to step 3
+
+**Step 3: Run all tests**
+```bash
+# .NET tests (from /src directory):
+dotnet test ./farm-web.sln -c Release
+
+# React tests:
+cd /src/Web/ReactApp
+npm run test:run
+```
+- **WAIT for tests to complete - do NOT cancel**
+- **MUST see: "PASSED" or "all tests passing"**
+- **If tests fail**: Fix the failing tests immediately, re-run, then proceed
+- **If all tests pass**: Continue to step 4
+
+**Step 4: Verify no new lint/formatting issues**
+```bash
+# .NET formatting check:
+cd /home/pi/pfarm/src
+dotnet format ./farm-web.sln --verify-no-changes  # Check only, don't modify
+
+# React linting (if applicable):
+cd /src/Web/ReactApp
+npm run lint 2>&1 | head -20
+```
+
+**Step 5: ONLY THEN declare success**
+- Report: "✅ Build successful, all tests pass, no new lint issues"
+- If Docker build is needed, deploy and verify
+- Include summary of what was changed and validated
+
+**FAILURE TO FOLLOW THIS PROCESS CAUSES:**
+- Broken Docker builds (forces user to debug container failures)
+- Runtime errors in production (tests would have caught them)
+- Wasted deployment time (manual fixes needed)
+- User frustration and lost trust in automated changes
+
+**If ever unclear about validation steps, ALWAYS ask rather than guess.**
+
+---
+
 **Code Style:**
 - **C# (.NET API)**: PascalCase for types/members, camelCase for locals/parameters
 - **TypeScript (React)**: camelCase for variables/functions, PascalCase for components/types

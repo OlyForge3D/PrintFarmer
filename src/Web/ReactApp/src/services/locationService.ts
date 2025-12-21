@@ -55,7 +55,7 @@ class LocationService {
    * Get all active locations
    */
   async getAllLocations(): Promise<Location[]> {
-    const response = await this.api.get<Location[]>('/api/locations');
+    const response = await this.api.get<Location[]>('/locations');
     return response.data;
   }
 
@@ -63,7 +63,7 @@ class LocationService {
    * Get a specific location by ID
    */
   async getLocationById(id: string): Promise<Location> {
-    const response = await this.api.get<Location>(`/api/locations/${id}`);
+    const response = await this.api.get<Location>(`/locations/${id}`);
     return response.data;
   }
 
@@ -71,7 +71,7 @@ class LocationService {
    * Create a new location
    */
   async createLocation(request: CreateLocationRequest): Promise<Location> {
-    const response = await this.api.post<Location>('/api/locations', request);
+    const response = await this.api.post<Location>('/locations', request);
     return response.data;
   }
 
@@ -79,7 +79,7 @@ class LocationService {
    * Update an existing location
    */
   async updateLocation(id: string, request: UpdateLocationRequest): Promise<Location> {
-    const response = await this.api.put<Location>(`/api/locations/${id}`, request);
+    const response = await this.api.put<Location>(`/locations/${id}`, request);
     return response.data;
   }
 
@@ -87,7 +87,7 @@ class LocationService {
    * Delete a location (soft delete)
    */
   async deleteLocation(id: string): Promise<void> {
-    await this.api.delete(`/api/locations/${id}`);
+    await this.api.delete(`/locations/${id}`);
   }
 }
 

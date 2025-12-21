@@ -30,8 +30,8 @@ public abstract class BaseDiscoveryProbe : INetworkDiscoveryProbe
         HttpResponseMessage response, string content)
     {
         // Default: check success status
-        return Task.FromResult(response.IsSuccessStatusCode 
-            ? (true, 100, "Response valid") 
+        return Task.FromResult(response.IsSuccessStatusCode
+            ? (true, 100, "Response valid")
             : (false, 0, "Response invalid"));
     }
 

@@ -1,36 +1,27 @@
-﻿using System.Text.Json;
+using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Printers;
+using Farm.Infrastructure.Discovery;
 
-namespace Farm.Infrastructure.Discovery;
+namespace Farm.Backend.Plugin.PrusaLink;
 
 /// <summary>
 /// Discovery probe for PrusaLink-based 3D printers (Prusa MK series).
 /// Probes ports 80 and 8080, validates response contains PrusaLink-specific fields.
-/// Uses IPrusaLinkClient for all API interactions to ensure consistency with backend client implementation.
 /// </summary>
-public class PrusaLinkDiscoveryProbe : BaseDiscoveryProbe
+public class PrusaLinkDiscoveryProbe : INetworkDiscoveryProbe
 {
-    private readonly IPrusaLinkClient _prusaLinkClient;
-
-    public PrusaLinkDiscoveryProbe(IPrusaLinkClient prusaLinkClient)
-    {
-        _prusaLinkClient = prusaLinkClient;
-    }
-    public override string DisplayName => "PrusaLink";
-    protected override int[] Ports => new[] { 80, 8080 };
-    protected override string EndpointPath => "/api/v1/info";
-    protected override PrinterBackend Backend => PrinterBackend.PrusaLink;
-    protected override string PrinterName => "PrusaLink Printer";
+    public string DisplayName => "PrusaLink";
+    public PrinterBackend Backend => PrinterBackend.PrusaLink;
 
     /// <summary>
     /// Validates PrusaLink response with confidence scoring.
     /// Score 100: Has multiple Prusa-specific fields (2-3 fields)
     /// Score 85: Has some Prusa-specific fields (1 field)
     /// </summary>
-    protected override Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
+    protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
         if (!response.IsSuccessStatusCode)
@@ -69,5 +60,42 @@ public class PrusaLinkDiscoveryProbe : BaseDiscoveryProbe
             // Not valid JSON or parsing error - not PrusaLink
             return Task.FromResult((false, 0, "Invalid JSON"));
         }
+    }
+
+    public async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
+    {
+        using HttpClient client = new()
+        { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+
+        // Try both port 80 and 8080
+        foreach (int port in new[] { 80, 8080 })
+        {
+            string url = $"http://{ipAddress}:{port}/api/v1/info";
+            try
+            {
+                HttpResponseMessage response = await client.GetAsync(url, cancellationToken);
+                string content = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                (bool isValid, int confidence, string? reason) = await ValidateResponseAsync(response, content);
+                if (!isValid)
+                {
+                    continue;
+                }
+
+                DiscoveredPrinterDto dto = new DiscoveredPrinterDto
+                {
+                    IpAddress = ipAddress,
+                    BackendPort = port,
+                    Backend = Backend,
+                    ServerUrl = $"http://{ipAddress}",
+                    Name = "PrusaLink Printer"
+                };
+
+                return new ProbeResult(dto, confidence, reason);
+            }
+            catch { }
+        }
+
+        return null;
     }
 }

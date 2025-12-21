@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="../Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../../discovery/Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="../../signalr/Farm.SignalR/Farm.SignalR.csproj" />
   </ItemGroup>
 

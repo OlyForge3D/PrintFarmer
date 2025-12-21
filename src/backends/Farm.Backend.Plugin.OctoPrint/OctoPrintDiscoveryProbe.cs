@@ -1,32 +1,22 @@
-﻿using System.Net.Http;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Printers;
+using Farm.Infrastructure.Discovery;
 
-namespace Farm.Infrastructure.Discovery;
+namespace Farm.Backend.Plugin.OctoPrint;
 
 /// <summary>
 /// Discovery probe for OctoPrint-based 3D printers.
-/// Uses IOctoPrintClient for all API interactions to ensure consistency with backend client implementation.
 /// Note: When OctoPrint runs with Moonraker compatibility mode, the server element may contain
 /// both OctoPrint and Moonraker. In this case, confidence is 0 to allow the Moonraker probe
 /// to take precedence (more accurate for Klipper-based systems).
 /// </summary>
-public class OctoPrintDiscoveryProbe : BaseDiscoveryProbe
+public class OctoPrintDiscoveryProbe : INetworkDiscoveryProbe
 {
-    private readonly IOctoPrintClient _octoPrintClient;
-
-    public OctoPrintDiscoveryProbe(IOctoPrintClient octoPrintClient)
-    {
-        _octoPrintClient = octoPrintClient;
-    }
-    public override string DisplayName => "OctoPrint";
-    protected override int[] Ports => new[] { 80, 5000 }; // Probe both, but prefer 80 as default
-    protected override string EndpointPath => "/api/version";
-    protected override PrinterBackend Backend => PrinterBackend.OctoPrint;
-    protected override string PrinterName => "OctoPrint Printer";
+    public string DisplayName => "OctoPrint";
+    public PrinterBackend Backend => PrinterBackend.OctoPrint;
 
     /// <summary>
     /// Validates OctoPrint response with confidence scoring.
@@ -34,7 +24,7 @@ public class OctoPrintDiscoveryProbe : BaseDiscoveryProbe
     /// Score 75: Has "api" field (specific to OctoPrint endpoint, and NO Moonraker)
     /// Score 0: Moonraker detected in server element (prefer Moonraker probe)
     /// </summary>
-    protected override Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
+    protected static Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(
         HttpResponseMessage response, string content)
     {
         if (!response.IsSuccessStatusCode)
@@ -88,5 +78,42 @@ public class OctoPrintDiscoveryProbe : BaseDiscoveryProbe
             // Not valid JSON - reject
             return Task.FromResult((false, 0, "Invalid JSON"));
         }
+    }
+
+    public async Task<ProbeResult?> ProbeAsync(string ipAddress, int timeoutMs, CancellationToken cancellationToken)
+    {
+        using HttpClient client = new()
+        { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+
+        // Try both port 80 and 5000 (prefer 80 as default)
+        foreach (int port in new[] { 80, 5000 })
+        {
+            string url = $"http://{ipAddress}:{port}/api/version";
+            try
+            {
+                HttpResponseMessage response = await client.GetAsync(url, cancellationToken);
+                string content = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                (bool isValid, int confidence, string? reason) = await ValidateResponseAsync(response, content);
+                if (!isValid)
+                {
+                    continue;
+                }
+
+                DiscoveredPrinterDto dto = new DiscoveredPrinterDto
+                {
+                    IpAddress = ipAddress,
+                    BackendPort = port,
+                    Backend = Backend,
+                    ServerUrl = $"http://{ipAddress}",
+                    Name = "OctoPrint Printer"
+                };
+
+                return new ProbeResult(dto, confidence, reason);
+            }
+            catch { }
+        }
+
+        return null;
     }
 }

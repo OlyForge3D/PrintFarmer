@@ -1,28 +1,21 @@
-﻿using System.Net.Sockets;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Printers;
+using Farm.Infrastructure.Discovery;
 
-namespace Farm.Infrastructure.Discovery;
+namespace Farm.Backend.Plugin.Sdcp;
 
 /// <summary>
 /// Discovery probe for SDCP (Snapmaker Discovery Protocol) printers using UDP broadcast.
-/// Uses ISDCPClient for all API interactions to ensure consistency with backend client implementation.
 /// Sends 'M99999' discovery message to port 3000, receives JSON response with printer details.
 /// </summary>
 public class SdcpDiscoveryProbe : INetworkDiscoveryProbe
 {
-    private readonly ISDCPClient _sdcpClient;
     private const string SDCP_DISCOVERY_MESSAGE = "M99999";
     private const int SDCP_DISCOVERY_PORT = 3000;
-
-    public SdcpDiscoveryProbe(ISDCPClient sdcpClient)
-    {
-        _sdcpClient = sdcpClient;
-    }
 
     public string DisplayName => "SDCP";
     public PrinterBackend Backend => PrinterBackend.SDCP;
