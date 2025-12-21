@@ -9,9 +9,8 @@ import {
   Users,
   UserCheck,
   UserX,
-  Search
 } from 'lucide-react';
-import { DeleteIcon } from '@/components/icons/MdiIcons';
+import { DeleteIcon, SearchIcon, EditIcon } from '@/components/icons/MdiIcons';
 import { Button, Input, Select, FormField, Alert, Checkbox, Modal } from '@/components/ui';
 import { TableSkeleton } from '@/components/skeletons/TableSkeleton';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -390,7 +389,7 @@ export function UserManagementPage() {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10"
           />
-          <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-pf-text-tertiary" />
+          <SearchIcon className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-pf-text-tertiary" />
         </div>
       </div>
       {/* Users Table */}

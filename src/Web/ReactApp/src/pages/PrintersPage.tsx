@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { usePrintersWithCameraUrls, useDeletePrinter } from '@/hooks/useApi';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
+import { usePrinters, useDeletePrinter } from '@/hooks/useApi';
 import { useQueryClient } from '@tanstack/react-query';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -56,8 +55,7 @@ export function PrintersPage() {
     isLoading, 
     error,
     refetch: refetchPrinters
-  } = usePrintersWithCameraUrls();
-  const { getPrinterStatus } = usePrinterStatusUpdates();
+  } = usePrinters();
   
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -334,13 +332,12 @@ export function PrintersPage() {
             </div>
           ) : viewMode === 'compact' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {userPrinters.map((p) => (
+              {userPrinters.map((p: Printer) => (
                 <PrinterCompactCard
                   key={p.id}
                   printer={p}
                   onEdit={(printer) => handleEditPrinter(printer)}
                   onDelete={handleDeleteSinglePrinter}
-                  getPrinterStatus={getPrinterStatus}
                 />
               ))}
             </div>

@@ -101,13 +101,13 @@ export const PrinterLocationDragDrop: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold mb-2">Assign Printers to Locations</h1>
-        <p className="text-gray-600">Drag and drop printers to assign them to locations</p>
+        <h1 className="text-3xl font-bold mb-2 text-pf-text-primary">Assign Printers to Locations</h1>
+        <p className="text-pf-text-secondary">Drag and drop printers to assign them to locations</p>
       </div>
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+        <div className="bg-pf-error-bg border border-pf-error-border text-pf-error-text px-4 py-3 rounded-lg">
           {error}
         </div>
       )}
@@ -119,14 +119,14 @@ export const PrinterLocationDragDrop: React.FC = () => {
           <div
             onDragOver={handleDragOver}
             onDrop={handleDropOnUnassigned}
-            className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-4 min-h-96"
+            className="bg-pf-bg-2 border-2 border-dashed border-pf-border rounded-lg p-4 min-h-96 transition-colors hover:border-pf-accent"
           >
-            <h2 className="text-lg font-semibold mb-4 text-gray-700">
+            <h2 className="text-lg font-semibold mb-4 text-pf-text-primary">
               Unassigned Printers ({unassignedPrinters.length})
             </h2>
             <div className="space-y-2">
               {unassignedPrinters.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">All printers assigned</p>
+                <p className="text-pf-text-tertiary text-center py-8">All printers assigned</p>
               ) : (
                 unassignedPrinters.map((printer) => (
                   <PrinterCard
@@ -144,8 +144,8 @@ export const PrinterLocationDragDrop: React.FC = () => {
         {/* Locations Columns */}
         <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
           {locations.length === 0 ? (
-            <div className="col-span-full bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <p className="text-yellow-800">No locations created yet. Create a location first.</p>
+            <div className="col-span-full bg-pf-bg-2 border border-pf-warning rounded-lg p-4">
+              <p className="text-pf-warning-text">No locations created yet. Create a location first.</p>
             </div>
           ) : (
             locations.map((location) => {
@@ -155,20 +155,20 @@ export const PrinterLocationDragDrop: React.FC = () => {
                   key={location.id}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDropOnLocation(e, location.id)}
-                  className="bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition-colors"
+                  className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 shadow hover:border-pf-primary transition-colors"
                 >
-                  <h3 className="text-lg font-semibold mb-2">{location.name}</h3>
+                  <h3 className="text-lg font-semibold mb-2 text-pf-text-primary">{location.name}</h3>
                   {location.description && (
-                    <p className="text-sm text-gray-600 mb-3">{location.description}</p>
+                    <p className="text-sm text-pf-text-secondary mb-3">{location.description}</p>
                   )}
-                  <div className="bg-blue-50 rounded px-2 py-1 mb-3 inline-block">
-                    <span className="text-sm font-medium text-blue-700">
-                      {locationPrinters.length} / {location.printerCount + locationPrinters.length - location.printerCount}
+                  <div className="bg-pf-status-online-bg rounded px-2 py-1 mb-3 inline-block">
+                    <span className="text-sm font-medium text-pf-status-online-text">
+                      {locationPrinters.length} printers
                     </span>
                   </div>
-                  <div className="space-y-2 min-h-32 bg-blue-50 rounded p-2">
+                  <div className="space-y-2 min-h-32 bg-pf-bg-2 rounded-md p-3">
                     {locationPrinters.length === 0 ? (
-                      <p className="text-gray-400 text-center py-8 text-sm">Drag printers here</p>
+                      <p className="text-pf-text-tertiary text-center py-8 text-sm">Drag printers here</p>
                     ) : (
                       locationPrinters.map((printer) => (
                         <PrinterCard
@@ -202,13 +202,12 @@ const PrinterCard: React.FC<PrinterCardProps> = ({ printer, onDragStart, isDragg
       draggable
       onDragStart={onDragStart}
       className={`
-        bg-white border rounded p-3 cursor-move transition-all
-        ${isDragging ? 'opacity-50 scale-95' : 'hover:shadow-md'}
-        ${isDragging ? 'border-blue-500' : 'border-gray-300'}
+        bg-pf-bg-1 border rounded-md p-3 cursor-move transition-all shadow-sm
+        ${isDragging ? 'opacity-50 scale-95 border-pf-accent' : 'border-pf-border hover:shadow-md hover:border-pf-primary'}
       `}
     >
-      <p className="font-medium text-sm text-gray-800 truncate">{printer.name}</p>
-      <p className="text-xs text-gray-500 truncate">{printer.serverUrl}</p>
+      <p className="font-medium text-sm text-pf-text-primary truncate">{printer.name}</p>
+      <p className="text-xs text-pf-text-tertiary truncate">{printer.serverUrl}</p>
     </div>
   );
 };

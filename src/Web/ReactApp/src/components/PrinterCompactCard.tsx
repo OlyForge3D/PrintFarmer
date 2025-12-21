@@ -7,19 +7,17 @@ interface PrinterCompactCardProps {
   printer: Printer;
   onEdit: (printer: Printer) => void;
   onDelete: (printer: Printer) => void;
-  getPrinterStatus?: (id: string) => { state?: string; isOnline?: boolean } | undefined;
 }
 
 export function PrinterCompactCard({
   printer: p,
   onEdit,
-  onDelete,
-  getPrinterStatus
+  onDelete
 }: PrinterCompactCardProps) {
   const [imageError, setImageError] = useState(false);
-  const status = (getPrinterStatus?.(p.id)?.state ?? p.state ?? '') as string;
-  const isPrinting = status.toLowerCase().includes('printing');
-  const isOnline = !!p.isOnline || ['operational', 'ready', 'idle'].some(x => status.toLowerCase().includes(x));
+  const isOnline = p.isOnline ?? false;
+  const state = p.state ?? '';
+  const isPrinting = state.toLowerCase().includes('printing');
 
   return (
     <div className="bg-pf-bg-1 rounded-lg p-4 shadow border border-pf-border hover:border-pf-primary transition-colors">

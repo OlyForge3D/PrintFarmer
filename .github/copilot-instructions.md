@@ -624,6 +624,22 @@ npm run lint 2>&1 | head -20
 - Docker Compose with database services for testing
 - ⚠️ **Note**: Main Dockerfile may need updates to reference "api" directory instead of "server"
 
+**Docker Deployment** ⚠️ **CRITICAL USAGE NOTES**:
+- **Location**: Deploy script is at `/home/pi/pfarm/scripts/deploy-docker.sh`
+- **Working Directory**: ALWAYS run from `/home/pi/pfarm` directory (repository root), NOT from `/src`
+- **Command**: `/home/pi/pfarm/scripts/deploy-docker.sh --non-interactive --tear-down`
+  - `--non-interactive`: Run without prompts (suitable for automated deployments)
+  - `--tear-down`: Remove old containers and rebuild fresh
+- **Alternative**: `bash ./scripts/deploy-docker.sh --non-interactive --tear-down` (when in `/home/pi/pfarm`)
+- **Timeout**: Set to 300+ seconds - deployment includes Docker build and container startup
+- **Purpose**: Rebuilds and deploys all services (API, React frontend, database, etc.)
+- **Post-Deployment Validation**:
+  ```bash
+  docker compose --env-file .env ps          # Check running containers
+  curl http://localhost:8080/healthz         # Verify frontend health
+  curl http://localhost:5245/api/locations   # Verify API with new LocationsController
+  ```
+
 **Database Provider Testing:**
 - Use `./test-providers-simple.sh` to test all database providers
 - Automated scripts handle Docker database setup and testing

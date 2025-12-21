@@ -5,7 +5,6 @@ import { PrinterBackend } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Button } from '@/components/ui';
@@ -32,8 +31,6 @@ export function PrinterCard({
   onManage = () => { }
 }: PrinterCardProps) {
   const { hasPermission } = useAuth();
-  const { getPrinterStatus } = usePrinterStatusUpdates();
-  const realtimeStatus = getPrinterStatus(printer.id);
 
   // State for printer cover image
   const [coverImageUrl, setCoverImageUrl] = useState<string | undefined>(undefined);
@@ -68,7 +65,7 @@ export function PrinterCard({
       // ignore debug inspection errors
       void err;
     }
-  }, [realtimeStatus, printer.id]);
+  }, [printer.id]);
 
   const renderDebugBadge = (): React.ReactNode => {
     // Guarded debug - emit to console for developers
@@ -86,7 +83,7 @@ export function PrinterCard({
       // Render debug payload safely using renderUnknown
       const payload = {
         printer,
-        realtimeStatus
+        currentStatus
       } as unknown;
       return <div className="text-xs text-pf-text-tertiary">{renderUnknown(payload)}</div>;
     }
@@ -113,43 +110,42 @@ export function PrinterCard({
     return () => { ignore = true; };
   }, [printer.id, printer.backend]);
 
-  // Prefer print job status for Moonraker, fallback to realtime/server status
+  // Prefer print job status for Moonraker, fallback to printer data
   const currentStatus = (() => {
     if (printer.backend === PrinterBackend.Moonraker && printJobStatus && printJobStatus.state && printJobStatus.state !== 'offline') {
       return {
-        ...realtimeStatus,
-        isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
+        isOnline: printer.isOnline,
         state: printJobStatus.state,
-        progress: printJobStatus.progress ?? realtimeStatus?.progress ?? printer.progress,
-        jobName: printJobStatus.jobName ?? realtimeStatus?.jobName ?? printer.jobName,
-        thumbnailUrl: printJobStatus.thumbnailUrl ?? realtimeStatus?.thumbnailUrl ?? printer.thumbnailUrl,
-        hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
-        bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
-        hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
-        bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
-        x: realtimeStatus?.x ?? printer.x,
-        y: realtimeStatus?.y ?? printer.y,
-        z: realtimeStatus?.z ?? printer.z,
-        cameraStreamUrl: realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl,
-        cameraSnapshotUrl: realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
+        progress: printJobStatus.progress ?? printer.progress,
+        jobName: printJobStatus.jobName ?? printer.jobName,
+        thumbnailUrl: printJobStatus.thumbnailUrl ?? printer.thumbnailUrl,
+        hotendTemp: printer.hotendTemp,
+        bedTemp: printer.bedTemp,
+        hotendTarget: printer.hotendTarget,
+        bedTarget: printer.bedTarget,
+        x: printer.x,
+        y: printer.y,
+        z: printer.z,
+        cameraStreamUrl: printer.cameraStreamUrl,
+        cameraSnapshotUrl: printer.cameraSnapshotUrl,
       };
     }
-    // Default fallback
+    // Default: use printer data directly (already contains merged realtime status from API)
     return {
-      isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
-      state: realtimeStatus?.state ?? printer.state,
-      progress: realtimeStatus?.progress ?? printer.progress,
-      jobName: realtimeStatus?.jobName ?? printer.jobName,
-      hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
-      bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
-      hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
-      bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
-      x: realtimeStatus?.x ?? printer.x,
-      y: realtimeStatus?.y ?? printer.y,
-      z: realtimeStatus?.z ?? printer.z,
-      cameraStreamUrl: realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl,
-      cameraSnapshotUrl: realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
-      thumbnailUrl: realtimeStatus?.thumbnailUrl ?? printer.thumbnailUrl,
+      isOnline: printer.isOnline,
+      state: printer.state,
+      progress: printer.progress,
+      jobName: printer.jobName,
+      hotendTemp: printer.hotendTemp,
+      bedTemp: printer.bedTemp,
+      hotendTarget: printer.hotendTarget,
+      bedTarget: printer.bedTarget,
+      x: printer.x,
+      y: printer.y,
+      z: printer.z,
+      cameraStreamUrl: printer.cameraStreamUrl,
+      cameraSnapshotUrl: printer.cameraSnapshotUrl,
+      thumbnailUrl: printer.thumbnailUrl,
     };
   })();
 

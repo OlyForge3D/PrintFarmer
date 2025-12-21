@@ -948,7 +948,13 @@ namespace Farm.Infrastructure.Services.Printers
                 Notes = dto.Notes,
                 ManufacturerId = manufacturerId,
                 ModelId = modelId,
-                DateAcquired = dto.DateAcquired?.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc) : dto.DateAcquired,
+                DateAcquired = dto.DateAcquired?.Kind switch
+                {
+                    DateTimeKind.Utc => dto.DateAcquired,
+                    DateTimeKind.Unspecified => DateTime.SpecifyKind(dto.DateAcquired.Value, DateTimeKind.Utc),
+                    DateTimeKind.Local => dto.DateAcquired.Value.ToUniversalTime(),
+                    _ => null
+                },
                 Backend = (int)dto.Backend,
                 ApiKey = dto.ApiKey,
                 // BackendPort MUST be set by discovery probes (always includes actual port, even if standard)
@@ -1775,9 +1781,31 @@ namespace Farm.Infrastructure.Services.Printers
                 }
                 catch (Exception ex)
                 {
-                    string errorMessage = $"Failed to create printer: {ex.Message}";
+                    string errorMessage;
+                    
+                    // Try to extract meaningful error from database exceptions
+                    if (ex.Message.Contains("constraint failed", StringComparison.OrdinalIgnoreCase) ||
+                        ex.InnerException?.Message.Contains("constraint", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        var dbEx = Exceptions.DatabaseConstraintException.FromEfException(ex, "Printer");
+                        errorMessage = dbEx.Message;
+                        if (dbEx.ConstraintName != null)
+                        {
+                            errorMessage += $" ({dbEx.ConstraintName} on {dbEx.PropertyName})";
+                        }
+                    }
+                    else if (ex.InnerException != null)
+                    {
+                        // Show inner exception if outer is generic EF message
+                        errorMessage = $"Failed to create printer: {ex.InnerException.Message}";
+                    }
+                    else
+                    {
+                        errorMessage = $"Failed to create printer: {ex.Message}";
+                    }
+                    
                     errorResults[i] = errorMessage;
-                    _logger.LogWarning($"[BulkCreate] Error creating printer at index {i}: {errorMessage}");
+                    _logger.LogWarning(ex, $"[BulkCreate] Error creating printer {printers[i].Name} at index {i}: {errorMessage}");
 
                     var result = new
                     {
@@ -2023,7 +2051,7 @@ namespace Farm.Infrastructure.Services.Printers
                                 CameraStreamUrl = cameraStreamIdx >= 0 && cameraStreamIdx < values.Length ? values[cameraStreamIdx] : null,
                                 CameraSnapshotUrl = cameraSnapshotIdx >= 0 && cameraSnapshotIdx < values.Length ? values[cameraSnapshotIdx] : null,
 #pragma warning disable S6580 // SonarSource: format provider is already specified (InvariantCulture)
-                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime da) ? da : null,
+                                DateAcquired = dateAcquiredIdx >= 0 && dateAcquiredIdx < values.Length && DateTime.TryParse(values[dateAcquiredIdx], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out DateTime da) ? da : null,
 #pragma warning restore S6580
                                 LocationName = locationNameIdx >= 0 && locationNameIdx < values.Length && !string.IsNullOrWhiteSpace(values[locationNameIdx]) ? values[locationNameIdx] : null
                             };

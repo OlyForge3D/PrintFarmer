@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Location, CreateLocationRequest, UpdateLocationRequest, locationService } from '../services/locationService';
+import { PrinterLocationDragDrop } from './PrinterLocationDragDrop';
 
 /**
  * LocationManagement Component - Manage printer locations
  * 
- * For assigning printers to locations via drag and drop, see PrinterLocationDragDrop component:
- * import PrinterLocationDragDrop from './PrinterLocationDragDrop';
- * <PrinterLocationDragDrop />
+ * Includes drag and drop functionality for assigning printers to locations via the PrinterLocationDragDrop component.
  */
 export const LocationManagement: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
@@ -248,6 +247,11 @@ export const LocationManagement: React.FC = () => {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Drag and Drop Printer Assignment */}
+      <div className="border-t pt-8 mt-8">
+        <PrinterLocationDragDrop />
       </div>
     </div>
   );

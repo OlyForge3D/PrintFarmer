@@ -12,7 +12,6 @@ import {
 } from '@/types/api';
 import { useAuth } from '@/contexts/AuthHooks';
 import { usePrinters, useCancelHarvestOperation, useRestartHarvestDiscovery } from '@/hooks/useApi';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { signalRService } from '@/services/harvest-signalr';
 import { apiClient } from '@/services/api';
 import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
@@ -30,33 +29,14 @@ export const HarvestPage: React.FC = () => {
   const restartHarvestDiscoveryMutation = useRestartHarvestDiscovery();
   const { hasPermission } = useAuth();
   const { data: printers, isLoading: printersLoading } = usePrinters();
-  const { getPrinterStatus } = usePrinterStatusUpdates();
   
   const { data: harvestOperations, refetch: refetchOperations } = useQuery({
     queryKey: ['harvest-operations'],
     queryFn: () => apiClient.getHarvestOperations(),
     refetchInterval: 2000,
   });
-
-  // Merge live status into base printer data
-  const printersWithLive = (printers || []).map(p => {
-    const status = getPrinterStatus(p.id);
-    if (!status) return p;
-    return {
-      ...p,
-      isOnline: status.isOnline,
-      isReachable: status.isOnline || p.isReachable,
-      progress: status.progress ?? p.progress,
-      jobName: status.jobName ?? p.jobName,
-      hotendTemp: status.hotendTemp ?? p.hotendTemp,
-      bedTemp: status.bedTemp ?? p.bedTemp,
-      hotendTarget: status.hotendTarget ?? p.hotendTarget,
-      bedTarget: status.bedTarget ?? p.bedTarget,
-      x: status.x ?? p.x,
-      y: status.y ?? p.y,
-      z: status.z ?? p.z,
-    } as Printer;
-  });
+  // Printers already have merged realtime status from API
+  const printersWithLive = printers || [];
 
   // All hooks must be called before any return (including useEffect)
 

@@ -17,7 +17,6 @@ import {
 import { Button } from '@/components/ui';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/components/PrinterFilesModal';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
 import { PrinterBackend, type Printer } from '@/types/api';
 import moonrakerIcon from '@/assets/moonraker.svg';
@@ -77,19 +76,15 @@ export function CollapsedPrinterCard({
   const [showFiles, setShowFiles] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
 
-  // Get real-time status updates from SignalR
-  const { printerStatuses } = usePrinterStatusUpdates();
-  const realtimeStatus = printerStatuses.get(printer.id);
-  
-  // Merge API data with real-time SignalR status (prefer SignalR when available)
-  const isOnline = realtimeStatus?.isOnline ?? printer.isOnline ?? false;
-  const state = realtimeStatus?.state ?? printer.state ?? 'Unknown';
+  // Use printer data directly (already contains merged realtime status from API)
+  const isOnline = printer.isOnline ?? false;
+  const state = printer.state ?? 'Unknown';
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
   // Check if printer has camera URLs - just verify if URLs have values from database
-  const cameraSnapshotUrl = realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
-  const cameraStreamUrl = realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl;
+  const cameraSnapshotUrl = printer.cameraSnapshotUrl;
+  const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
   // State color classes

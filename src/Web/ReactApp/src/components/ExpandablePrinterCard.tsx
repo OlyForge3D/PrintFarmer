@@ -35,8 +35,7 @@ function getBackendIcon(backend: PrinterBackend | number | string) {
       return <span title="Other" aria-label="Other" role="img" className="mr-1">🖨️</span>;
   }
 }
-import { useState, useLayoutEffect, useRef } from 'react';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
+import { useState, useRef, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
@@ -59,6 +58,7 @@ import {
   CameraIcon,
   MinusIcon
 } from '@/components/icons/MdiIcons';
+import { usePrinter } from '@/hooks/useApi';
 
 interface ExpandablePrinterCardProps {
   printer: Printer;
@@ -68,7 +68,11 @@ interface ExpandablePrinterCardProps {
   onManage?: (printer: Printer) => void;
 }
 // We intentionally accept onDelete/onManage in props interface for future actions but do not destructure them to avoid unused vars
-export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCardProps) {
+export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: ExpandablePrinterCardProps) {
+  // Use the API hook to get the complete printer data with merged realtime status
+  // The backend/API layer handles merging realtime status with printer data
+  const { data: printer = initialPrinter, isLoading } = usePrinter(initialPrinter.id);
+  
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -80,105 +84,31 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const [moveZ, setMoveZ] = useState<number | ''>('');
   const [collapsedImageVisible, setCollapsedImageVisible] = useState(true);
   const [expandedImageVisible, setExpandedImageVisible] = useState(true);
-  
-  // State to track last known good values
-  const [lastKnownHotendTemp, setLastKnownHotendTemp] = useState<number | null>(null);
-  const [lastKnownBedTemp, setLastKnownBedTemp] = useState<number | null>(null);
-  const [lastKnownX, setLastKnownX] = useState<number | null>(null);
-  const [lastKnownY, setLastKnownY] = useState<number | null>(null);
-  const [lastKnownZ, setLastKnownZ] = useState<number | null>(null);
-  
-  const { printerStatuses } = usePrinterStatusUpdates();
-  
-  // Get status from the Map - this will cause re-render when printerStatuses changes
-  const status = printerStatuses.get(printer.id);
-  
-  // Debug logging to track status updates
-  useLayoutEffect(() => {
-    const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
-    if (win.PrintFarmerDebug?.expandablePrinterCard) {
-      console.log('[ExpandablePrinterCard] Status update:', {
-        printerId: printer.id,
-        printerName: printer.name,
-        status,
-        hotendTemp: status?.hotendTemp,
-        bedTemp: status?.bedTemp,
-        x: status?.x,
-        y: status?.y,
-        z: status?.z,
-      });
-    }
-  }, [status, printer.id, printer.name]);
-  
-  const isOnline = status?.isOnline ?? printer.isOnline;
-  const state = status?.state ?? printer.state;
-  const isPrinting = state?.toLowerCase().includes('printing') ?? false;
-  const isPaused = state?.toLowerCase().includes('paused') ?? false;
-  const isShutdown = (state?.toLowerCase().includes('shutdown') ?? false) || (state?.toLowerCase().includes('error') ?? false);
 
-  // Camera URL logic: prioritize real-time status, fallback to printer config
-  const cameraStreamUrl = status?.cameraStreamUrl ?? printer.cameraStreamUrl;
-  const cameraSnapshotUrl = status?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl;
-  // Check if printer has camera URLs - the presence of URLs is the source of truth
-  const hasCameraUrls = !!(
-    (cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ||
-    (cameraStreamUrl ?? printer.cameraStreamUrl)
-  );
+  // API hook provides printer data with merged realtime status - no need for manual merging
+  const isOnline = printer.isOnline ?? false;
+  const state = printer.state ?? 'unknown';
+  const isPrinting = state.toLowerCase().includes('printing');
+  const isPaused = state.toLowerCase().includes('paused');
+  const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
 
-  // Update last known values when new data is available
-  // useLayoutEffect runs synchronously after DOM mutations but before browser paint
-  // This ensures real-time updates without the batching delays of useEffect
-  useLayoutEffect(() => {
-    // Initialize from printer data if we don't have last known values and status is null
-    if (lastKnownHotendTemp === null && (status?.hotendTemp === null || status?.hotendTemp === undefined) && printer.hotendTemp !== null && printer.hotendTemp !== undefined) {
-      setLastKnownHotendTemp(printer.hotendTemp);
-    }
-    if (lastKnownBedTemp === null && (status?.bedTemp === null || status?.bedTemp === undefined) && printer.bedTemp !== null && printer.bedTemp !== undefined) {
-      setLastKnownBedTemp(printer.bedTemp);
-    }
-    if (lastKnownX === null && (status?.x === null || status?.x === undefined) && printer.x !== null && printer.x !== undefined) {
-      setLastKnownX(printer.x);
-    }
-    if (lastKnownY === null && (status?.y === null || status?.y === undefined) && printer.y !== null && printer.y !== undefined) {
-      setLastKnownY(printer.y);
-    }
-    if (lastKnownZ === null && (status?.z === null || status?.z === undefined) && printer.z !== null && printer.z !== undefined) {
-      setLastKnownZ(printer.z);
-    }
-    
-    // Update from status if we have new non-null data
-    if (status?.hotendTemp !== null && status?.hotendTemp !== undefined) {
-      setLastKnownHotendTemp(status.hotendTemp);
-    }
-    if (status?.bedTemp !== null && status?.bedTemp !== undefined) {
-      setLastKnownBedTemp(status.bedTemp);
-    }
-    if (status?.x !== null && status?.x !== undefined) {
-      setLastKnownX(status.x);
-    }
-    if (status?.y !== null && status?.y !== undefined) {
-      setLastKnownY(status.y);
-    }
-    if (status?.z !== null && status?.z !== undefined) {
-      setLastKnownZ(status.z);
-    }
-  }, [status, printer.id, printer.name, printer.hotendTemp, printer.bedTemp, printer.hotendTarget, printer.bedTarget, printer.x, printer.y, printer.z, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ]);
+  // Camera URLs come from API (no need to merge with SignalR)
+  const cameraStreamUrl = printer.cameraStreamUrl;
+  const cameraSnapshotUrl = printer.cameraSnapshotUrl;
+  const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
 
-  const formatTempWithTarget = (currentTemp: number | null | undefined, targetTemp: number | null | undefined, lastKnownCurrent: number | null): string => {
-    const current = currentTemp ?? lastKnownCurrent;
-    const target = targetTemp;
+  const formatTempWithTarget = (currentTemp: number | null | undefined, targetTemp: number | null | undefined): string => {
+    if (currentTemp === null || currentTemp === undefined) return '[ --°C ]';
     
-    if (current === null || current === undefined) return '[ --°C ]';
-    
-    const currentRounded = Math.round(current);
+    const currentRounded = Math.round(currentTemp);
     
     // If target is null, undefined, or 0, just show current temperature
-    if (target === null || target === undefined || target === 0) {
+    if (targetTemp === null || targetTemp === undefined || targetTemp === 0) {
       return `[ ${currentRounded}°C ]`;
     }
     
     // If heating (target > current), show both
-    const targetRounded = Math.round(target);
+    const targetRounded = Math.round(targetTemp);
     if (targetRounded > currentRounded) {
       return `[ ${currentRounded}°C → ${targetRounded}°C ]`;
     }
@@ -187,10 +117,9 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     return `[ ${currentRounded}°C ]`;
   };
 
-  const formatPos = (pos: number | null | undefined, lastKnown: number | null): string => {
-    const value = pos ?? lastKnown;
-    if (value === null || value === undefined) return '---';
-    return value.toFixed(1);
+  const formatPos = (pos: number | null | undefined): string => {
+    if (pos === null || pos === undefined) return '---';
+    return pos.toFixed(1);
   };
 
   const toCamelCase = (str?: string) => {
@@ -244,15 +173,15 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
   const expandedProgressRef = useRef<HTMLDivElement | null>(null);
 
   // Update progress bar widths via DOM refs to avoid inline style props (project lint rule)
-  useLayoutEffect(() => {
-    const pct = status?.progress !== undefined && status?.progress !== null ? Math.max(0, Math.min(100, status.progress)) : 0;
+  useEffect(() => {
+    const pct = printer.progress !== undefined && printer.progress !== null ? Math.max(0, Math.min(100, printer.progress)) : 0;
     try {
       if (collapsedProgressRef.current) collapsedProgressRef.current.style.width = `${Math.round(pct)}%`;
       if (expandedProgressRef.current) expandedProgressRef.current.style.width = `${Math.round(pct)}%`;
     } catch {
       // Ignore DOM write errors in very restricted test environments
     }
-  }, [status?.progress]);
+  }, [printer.progress]);
 
   // progressPct is available via status.progress when needed; dynamic width is set via refs
 
@@ -306,7 +235,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     if (e.key !== 'Enter' || hotendTemp === '') return;
     
     try {
-      const currentBedTemp = bedTemp === '' ? (status?.bedTarget ?? printer.bedTarget ?? 0) : bedTemp;
+      const currentBedTemp = bedTemp === '' ? (printer.bedTarget ?? 0) : bedTemp;
       const result = await apiClient.setTemperatures(printer.id, { 
         hotend: Number(hotendTemp),
         bed: Number(currentBedTemp)
@@ -324,7 +253,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
     if (e.key !== 'Enter' || bedTemp === '') return;
     
     try {
-      const currentHotendTemp = hotendTemp === '' ? (status?.hotendTarget ?? printer.hotendTarget ?? 0) : hotendTemp;
+      const currentHotendTemp = hotendTemp === '' ? (printer.hotendTarget ?? 0) : hotendTemp;
       const result = await apiClient.setTemperatures(printer.id, { 
         hotend: Number(currentHotendTemp),
         bed: Number(bedTemp)
@@ -543,18 +472,18 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         </div>
 
         {/* Progress bar for active prints */}
-        {isOnline && status?.progress !== undefined && status.progress > 0 && (
+        {isOnline && printer.progress !== undefined && printer.progress > 0 && (
           <div className="mt-3">
             <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-              <span className="truncate flex-1">{status.jobName || 'Printing...'}</span>
-              <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
+              <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>
+              <span className="font-semibold ml-2">{Math.round(printer.progress)}%</span>
             </div>
             <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
               <div
                 ref={collapsedProgressRef}
                 className="bg-pf-success h-2 rounded-full transition-all duration-300"
               >
-                <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, status.progress))) }%</span>
+                <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, printer.progress))) }%</span>
               </div>
             </div>
           </div>
@@ -582,7 +511,7 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
               {/* Optional debug panel controlled by window.PrintFarmerDebug.expandablePrinterCardDisplay */}
               {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
                 <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
-                  {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}
+                  {renderUnknown({ printer })}
                 </div>
               )}
         
@@ -700,18 +629,18 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
       </div>
 
       {/* Progress bar for active prints */}
-      {isOnline && status?.progress !== undefined && status.progress > 0 && (
+      {isOnline && printer.progress !== undefined && printer.progress > 0 && (
         <div className="mb-4">
           <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-            <span className="truncate flex-1">{status.jobName || 'Printing...'}</span>
-            <span className="font-semibold ml-2">{Math.round(status.progress)}%</span>
+            <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>
+            <span className="font-semibold ml-2">{Math.round(printer.progress)}%</span>
           </div>
           <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
             <div
               ref={expandedProgressRef}
               className="bg-pf-success h-2 rounded-full transition-all duration-300"
             >
-              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, status.progress))) }%</span>
+              <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, printer.progress))) }%</span>
             </div>
           </div>
         </div>
@@ -723,23 +652,21 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         <div className="grid grid-cols-3 gap-2 w-[24.5rem]">
           {/* Row 1: Labels */}
           <div className="flex items-center h-5 w-[7.75rem]">
-            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(status?.hotendTarget ?? printer.hotendTarget ?? 0) > 0} />
+            <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
             <span className="text-xs text-slate-400 ml-auto">
               {formatTempWithTarget(
-                status?.hotendTemp ?? printer.hotendTemp,
-                status?.hotendTarget ?? printer.hotendTarget,
-                lastKnownHotendTemp
+                printer.hotendTemp,
+                printer.hotendTarget
               )}
             </span>
           </div>
           
           <div className="flex items-center h-5 w-[7.75rem]">
-            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(status?.bedTarget ?? printer.bedTarget ?? 0) > 0} />
+            <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
             <span className="text-xs text-slate-400 ml-auto">
               {formatTempWithTarget(
-                status?.bedTemp ?? printer.bedTemp,
-                status?.bedTarget ?? printer.bedTarget,
-                lastKnownBedTemp
+                printer.bedTemp,
+                printer.bedTarget
               )}
             </span>
           </div>
@@ -999,13 +926,13 @@ export function ExpandablePrinterCard({ printer, onEdit }: ExpandablePrinterCard
         <div className="grid grid-cols-4 gap-2 mt-3 w-72 h-12">
           {/* Row 1: Labels (right-aligned) */}
           <div className="flex items-center justify-end pr-1">
-            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(null, lastKnownX)} ]</span>
+            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(printer.x)} ]</span>
           </div>
           <div className="flex items-center justify-end pr-1">
-            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(null, lastKnownY)} ]</span>
+            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(printer.y)} ]</span>
           </div>
           <div className="flex items-center justify-end pr-1">
-            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(null, lastKnownZ)} ]</span>
+            <span className="text-xs font-bold text-pf-text-secondary">[ {formatPos(printer.z)} ]</span>
           </div>
           <div className="flex items-center">
             <span className="text-xs font-bold text-pf-text-secondary">GO</span>

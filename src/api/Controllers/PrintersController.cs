@@ -1909,4 +1909,91 @@ public class PrintersController(
 
     #endregion
 
+    #region Printer Location Management
+
+    /// <summary>
+    /// Assign a printer to a location.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="request">The location assignment request</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>The updated printer</returns>
+    /// <response code="200">Printer assigned to location successfully</response>
+    /// <response code="404">Printer or location not found</response>
+    /// <response code="500">Failed to assign printer to location</response>
+    [HttpPost("{id}/location")]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<PrinterDto>> AssignPrinterToLocationAsync(
+        [FromRoute] Guid id,
+        [FromBody] AssignPrinterToLocationRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (request?.LocationId == null)
+            {
+                return BadRequest(new { message = "LocationId is required" });
+            }
+
+            var printer = await _printersService.FindByIdAsync(id, ct);
+            if (printer == null)
+            {
+                return NotFound(new { message = "Printer not found" });
+            }
+
+            // Update printer with location
+            printer.LocationId = request.LocationId;
+            await _printersService.SaveChangesAsync(ct);
+
+            var dto = await _printersService.GetPrinterDtoAsync(id, ct);
+            return Ok(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[PrintersController] Failed to assign printer {id} to location");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Remove a printer from its location (unassign).
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content</returns>
+    /// <response code="204">Printer unassigned from location successfully</response>
+    /// <response code="404">Printer not found</response>
+    /// <response code="500">Failed to unassign printer from location</response>
+    [HttpDelete("{id}/location")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult> UnassignPrinterFromLocationAsync(
+        [FromRoute] Guid id,
+        CancellationToken ct)
+    {
+        try
+        {
+            var printer = await _printersService.FindByIdAsync(id, ct);
+            if (printer == null)
+            {
+                return NotFound(new { message = "Printer not found" });
+            }
+
+            // Remove location from printer
+            printer.LocationId = null;
+            await _printersService.SaveChangesAsync(ct);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[PrintersController] Failed to unassign printer {id} from location");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    #endregion
+
 }

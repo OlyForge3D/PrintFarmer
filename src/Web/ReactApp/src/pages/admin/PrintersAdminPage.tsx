@@ -4,13 +4,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
 import { printerHubService } from '@/services/printerHubService';
 import { getPrinterBackendName } from '@/utils/enumHelpers';
+import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { toast } from 'sonner';
 import { DeleteIcon, EditIcon, CheckCircleIcon, CircleIcon } from '@/components/icons/MdiIcons';
-import { Alert, Button, Checkbox, FileUpload, Label, Select, Tooltip } from '@/components/ui';
+import { Alert, Button, Checkbox, Label, Select, Tooltip } from '@/components/ui';
 import type { Printer } from '@/types/api';
 
 export function PrintersAdminPage() {
@@ -193,44 +194,49 @@ export function PrintersAdminPage() {
       const f = file || (fileInputRef.current?.files ? fileInputRef.current.files[0] : undefined);
       if (!f) return;
 
-      const text = await f.text();
-      let parsed: unknown = [];
-      try {
-        parsed = JSON.parse(text);
-      } catch (parseErr) {
-        console.error('Failed to parse import file', parseErr);
-        toast.error('Invalid file format. Expected JSON array.');
+      // Validate file type
+      const extension = f.name.split('.').pop()?.toLowerCase();
+      if (!['csv', 'json'].includes(extension || '')) {
+        toast.error('File must be CSV or JSON format');
         return;
       }
 
-      if (!Array.isArray(parsed)) {
-        toast.error('Import file must contain a JSON array');
-        return;
-      }
+      // Send file to backend for parsing and import
+      const formData = new FormData();
+      formData.append('file', f);
 
-      const mapped: PreviewItem[] = parsed.map((item, idx) => {
-        const rec = (item ?? {}) as Record<string, unknown>;
-        return {
-          __index: idx,
-          raw: rec,
-          name: typeof rec.name === 'string' ? rec.name : '',
-          serverUrl: typeof rec.serverUrl === 'string' ? rec.serverUrl : '',
-          backend: typeof rec.backend === 'number' ? rec.backend : 1,
-          apiKey: typeof rec.apiKey === 'string' ? rec.apiKey : undefined,
-          notes: typeof rec.notes === 'string' ? rec.notes : undefined,
-          manufacturerId: typeof rec.manufacturerId === 'string' ? rec.manufacturerId : undefined,
-          modelId: typeof rec.modelId === 'string' ? rec.modelId : undefined,
-          manufacturerName: typeof rec.manufacturerName === 'string' ? rec.manufacturerName : undefined,
-          modelName: typeof rec.modelName === 'string' ? rec.modelName : undefined,
-          valid: Boolean(rec.name) && Boolean(rec.serverUrl)
-        };
+      setImporting(true);
+      const response = await fetch(`${getApiBaseUrl()}/printers/import`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData
       });
 
-      setPreviewItems(mapped);
-      setImportResults(null);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(error.message || `HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('[Import] Backend response:', result);
+
+      setImportResults(result);
       setImporting(false);
+      
+      // Refresh printers list to show newly imported printers
+      await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+      
+      const { importedCount, skippedCount, failureCount } = result;
+      if (importedCount > 0) {
+        toast.success(`Successfully imported ${importedCount} printer${importedCount === 1 ? '' : 's'}${skippedCount > 0 ? `, skipped ${skippedCount}` : ''}${failureCount > 0 ? `, failed ${failureCount}` : ''}`);
+      } else if (skippedCount > 0) {
+        toast.info(`No new printers imported (${skippedCount} skipped due to duplicates)`);
+      } else if (failureCount > 0) {
+        toast.error(`Import failed: ${failureCount} error${failureCount === 1 ? '' : 's'}`);
+      }
     } catch (err) {
-      console.error('Import failed', err);
+      console.error('[Import] Import failed', err);
+      setImporting(false);
       toast.error(err instanceof Error ? err.message : 'Failed to import file');
     }
   };
@@ -509,13 +515,14 @@ export function PrintersAdminPage() {
               ) : 'Export printers'}
             </Button>
             <Button variant="primary" aria-label="Open file picker to import printers" onClick={handleImportClick}>Import printers</Button>
-            <FileUpload
-              id={fileInputId}
-              label="Import printers JSON file"
+            {/* Hidden file input for import */}
+            <input
               ref={fileInputRef}
-              accept=".csv,.json,text/csv,application/json"
-              onChange={(files) => handleFile(files?.[0])}
-              className=""
+              type="file"
+              id={fileInputId}
+              accept=".csv,.json"
+              onChange={(e) => handleFile(e.target.files?.[0])}
+              style={{ display: 'none' }}
             />
           </div>
 

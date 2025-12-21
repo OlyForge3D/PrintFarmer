@@ -4,7 +4,6 @@ import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
-import { usePrinterStatusUpdates } from '@/hooks/useSignalR';
 import { useAuth } from '@/contexts/AuthHooks';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { 
@@ -20,8 +19,6 @@ const DEFAULT_PRESETS: TempPresets = { abs: { hotend: 250, bed: 90 }, asa: { hot
 
 export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
   const { hasPermission } = useAuth();
-  const { getPrinterStatus } = usePrinterStatusUpdates();
-  const realtimeStatus = getPrinterStatus(printer.id);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isCameraVisible, setIsCameraVisible] = useState(false);
   const [moveStep, setMoveStep] = useState(10);
@@ -30,20 +27,21 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Use printer data directly (already contains merged realtime status from API)
   const currentStatus = {
-    isOnline: realtimeStatus?.isOnline ?? printer.isOnline,
-    state: realtimeStatus?.state ?? printer.state,
-    progress: realtimeStatus?.progress ?? printer.progress,
-    jobName: realtimeStatus?.jobName ?? printer.jobName,
-    hotendTemp: realtimeStatus?.hotendTemp ?? printer.hotendTemp,
-    bedTemp: realtimeStatus?.bedTemp ?? printer.bedTemp,
-    hotendTarget: realtimeStatus?.hotendTarget ?? printer.hotendTarget,
-    bedTarget: realtimeStatus?.bedTarget ?? printer.bedTarget,
-    x: realtimeStatus?.x ?? printer.x,
-    y: realtimeStatus?.y ?? printer.y,
-    z: realtimeStatus?.z ?? printer.z,
-    cameraStreamUrl: realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl,
-    cameraSnapshotUrl: realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl,
+    isOnline: printer.isOnline,
+    state: printer.state,
+    progress: printer.progress,
+    jobName: printer.jobName,
+    hotendTemp: printer.hotendTemp,
+    bedTemp: printer.bedTemp,
+    hotendTarget: printer.hotendTarget,
+    bedTarget: printer.bedTarget,
+    x: printer.x,
+    y: printer.y,
+    z: printer.z,
+    cameraStreamUrl: printer.cameraStreamUrl,
+    cameraSnapshotUrl: printer.cameraSnapshotUrl,
   };
 
   const progressNow = typeof currentStatus.progress === 'number' ? Math.round(currentStatus.progress) : 0;

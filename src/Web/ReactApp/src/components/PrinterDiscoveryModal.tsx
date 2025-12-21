@@ -6,6 +6,7 @@ import './printerDiscovery.css';
 import { useStartDiscoveryStream, useCancelDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/hooks/useApi';
 import { useDiscoveryStream, useSignalRConnection } from '@/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
+import { SearchIcon } from '@/components/icons/MdiIcons';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import { CloseIcon } from '@/components/icons/MdiIcons';
@@ -583,7 +584,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                 variant="primary"
                 onClick={handleStartDiscovery}
                 disabled={startDiscoveryMutation.isPending || selectedBackends.size === 0}
-                iconLeft={<Search className="h-4 w-4" />}
+                iconLeft={<SearchIcon className="h-4 w-4" />}
               >
                 {hasScanRun ? 'Scan Again' : 'Start Scan'}
               </Button>
