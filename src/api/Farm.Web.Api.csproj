@@ -15,7 +15,6 @@
   <ItemGroup>
   <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
-    <ProjectReference Include="../signalr/Farm.SignalR/Farm.SignalR.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
     <!-- Plugin implementations - needed for dynamic plugin discovery -->
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj" />

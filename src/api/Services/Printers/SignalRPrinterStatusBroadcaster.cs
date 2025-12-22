@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.SignalR.Hubs;
+using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.Printers;

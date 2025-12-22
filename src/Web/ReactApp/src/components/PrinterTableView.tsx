@@ -104,9 +104,9 @@ export function PrinterTableView({
     if (temp === undefined && target === undefined) return '—';
     
     if (target !== undefined && target > 0) {
-      return `${Math.round(temp || 0)}°/${Math.round(target)}°`;
+      return `${(temp || 0).toFixed(1)}°/${(target || 0).toFixed(1)}°`;
     }
-    return temp !== undefined ? `${Math.round(temp)}°` : '—';
+    return temp !== undefined ? `${temp.toFixed(1)}°` : '—';
   };
 
   return (

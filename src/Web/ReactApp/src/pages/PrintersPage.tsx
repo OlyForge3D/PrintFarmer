@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { usePrinters, useDeletePrinter } from '@/hooks/useApi';
+import { usePrinterDisplays } from '@/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { useAuth } from '@/contexts/AuthHooks';
@@ -10,30 +11,16 @@ import { EditPrinterModal } from '@/components/EditPrinterModal';
 import { AddPrinterButton } from '@/components/AddPrinterButton';
 import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/components/skeletons/PrinterCardSkeleton';
-import { ExpandablePrinterCard } from '@/components/ExpandablePrinterCard';
+import { DetailedPrinterCard } from '@/components/DetailedPrinterCard';
 import { PrinterCompactCard } from '@/components/PrinterCompactCard';
 import { PageTemplate } from '@/components/PageTemplate';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
+import { ViewModeToggle } from '@/components/ViewModeToggle';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
 import { PrinterIcon } from '@/components/icons/MdiIcons';
-import { mdiViewList, mdiViewGrid, mdiViewComfy, mdiViewQuilt } from '@mdi/js';
-import { toast } from 'sonner';
-
-// Helper component for MDI icons
-function MdiIcon({ path, size = 'w-4 h-4' }: { path: string; size?: string }) {
-  return (
-    <svg
-      className={size}
-      viewBox="0 0 24 24"
-      role="img"
-    >
-      <path fill="currentColor" d={path} />
-    </svg>
-  );
-}
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -56,6 +43,9 @@ export function PrintersPage() {
     error,
     refetch: refetchPrinters
   } = usePrinters();
+  
+  // Merge with realtime SignalR updates for display
+  const displayPrinters = usePrinterDisplays(printers || []);
   
   const deletePrinterMutation = useDeletePrinter();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -81,7 +71,7 @@ export function PrintersPage() {
 
   // Filter printers for the current user (for now show all printers since userId isn't on Printer)
   const userPrinters = useMemo(() => {
-    let filtered = printers || [];
+    let filtered = displayPrinters || [];
     // State filter
     if (stateFilter !== 'all') {
       filtered = filtered.filter(p => {
@@ -98,7 +88,7 @@ export function PrintersPage() {
       filtered = filtered.filter(p => getBackendName(p.backend) === backendFilter);
     }
     return filtered;
-  }, [printers, stateFilter, backendFilter]);
+  }, [displayPrinters, stateFilter, backendFilter]);
 
 
 
@@ -247,55 +237,12 @@ export function PrintersPage() {
             <option value="OctoPrint">OctoPrint</option>
           </Select>
           {/* View Mode Toggle */}
-          <div className="flex items-center bg-pf-bg-1 border border-pf-border rounded-lg p-1">
-            <Button
-              type="button"
-              onClick={() => setViewMode('collapsed')}
-              variant={viewMode === 'collapsed' ? 'primary' : 'subtle'}
-              size="sm"
-              className="flex items-center space-x-2"
-              title="Collapsed Card View"
-            >
-              <MdiIcon path={mdiViewList} />
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setViewMode('compact')}
-              variant={viewMode === 'compact' ? 'primary' : 'subtle'}
-              size="sm"
-              className="!p-2"
-              title="Compact Cards"
-            >
-              <MdiIcon path={mdiViewGrid} />
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setViewMode('expandable')}
-              variant={viewMode === 'expandable' ? 'primary' : 'subtle'}
-              size="sm"
-              className="!p-2"
-              title="Expandable Cards"
-            >
-              <MdiIcon path={mdiViewComfy} />
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setViewMode('table')}
-              variant={viewMode === 'table' ? 'primary' : 'subtle'}
-              size="sm"
-              className="flex items-center space-x-2"
-              title="Table View"
-            >
-              <MdiIcon path={mdiViewQuilt} />
-            </Button>
-          </div>
+          <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
           {hasPermission('printers', 'create') && (
             <AddPrinterButton onSuccess={refetchPrinters} />
           )}
         </div>
       </div>
-
-
 
         {/* Content Area */}
         <div className="space-y-6">
@@ -310,9 +257,20 @@ export function PrintersPage() {
                 )}
               </div>
             </div>
+          ) : viewMode === 'compact' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {userPrinters.map((p: Printer) => (
+                <PrinterCompactCard
+                  key={p.id}
+                  printer={p}
+                  onEdit={(printer) => handleEditPrinter(printer)}
+                  onDelete={handleDeleteSinglePrinter}
+                />
+              ))}
+            </div>
           ) : viewMode === 'collapsed' ? (
             <div className="flex gap-6">
-              <div className="grid grid-cols-[repeat(auto-fit,26rem)] gap-6 justify-start flex-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 flex-1">
                 {userPrinters.map((printer) => (
                   <CollapsedPrinterCard
                     key={printer.id}
@@ -330,21 +288,10 @@ export function PrintersPage() {
                 />
               )}
             </div>
-          ) : viewMode === 'compact' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {userPrinters.map((p: Printer) => (
-                <PrinterCompactCard
-                  key={p.id}
-                  printer={p}
-                  onEdit={(printer) => handleEditPrinter(printer)}
-                  onDelete={handleDeleteSinglePrinter}
-                />
-              ))}
-            </div>
           ) : viewMode === 'expandable' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {userPrinters.map((p) => (
-                <ExpandablePrinterCard
+                <DetailedPrinterCard
                   key={p.id}
                   printer={p}
                   onEdit={() => handleEditPrinter(p)}

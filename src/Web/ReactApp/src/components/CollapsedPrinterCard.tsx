@@ -15,10 +15,12 @@ import {
   DeleteIcon
 } from '@/components/icons/MdiIcons';
 import { Button } from '@/components/ui';
+import { ControlPadButton } from '@/components/ui/ControlPadButton';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/components/PrinterFilesModal';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
 import { PrinterBackend, type Printer } from '@/types/api';
+import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import prusalinkIcon from '@/assets/prusalink.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
@@ -65,11 +67,13 @@ interface CollapsedPrinterCardProps {
 }
 
 export function CollapsedPrinterCard({
-  printer,
+  printer: printerProp,
   onExpand,
   onEdit,
   onDelete
 }: CollapsedPrinterCardProps) {
+  // Merge with realtime SignalR updates
+  const printer = usePrinterDisplay(printerProp);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraMode, setCameraMode] = useState<'snapshot' | 'stream'>('snapshot');
   const [showHistory, setShowHistory] = useState(false);
@@ -158,7 +162,7 @@ export function CollapsedPrinterCard({
         
         {/* External link */}
         <a 
-          href={printer.serverUrl} 
+          href={printer.frontendUrl} 
           target="_blank" 
           rel="noopener noreferrer"
           className="text-pf-text-secondary hover:text-pf-text-primary flex-shrink-0 p-1"
@@ -233,48 +237,43 @@ export function CollapsedPrinterCard({
         </Button>
       </div>
 
-      {/* Control buttons in collapsed view - same size as XY pad buttons */}
-      <div className="grid grid-cols-3 gap-1 w-40 h-12 mb-2">
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => handleControlAction('pause')}
+      {/* Control buttons */}
+      <div className="flex gap-1 mb-2">
+        <ControlPadButton
           disabled={!isPrinting}
-          className="w-full h-full !p-0"
+          onClick={() => handleControlAction('pause')}
+          title="Pause"
+          padSize="small"
         >
-          <PauseIcon className="h-6 w-6" />
-        </Button>
-        <Button
-          type="button"
+          <PauseIcon className="h-4 w-4" />
+        </ControlPadButton>
+        <ControlPadButton
           variant="success"
-          size="sm"
-          onClick={() => handleControlAction('resume')}
           disabled={!isPaused}
-          className="w-full h-full !p-0"
+          onClick={() => handleControlAction('resume')}
+          title="Resume"
+          padSize="small"
         >
-          <PlayIcon className="h-6 w-6" />
-        </Button>
-        <Button
-          type="button"
+          <PlayIcon className="h-4 w-4" />
+        </ControlPadButton>
+        <ControlPadButton
           variant={isShutdown ? 'secondary' : 'danger'}
-          size="sm"
-          onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           disabled={!isOnline}
+          onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
-          className="w-full h-full !p-0"
+          padSize="small"
         >
-          {isShutdown ? <RefreshIcon className="h-6 w-6" /> : <EmergencyStopIcon className="h-6 w-6" />}
-        </Button>
+          {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
+        </ControlPadButton>
       </div>
 
       {/* Progress bar for active prints */}
       {(() => {
-        const progress = realtimeStatus?.progress ?? printer.progress ?? 0;
+        const progress = printer.progress ?? 0;
         return isOnline && progress !== undefined && progress > 0 && (
           <div className="mt-3">
             <div className="flex justify-between text-xs text-pf-text-secondary mb-1">
-              <span className="truncate flex-1">{(realtimeStatus?.jobName ?? printer.jobName) || 'Printing...'}</span>
+              <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>
               <span className="font-semibold ml-2">{Math.round(progress)}%</span>
             </div>
             <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
@@ -292,7 +291,7 @@ export function CollapsedPrinterCard({
       {showCamera && (
         <div className="mt-4 w-52 flex flex-col bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
           {/* Camera mode toggle - show if both snapshot and stream are available */}
-          {hasCameraUrls && (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) && (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl) && (
+          {hasCameraUrls && cameraSnapshotUrl && cameraStreamUrl && (
             <div className="flex gap-1 p-2 border-b border-pf-border bg-pf-bg-1 bg-opacity-50">
               <Button
                 type="button"
@@ -320,33 +319,33 @@ export function CollapsedPrinterCard({
           {/* Camera display */}
           <div className="min-h-32 flex items-center justify-center overflow-hidden">
             {hasCameraUrls ? (
-              cameraMode === 'snapshot' && (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ? (
+              cameraMode === 'snapshot' && cameraSnapshotUrl ? (
                 <img 
-                  src={realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl}
+                  src={cameraSnapshotUrl}
                   alt="webcam snapshot"
                   className="max-w-full max-h-full object-contain"
                   onError={() => {}}
                   onLoad={() => {}}
                 />
-              ) : cameraMode === 'stream' && (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl) ? (
+              ) : cameraMode === 'stream' && cameraStreamUrl ? (
                 <img 
-                  src={realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl}
+                  src={cameraStreamUrl}
                   alt="webcam stream"
                   className="max-w-full max-h-full object-contain"
                   onError={() => {}}
                   onLoad={() => {}}
                 />
-              ) : (realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl) ? (
+              ) : cameraSnapshotUrl ? (
                 <img 
-                  src={realtimeStatus?.cameraSnapshotUrl ?? printer.cameraSnapshotUrl}
+                  src={cameraSnapshotUrl}
                   alt="webcam snapshot"
                   className="max-w-full max-h-full object-contain"
                   onError={() => {}}
                   onLoad={() => {}}
                 />
-              ) : (realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl) ? (
+              ) : cameraStreamUrl ? (
                 <img 
-                  src={realtimeStatus?.cameraStreamUrl ?? printer.cameraStreamUrl}
+                  src={cameraStreamUrl}
                   alt="webcam stream"
                   className="max-w-full max-h-full object-contain"
                   onError={() => {}}

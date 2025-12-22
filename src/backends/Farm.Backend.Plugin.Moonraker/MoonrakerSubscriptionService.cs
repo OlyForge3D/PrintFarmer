@@ -7,8 +7,8 @@ using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
-using Farm.SignalR.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -1264,6 +1264,8 @@ public sealed class MoonrakerSubscriptionService(
             );
             _statusCacheWriter.UpdateStatus(cacheUpdate);
 
+            _logger.LogInformation($"[MoonrakerSubscriptionService] Broadcasting printerupdated for {printerId} via SignalR");
+            _logger.LogDebug($"[MoonrakerSubscriptionService] Hub is null: {hub == null}");
             await hub!.Clients.All.SendAsync("printerupdated", update, ct);
         }
         catch (OperationCanceledException)
@@ -1324,6 +1326,7 @@ public sealed class MoonrakerSubscriptionService(
             );
             _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
 
+            _logger.LogInformation($"[MoonrakerSubscriptionService] Broadcasting printerupdated (offline) for {printerId} via SignalR");
             await hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
             _logger.LogDebug($"Sent offline status for printer {printerId}");
         }
@@ -1364,6 +1367,7 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: null
             );
 
+            _logger.LogInformation($"[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {printerId} via SignalR");
             await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
             _logger.LogDebug($"Sent shutdown status for printer {printerId}");
         }

@@ -6,6 +6,7 @@ import moonrakerIcon from '@/assets/moonraker.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
 import type { Printer } from '@/types/api';
 import { useAuth } from '@/contexts/AuthHooks';
+import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 import { PrinterActionsDropdown } from './PrinterActionsDropdown';
 import { Button } from '@/components/ui';
 import { PlayIcon, PauseIcon, StopIcon, GearIcon } from '@/components/icons/MdiIcons';
@@ -24,13 +25,15 @@ interface PrinterCardProps {
 }
 
 export function PrinterCard({
-  printer,
+  printer: printerProp,
   viewMode = 'grid',
   onEdit = () => { },
   onDelete = () => { },
   onManage = () => { }
 }: PrinterCardProps) {
   const { hasPermission } = useAuth();
+  // Merge with realtime SignalR updates
+  const printer = usePrinterDisplay(printerProp);
 
   // State for printer cover image
   const [coverImageUrl, setCoverImageUrl] = useState<string | undefined>(undefined);
@@ -187,9 +190,9 @@ export function PrinterCard({
     if (temp === undefined && target === undefined) return null;
 
     if (target !== undefined) {
-      return `${Math.round(temp || 0)}°/${Math.round(target)}°`;
+      return `${(temp || 0).toFixed(1)}°/${(target || 0).toFixed(1)}°`;
     }
-    return `${Math.round(temp || 0)}°`;
+    return `${(temp || 0).toFixed(1)}°`;
   };
 
   const formatPosition = (x?: number, y?: number, z?: number) => {

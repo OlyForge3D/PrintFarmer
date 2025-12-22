@@ -68,6 +68,7 @@ export interface Printer {
   id: string;
   name: string;
   serverUrl: string;
+  frontendUrl?: string;
   notes?: string;
   isOnline: boolean;
   isReachable: boolean;

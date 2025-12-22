@@ -15,6 +15,7 @@ export function ControlPadButton({
   padSize = 'medium',
   variant = 'secondary',
   className = '',
+  children,
   ...props
 }: ControlPadButtonProps) {
   const sizeClasses = {
@@ -29,6 +30,8 @@ export function ControlPadButton({
       size="sm"
       className={`${sizeClasses[padSize]} !p-0 ${className}`}
       {...props}
-    />
+    >
+      {children}
+    </Button>
   );
 }

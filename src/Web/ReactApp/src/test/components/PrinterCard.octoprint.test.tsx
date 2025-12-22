@@ -25,7 +25,7 @@ vi.mock('@/contexts/AuthHooks', () => ({
 
 // Mock useSignalR to prevent signalRService errors
 vi.mock('@/hooks/useSignalR', () => ({
-  usePrinterStatusUpdates: () => ({ getPrinterStatus: () => undefined }),
+  usePrinterStatusUpdates: () => ({ printerStatuses: new Map() }),
   useDiscoveryStream: () => ({
     progress: null,
     foundPrinters: [],

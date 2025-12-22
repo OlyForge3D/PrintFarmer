@@ -2,8 +2,8 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
-using Farm.SignalR.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.SignalR

@@ -12,13 +12,16 @@ import {
 } from 'lucide-react';
 import { PlayIcon, PauseIcon } from '@/components/icons/MdiIcons';
 import { Button, Input, FileUpload } from '@/components/ui';
+import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 
 interface EnhancedPrinterCardProps { printer: Printer; }
 interface TempPresets { [k: string]: { hotend: number; bed: number }; }
 const DEFAULT_PRESETS: TempPresets = { abs: { hotend: 250, bed: 90 }, asa: { hotend: 260, bed: 95 }, pla: { hotend: 210, bed: 60 }, pc: { hotend: 280, bed: 110 }, pctg: { hotend: 230, bed: 75 }, petg: { hotend: 240, bed: 70 } };
 
-export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
+export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCardProps) {
   const { hasPermission } = useAuth();
+  // Merge with realtime SignalR updates
+  const printer = usePrinterDisplay(printerProp);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isCameraVisible, setIsCameraVisible] = useState(false);
   const [moveStep, setMoveStep] = useState(10);
@@ -54,7 +57,7 @@ export function EnhancedPrinterCard({ printer }: EnhancedPrinterCardProps) {
     if (b === PrinterBackend.OctoPrint) return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle" />;
     return <span title="Other" aria-label="Other" role="img">🖨️</span>;
   };
-  const formatTemperature = (t?: number, target?: number) => target !== undefined ? `${Math.round(t || 0)}° → ${Math.round(target)}°` : `${Math.round(t || 0)}°`;
+  const formatTemperature = (t?: number, target?: number) => target !== undefined ? `${(t || 0).toFixed(1)}° → ${(target || 0).toFixed(1)}°` : `${(t || 0).toFixed(1)}°`;
   const formatPosition = (v?: number) => v !== undefined ? v.toFixed(1) : '--';
   const isPrinting = currentStatus.isOnline && currentStatus.state === 'printing';
   const isPaused = currentStatus.isOnline && currentStatus.state === 'paused';

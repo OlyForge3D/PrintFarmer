@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 // No MdiIcons used in this component
 import { usePrinter } from '@/hooks/useApi';
+import { usePrinterDisplay } from '@/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
 import { formatPrinterState } from '@/utils/printerStateDisplay';
 import type { TempTargets, MoveRequest } from '@/types/api';
@@ -76,7 +77,9 @@ interface PrinterDetailsSidebarProps {
 export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSidebarProps) {
   // Call hooks first before any early returns (React Rules of Hooks)
   // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
-  const { data: printer, isLoading, refetch } = usePrinter(printerId || '');
+  const { data: apiPrinter, isLoading, refetch } = usePrinter(printerId || '');
+  // Merge with realtime SignalR updates
+  const printer = usePrinterDisplay(apiPrinter || ({} as any));
   
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);

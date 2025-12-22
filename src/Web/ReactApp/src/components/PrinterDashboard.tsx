@@ -1,5 +1,6 @@
 import React from 'react';
 import { usePrinters, useJobQueue, usePrinterHistory } from '@/hooks/useApi';
+import { usePrinterDisplays } from '@/hooks/usePrinterDisplay';
 import { SettingsIcon, PlayIcon, PauseIcon, PrinterIcon, WrenchIcon, CheckCircleIcon, AlertCircleIcon, DashboardIcon, TrendingUpIcon } from '@/components/icons/MdiIcons';
 import { DetailedSystemHealth } from '@/components/SystemHealth';
 import { PageTemplate } from '@/components/PageTemplate';
@@ -43,6 +44,9 @@ function StatsCard({ title, value, icon: Icon, color }: StatsCardProps) {
 export const PrinterDashboard: React.FC = () => {
   const { data: printers, isLoading, error } = usePrinters();
   
+  // Merge with realtime SignalR updates for display
+  const displayPrinters = usePrinterDisplays(printers || []);
+  
   // Fetch global job queue for active jobs
   const { data: globalQueue } = useJobQueue(undefined);
   
@@ -54,7 +58,7 @@ export const PrinterDashboard: React.FC = () => {
   );
 
   const stats = React.useMemo(() => {
-    const userPrinters = printers ?? [];
+    const userPrinters = displayPrinters ?? [];
     const total = userPrinters.length;
     const online = userPrinters.filter(p => p.isOnline).length;
     const printing = userPrinters.filter(p => (p.state ?? '').toLowerCase().includes('printing')).length;
@@ -62,7 +66,7 @@ export const PrinterDashboard: React.FC = () => {
     const maintenance = userPrinters.filter(p => p.inMaintenance).length;
     const offline = total - online;
     return { total, online, printing, paused, offline, maintenance };
-  }, [printers]);
+  }, [displayPrinters]);
 
   return (
     <PageTemplate

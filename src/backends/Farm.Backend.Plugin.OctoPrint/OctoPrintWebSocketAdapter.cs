@@ -4,8 +4,8 @@ using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
-using Farm.SignalR.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Backend.Plugin.OctoPrint;

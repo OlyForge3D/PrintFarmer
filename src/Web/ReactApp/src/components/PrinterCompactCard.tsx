@@ -33,8 +33,10 @@ export function PrinterCompactCard({
             />
           </div>
         ) : null}
-        <div className="text-base font-medium">{p.name}</div>
-        <div className="text-sm text-pf-text-secondary">
+        <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1">
+          {p.name}
+        </div>
+        <div className="text-pf-text-secondary text-xs">
           {p.manufacturerName ? `${p.manufacturerName} ${p.modelName ?? ''}` : (p.modelName ?? '')}
         </div>
       </div>

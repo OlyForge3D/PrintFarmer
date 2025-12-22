@@ -101,7 +101,7 @@ export function usePrinterStatusUpdates(
           if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
           (win.PrintFarmerDebug as Record<string, unknown>).lastPrinterUpdate = status as unknown as Record<string, unknown>;
         if (win.PrintFarmerDebug?.usePrinterStatusUpdates) {
-          console.debug('[usePrinterStatusUpdates] received status update', status.id, status.state, status.isOnline);
+          console.debug('[usePrinterStatusUpdates] received status update', status.id, status.state, status.isOnline, status.hotendTemp, status.bedTemp);
         }
       } catch {
         // Swallow debug failures

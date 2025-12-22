@@ -374,7 +374,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                   {printer.serverUrl}
                 </div>
                 <a 
-                  href={printer.serverUrl} 
+                  href={printer.frontendUrl || printer.serverUrl} 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="text-pf-text-secondary hover:text-pf-text-primary"
@@ -545,7 +545,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
                 {printer.serverUrl}
               </div>
               <a 
-                href={printer.serverUrl} 
+                href={printer.frontendUrl || printer.serverUrl} 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="text-pf-text-secondary hover:text-pf-text-primary"
@@ -653,7 +653,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
           {/* Row 1: Labels */}
           <div className="flex items-center h-5 w-[7.75rem]">
             <NozzleIcon className="w-4 h-4 text-red-500 flex-shrink-0" isOn={(printer.hotendTarget ?? 0) > 0} />
-            <span className="text-xs text-slate-400 ml-auto">
+            <span className="text-[0.65rem] text-slate-400 ml-auto">
               {formatTempWithTarget(
                 printer.hotendTemp,
                 printer.hotendTarget
@@ -663,7 +663,7 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
           
           <div className="flex items-center h-5 w-[7.75rem]">
             <BedIcon className="w-4 h-4 text-blue-500 flex-shrink-0" isOn={(printer.bedTarget ?? 0) > 0} />
-            <span className="text-xs text-slate-400 ml-auto">
+            <span className="text-[0.65rem] text-slate-400 ml-auto">
               {formatTempWithTarget(
                 printer.bedTemp,
                 printer.bedTarget
@@ -680,12 +680,14 @@ export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: Expan
             value={hotendTemp}
             onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleHotendTempKeyDown}
+            className="!w-full"
           />
           
           <TemperatureInput
             value={bedTemp}
             onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
             onKeyDown={handleBedTempKeyDown}
+            className="!w-full"
           />
           
           <div className="flex gap-1 items-stretch h-9">
