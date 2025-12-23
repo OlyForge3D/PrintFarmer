@@ -1,3 +1,5 @@
+#pragma warning disable S1144 // Unused classes and properties reserved for future use
+
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -533,14 +535,5 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
         public string? CameraStreamUrl { get; set; }
     }
 #pragma warning restore S3459, S1144
-
-    /// <summary>
-    /// Data class for parsed job status from HTTP fallback.
-    /// </summary>
-    private sealed class JobStatusData
-    {
-        public double? Progress { get; set; }
-        public string? JobName { get; set; }
-    }
 }
 

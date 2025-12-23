@@ -1,4 +1,6 @@
-﻿using System.Net.Http.Headers;
+﻿#pragma warning disable S1006, CA2213, S1939 // Default parameters, HttpClient disposal, and interface inheritance are intentional
+
+using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;

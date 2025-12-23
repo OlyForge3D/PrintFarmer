@@ -3,11 +3,10 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Artifacts;
 using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -18,18 +17,18 @@ namespace Farm.Web.Api.Services.Artifacts;
 /// </summary>
 public class ArtifactCleanupService : IArtifactCleanupService
 {
-    private readonly AppDbContext _db;
+    private readonly IArtifactsRepository _artifactsRepo;
     private readonly ArtifactStorageSettings _settings;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<ArtifactCleanupService> _logger;
 
     public ArtifactCleanupService(
-        AppDbContext db,
+        IArtifactsRepository artifactsRepo,
         IOptions<ArtifactStorageSettings> opts,
         IWebHostEnvironment env,
         ILogger<ArtifactCleanupService> logger)
     {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _artifactsRepo = artifactsRepo ?? throw new ArgumentNullException(nameof(artifactsRepo));
         _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
         _env = env ?? throw new ArgumentNullException(nameof(env));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -49,10 +48,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
         if (_settings.MaxAgeDays.HasValue && _settings.MaxAgeDays.Value > 0)
         {
             DateTime cutoffDate = DateTime.UtcNow.AddDays(-_settings.MaxAgeDays.Value);
-            List<Artifact> oldArtifacts = await _db.Artifacts
-                .Where(a => a.CreatedAt < cutoffDate)
-                .OrderBy(a => a.CreatedAt)
-                .ToListAsync(ct);
+            List<Artifact> oldArtifacts = (await _artifactsRepo.GetOlderThanAsync(cutoffDate, ct)).ToList();
 
             _logger.LogInformation("Found {Count} artifacts older than {Days} days", oldArtifacts.Count, _settings.MaxAgeDays.Value);
             candidatesForDeletion.AddRange(oldArtifacts);
@@ -61,15 +57,13 @@ public class ArtifactCleanupService : IArtifactCleanupService
         // Size-based cleanup: if total storage exceeds MaxTotalBytes, delete oldest until under threshold
         if (_settings.MaxTotalBytes.HasValue && _settings.MaxTotalBytes.Value > 0)
         {
-            long totalSize = await _db.Artifacts.SumAsync(a => (long?)a.SizeBytes, ct) ?? 0;
+            long totalSize = await _artifactsRepo.GetTotalSizeAsync(ct);
             if (totalSize > _settings.MaxTotalBytes.Value)
             {
                 _logger.LogInformation("Total storage {TotalSize} exceeds threshold {MaxTotalBytes}, selecting oldest artifacts for cleanup",
                     totalSize, _settings.MaxTotalBytes.Value);
 
-                List<Artifact> allArtifacts = await _db.Artifacts
-                    .OrderBy(a => a.CreatedAt)
-                    .ToListAsync(ct);
+                List<Artifact> allArtifacts = (await _artifactsRepo.GetAllAsync(ct)).ToList();
 
                 long runningTotal = totalSize;
                 foreach (Artifact? artifact in allArtifacts)
@@ -134,7 +128,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
                 }
 
                 // Remove from database
-                _ = _db.Artifacts.Remove(artifact);
+                _ = await _artifactsRepo.DeleteByIdAsync(artifact.Id, ct);
                 deletedCount++;
 
                 _logger.LogInformation(
@@ -150,12 +144,7 @@ public class ArtifactCleanupService : IArtifactCleanupService
             }
         }
 
-        if (deletedCount > 0)
-        {
-            _ = await _db.SaveChangesAsync(ct);
-            _logger.LogInformation("Successfully deleted {Count} artifacts", deletedCount);
-        }
-
+        _logger.LogInformation("Successfully deleted {Count} artifacts", deletedCount);
         return deletedCount;
     }
 }

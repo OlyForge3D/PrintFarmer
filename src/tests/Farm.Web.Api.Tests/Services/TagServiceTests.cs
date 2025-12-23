@@ -79,10 +79,10 @@ public class TagServiceTests
     {
         // Arrange
         _tagRepository.Setup(r => r.ListAllAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Database error"));
+            .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act & Assert
-        await Assert.ThrowsAsync<Exception>(() => _service.GetAllTagsAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.GetAllTagsAsync(CancellationToken.None));
     }
 
     #endregion
@@ -289,7 +289,7 @@ public class TagServiceTests
             .Returns(Task.CompletedTask);
 
         // Simulate race condition: another thread created the tag between check and insert
-        var dbUpdateEx = new DbUpdateException("Duplicate", new Exception("UNIQUE constraint failed"));
+        var dbUpdateEx = new DbUpdateException("Duplicate", new InvalidOperationException("UNIQUE constraint failed"));
         _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(dbUpdateEx);
 

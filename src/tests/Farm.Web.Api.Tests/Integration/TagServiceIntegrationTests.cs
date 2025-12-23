@@ -64,7 +64,7 @@ public class TagServiceIntegrationTests : IAsyncLifetime
         return model;
     }
 
-    private async Task<Model3DTagDto> CreateTestTagAsync(string name = null)
+    private async Task<Model3DTagDto> CreateTestTagAsync(string? name = null)
     {
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<ITagService>();

@@ -5,11 +5,9 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.FileConsistency;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -108,19 +106,19 @@ public class FileConsistencyAuditService : BackgroundService
 
         using (IServiceScope scope = _scopeFactory.CreateScope())
         {
-            AppDbContext dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             IFileManagementService fileManagementService = scope.ServiceProvider.GetRequiredService<IFileManagementService>();
             IFileIntegrityService fileIntegrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
+            IFileAuditRepository auditRepo = scope.ServiceProvider.GetRequiredService<IFileAuditRepository>();
 
             // Collect results from all audit passes
-            AuditResults model3dResults = await AuditModel3DFilesAsync(dbContext, fileManagementService, fileIntegrityService, ct);
-            AuditResults gcodeResults = await AuditGcodeFilesAsync(dbContext, fileManagementService, fileIntegrityService, ct);
-            AuditResults orphanedResults = await AuditOrphanedFilesAsync(dbContext, ct);
+            AuditResults model3dResults = await AuditModel3DFilesAsync(auditRepo, fileManagementService, fileIntegrityService, ct);
+            AuditResults gcodeResults = await AuditGcodeFilesAsync(auditRepo, fileManagementService, fileIntegrityService, ct);
+            AuditResults orphanedResults = await AuditOrphanedFilesAsync(auditRepo, ct);
 
             // Save audit results to database
-            await SaveAuditResultsAsync(dbContext, model3dResults, "Model3D", ct);
-            await SaveAuditResultsAsync(dbContext, gcodeResults, "GcodeFile", ct);
-            await SaveAuditResultsAsync(dbContext, orphanedResults, "OrphanedFiles", ct);
+            await SaveAuditResultsAsync(auditRepo, model3dResults, "Model3D", ct);
+            await SaveAuditResultsAsync(auditRepo, gcodeResults, "GcodeFile", ct);
+            await SaveAuditResultsAsync(auditRepo, orphanedResults, "OrphanedFiles", ct);
 
             _logger.LogInformation("File consistency audit completed");
         }
@@ -130,7 +128,7 @@ public class FileConsistencyAuditService : BackgroundService
     /// Save audit results to FileHealthAudit table for dashboard and admin review.
     /// </summary>
     private async Task SaveAuditResultsAsync(
-        AppDbContext dbContext,
+        IFileAuditRepository auditRepo,
         AuditResults results,
         string auditType,
         CancellationToken ct)
@@ -161,9 +159,7 @@ public class FileConsistencyAuditService : BackgroundService
                 CreatedAt = DateTime.UtcNow
             };
 
-            _ = dbContext.FileHealthAudits.Add(auditEntry);
-            _ = await dbContext.SaveChangesAsync(ct);
-
+            await auditRepo.SaveAuditResultAsync(auditEntry, ct);
             _logger.LogInformation($"Audit results saved for {auditType}: {auditEntry.SummaryMessage}");
         }
         catch (Exception ex)
@@ -173,16 +169,14 @@ public class FileConsistencyAuditService : BackgroundService
     }
 
     private async Task<AuditResults> AuditModel3DFilesAsync(
-        AppDbContext dbContext,
+        IFileAuditRepository auditRepo,
         IFileManagementService fileManagementService,
         IFileIntegrityService fileIntegrityService,
         CancellationToken ct)
     {
         _logger.LogDebug("Auditing Model3D files");
 
-        List<Model3D> models = await dbContext.Models3D
-            .AsNoTracking()
-            .ToListAsync(ct);
+        List<Model3D> models = (await auditRepo.GetAllModel3DFilesAsync(ct)).ToList();
 
         AuditResults results = new AuditResults { FilesChecked = models.Count };
 
@@ -248,16 +242,14 @@ public class FileConsistencyAuditService : BackgroundService
     }
 
     private async Task<AuditResults> AuditGcodeFilesAsync(
-        AppDbContext dbContext,
+        IFileAuditRepository auditRepo,
         IFileManagementService fileManagementService,
         IFileIntegrityService fileIntegrityService,
         CancellationToken ct)
     {
         _logger.LogDebug("Auditing GcodeFile files");
 
-        List<GcodeFile> gcodeFiles = await dbContext.GcodeFiles
-            .AsNoTracking()
-            .ToListAsync(ct);
+        List<GcodeFile> gcodeFiles = (await auditRepo.GetAllGcodeFilesAsync(ct)).ToList();
 
         AuditResults results = new AuditResults { FilesChecked = gcodeFiles.Count };
 
@@ -308,26 +300,16 @@ public class FileConsistencyAuditService : BackgroundService
         return results;
     }
 
-    private async Task<AuditResults> AuditOrphanedFilesAsync(
-        AppDbContext dbContext,
-        CancellationToken ct)
+    private async Task<AuditResults> AuditOrphanedFilesAsync(IFileAuditRepository auditRepo, CancellationToken ct)
     {
         _logger.LogDebug("Auditing for orphaned files");
 
         AuditResults results = new AuditResults();
 
-        HashSet<string> dbModelPaths = (await dbContext.Models3D
-            .AsNoTracking()
-            .Select(m => m.FilePath)
-            .ToListAsync(ct))
-            .Where(p => !string.IsNullOrEmpty(p))
+        HashSet<string> dbModelPaths = (await auditRepo.GetAllModel3DPathsAsync(ct))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        HashSet<string> dbGcodePaths = (await dbContext.GcodeFiles
-            .AsNoTracking()
-            .Select(g => g.FilePath)
-            .ToListAsync(ct))
-            .Where(p => !string.IsNullOrEmpty(p))
+        HashSet<string> dbGcodePaths = (await auditRepo.GetAllGcodePathsAsync(ct))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Check for orphaned model files

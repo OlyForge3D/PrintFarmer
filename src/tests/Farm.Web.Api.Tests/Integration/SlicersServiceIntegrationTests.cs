@@ -87,7 +87,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
 
         var dto = new RegisterSlicerDto
         {
-            Name = null, // Explicitly null to trigger default
+            Name = null!, // Explicitly null to trigger default
             SlicerType = 1,
             Version = "2.3.1",
             Host = "http://localhost:8080",

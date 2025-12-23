@@ -1,3 +1,5 @@
+#pragma warning disable S2219 // Type pattern matching style is intentional
+
 using System;
 using System.Collections.Generic;
 using System.Linq;

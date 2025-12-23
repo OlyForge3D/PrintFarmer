@@ -122,7 +122,7 @@ public static class ServiceCollectionExtensions
         // Register a lightweight provider for system settings that reads from IConfiguration
         _ = services.AddSingleton<ISystemSettingsProvider, ConfigurationSystemSettingsProvider>();
 
-        // Register SettingsService so DI constructs it with IConfiguration, AppDbContext and IUnifiedLoggingService
+        // Register SettingsService so DI constructs it with IConfiguration, and IUnifiedLoggingService
         _ = services.AddScoped<ISettingsService, SettingsService>();
 
         // Settings initialization from environment variables (scoped to match ISettingsService)
@@ -224,6 +224,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Harvest.IHarvestRepository, Farm.Infrastructure.Repositories.Harvest.EfHarvestRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileConsistencyRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileConsistencyRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileAuditRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileAuditRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Locations.ILocationRepository, Farm.Infrastructure.Repositories.Locations.EfLocationRepository>();
 
         // Tag repositories
@@ -235,6 +236,9 @@ public static class ServiceCollectionExtensions
 
         // Filament repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Filament.IFilamentTypeRepository, Farm.Infrastructure.Repositories.Filament.FilamentTypeRepository>();
+
+        // Artifacts repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Artifacts.IArtifactsRepository, Farm.Infrastructure.Repositories.Artifacts.EfArtifactsRepository>();
 
         // Password policy repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.PasswordPolicy.IPasswordPolicyRepository, Farm.Infrastructure.Repositories.PasswordPolicy.PasswordPolicyRepository>();
@@ -624,13 +628,6 @@ public static class ServiceCollectionExtensions
     #endregion
 
     #region Helpers
-
-    private static void RegisterStatusClientsFromPlugins(IServiceCollection services)
-    {
-        // Status clients are now registered by their respective plugins via RegisterAdditionalServices
-        // This method is a placeholder for any common status client setup if needed in the future
-        // For now, plugins handle all status client registration independently
-    }
 
     private static bool ShouldDisableBackgroundServices()
     {

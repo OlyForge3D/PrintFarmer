@@ -1,4 +1,6 @@
-﻿using System.IO;
+﻿#pragma warning disable CS1066, S1006 // Default parameters in explicit interface implementations are architecturally intentional
+
+using System.IO;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -469,7 +471,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
     }
 
-    public async Task<PrinterDto> CreatePrinterDtoAsync(
+    public Task<PrinterDto> CreatePrinterDtoAsync(
         Printer printer,
         PrinterCompositeStatus status,
         PrinterSpoolInfoDto? spoolInfo,
@@ -481,7 +483,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         string? cameraSnapshotUrl = printer.CameraSnapshotUrl;
 
         // Construct backend-specific PrinterDto
-        return new PrinterDto(
+        return Task.FromResult(new PrinterDto(
             Id: printer.Id,
             Name: printer.Name,
             Notes: printer.Notes,
@@ -510,7 +512,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             SpoolInfo: spoolInfo,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl
-        );
+        ));
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)

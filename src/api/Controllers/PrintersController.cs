@@ -1624,7 +1624,7 @@ public class PrintersController(
             
             Response.ContentType = contentType;
             Response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
-            await Response.Body.WriteAsync(data, 0, data.Length, ct);
+            await Response.Body.WriteAsync(data.AsMemory(0, data.Length), ct);
             return new EmptyResult();
         }
         catch (Exception ex)

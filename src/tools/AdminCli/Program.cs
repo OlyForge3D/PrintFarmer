@@ -292,6 +292,8 @@ internal static class Program
     /// <param name="probes">Discovery probes for each backend type</param>
     /// <param name="rangeConstraints">Optional list of CIDR ranges (e.g., 192.168.1.0/24) to constrain discovery</param>
     /// <param name="interfaceConstraints">Optional list of interface names (e.g., en0) to constrain discovery</param>
+    /// <param name="probeTimeoutMs">Timeout in milliseconds for each probe operation</param>
+    /// <param name="maxConcurrentScans">Maximum number of concurrent scan operations</param>
     private static async Task<List<DiscoveredPrinterInfo>> PerformLocalDiscoveryAsync(
         INetworkDiscoveryProbe[] probes,
         List<string>? rangeConstraints = null,

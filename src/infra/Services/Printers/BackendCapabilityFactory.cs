@@ -1,3 +1,5 @@
+#pragma warning disable CA1851 // Multiple enumeration intentional for distinct operations
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -72,7 +74,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         var discovered = new Dictionary<PrinterBackend, BackendCapabilities>();
 
         // For each backend, get its client and check which capability interfaces it implements
-        foreach (PrinterBackend backend in Enum.GetValues(typeof(PrinterBackend)))
+        foreach (PrinterBackend backend in Enum.GetValues<PrinterBackend>())
         {
             try
             {

@@ -1,5 +1,7 @@
 namespace Farm.Web.Api.Extensions;
 
+#pragma warning disable CA1303, S3885 // Debug logging strings don't need localization; Assembly.LoadFrom intentional for plugin discovery
+
 using Farm.Backend.Plugin.Core;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -48,7 +50,7 @@ public static class BackendPluginExtensions
     /// <param name="services">The service collection for dependency injection setup.</param>
     /// <param name="assembliesToSearch">Optional: specific assemblies to search. If null, searches all loaded assemblies.</param>
     private static void DiscoverAndLoadPlugins(
-        IBackendPluginRegistry registry,
+        BackendPluginRegistry registry,
         IServiceCollection services,
         IEnumerable<System.Reflection.Assembly>? assembliesToSearch = null)
     {

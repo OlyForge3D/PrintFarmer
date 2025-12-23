@@ -69,29 +69,32 @@ namespace Farm.Web.Api.Services.Queue
     }
 
     /// <summary>
-    /// Implementation of IQueueDataService using EF Core directly for specialized queries.
+    /// Implementation of IQueueDataService using IDbContextFactory for specialized queries.
+    /// Creates a new DbContext instance for each operation to avoid threading issues.
     /// </summary>
     public class QueueDataService : IQueueDataService
     {
-        private readonly AppDbContext _db;
+        private readonly IDbContextFactory<AppDbContext> _dbFactory;
 
-        public QueueDataService(AppDbContext db)
+        public QueueDataService(IDbContextFactory<AppDbContext> dbFactory)
         {
-            _db = db ?? throw new ArgumentNullException(nameof(db));
+            _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
         }
 
-        public Task<List<Printer>> GetAvailablePrintersAsync(CancellationToken ct)
+        public async Task<List<Printer>> GetAvailablePrintersAsync(CancellationToken ct)
         {
-            return _db.Printers
+            using var db = _dbFactory.CreateDbContext();
+            return await db.Printers
                 .Include(p => p.Model)
                 .Include(p => p.Toolheads)
                 .Where(p => p.IsAvailable)
                 .ToListAsync(ct);
         }
 
-        public Task<List<PrintJob>> GetPrintJobsForPrinterAsync(Guid printerId, CancellationToken ct)
+        public async Task<List<PrintJob>> GetPrintJobsForPrinterAsync(Guid printerId, CancellationToken ct)
         {
-            return _db.PrintJobs
+            using var db = _dbFactory.CreateDbContext();
+            return await db.PrintJobs
                 .Include(j => j.GcodeFile)
                 .Include(j => j.AssignedPrinter)
                 .Where(j => j.AssignedPrinterId == printerId)
@@ -101,9 +104,10 @@ namespace Farm.Web.Api.Services.Queue
                 .ToListAsync(ct);
         }
 
-        public Task<List<PrintJob>> GetAllPrintJobsAsync(CancellationToken ct)
+        public async Task<List<PrintJob>> GetAllPrintJobsAsync(CancellationToken ct)
         {
-            return _db.PrintJobs
+            using var db = _dbFactory.CreateDbContext();
+            return await db.PrintJobs
                 .Include(j => j.GcodeFile)
                 .Include(j => j.AssignedPrinter)
                 .OrderBy(j => j.QueuePosition)
@@ -111,42 +115,49 @@ namespace Farm.Web.Api.Services.Queue
                 .ToListAsync(ct);
         }
 
-        public Task<PrintJob?> GetCurrentJobForPrinterAsync(Guid printerId, CancellationToken ct)
+        public async Task<PrintJob?> GetCurrentJobForPrinterAsync(Guid printerId, CancellationToken ct)
         {
-            return _db.PrintJobs
+            using var db = _dbFactory.CreateDbContext();
+            return await db.PrintJobs
                 .FirstOrDefaultAsync(j => j.AssignedPrinterId == printerId && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing), ct);
         }
 
-        public Task<GcodeFile?> GetGcodeFileAsync(Guid id, CancellationToken ct)
+        public async Task<GcodeFile?> GetGcodeFileAsync(Guid id, CancellationToken ct)
         {
-            return _db.GcodeFiles.FindAsync(new object[] { id }, ct).AsTask();
+            using var db = _dbFactory.CreateDbContext();
+            return await db.GcodeFiles.FindAsync(new object[] { id }, ct).AsTask();
         }
 
-        public Task<PrintJob?> GetPrintJobByIdAsync(Guid id, CancellationToken ct)
+        public async Task<PrintJob?> GetPrintJobByIdAsync(Guid id, CancellationToken ct)
         {
-            return _db.PrintJobs.Include(j => j.GcodeFile).Include(j => j.AssignedPrinter).FirstOrDefaultAsync(j => j.Id == id, ct);
+            using var db = _dbFactory.CreateDbContext();
+            return await db.PrintJobs.Include(j => j.GcodeFile).Include(j => j.AssignedPrinter).FirstOrDefaultAsync(j => j.Id == id, ct);
         }
 
-        public Task<int> CountQueuedJobsForPrinterAsync(Guid printerId, CancellationToken ct)
+        public async Task<int> CountQueuedJobsForPrinterAsync(Guid printerId, CancellationToken ct)
         {
-            return _db.PrintJobs.CountAsync(j => j.AssignedPrinterId == printerId && (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned), ct);
+            using var db = _dbFactory.CreateDbContext();
+            return await db.PrintJobs.CountAsync(j => j.AssignedPrinterId == printerId && (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned), ct);
         }
 
         public async Task<int> GetNextQueuePositionAsync(Guid printerId, CancellationToken ct)
         {
-            int? max = await _db.PrintJobs.Where(j => j.AssignedPrinterId == printerId && (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned)).MaxAsync(j => (int?)j.QueuePosition, ct);
+            using var db = _dbFactory.CreateDbContext();
+            int? max = await db.PrintJobs.Where(j => j.AssignedPrinterId == printerId && (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned)).MaxAsync(j => (int?)j.QueuePosition, ct);
             return (max ?? 0) + 1;
         }
 
         public async Task<int> GetNextGlobalQueuePositionAsync(CancellationToken ct)
         {
-            int? max = await _db.PrintJobs.Where(j => j.Status == PrintJobStatus.Queued).MaxAsync(j => (int?)j.QueuePosition, ct);
+            using var db = _dbFactory.CreateDbContext();
+            int? max = await db.PrintJobs.Where(j => j.Status == PrintJobStatus.Queued).MaxAsync(j => (int?)j.QueuePosition, ct);
             return (max ?? 0) + 1;
         }
 
-        public Task<int> CountActiveJobsUsingGcodeAsync(Guid gcodeFileId, CancellationToken ct)
+        public async Task<int> CountActiveJobsUsingGcodeAsync(Guid gcodeFileId, CancellationToken ct)
         {
-            return _db.PrintJobs
+            using var db = _dbFactory.CreateDbContext();
+            return await db.PrintJobs
                 .Where(j => j.GcodeFileId == gcodeFileId &&
                            (j.Status == PrintJobStatus.Queued ||
                             j.Status == PrintJobStatus.Assigned ||

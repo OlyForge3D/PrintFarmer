@@ -1,4 +1,6 @@
-﻿using System;
+﻿#pragma warning disable S1006, CA1033, S1939 // Default parameters, explicit interface implementations, and interface inheritance are intentional
+
+using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -1670,7 +1672,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             // OctoPrint snapshot is typically /webcam/?action=snapshot
-            return $"{baseUrl.TrimEnd('/')}/webcam/?action=snapshot";
+            return await Task.FromResult($"{baseUrl.TrimEnd('/')}/webcam/?action=snapshot");
         }
         catch
         {

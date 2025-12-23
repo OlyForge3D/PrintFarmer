@@ -19,11 +19,13 @@ public sealed class ConsoleEmailService : IEmailService
             null
         );
 
+#pragma warning disable CA1303 // Console logging strings don't require localization
         Console.WriteLine("[EMAIL:CONSOLE]");
         Console.WriteLine($"  To: {message.To}");
         Console.WriteLine($"  Subject: {message.Subject}");
         Console.WriteLine($"  Body (plain): {message.PlainBody}");
         Console.WriteLine($"  Body (html): {message.HtmlBody}");
+#pragma warning restore CA1303
 
         return Task.FromResult(new EmailDispatchResult(true, "Email logged to console"));
     }

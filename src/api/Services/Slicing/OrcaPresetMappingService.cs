@@ -1,8 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Domain;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Slicing;
 
@@ -11,11 +10,11 @@ namespace Farm.Web.Api.Services.Slicing;
 /// </summary>
 public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
 {
-    private readonly AppDbContext _db;
+    private readonly ICatalogRepository _catalogRepo;
 
-    public OrcaPresetMappingService(AppDbContext db)
+    public OrcaPresetMappingService(ICatalogRepository catalogRepo)
     {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _catalogRepo = catalogRepo ?? throw new ArgumentNullException(nameof(catalogRepo));
     }
 
     public async Task<OrcaBundleMappingResult> MapBundlePresetsAsync(OrcaBundlePreviewDto preview, CancellationToken ct = default)
@@ -23,14 +22,15 @@ public sealed partial class OrcaPresetMappingService : IOrcaPresetMappingService
         OrcaBundleMappingResult result = new OrcaBundleMappingResult();
 
         // Load catalog data for matching
-        List<PrinterModel> printerModels = await _db.Models
-            .Include(pm => pm.Manufacturer)
-            .AsNoTracking()
-            .ToListAsync(ct);
+        var modelDtos = await _catalogRepo.GetModelsCachedAsync(null, ct);
+        List<PrinterModel> printerModels = modelDtos
+            .Select(m => new PrinterModel { Id = m.Id, Name = m.Name, ManufacturerId = m.ManufacturerId })
+            .ToList();
 
-        List<Manufacturer> manufacturers = await _db.Manufacturers
-            .AsNoTracking()
-            .ToListAsync(ct);
+        var manufacturerTuples = await _catalogRepo.GetManufacturersAsync(ct);
+        List<Manufacturer> manufacturers = manufacturerTuples
+            .Select(m => new Manufacturer { Id = m.Id, Name = m.Name })
+            .ToList();
 
         // Map printer presets
         foreach (OrcaPrinterPresetDto printer in preview.Printers)

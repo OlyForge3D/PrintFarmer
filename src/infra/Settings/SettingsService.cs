@@ -45,6 +45,7 @@ namespace Farm.Infrastructure.Settings
             return null;
         }
         private readonly IUnifiedLoggingService _logger;
+        private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
 
         public void Save<T>(T settings) where T : class, IAppSetting
         {
@@ -59,7 +60,9 @@ namespace Farm.Infrastructure.Settings
 
             // Persist to DB (AppSettings only)
             string json = JsonSerializer.Serialize(settings);
-            AppSettingsEntity? entity = _dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
+            
+            using var dbContext = _dbContextFactory.CreateDbContext();
+            AppSettingsEntity? entity = dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
             if (entity == null)
             {
                 _logger.LogInformation("[SettingsService] Adding new entity", null, new { Key = appAttr.Key });
@@ -69,14 +72,14 @@ namespace Farm.Infrastructure.Settings
                     SettingsJson = json,
                     UpdatedAt = DateTime.UtcNow
                 };
-                _ = _dbContext.AppSettingsEntities.Add(entity);
+                _ = dbContext.AppSettingsEntities.Add(entity);
             }
             else
             {
                 _logger.LogInformation("[SettingsService] Updating existing entity", null, new { Key = entity.Key, Id = entity.Id });
                 _logger.LogDebug("[SettingsService] JSON length change", null, new { OldLen = entity.SettingsJson?.Length ?? 0, NewLen = json.Length });
 
-                EntityEntry<AppSettingsEntity> entry = _dbContext.Entry(entity);
+                EntityEntry<AppSettingsEntity> entry = dbContext.Entry(entity);
                 _logger.LogDebug("[SettingsService] Entity state before changes", null, new { State = entry.State.ToString() });
 
                 entity.SettingsJson = json;
@@ -88,30 +91,29 @@ namespace Farm.Infrastructure.Settings
                 _logger.LogDebug("[SettingsService] Entity state after marking Modified", null, new { State = entry.State.ToString() });
             }
 
-            int rowsAffected = _dbContext.SaveChanges();
+            int rowsAffected = dbContext.SaveChanges();
             _logger.LogInformation("[SettingsService] SaveChanges returned", null, new { RowsAffected = rowsAffected });
 
             // Clear change tracker to ensure fresh data is loaded on next query
-            _dbContext.ChangeTracker.Clear();
+            dbContext.ChangeTracker.Clear();
         }
         private Dictionary<string, object> _settings = new();
         private readonly List<Type> _settingTypes;
-        private readonly AppDbContext _dbContext;
 
         public SettingsService(IConfiguration config)
         {
-            // For DI: IConfiguration and AppDbContext
-            throw new InvalidOperationException("Use the constructor with IConfiguration and AppDbContext");
+            // For DI: IConfiguration and IDbContextFactory
+            throw new InvalidOperationException("Use the constructor with IConfiguration and IDbContextFactory<AppDbContext>");
 
         }
 
-        public SettingsService(IConfiguration config, AppDbContext dbContext, IUnifiedLoggingService logger)
+        public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, IUnifiedLoggingService logger)
         {
             _settingTypes = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
                 .Where(t => t.GetCustomAttribute<AppSettingAttribute>() != null || t.GetCustomAttribute<SystemSettingAttribute>() != null)
                 .ToList();
-            _dbContext = dbContext;
+            _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             LoadSettings(config);
         }
@@ -119,6 +121,8 @@ namespace Farm.Infrastructure.Settings
         private void LoadSettings(IConfiguration config)
         {
             Dictionary<string, object> newSettings = new Dictionary<string, object>();
+            using var dbContext = _dbContextFactory.CreateDbContext();
+            
             foreach (Type type in _settingTypes)
             {
                 AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>();
@@ -133,7 +137,7 @@ namespace Farm.Infrastructure.Settings
                 if (appAttr != null)
                 {
                     // AppSettings: try DB first, fallback to config
-                    AppSettingsEntity? dbEntity = _dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
+                    AppSettingsEntity? dbEntity = dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
                     if (dbEntity != null && !string.IsNullOrWhiteSpace(dbEntity.SettingsJson))
                     {
                         try

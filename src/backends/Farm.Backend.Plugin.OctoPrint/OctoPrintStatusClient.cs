@@ -1,3 +1,5 @@
+#pragma warning disable CS1587 // XML comment is not placed on a valid language element
+
 using System;
 using System.Text.Json;
 using System.Threading;

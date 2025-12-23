@@ -176,7 +176,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
 
         // Assert
         result.Should().NotBeEmpty();
-        result.Should().Contain(g => Math.Abs(g.RequiredNozzleDiameter.Value - 0.4) < 0.01);
+        result.Should().Contain(g => Math.Abs((g.RequiredNozzleDiameter ?? 0) - 0.4) < 0.01);
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
 
         // Assert
         result.Should().NotBeEmpty();
-        result.Should().Contain(g => g.RequiredMaterial == "PETG" && Math.Abs(g.RequiredNozzleDiameter.Value - 0.6) < 0.01);
+        result.Should().Contain(g => g.RequiredMaterial == "PETG" && Math.Abs((g.RequiredNozzleDiameter ?? 0) - 0.6) < 0.01);
     }
 
     #endregion

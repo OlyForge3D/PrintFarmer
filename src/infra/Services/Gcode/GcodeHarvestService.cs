@@ -1,4 +1,6 @@
 ﻿// ...existing code...
+#pragma warning disable VSTHRD101, S1172, CA1849 // Fire-and-forget background tasks, unused parameter in delegate, sync writes intentional
+
 using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
@@ -162,18 +164,18 @@ public partial class GcodeHarvestService(
         // Use explicit async task method to properly execute on thread pool
         async Task ExecuteHarvestAsync()
         {
-            Console.Error.WriteLine($"[HARVEST] Background harvest start for op {operation.Id}");
+            await Console.Error.WriteLineAsync($"[HARVEST] Background harvest start for op {operation.Id}");
             try
             {
                 _logger.LogError($"🚀 Background harvest task STARTED for operation {operation.Id} on printer {printerName}");
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] Background task: Calling DiscoverAndQueueFilesAsync");
                 await DiscoverAndQueueFilesAsync(operation, printerId, printerName, printerBackendUrl, printerApiKey, printerBackend);
-                Console.Error.WriteLine($"[HARVEST] Background harvest completed for op {operation.Id}");
+                await Console.Error.WriteLineAsync($"[HARVEST] Background harvest completed for op {operation.Id}");
                 _logger.LogError($"✅ Background harvest task COMPLETED successfully for operation {operation.Id}");
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[HARVEST] Background harvest FAILED for op {operation.Id}: {ex.Message}");
+                await Console.Error.WriteLineAsync($"[HARVEST] Background harvest FAILED for op {operation.Id}: {ex.Message}");
                 _logger.LogError(ex, $"❌ Background harvest task FAILED for operation {operation.Id}: {ex.Message}");
 
                 // Update the operation status to failed with detailed error info
@@ -214,7 +216,7 @@ public partial class GcodeHarvestService(
     /// <summary>
     /// Discover files from printer and queue them for processing
     /// </summary>
-    private async Task DiscoverAndQueueFilesAsync(GcodeHarvestOperation operation, Guid printerId, string printerName, string printerBackendUrl, string printerApiKey, PrinterBackend printerBackend)
+    private async Task DiscoverAndQueueFilesAsync(GcodeHarvestOperation operation, Guid _printerId, string printerName, string printerBackendUrl, string printerApiKey, PrinterBackend printerBackend)
     {
         await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
         IHarvestRepository scopedHarvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();

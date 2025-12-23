@@ -4,6 +4,7 @@ namespace Farm.Infrastructure.Exceptions;
 /// Thrown when a database constraint violation occurs during entity creation or update.
 /// Provides a user-friendly error message extracted from the EF constraint failure.
 /// </summary>
+#pragma warning disable CA1032 // Current constructor pattern is intentional for domain exception
 public sealed class DatabaseConstraintException : Exception
 {
     public string? ConstraintName { get; }
@@ -18,7 +19,9 @@ public sealed class DatabaseConstraintException : Exception
         string entityType = "Entity",
         string propertyName = "Property",
         Exception? inner = null)
+#pragma warning disable S3427 // Multiple constructors intentionally support flexible initialization
         : base(message, inner)
+#pragma warning restore S3427
     {
         ConstraintName = constraintName;
         EntityType = entityType;
@@ -31,7 +34,8 @@ public sealed class DatabaseConstraintException : Exception
     /// </summary>
     public static DatabaseConstraintException FromEfException(Exception ex, string entityType = "Printer")
     {
-        if (ex == null) throw new ArgumentNullException(nameof(ex));
+        ArgumentNullException.ThrowIfNull(ex);
+#pragma warning restore CA1032
 
         // Try to extract constraint info from various exception types
         string? constraintName = null;

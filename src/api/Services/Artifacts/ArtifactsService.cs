@@ -7,10 +7,10 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Artifacts;
 using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Artifacts;
@@ -21,15 +21,15 @@ namespace Farm.Web.Api.Services.Artifacts;
 public class ArtifactsService : IArtifactsService
 {
     private readonly IWebHostEnvironment _env;
-    private readonly Farm.Infrastructure.Data.AppDbContext _db;
+    private readonly IArtifactsRepository _artifactsRepo;
     private readonly ArtifactStorageSettings _settings;
     private static readonly Regex FileNameSafeRegex = new("[^a-zA-Z0-9._-]+", RegexOptions.Compiled);
 
     private readonly ArtifactsMetrics _metrics;
-    public ArtifactsService(IWebHostEnvironment env, Farm.Infrastructure.Data.AppDbContext db, IOptions<ArtifactStorageSettings> opts, ArtifactsMetrics metrics)
+    public ArtifactsService(IWebHostEnvironment env, IArtifactsRepository artifactsRepo, IOptions<ArtifactStorageSettings> opts, ArtifactsMetrics metrics)
     {
         _env = env ?? throw new ArgumentNullException(nameof(env));
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _artifactsRepo = artifactsRepo ?? throw new ArgumentNullException(nameof(artifactsRepo));
         _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
     }
@@ -84,19 +84,18 @@ public class ArtifactsService : IArtifactsService
             CreatedAt = now
         };
 
-        _ = _db.Set<Artifact>().Add(artifact);
-        _ = await _db.SaveChangesAsync(ct);
+        _ = await _artifactsRepo.AddAsync(artifact, ct);
         _metrics.RecordUpload(file.Length);
 
         // Increment worker artifact counters if available
         if (workerId.HasValue)
         {
-            Worker? worker = await _db.Set<Worker>().FirstOrDefaultAsync(w => w.Id == workerId.Value, ct);
+            Worker? worker = await _artifactsRepo.GetWorkerByIdAsync(workerId.Value, ct);
             if (worker != null)
             {
                 worker.ArtifactsProduced++;
                 worker.ArtifactBytesProduced += file.Length;
-                _ = await _db.SaveChangesAsync(ct);
+                await _artifactsRepo.UpdateWorkerAsync(worker, ct);
             }
         }
 
@@ -161,18 +160,17 @@ public class ArtifactsService : IArtifactsService
             CreatedAt = now
         };
 
-        _ = _db.Set<Artifact>().Add(artifact);
-        _ = await _db.SaveChangesAsync(ct);
+        _ = await _artifactsRepo.AddAsync(artifact, ct);
         _metrics.RecordUpload(bytes.Length);
 
         if (workerId.HasValue)
         {
-            Worker? worker = await _db.Set<Worker>().FirstOrDefaultAsync(w => w.Id == workerId.Value, ct);
+            Worker? worker = await _artifactsRepo.GetWorkerByIdAsync(workerId.Value, ct);
             if (worker != null)
             {
                 worker.ArtifactsProduced++;
                 worker.ArtifactBytesProduced += bytes.Length;
-                _ = await _db.SaveChangesAsync(ct);
+                await _artifactsRepo.UpdateWorkerAsync(worker, ct);
             }
         }
 
@@ -181,17 +179,17 @@ public class ArtifactsService : IArtifactsService
 
     public async Task<Artifact?> GetAsync(Guid id, CancellationToken ct)
     {
-        return await _db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == id, ct);
+        return await _artifactsRepo.GetByIdAsync(id, ct);
     }
 
     public async Task<IReadOnlyList<Artifact>> ListByJobAsync(Guid jobId, CancellationToken ct)
     {
-        return await _db.Set<Artifact>().Where(a => a.JobId == jobId).OrderByDescending(a => a.CreatedAt).ToListAsync(ct);
+        return await _artifactsRepo.GetByJobIdAsync(jobId, ct);
     }
 
     public async Task<(Artifact artifact, string fullPath)?> GetWithPathAsync(Guid id, CancellationToken ct)
     {
-        Artifact? artifact = await _db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == id, ct);
+        Artifact? artifact = await _artifactsRepo.GetByIdAsync(id, ct);
         if (artifact == null)
         {
             return null;

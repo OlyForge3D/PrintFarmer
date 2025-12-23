@@ -56,7 +56,7 @@ public class StaleWorkerCleanupHostedService : BackgroundService
                     continue;
                 }
 
-                await CleanupStaleWorkersAsync(settings, stoppingToken);
+                await CleanupStaleWorkersAsync(settings);
             }
             catch (OperationCanceledException)
             {
@@ -70,7 +70,7 @@ public class StaleWorkerCleanupHostedService : BackgroundService
         }
     }
 
-    private async Task CleanupStaleWorkersAsync(StaleWorkerCleanupSettings settings, CancellationToken cancellationToken)
+    private async Task CleanupStaleWorkersAsync(StaleWorkerCleanupSettings settings)
     {
         try
         {

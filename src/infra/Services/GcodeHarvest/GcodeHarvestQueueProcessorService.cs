@@ -53,7 +53,7 @@ public class GcodeHarvestQueueProcessorService(
                     var parameters = JsonSerializer.Deserialize<StartGcodeHarvestDto>(queueItem.Parameters)
                         ?? throw new InvalidOperationException("Failed to deserialize harvest parameters");
 
-                    Console.Error.WriteLine($"[HARVEST_PROCESSOR] CHECKPOINT_1 for queue item {queueItem.Id}");
+                    await Console.Error.WriteLineAsync($"[HARVEST_PROCESSOR] CHECKPOINT_1 for queue item {queueItem.Id}");
                     
                     logger.LogInformation("xxx_CHECKPOINT_1: About to get harvest service type");
 
@@ -95,10 +95,10 @@ public class GcodeHarvestQueueProcessorService(
                     }
 
                     logger.LogInformation("xxx_CHECKPOINT_5: About to invoke StartHarvestAsync");
-                    logger.LogError($"[DIAGNOSTIC] About to call StartHarvestAsync for queue item {queueItem.Id}");
+                    logger.LogError("[DIAGNOSTIC] About to call StartHarvestAsync for queue item {QueueItemId}", queueItem.Id);
                     logger.LogInformation("xxx_CHECKPOINT_5b: After error log");
                     var result = (object?)await (dynamic)startMethod.Invoke(harvestService, new object[] { parameters, stoppingToken })!;
-                    logger.LogError($"[DIAGNOSTIC] StartHarvestAsync returned result = {(result == null ? "NULL" : result.GetType().FullName)}");
+                    logger.LogError("[DIAGNOSTIC] StartHarvestAsync returned result = {ResultType}", result == null ? "NULL" : result.GetType().FullName);
 
                     // Extract result properties if available
                     string? operationId = null;
