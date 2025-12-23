@@ -207,14 +207,13 @@ export const NewSliceJobPage: React.FC = () => {
       height: detailedPrinter.modelMaxZ || 0.5
     };
   }, [selectedPrinterWithDetails]);
-
   // Get bed texture for the selected printer
   const bedTextureInfo = useMemo(() => {
     if (!selectedPrinterWithDetails?.manufacturerName || !selectedPrinterWithDetails?.modelName) {
       return { url: undefined, format: undefined };
     }
 
-    // Look up asset by manufacturer and model name
+    // Look up asset by manufacturer and model name from local asset service
     const asset = assetService.getAsset(selectedPrinterWithDetails.manufacturerName, selectedPrinterWithDetails.modelName);
 
     if (asset?.bedTexture) {
@@ -224,33 +223,34 @@ export const NewSliceJobPage: React.FC = () => {
       };
     }
 
+    // If local asset service doesn't have it, return undefined
+    // Don't use API fallback as it may return 404 and cause TextureLoader errors
     return { url: undefined, format: undefined };
   }, [selectedPrinterWithDetails?.manufacturerName, selectedPrinterWithDetails?.modelName]);
 
-  // Fetch hierarchical profiles with manufacturer/model organization
-  const { data: hierarchyProfiles } = useQuery<HierarchicalProfilesResponse, Error>({
-    queryKey: ['slicerProfilesHierarchy'],
-    queryFn: () => slicerProfilesService.listHierarchical(),
-    staleTime: 15_000
-  });
-
-  // Fetch flat process profiles for backward compatibility
-  const { data: extendedProfiles } = useQuery<ExtendedProfilesResponse, Error>({
-    queryKey: ['slicerProfilesExtended'],
+  // Fetch process profiles using React Query
+  const { data: processProfilesData } = useQuery({
+    queryKey: ['slicerProfiles'],
     queryFn: () => slicerProfilesService.listExtended(),
     staleTime: 15_000
   });
 
+  // Fetch hierarchical profiles for ProfileSelector component
+  const { data: hierarchyProfiles } = useQuery({
+    queryKey: ['slicerProfilesHierarchy'],
+    queryFn: () => slicerProfilesService.listHierarchical(),
+    staleTime: 15_000
+  });
   // Filter profiles for the selected printer
   const printerProcessProfiles = useMemo(() => {
     // Return all process profiles from the extended response
-    return extendedProfiles?.processProfiles ?? [];
-  }, [extendedProfiles]);
+    return processProfilesData?.processProfiles ?? [];
+  }, [processProfilesData]);
 
   // Machine profiles for profile selection
   const machineProfiles = useMemo(() => {
-    return extendedProfiles?.machineProfiles ?? [];
-  }, [extendedProfiles]);
+    return processProfilesData?.machineProfiles ?? [];
+  }, [processProfilesData]);
 
   // Filament profiles - combination of slicer profiles + custom for printer
   const filamentProfiles = useMemo(() => {

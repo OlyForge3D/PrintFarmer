@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
+import { ViewCube } from './ViewCube';
 
 interface STLViewerProps {
   file?: File | ArrayBuffer | string;
@@ -15,7 +16,6 @@ interface STLViewerProps {
  * Handles both ASCII and binary STL formats
  */
 function parseSTL(arrayBuffer: ArrayBuffer): THREE.BufferGeometry {
-  const view = new DataView(arrayBuffer);
   const isASCII = isASCIISTL(arrayBuffer);
 
   if (isASCII) {
@@ -151,8 +151,58 @@ function STLModel({ geometry, autoRotate = false, onMeshLoaded }: STLModelProps)
 }
 
 /**
+ * Camera Controller Component
+ * Animates camera to preset views
+ */
+function CameraController({ viewDirection }: { viewDirection: string | null }) {
+  const { camera } = useThree();
+  const controlsRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!viewDirection) return;
+
+    const distance = 100;
+    const positions: Record<string, [number, number, number]> = {
+      top: [0, distance, 0],
+      bottom: [0, -distance, 0],
+      front: [0, 0, distance],
+      back: [0, 0, -distance],
+      left: [-distance, 0, 0],
+      right: [distance, 0, 0],
+      iso: [distance * 0.7, distance * 0.7, distance * 0.7],
+    };
+
+    const targetPos = positions[viewDirection] || positions.iso;
+    const startPos = [camera.position.x, camera.position.y, camera.position.z] as [number, number, number];
+    let progress = 0;
+    const duration = 600; // ms
+
+    const animate = (timestamp: number) => {
+      if (!progress) progress = timestamp;
+      const elapsed = timestamp - progress;
+      const t = Math.min(elapsed / duration, 1);
+
+      camera.position.set(
+        startPos[0] + (targetPos[0] - startPos[0]) * t,
+        startPos[1] + (targetPos[1] - startPos[1]) * t,
+        startPos[2] + (targetPos[2] - startPos[2]) * t
+      );
+      camera.lookAt(0, 0, 0);
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [viewDirection, camera]);
+
+  return null;
+}
+
+/**
  * STL Viewer Component
- * Displays STL files with interactive 3D controls
+ * Displays STL files with interactive 3D controls and CAD-style view cube
  */
 export const STLViewer: React.FC<STLViewerProps> = ({
   file,
@@ -163,6 +213,7 @@ export const STLViewer: React.FC<STLViewerProps> = ({
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewDirection, setViewDirection] = useState<string | null>(null);
 
   useEffect(() => {
     if (!file) {
@@ -238,33 +289,41 @@ export const STLViewer: React.FC<STLViewerProps> = ({
   }
 
   return (
-    <Canvas
-      camera={{ position: cameraPosition, fov: 50 }}
-      style={{ width: '100%', height: '100%' }}
-      gl={{ antialias: true, alpha: true }}
-    >
-      {/* Lighting */}
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[100, 100, 100]} intensity={0.8} />
-      <directionalLight position={[-100, -100, -100]} intensity={0.3} />
-      <pointLight position={[50, 50, 50]} intensity={0.4} />
+    <div className="relative w-full h-full">
+      <Canvas
+        camera={{ position: cameraPosition, fov: 50 }}
+        style={{ width: '100%', height: '100%' }}
+        gl={{ antialias: true, alpha: true }}
+      >
+        {/* Lighting */}
+        <ambientLight intensity={0.5} />
+        <directionalLight position={[100, 100, 100]} intensity={0.8} />
+        <directionalLight position={[-100, -100, -100]} intensity={0.3} />
+        <pointLight position={[50, 50, 50]} intensity={0.4} />
 
-      {/* Model */}
-      <STLModel geometry={geometry} autoRotate={autoRotate} onMeshLoaded={onMeshLoaded} />
+        {/* Model */}
+        <STLModel geometry={geometry} autoRotate={autoRotate} onMeshLoaded={onMeshLoaded} />
 
-      {/* Grid */}
-      <Grid args={[1000, 1000]} cellSize={10} cellColor="#6f7280" sectionSize={100} fadeDistance={500} fadeStrength={1} infiniteGrid />
+        {/* Grid */}
+        <Grid args={[1000, 1000]} cellSize={10} cellColor="#6f7280" sectionSize={100} fadeDistance={500} fadeStrength={1} infiniteGrid />
 
-      {/* Controls */}
-      <OrbitControls
-        makeDefault
-        autoRotate={false}
-        autoRotateSpeed={4}
-        enableDamping
-        dampingFactor={0.05}
-        enableZoom
-      />
-    </Canvas>
+        {/* Controls */}
+        <OrbitControls
+          makeDefault
+          autoRotate={false}
+          autoRotateSpeed={4}
+          enableDamping
+          dampingFactor={0.05}
+          enableZoom
+        />
+
+        {/* Camera Controller for view animations */}
+        <CameraController viewDirection={viewDirection} />
+      </Canvas>
+
+      {/* View Cube Overlay */}
+      <ViewCube onViewChange={setViewDirection} />
+    </div>
   );
 };
 

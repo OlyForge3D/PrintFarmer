@@ -116,10 +116,18 @@ class AssetService {
       key = manufacturerOrPath.toLowerCase();
     }
 
-    // Normalize key (replace spaces with underscores)
-    key = key.replace(/\s+/g, "_");
+    // Try exact match first (with spaces preserved)
+    let result = this.printerMap.get(key);
+    if (result) return result;
 
-    return this.printerMap.get(key);
+    // Fallback: try with underscores instead of spaces for compatibility
+    const keyWithUnderscores = key.replace(/\s+/g, "_");
+    result = this.printerMap.get(keyWithUnderscores);
+    if (result) return result;
+
+    // Final fallback: try with dashes instead of spaces
+    const keyWithDashes = key.replace(/\s+/g, "-");
+    return this.printerMap.get(keyWithDashes);
   }
 
   /**

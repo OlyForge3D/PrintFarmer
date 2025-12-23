@@ -1,6 +1,6 @@
-import React, { Suspense, useRef, useState } from 'react';
+import React, { Suspense, useRef, useState, useEffect } from 'react';
 // (renderUnknown not required here)
-import { Canvas, useFrame, useLoader } from '@react-three/fiber';
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import {
   OrbitControls,
   Grid,
@@ -15,6 +15,7 @@ import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
+import { ViewCube3D } from './ViewCube3D';
 
 export interface ModelViewerProps {
   modelUrl: string;
@@ -36,8 +37,8 @@ function LoadingProgress() {
   const { progress } = useProgress();
   return (
     <Html center>
-      <div className="bg-white px-4 py-2 rounded-lg shadow-lg">
-        <div className="text-sm font-medium text-gray-900">
+      <div className="bg-pf-bg-2 px-4 py-2 rounded-lg shadow-lg border border-pf-border">
+        <div className="text-sm font-medium text-pf-text-primary">
           Loading... {Math.round(progress)}%
         </div>
       </div>
@@ -60,7 +61,20 @@ function TexturedPrintBed({
   textureUrl: string;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const texture = useLoader(TextureLoader, textureUrl);
+  
+  let texture: THREE.Texture | null = null;
+  try {
+    // Use useLoader but catch errors gracefully
+    texture = useLoader(TextureLoader, textureUrl);
+  } catch (error) {
+    // If texture fails to load, return plain bed instead
+    console.warn(`[TexturedPrintBed] Failed to load texture from ${textureUrl}:`, error);
+    return <PlainPrintBed width={width} depth={depth} height={height} />;
+  }
+
+  if (!texture) {
+    return <PlainPrintBed width={width} depth={depth} height={height} />;
+  }
 
   return (
     <>
@@ -284,6 +298,57 @@ function PLYModel({ url }: { url: string }) {
   );
 }
 
+/**
+ * Camera Controller - Handles smooth camera animations to different views
+ */
+function CameraController({ viewDirection }: { viewDirection: string | null }) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    if (!viewDirection) return;
+
+    const distance = 100;
+    const positions: Record<string, [number, number, number]> = {
+      top: [0, distance, 0],
+      bottom: [0, -distance, 0],
+      front: [0, 0, distance],
+      back: [0, 0, -distance],
+      left: [-distance, 0, 0],
+      right: [distance, 0, 0],
+      iso: [distance * 0.7, distance * 0.7, distance * 0.7],
+    };
+
+    const targetPosition = positions[viewDirection];
+    if (!targetPosition) return;
+
+    const startPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+    const duration = 600; // 600ms animation
+    const startTime = Date.now();
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const t = Math.min(elapsed / duration, 1);
+
+      // Smooth easing: cubic easeInOut
+      const easeT = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+      camera.position.x = startPos.x + (targetPosition[0] - startPos.x) * easeT;
+      camera.position.y = startPos.y + (targetPosition[1] - startPos.y) * easeT;
+      camera.position.z = startPos.z + (targetPosition[2] - startPos.z) * easeT;
+
+      camera.lookAt(0, 0, 0);
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [viewDirection, camera]);
+
+  return null;
+}
+
 export const ModelViewer: React.FC<ModelViewerProps> = ({
   modelUrl,
   fileType,
@@ -296,6 +361,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
   bedTextureFormat
 }) => {
   const [error, setError] = useState<string | null>(null);
+  const [viewDirection, setViewDirection] = useState<string | null>(null);
 
   const renderModel = () => {
     switch (fileType) {
@@ -313,17 +379,17 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
 
   if (error) {
     return (
-      <div className={`${className} flex items-center justify-center bg-gray-100 rounded-lg border`}>
+      <div className={`${className} flex items-center justify-center bg-pf-bg-1 rounded-lg border border-pf-border`}>
         <div className="text-center">
-          <p className="text-red-600 font-medium">Failed to load 3D model</p>
-          <p className="text-gray-500 text-sm mt-1">{error}</p>
+          <p className="text-pf-error font-medium">Failed to load 3D model</p>
+          <p className="text-pf-text-secondary text-sm mt-1">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`${className} border rounded-lg overflow-hidden bg-gray-50 relative`}>
+    <div className={`${className} border border-pf-border rounded-lg overflow-hidden bg-pf-bg-0 relative`}>
       <Canvas
         camera={{ position: [50, 50, 50], fov: 45 }}
         shadows
@@ -386,6 +452,9 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           autoRotateSpeed={0.5}
         />
 
+        {/* Camera Controller for view animations */}
+        <CameraController viewDirection={viewDirection} />
+
         {showGrid && <Grid infiniteGrid />}
 
         {showAxes && (
@@ -396,14 +465,15 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
             />
           </GizmoHelper>
         )}
-      </Canvas>
 
-      {/* Model info overlay */}
-      <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-3 py-2 rounded-lg text-sm">
-        <div className="font-medium">{fileType.toUpperCase()} Model</div>
-        <div className="text-gray-600">Click and drag to rotate</div>
+        {/* 3D View Cube - as scene element for proper depth rendering */}
+        <ViewCube3D onViewChange={setViewDirection} />
+      </Canvas>
+      <div className="absolute top-4 left-4 bg-pf-bg-2/95 backdrop-blur px-3 py-2 rounded-lg text-sm border border-pf-border">
+        <div className="font-medium text-pf-text-primary">{fileType.toUpperCase()} Model</div>
+        <div className="text-pf-text-secondary">Click and drag to rotate</div>
         {bedDimensions && (
-          <div className="text-xs text-gray-500 mt-1">
+          <div className="text-xs text-pf-text-muted mt-1">
             Bed: {bedDimensions.width} × {bedDimensions.depth}mm
           </div>
         )}

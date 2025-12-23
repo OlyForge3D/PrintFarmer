@@ -7,12 +7,14 @@ import { getPrinterBackendName } from '@/utils/enumHelpers';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { PrinterDiscoveryModal } from '@/components/PrinterDiscoveryModal';
 import { EditPrinterModal } from '@/components/EditPrinterModal';
+import { DeleteConfirmationModal } from '@/components/DeleteConfirmationModal';
+import { ImportResultsModal } from '@/components/ImportResultsModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PageTemplate } from '@/components/PageTemplate';
 import { toast } from 'sonner';
 import { DeleteIcon, EditIcon, CheckCircleIcon, CircleIcon } from '@/components/icons/MdiIcons';
 import { Alert, Button, Checkbox, Label, Select, Tooltip } from '@/components/ui';
-import type { Printer } from '@/types/api';
+import type { Printer, UpdatePrinterDto } from '@/types/api';
 
 export function PrintersAdminPage() {
   const queryClient = useQueryClient();
@@ -36,6 +38,8 @@ export function PrintersAdminPage() {
   const [importing, setImporting] = React.useState<boolean>(false);
   const [duplicateHandling, setDuplicateHandling] = React.useState<'skip' | 'overwrite' | 'rename'>('skip');
   const [importResults, setImportResults] = React.useState<import('@/types/api').BulkImportResultItem[] | null>(null);
+  const [importStats, setImportStats] = React.useState<{ imported: number; skipped: number; failed: number }>({ imported: 0, skipped: 0, failed: 0 });
+  const [showImportResults, setShowImportResults] = React.useState(false);
   const [retryingIndex, setRetryingIndex] = React.useState<number | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [showExportOptions, setShowExportOptions] = React.useState(false);
@@ -45,11 +49,16 @@ export function PrintersAdminPage() {
   const [discoveryAvailable, setDiscoveryAvailable] = React.useState(false);
   const [bulkManufacturerId, setBulkManufacturerId] = React.useState<string>('');
   const [bulkModelId, setBulkModelId] = React.useState<string>('');
-  const [bulkIsEnabled, setBulkIsEnabled] = React.useState<boolean | null>(null);
+  const [bulkOperation, setBulkOperation] = React.useState<'none' | 'enable' | 'disable' | 'delete'>('none');
   const [bulkOperating, setBulkOperating] = React.useState(false);
   const [editPrinterId, setEditPrinterId] = React.useState<string | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = React.useState(false);
   const [togglingEnabledId, setTogglingEnabledId] = React.useState<string | null>(null);
+  const [isRefreshingCapabilities, setIsRefreshingCapabilities] = React.useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = React.useState<{
+    isOpen: boolean;
+    printers: Printer[];
+  }>({ isOpen: false, printers: [] });
 
   // Check if discovery service is available
   React.useEffect(() => {
@@ -218,21 +227,37 @@ export function PrintersAdminPage() {
       }
 
       const result = await response.json();
-      console.log('[Import] Backend response:', result);
+      if (window.PrintFarmerDebug?.import) {
+        console.log('[Import] Backend response:', result);
+      }
 
-      setImportResults(result);
       setImporting(false);
       
       // Refresh printers list to show newly imported printers
       await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       
-      const { importedCount, skippedCount, failureCount } = result;
-      if (importedCount > 0) {
-        toast.success(`Successfully imported ${importedCount} printer${importedCount === 1 ? '' : 's'}${skippedCount > 0 ? `, skipped ${skippedCount}` : ''}${failureCount > 0 ? `, failed ${failureCount}` : ''}`);
-      } else if (skippedCount > 0) {
+      const { importedCount, skippedCount, failureCount, results } = result;
+      
+      // Show results modal if there are any results
+      if (results && results.length > 0) {
+        const stats = {
+          imported: importedCount,
+          skipped: skippedCount,
+          failed: failureCount
+        };
+        setImportStats(stats);
+        setImportResults(results);
+        setShowImportResults(true);
+      }
+      
+      // Show toast notification
+      if (failureCount > 0) {
+        toast.error(`Import completed with ${failureCount} error${failureCount === 1 ? '' : 's'} - See modal for details`);
+      } else if (importedCount > 0) {
+        const summary = `Successfully imported ${importedCount} printer${importedCount === 1 ? '' : 's'}${skippedCount > 0 ? `, skipped ${skippedCount}` : ''}`;
+        toast.success(summary);
+      } else if (skippedCount > 0 && failureCount === 0) {
         toast.info(`No new printers imported (${skippedCount} skipped due to duplicates)`);
-      } else if (failureCount > 0) {
-        toast.error(`Import failed: ${failureCount} error${failureCount === 1 ? '' : 's'}`);
       }
     } catch (err) {
       console.error('[Import] Import failed', err);
@@ -278,6 +303,25 @@ export function PrintersAdminPage() {
       setImportResults(mappedResults);
       // Keep previewItems so admin can review results
       
+      // Show detailed feedback based on results
+      const { importedCount = 0, skippedCount = 0, failureCount = 0 } = resp;
+      
+      setImportStats({ imported: importedCount, skipped: skippedCount, failed: failureCount });
+      
+      // Always show the results modal for visibility
+      setShowImportResults(true);
+      
+      if (failureCount > 0) {
+        toast.error(`Import completed with ${failureCount} error${failureCount === 1 ? '' : 's'} - see details below`);
+      }
+      
+      if (importedCount > 0) {
+        const summary = `Imported ${importedCount} printer${importedCount === 1 ? '' : 's'}${skippedCount > 0 ? `, skipped ${skippedCount}` : ''}`;
+        toast.success(summary);
+      } else if (skippedCount > 0 && failureCount === 0) {
+        toast.info(`No new printers imported (${skippedCount} skipped due to duplicates)`);
+      }
+      
       // Invalidate printer queries globally so all pages (admin + main printers page) see new printers immediately
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       
@@ -319,7 +363,7 @@ export function PrintersAdminPage() {
       // Invalidate printer queries globally so all pages see retried printer immediately
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       
-      if (singleResult && singleResult.status === 'Imported') {
+      if (singleResult && singleResult.status === 'Success') {
         toast.success(`Imported ${singleResult.name}`);
       } else if (singleResult && singleResult.status === 'Skipped') {
         toast(`Skipped ${singleResult.name || 'row'}`);
@@ -390,8 +434,16 @@ export function PrintersAdminPage() {
       return;
     }
 
-    if (!bulkManufacturerId && !bulkModelId && bulkIsEnabled === null) {
-      toast('Select at least one field to update');
+    // For manufacturer/model updates, require at least one field to be set
+    if (bulkOperation === 'none' && !bulkManufacturerId && !bulkModelId) {
+      toast('Select an operation or at least one field to update');
+      return;
+    }
+
+    // If delete is selected, show confirmation modal
+    if (bulkOperation === 'delete') {
+      const printersToDelete = (printers || []).filter(p => selectedIds.includes(p.id));
+      setDeleteConfirmation({ isOpen: true, printers: printersToDelete });
       return;
     }
 
@@ -405,15 +457,27 @@ export function PrintersAdminPage() {
           const printer = printers?.find(p => p.id === id);
           if (!printer) continue;
 
-          await apiClient.updatePrinter(id, {
-            name: printer.name,
-            serverUrl: printer.serverUrl || '',
-            notes: printer.notes,
-            manufacturerId: bulkManufacturerId ? (bulkManufacturerId as unknown as string) : printer.manufacturerId,
-            modelId: bulkModelId ? (bulkModelId as unknown as string) : printer.modelId,
+          // Build update object with only the fields we need
+          const updateData: UpdatePrinterDto = {
             backend: printer.backend,
-            isEnabled: bulkIsEnabled !== null ? bulkIsEnabled : undefined
-          });
+            // Optional fields - only include if they have values
+            ...(printer.notes !== undefined && { notes: printer.notes }),
+            ...(bulkManufacturerId && { manufacturerId: bulkManufacturerId as unknown as string }),
+            ...(!bulkManufacturerId && printer.manufacturerId && { manufacturerId: printer.manufacturerId }),
+            ...(bulkModelId && { modelId: bulkModelId as unknown as string }),
+            ...(!bulkModelId && printer.modelId && { modelId: printer.modelId }),
+            ...(printer.apiKey && { apiKey: printer.apiKey }),
+            ...(printer.originalServerUrl && { originalServerUrl: printer.originalServerUrl }),
+          };
+
+          // Add enabled status if changing
+          if (bulkOperation === 'enable') {
+            updateData.isEnabled = true;
+          } else if (bulkOperation === 'disable') {
+            updateData.isEnabled = false;
+          }
+
+          await apiClient.updatePrinter(id, updateData);
           updated++;
         } catch (err) {
           console.error(`Failed to update printer ${id}:`, err);
@@ -421,13 +485,14 @@ export function PrintersAdminPage() {
         }
       }
 
-      toast.success(`Updated ${updated} printer${updated !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`);
+      const operationDesc = bulkOperation === 'enable' ? 'enabled' : bulkOperation === 'disable' ? 'disabled' : 'updated';
+      toast.success(`${updated} printer${updated !== 1 ? 's' : ''} ${operationDesc}${failed > 0 ? ` (${failed} failed)` : ''}`);
       
       // Clear selections and reset form
       setSelectedIds([]);
       setBulkManufacturerId('');
       setBulkModelId('');
-      setBulkIsEnabled(null);
+      setBulkOperation('none');
       
       // Refetch printers to show updates
       if (refetch) await refetch();
@@ -437,6 +502,43 @@ export function PrintersAdminPage() {
     } finally {
       setBulkOperating(false);
     }
+  };
+
+  const handleConfirmDelete = async () => {
+    setBulkOperating(true);
+    try {
+      let deleted = 0;
+      let failed = 0;
+
+      for (const printer of deleteConfirmation.printers) {
+        try {
+          await apiClient.deletePrinter(printer.id);
+          deleted++;
+        } catch (err) {
+          console.error(`Failed to delete printer ${printer.id}:`, err);
+          failed++;
+        }
+      }
+
+      toast.success(`Deleted ${deleted} printer${deleted !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`);
+      
+      // Clear selections
+      setSelectedIds([]);
+      setDeleteConfirmation({ isOpen: false, printers: [] });
+      setBulkOperation('none');
+      
+      // Refetch printers to show updates
+      if (refetch) await refetch();
+    } catch (err) {
+      console.error('Bulk delete failed', err);
+      toast.error('Bulk delete failed');
+    } finally {
+      setBulkOperating(false);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteConfirmation({ isOpen: false, printers: [] });
   };
 
   const handleEditClick = (printer: Printer) => {
@@ -492,6 +594,45 @@ export function PrintersAdminPage() {
     }
   };
 
+  const handleRefreshCapabilities = async () => {
+    if (!printers || printers.length === 0) {
+      toast.info('No printers to refresh');
+      return;
+    }
+
+    setIsRefreshingCapabilities(true);
+    const successCount: number[] = [];
+    const failedCount: number[] = [];
+
+    try {
+      // Refresh cameras for all printers that support it
+      for (const printer of printers) {
+        try {
+          await apiClient.refreshCameraUrls(printer.id);
+          if (printer.cameraStreamUrl || printer.cameraSnapshotUrl) {
+            successCount.push(1);
+          }
+        } catch (error) {
+          failedCount.push(1);
+          console.warn(`Failed to refresh cameras for ${printer.name}:`, error);
+        }
+      }
+
+      const total = printers.length;
+      const withCameras = successCount.length;
+      
+      toast.success(`Refreshed capabilities for ${total} printer${total === 1 ? '' : 's'} (${withCameras} with cameras detected)`);
+      
+      // Refetch to get updated camera URLs
+      await refetch?.();
+    } catch (error) {
+      console.error('Failed to refresh capabilities:', error);
+      toast.error('Failed to refresh printer capabilities');
+    } finally {
+      setIsRefreshingCapabilities(false);
+    }
+  };
+
   return (
     <ProtectedRoute requiredRole="farm_admin">
       <PageTemplate title="Admin: Printers" subtitle="Import and export printers" maxWidth="max-w-4xl">
@@ -515,7 +656,20 @@ export function PrintersAdminPage() {
               ) : 'Export printers'}
             </Button>
             <Button variant="primary" aria-label="Open file picker to import printers" onClick={handleImportClick}>Import printers</Button>
-            {/* Hidden file input for import */}
+            <Button 
+              variant="secondary" 
+              aria-label="Refresh printer capabilities (cameras, features, etc.)" 
+              onClick={handleRefreshCapabilities}
+              disabled={isRefreshingCapabilities}
+            >
+              {isRefreshingCapabilities ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  Refreshing...
+                </span>
+              ) : 'Refresh Capabilities'}
+            </Button>
+            {/* Hidden file input for import - using standard HTML hidden input pattern */}
             <input
               ref={fileInputRef}
               type="file"
@@ -523,6 +677,7 @@ export function PrintersAdminPage() {
               accept=".csv,.json"
               onChange={(e) => handleFile(e.target.files?.[0])}
               style={{ display: 'none' }}
+              aria-hidden="true"
             />
           </div>
 
@@ -694,54 +849,44 @@ export function PrintersAdminPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div className="form-group">
-                          <Label className="mb-2">Enabled Status</Label>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant={bulkIsEnabled === true ? 'primary' : 'secondary'}
-                              onClick={() => setBulkIsEnabled(true)}
-                              className="flex-1"
-                            >
-                              Enable
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={bulkIsEnabled === false ? 'primary' : 'secondary'}
-                              onClick={() => setBulkIsEnabled(false)}
-                              className="flex-1"
-                            >
-                              Disable
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={bulkIsEnabled === null ? 'primary' : 'secondary'}
-                              onClick={() => setBulkIsEnabled(null)}
-                              className="flex-1"
-                            >
-                              Skip
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="flex items-end">
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            onClick={handleBulkUpdate}
-                            disabled={bulkOperating}
+                          <Label htmlFor="bulk-operation" className="mb-1">Bulk Operation</Label>
+                          <Select
+                            id="bulk-operation"
+                            value={bulkOperation}
+                            onChange={(e) => setBulkOperation(e.target.value as 'none' | 'enable' | 'disable' | 'delete')}
                             className="w-full"
                           >
-                            {bulkOperating ? 'Updating...' : 'Apply to selected'}
-                          </Button>
+                            <option value="none">-- Select operation --</option>
+                            <option value="enable">Enable</option>
+                            <option value="disable">Disable</option>
+                            <option value="delete">Delete</option>
+                          </Select>
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setSelectedIds([])}
-                        className="w-full"
-                      >
-                        Clear selection
-                      </Button>
+                      <div className="flex gap-2 mb-4">
+                        <Button
+                          size="sm"
+                          variant={bulkOperation === 'delete' ? 'danger' : 'primary'}
+                          onClick={handleBulkUpdate}
+                          disabled={bulkOperating}
+                          className="flex-1"
+                        >
+                          {bulkOperating ? 'Processing...' : 'Apply to selected'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setSelectedIds([]);
+                            setBulkManufacturerId('');
+                            setBulkModelId('');
+                            setBulkOperation('none');
+                          }}
+                          className="flex-1"
+                        >
+                          Clear selection
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -804,9 +949,9 @@ export function PrintersAdminPage() {
                                       <span className="text-pf-text-secondary">Pending</span>
                                     </div>
                                   )}
-                                  {importResult.status === 'Imported' && (
+                                  {importResult.status === 'Success' && (
                                     <div className="flex flex-col items-start gap-1">
-                                      <span className="text-pf-success-text font-semibold">Imported</span>
+                                      <span className="text-pf-success-text font-semibold">Success</span>
                                       {importResult.id && (
                                         <a href={`/printers/${importResult.id}`} className="text-pf-accent underline text-xs">Open</a>
                                       )}
@@ -878,6 +1023,27 @@ export function PrintersAdminPage() {
             // Refetch the printers list to show newly discovered printers
             // Note: usePrintersWithCameraUrls will automatically refetch when needed
           }}
+        />
+
+        <DeleteConfirmationModal
+          isOpen={deleteConfirmation.isOpen}
+          printers={deleteConfirmation.printers}
+          onConfirm={handleConfirmDelete}
+          onCancel={handleCancelDelete}
+        />
+
+        <ImportResultsModal
+          isOpen={showImportResults}
+          results={importResults?.map(r => ({
+            index: r.index,
+            name: r.name,
+            status: r.status,
+            reason: r.reason
+          })) || null}
+          importedCount={importStats.imported}
+          skippedCount={importStats.skipped}
+          failureCount={importStats.failed}
+          onClose={() => setShowImportResults(false)}
         />
       </PageTemplate>
     </ProtectedRoute>

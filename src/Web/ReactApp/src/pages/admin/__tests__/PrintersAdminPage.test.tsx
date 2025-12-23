@@ -48,7 +48,7 @@ describe('PrintersAdminPage', () => {
   });
 
   it('calls bulk endpoint on confirm import and shows results', async () => {
-    const bulkMock = vi.spyOn(api.apiClient, 'bulkCreatePrinters').mockResolvedValue({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Imported', id: 'id-1' }] });
+    const bulkMock = vi.spyOn(api.apiClient, 'bulkCreatePrinters').mockResolvedValue({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Success', id: 'id-1' }] });
 
     renderWithProviders(<PrintersAdminPage />);
     const file = { name: 'printers.json', async text() { return JSON.stringify([{ name: 'P1', serverUrl: 'http://1' }]); } } as unknown as File;
@@ -68,7 +68,7 @@ describe('PrintersAdminPage', () => {
   it('retries single failed row via Retry button', async () => {
     vi.spyOn(api.apiClient, 'bulkCreatePrinters')
       .mockResolvedValueOnce({ importedCount: 0, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Failed', reason: 'bad' }] })
-      .mockResolvedValueOnce({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Imported', id: 'id-1' }] });
+      .mockResolvedValueOnce({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Success', id: 'id-1' }] });
 
     renderWithProviders(<PrintersAdminPage />);
   const file = { name: 'printers.json', async text() { return JSON.stringify([{ name: 'P1', serverUrl: 'http://1' }]); } } as unknown as File;
@@ -83,13 +83,13 @@ describe('PrintersAdminPage', () => {
 
     // Click Retry
     fireEvent.click(screen.getByText('Retry'));
-    await waitFor(() => expect(screen.getByText('Imported')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Success')).toBeInTheDocument());
   });
 
   it('retries all failed rows via Retry all failed', async () => {
     vi.spyOn(api.apiClient, 'bulkCreatePrinters')
       .mockResolvedValueOnce({ importedCount: 0, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Failed', reason: 'bad' }] })
-      .mockResolvedValueOnce({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Imported', id: 'id-1' }] });
+      .mockResolvedValueOnce({ importedCount: 1, skippedCount: 0, results: [{ index: 0, name: 'P1', status: 'Success', id: 'id-1' }] });
 
     renderWithProviders(<PrintersAdminPage />);
   const file = { name: 'printers.json', async text() { return JSON.stringify([{ name: 'P1', serverUrl: 'http://1' }]); } } as unknown as File;

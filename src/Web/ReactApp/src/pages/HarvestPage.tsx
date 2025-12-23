@@ -6,7 +6,6 @@ import { Button } from '@/components/ui';
 // Sparkles icon - using ActivityIcon as close substitute
 import { ActivityIcon } from '@/components/icons/MdiIcons';
 import { 
-  Printer, 
   GcodeHarvestStatus,
   GcodeHarvestOperation,
 } from '@/types/api';

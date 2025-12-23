@@ -5429,6 +5429,17 @@ EOF
         if [ "$all_healthy" = false ]; then
             print_warning "Some services may still be starting after ${max_wait}s. Checking detailed status..."
         fi
+        
+        # Reload nginx configuration to pick up any new service IPs from the deployment
+        # This ensures DNS resolution is fresh and nginx uses correct upstream addresses
+        if docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
+            print_info "Reloading nginx proxy configuration to pick up new service IPs..."
+            if docker exec printfarmer-nginx-proxy nginx -s reload 2>/dev/null; then
+                print_success "Nginx configuration reloaded successfully"
+            else
+                print_warning "Failed to reload nginx - container may not be fully started yet"
+            fi
+        fi
     fi
 }
 

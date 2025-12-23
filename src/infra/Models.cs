@@ -396,14 +396,14 @@ public class CreatePrinterDto : PrinterInfoDto
 /// Update payload for modifying core printer attributes or reassigning catalog metadata.
 /// </summary>
 public record UpdatePrinterDto(
-    string Name,
-    string ServerUrl,
-    string? Notes,
-    Guid? ManufacturerId,
-    Guid? ModelId,
-    string? NewManufacturerName,
-    string? NewModelName,
-    DateTime? DateAcquired,
+    string? Name = null,
+    string? ServerUrl = null,
+    string? Notes = null,
+    Guid? ManufacturerId = null,
+    Guid? ModelId = null,
+    string? NewManufacturerName = null,
+    string? NewModelName = null,
+    DateTime? DateAcquired = null,
     PrinterBackend? Backend = null,
     string? ApiKey = null,
     string? CameraStreamUrl = null,

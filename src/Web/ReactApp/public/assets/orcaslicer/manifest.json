@@ -1,13 +1,13 @@
 {
   "version": "2.0",
   "extractedDate": "2025-11-11T04:40:00.090Z",
-  "source": "OrcaSlicer machine profiles",
+  "source": "OrcaSlicer machine profiles + PrintersForAnts community derivative",
   "defaultBedTexture": "/assets/orcaslicer/default-bed-texture.svg",
   "statistics": {
-    "totalManufacturers": 56,
-    "totalPrinters": 355,
-    "printersWithBedModel": 288,
-    "printersWithBedTexture": 252
+    "totalManufacturers": 57,
+    "totalPrinters": 361,
+    "printersWithBedModel": 292,
+    "printersWithBedTexture": 258
   },
   "manufacturers": [
     {
@@ -1164,6 +1164,26 @@
       "name": "Elegoo",
       "printers": [
         {
+          "id": "Elegoo Centauri",
+          "name": "Elegoo Centauri",
+          "nozzleDiameters": [
+            "0.4"
+          ],
+          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Centauri_texture.png",
+          "bedTextureFormat": "png",
+          "cover": "/assets/orcaslicer/elegoo/Elegoo Centauri_cover.png"
+        },
+        {
+          "id": "Elegoo Centauri Carbon",
+          "name": "Elegoo Centauri Carbon",
+          "nozzleDiameters": [
+            "0.4"
+          ],
+          "bedTexture": "/assets/orcaslicer/elegoo/Elegoo Centauri Carbon_texture.png",
+          "bedTextureFormat": "png",
+          "cover": "/assets/orcaslicer/elegoo/Elegoo Centauri Carbon_cover.png"
+        },
+        {
           "id": "Elegoo Neptune",
           "name": "Elegoo Neptune",
           "nozzleDiameters": [
@@ -2068,6 +2088,56 @@
           "bedTexture": "/assets/orcaslicer/positron3d/The Positron_texture.svg",
           "bedTextureFormat": "svg",
           "cover": "/assets/orcaslicer/positron3d/The Positron_cover.png"
+        }
+      ]
+    },
+    {
+      "id": "printersforAnts",
+      "name": "PrintersForAnts",
+      "printers": [
+        {
+          "id": "SaladFork 120",
+          "name": "SaladFork 120",
+          "nozzleDiameters": [
+            "0.4"
+          ],
+          "bedModel": "/assets/orcaslicer/printersforAnts/SaladFork 120_bed.stl",
+          "bedTexture": "/assets/orcaslicer/printersforAnts/SaladFork 120_texture.png",
+          "bedTextureFormat": "png",
+          "cover": "/assets/orcaslicer/printersforAnts/SaladFork 120_cover.png"
+        },
+        {
+          "id": "SaladFork 180",
+          "name": "SaladFork 180",
+          "nozzleDiameters": [
+            "0.4"
+          ],
+          "bedModel": "/assets/orcaslicer/printersforAnts/SaladFork 180_bed.stl",
+          "bedTexture": "/assets/orcaslicer/printersforAnts/SaladFork 180_texture.png",
+          "bedTextureFormat": "png",
+          "cover": "/assets/orcaslicer/printersforAnts/SaladFork 180_cover.png"
+        },
+        {
+          "id": "Micron 120",
+          "name": "Micron 120",
+          "nozzleDiameters": [
+            "0.4"
+          ],
+          "bedModel": "/assets/orcaslicer/printersforAnts/Micron 120_bed.stl",
+          "bedTexture": "/assets/orcaslicer/printersforAnts/Micron 120_texture.png",
+          "bedTextureFormat": "png",
+          "cover": "/assets/orcaslicer/printersforAnts/Micron 120_cover.png"
+        },
+        {
+          "id": "Micron 180",
+          "name": "Micron 180",
+          "nozzleDiameters": [
+            "0.4"
+          ],
+          "bedModel": "/assets/orcaslicer/printersforAnts/Micron 180_bed.stl",
+          "bedTexture": "/assets/orcaslicer/printersforAnts/Micron 180_texture.png",
+          "bedTextureFormat": "png",
+          "cover": "/assets/orcaslicer/printersforAnts/Micron 180_cover.png"
         }
       ]
     },

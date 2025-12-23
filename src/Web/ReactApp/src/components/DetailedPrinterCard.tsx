@@ -37,7 +37,6 @@ import { apiClient } from '@/services/api';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
 import { PrinterHistoryModal } from '@/components/PrinterHistoryModal';
-import { renderUnknown } from '@/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select, ControlPadButton } from '@/components/ui';
 import { 
   NozzleIcon, 

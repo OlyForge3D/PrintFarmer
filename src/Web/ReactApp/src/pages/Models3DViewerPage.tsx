@@ -5,7 +5,6 @@ import { Button, Alert } from '@/components/ui';
 import { UploadIcon, DeleteIcon, CubeIcon, EyeIcon } from '@/components/icons/MdiIcons';
 import { STLPreviewModal } from '@/components/3D/STLPreviewModal';
 import { useSTLFile } from '@/hooks/useSTLFile';
-import { assetService } from '@/services/assetService';
 import { validateSTLFile } from '@/utils/stlFileUtils';
 
 interface Model3D {
@@ -29,7 +28,7 @@ export const Models3DViewerPage: React.FC = () => {
   const stlFile = useSTLFile();
 
   // Fetch models list
-  const { data: models = [], isLoading, error, refetch } = useQuery<Model3D[], Error>({
+  const { data: models = [], isLoading, error } = useQuery<Model3D[], Error>({
     queryKey: ['models-3d-all'],
     queryFn: async () => {
       try {

@@ -117,4 +117,34 @@ public class EfPrintersRepository : IPrintersRepository
             .Where(p => p.Backend == (int)backend)
             .ToListAsync(ct);
     }
+
+    /// <summary>
+    /// Finds a printer by its IP address efficiently using a direct database query.
+    /// Extracts the IP from the ServerUrl and matches against the stored IpAddress field.
+    /// This is much more efficient than loading all printers into memory.
+    /// </summary>
+    public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
+    {
+        // Extract IP address from ServerUrl (format: http://ip or http://hostname)
+        // Strip http/https and port (if any) to get just the host
+        string inputHost = serverUrl.Replace("http://", "").Replace("https://", "").Split(':')[0];
+        
+        // Query only for the printer with matching IP - much more efficient than GetAllAsync + FirstOrDefault
+        return await _db.Printers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => !string.IsNullOrWhiteSpace(p.IpAddress) && p.IpAddress == inputHost, ct);
+    }
+
+    /// <summary>
+    /// Detaches all tracked entities from the DbContext to prevent "second operation" errors
+    /// in loops where multiple operations are performed on the same context.
+    /// This clears the change tracker without persisting any uncommitted changes.
+    /// </summary>
+    public void DetachAllEntities()
+    {
+        foreach (var entry in _db.ChangeTracker.Entries().ToList())
+        {
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+        }
+    }
 }

@@ -320,7 +320,7 @@ export interface CreatePrinterDto {
 export interface BulkImportResultItem {
   index: number;
   name: string;
-  status: "Pending" | "Imported" | "Skipped" | "Failed";
+  status: "Pending" | "Success" | "Skipped" | "Failed";
   id?: string;
   reason?: string;
 }
@@ -328,12 +328,13 @@ export interface BulkImportResultItem {
 export interface BulkImportResponse {
   importedCount: number;
   skippedCount: number;
+  failureCount: number; 
   results: BulkImportResultItem[];
 }
 
 export interface UpdatePrinterDto {
-  name: string;
-  serverUrl: string;
+  name?: string;
+  serverUrl?: string;
   originalServerUrl?: string;
   notes?: string;
   manufacturerId?: string;

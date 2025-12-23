@@ -682,11 +682,11 @@ public partial class GcodeHarvestService(
             return new GcodeHarvestResultDto(request.HarvestOperationId, false, "Harvest operation not found");
         }
 
-        _logger.LogInformation($"ImportSelectedFilesAsync: Received {request.FileIds.Length} file IDs to import: {string.Join(", ", request.FileIds)}");
+        _logger.LogInformationWithSource($"Received {request.FileIds.Length} file IDs to import: {string.Join(", ", request.FileIds)}");
 
         HarvestDiscoveredFile[] selectedFiles = await _harvestRepo.GetDiscoveredFilesByIdsAsync(request.FileIds.ToList(), ct);
 
-        _logger.LogInformation($"ImportSelectedFilesAsync: Retrieved {selectedFiles.Length} files from database");
+        _logger.LogInformationWithSource($"Retrieved {selectedFiles.Length} files from database");
 
         List<string> importedFileIds = new();
         List<string> skippedFileIds = new();
@@ -695,7 +695,7 @@ public partial class GcodeHarvestService(
 
         // Apply concurrency limiting using semaphore based on configuration
         int maxConcurrent = _harvestSettings.MaxConcurrentImports;
-        _logger.LogInformation($"ImportSelectedFilesAsync: Using max concurrent imports: {maxConcurrent}");
+        _logger.LogInformationWithSource($"Using max concurrent imports: {maxConcurrent}");
         using SemaphoreSlim semaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
 
         // Create import tasks for all selected files with concurrency limiting
@@ -830,10 +830,13 @@ public partial class GcodeHarvestService(
                     Id = Guid.NewGuid(),
                     OriginalFileName = discoveredFile.FileName,
                     DisplayName = Path.GetFileNameWithoutExtension(discoveredFile.FileName),
+                    FileDirectory = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory(),
                     FilePath = filePath,
                     FileSizeBytes = discoveredFile.Size,
                     FileHash = discoveredFile.FileHash ?? "",
                     UploadedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
                     Source = GcodeSource.Harvested,
                     SourcePrinterId = operation.PrinterId, // Keep for reference/audit trail
                     OriginalPrinterPath = discoveredFile.FilePath,
@@ -848,6 +851,8 @@ public partial class GcodeHarvestService(
                     ThumbnailPath = thumbnailPath, // Save extracted thumbnail path if available
                     Tags = request.DefaultTags != null ? JsonSerializer.Serialize(request.DefaultTags) : null
                 };
+
+                _logger.LogDebugWithSource($"Adding GcodeFile: Id={gcodeFile.Id}, FileName={gcodeFile.OriginalFileName}, FileDirectory={gcodeFile.FileDirectory}, TargetModelId={gcodeFile.TargetModelId}, CreatedAt={gcodeFile.CreatedAt}");
 
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 importedFileIds.Add(discoveredFile.Id.ToString());
@@ -884,8 +889,29 @@ public partial class GcodeHarvestService(
             // Individual errors already handled in task catch blocks
         }
 
-        await _harvestRepo.SaveChangesAsync(ct);
-        await _gcodeRepo.SaveChangesAsync(ct);
+        try
+        {
+            _logger.LogInformationWithSource($"Saving {importedFileIds.Count} harvest operations to database");
+            await _harvestRepo.SaveChangesAsync(ct);
+            _logger.LogInformationWithSource($"Harvest operations saved successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogErrorWithSource(ex, $"Error saving harvest operations: {ex.Message} | Inner: {ex.InnerException?.Message}");
+            throw;
+        }
+
+        try
+        {
+            _logger.LogInformationWithSource($"Saving {importedFileIds.Count} gcode files to database");
+            await _gcodeRepo.SaveChangesAsync(ct);
+            _logger.LogInformationWithSource($"Gcode files saved successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogErrorWithSource(ex, $"Error saving gcode files: {ex.Message} | Inner: {ex.InnerException?.Message}");
+            throw;
+        }
 
         GcodeHarvestResultDto result = new GcodeHarvestResultDto(
             request.HarvestOperationId,

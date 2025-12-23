@@ -18,7 +18,6 @@ import { PrinterModelDto } from '@/types/api';
 import {
   createBedVisualization,
   calculateOptimalCameraPosition,
-  extractBedDimensions,
   generateNozzleGeometry,
 } from '@/utils/bedGeometryGenerator';
 
@@ -93,8 +92,13 @@ const BedScene: React.FC<PrinterBedVisualizationProps> = ({
 }) => {
   const { camera } = useThree();
   const bedGroupRef = useRef<THREE.Group>(null);
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<InstanceType<typeof OrbitControls> | null>(null);
   const [autoRotateEnabled, setAutoRotateEnabled] = useState(autoRotate);
+
+  // Sync autoRotate prop to state
+  useEffect(() => {
+    setAutoRotateEnabled(autoRotate);
+  }, [autoRotate]);
 
   useEffect(() => {
     // Initialize scene
@@ -175,6 +179,7 @@ const BedScene: React.FC<PrinterBedVisualizationProps> = ({
 
       {/* Grid/Axes debug helpers */}
       {showAxes && <axesHelper args={[100]} />}
+      {showGrid && <gridHelper args={[200, 20]} />}
     </>
   );
 };

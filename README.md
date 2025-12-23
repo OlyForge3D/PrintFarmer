@@ -27,6 +27,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Real-time Updates** - SignalR WebSocket for live status (temperatures, progress, state)  
 ✅ **Location System** - Organize printers by workspace with drag-and-drop assignment  
 ✅ **Printer Discovery** - Auto-detect Moonraker and PrusaLink printers on network  
+✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
 ✅ **Integrated Slicing** - Built-in OrcaSlicer with profile management  
 ✅ **CSV Import/Export** - Bulk printer configuration management  

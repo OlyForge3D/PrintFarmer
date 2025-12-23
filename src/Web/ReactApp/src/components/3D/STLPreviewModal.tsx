@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/Button';
+import { CloseIcon } from '@/components/icons/MdiIcons';
 import { STLViewer } from './STLViewer';
-import * as THREE from 'three';
 
 interface STLPreviewModalProps {
   isOpen: boolean;
@@ -93,15 +94,9 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
             <h2 className="text-xl font-bold text-pf-text-primary">STL Model Preview</h2>
             <p className="text-sm mt-1 text-pf-text-secondary">{displayFileName}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="transition-colors p-2 rounded text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-border-medium"
-            aria-label="Close"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <Button variant="subtle" size="sm" onClick={onClose} className="p-1">
+            <CloseIcon className="w-5 h-5" />
+          </Button>
         </div>
 
         {/* Content */}
@@ -157,44 +152,38 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
                 <div className="border-t border-pf-border my-2"></div>
 
                 {/* Controls Info */}
-                <div className="bg-gray-900 rounded p-3">
-                  <h4 className="text-sm font-semibold text-white mb-2">Controls</h4>
-                  <div className="text-xs text-gray-300 space-y-1">
-                    <p><span className="text-blue-400">Left Click + Drag</span> - Rotate</p>
-                    <p><span className="text-blue-400">Right Click + Drag</span> - Pan</p>
-                    <p><span className="text-blue-400">Scroll</span> - Zoom</p>
-                    <p><span className="text-blue-400">Double Click</span> - Reset View</p>
+                <div className="bg-pf-bg-2 rounded p-3 border border-pf-border">
+                  <h4 className="text-sm font-semibold text-pf-text-primary mb-2">Controls</h4>
+                  <div className="text-xs text-pf-text-secondary space-y-1">
+                    <p><span className="text-pf-accent">Left Click + Drag</span> - Rotate</p>
+                    <p><span className="text-pf-accent">Right Click + Drag</span> - Pan</p>
+                    <p><span className="text-pf-accent">Scroll</span> - Zoom</p>
+                    <p><span className="text-pf-accent">Double Click</span> - Reset View</p>
                   </div>
                 </div>
               </div>
             ) : isLoading ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-                  <p className="text-sm text-gray-400 mt-2">Loading info...</p>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent mx-auto"></div>
+                  <p className="text-sm text-pf-text-secondary mt-2">Loading info...</p>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-gray-400">Unable to load model information</p>
+              <p className="text-sm text-pf-text-secondary">Unable to load model information</p>
             )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-800 px-6 py-3 border-t border-gray-700 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors font-medium"
-          >
+        <div className="bg-pf-bg-0 px-6 py-3 border-t border-pf-border flex justify-end gap-3">
+          <Button variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
           {onUseModel && (
-            <button
-              onClick={onUseModel}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-            >
+            <Button variant="primary" onClick={onUseModel}>
               Use This Model
-            </button>
+            </Button>
           )}
         </div>
       </div>

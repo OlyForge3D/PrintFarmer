@@ -79,7 +79,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
   const { data: apiPrinter, isLoading, refetch } = usePrinter(printerId || '');
   // Merge with realtime SignalR updates
-  const printer = usePrinterDisplay(apiPrinter || ({} as any));
+  const printer = usePrinterDisplay(apiPrinter || ({} as unknown));
   
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);

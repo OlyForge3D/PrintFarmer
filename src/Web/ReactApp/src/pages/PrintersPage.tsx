@@ -98,7 +98,6 @@ export function PrintersPage() {
 
   const handleDeleteSinglePrinter = (printer: Printer) => {
     setDeleteConfirmation({ isOpen: true, printers: [printer] });
-    toast(`Delete: "${printer.name}" — confirm to proceed`, { duration: 3000 });
   };
 
   const handleDeleteConfirm = async () => {

@@ -1,5 +1,4 @@
 import { LocationManagement } from '@/components/LocationManagement';
-import { Layout } from '@/components/Layout';
 
 export function LocationManagementAdminPage() {
   return (

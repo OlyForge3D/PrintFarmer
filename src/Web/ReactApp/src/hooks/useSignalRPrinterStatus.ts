@@ -99,43 +99,46 @@ export function useSignalRPrinterStatus(printerId: string): UseSignalRPrinterSta
           }
         });
 
-        connection.on('positionupdate', (data: any) => {
+        connection.on('positionupdate', (data: unknown) => {
           // Real-time position update without full status
-          if (data.printerId === printerId && status) {
-            setStatus({
-              ...status,
+          const posData = data as { printerId: string; x?: number; y?: number; z?: number };
+          if (posData.printerId === printerId) {
+            setStatus((prevStatus) => prevStatus ? {
+              ...prevStatus,
               nozzlePosition: {
-                x: data.x ?? status.nozzlePosition?.x ?? 0,
-                y: data.y ?? status.nozzlePosition?.y ?? 0,
-                z: data.z ?? status.nozzlePosition?.z ?? 0,
+                x: posData.x ?? prevStatus.nozzlePosition?.x ?? 0,
+                y: posData.y ?? prevStatus.nozzlePosition?.y ?? 0,
+                z: posData.z ?? prevStatus.nozzlePosition?.z ?? 0,
               },
-            });
+            } : prevStatus);
           }
         });
 
-        connection.on('temperatureupdate', (data: any) => {
+        connection.on('temperatureupdate', (data: unknown) => {
           // Real-time temperature update
-          if (data.printerId === printerId && status) {
-            setStatus({
-              ...status,
+          const tempData = data as { printerId: string; hotend?: number; hotendTarget?: number; bed?: number; bedTarget?: number };
+          if (tempData.printerId === printerId) {
+            setStatus((prevStatus) => prevStatus ? {
+              ...prevStatus,
               temperatures: {
-                hotend: data.hotend ?? status.temperatures?.hotend ?? 0,
-                hotendTarget: data.hotendTarget ?? status.temperatures?.hotendTarget ?? 0,
-                bed: data.bed ?? status.temperatures?.bed ?? 0,
-                bedTarget: data.bedTarget ?? status.temperatures?.bedTarget ?? 0,
+                hotend: tempData.hotend ?? prevStatus.temperatures?.hotend ?? 0,
+                hotendTarget: tempData.hotendTarget ?? prevStatus.temperatures?.hotendTarget ?? 0,
+                bed: tempData.bed ?? prevStatus.temperatures?.bed ?? 0,
+                bedTarget: tempData.bedTarget ?? prevStatus.temperatures?.bedTarget ?? 0,
               },
-            });
+            } : prevStatus);
           }
         });
 
-        connection.on('statechanged', (data: any) => {
+        connection.on('statechanged', (data: unknown) => {
           // Printer state changed
-          if (data.printerId === printerId && status) {
-            setStatus({
-              ...status,
-              state: data.state ?? status.state,
-              errorMessage: data.error,
-            });
+          const stateData = data as { printerId: string; state?: string; error?: string };
+          if (stateData.printerId === printerId) {
+            setStatus((prevStatus) => prevStatus ? {
+              ...prevStatus,
+              state: (stateData.state as any) ?? prevStatus.state,
+              errorMessage: stateData.error,
+            } : prevStatus);
           }
         });
 

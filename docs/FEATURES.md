@@ -263,6 +263,21 @@ Printer 3,http://192.168.1.102:7125,Moonraker,yyy_api_key_yyy,Workshop
 4. Click **Import**
 5. Non-existent locations are created automatically (use default settings)
 
+### Automatic Camera Discovery
+
+When you import printers, the system automatically detects and configures camera URLs in the background:
+
+- **Automatic Detection**: After a printer is imported, the system queries the printer's API to discover connected cameras
+- **Non-Blocking Import**: The import completes immediately (HTTP 201 response) while camera discovery happens in background
+- **Smart Behavior**: Only attempts discovery if no cameras are already configured (respects manual settings)
+- **Supported Backends**: Works with Moonraker, PrusaLink, OctoPrint, and SDCP
+- **Graceful Fallback**: If discovery fails (e.g., camera doesn't exist or API unreachable), the printer is still created successfully
+
+Camera URLs typically appear within 1-3 seconds. If you don't see cameras after importing:
+1. Verify the printer actually has cameras connected
+2. Check that the API key is correct (if required by the backend)
+3. Manually refresh the printer details to see if cameras were discovered
+
 ### Export Steps
 
 1. Go to **Admin > Export Printers**

@@ -5,12 +5,12 @@ import { STLPreviewModal } from './STLPreviewModal';
 
 // Mock STLViewer to simplify testing
 vi.mock('./STLViewer', () => ({
-  STLViewer: ({ file }: any) => <div data-testid="stl-viewer">STL Viewer Mock</div>,
+  STLViewer: ({ file }: { file?: unknown }) => <div data-testid="stl-viewer">STL Viewer Mock</div>,
 }));
 
 describe('STLPreviewModal Component', () => {
   it('does not render when isOpen is false', () => {
-    const { container } = render(
+    render(
       <STLPreviewModal
         isOpen={false}
         file={null}

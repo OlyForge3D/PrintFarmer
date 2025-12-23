@@ -193,8 +193,13 @@ public class GcodeHarvestController(
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to import selected files for operation {request.HarvestOperationId}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to import selected files");
+            _logger.LogErrorWithSource(ex, $"Failed to import selected files for operation {request.HarvestOperationId}");
+            // Log inner exceptions for better debugging
+            if (ex.InnerException != null)
+            {
+                _logger.LogErrorWithSource(ex.InnerException, "Inner exception details");
+            }
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to import selected files", details = ex.Message });
         }
     }
 

@@ -17,12 +17,14 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [isImporting, setIsImporting] = useState(false);
   // const [copying, setCopying] = useState(false);
   const filesRef = useRef<DiscoveredGcodeFileDto[]>([]);
 
   // Import selected files logic
   const handleImportSelected = async () => {
     if (selected.size === 0) return;
+    setIsImporting(true);
     try {
       const fileIds = Array.from(selected);
       const result = await apiClient.importSelectedGcodeFiles({
@@ -48,6 +50,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : 'Unknown error';
       toast.error('Import failed: ' + (msg || 'Unknown error'));
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -331,9 +335,18 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
       <div className="px-4 py-3 border-t border-pf-border flex items-center gap-3 bg-pf-surface">
         <Button
           onClick={handleImportSelected}
-          disabled={selected.size === 0}
+          disabled={selected.size === 0 || isImporting}
         >
-          Import Selected <span className="ml-1 font-bold">({selected.size})</span>
+          {isImporting ? (
+            <>
+              <span className="inline-block w-4 h-4 border-2 border-pf-accent border-t-transparent rounded-full animate-spin mr-2" />
+              Importing...
+            </>
+          ) : (
+            <>
+              Import Selected <span className="ml-1 font-bold">({selected.size})</span>
+            </>
+          )}
         </Button>
         <span className="text-pf-muted text-xs">Tip: Use checkboxes to select files to import.</span>
       </div>

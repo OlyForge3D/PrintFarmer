@@ -433,13 +433,8 @@ namespace Farm.Infrastructure.Services.Printers
         /// </summary>
         public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
         {
-            // Extract IP address from ServerUrl (format: http://ip or http://hostname)
-            // Strip http/https and port (if any) to get just the host
-            string inputHost = serverUrl.Replace("http://", "").Replace("https://", "").Split(':')[0];
-            
-            List<Printer> printers = await _repo.GetAllAsync(ct).ConfigureAwait(false);
-            // Compare input host against stored IpAddress (which contains the resolved IP)
-            return printers.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.IpAddress) && p.IpAddress == inputHost);
+            // Use the repository's efficient direct database query instead of loading all printers
+            return await _repo.FindByIpAddressAsync(serverUrl, ct);
         }
 
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
@@ -846,7 +841,7 @@ namespace Farm.Infrastructure.Services.Printers
         public async Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct)
         {
             // Check for duplicate printer by IP address
-            Printer? duplicate = await FindByIpAddressAsync(dto.ServerUrl, ct).ConfigureAwait(false);
+            Printer? duplicate = await FindByIpAddressAsync(dto.ServerUrl, ct);
 
             if (duplicate != null)
             {
@@ -860,7 +855,7 @@ namespace Farm.Infrastructure.Services.Printers
             {
                 string name = dto.NewManufacturerName!.Trim();
                 // CreateManufacturerAsync now returns existing manufacturer if it already exists (no exception thrown)
-                ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct).ConfigureAwait(false);
+                ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct);
                 manufacturerId = created.Id;
                 _logger.LogInformation($"Resolved manufacturer '{name}' to ID {manufacturerId}");
             }
@@ -889,14 +884,14 @@ namespace Farm.Infrastructure.Services.Printers
                     createReq.DefaultBackend,
                     createReq.SupportedFilamentTypeIds,
                     createReq.DefaultNozzleDiameter,
-                    ct).ConfigureAwait(false);
+                    ct);
                 modelId = createdModel.Id;
                 _logger.LogInformation($"Resolved model '{mname}' to ID {modelId}");
             }
 
             if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
             {
-                (Guid defaultManufacturerId, Guid defaultModelId) = await _defaultCatalog.GetDefaultCatalogIdsAsync().ConfigureAwait(false);
+                (Guid defaultManufacturerId, Guid defaultModelId) = await _defaultCatalog.GetDefaultCatalogIdsAsync();
                 if (manufacturerId == Guid.Empty)
                 {
                     manufacturerId = defaultManufacturerId;
@@ -982,7 +977,7 @@ namespace Farm.Infrastructure.Services.Printers
             // Assign location if provided
             if (!string.IsNullOrWhiteSpace(dto.LocationName))
             {
-                Location? location = await _locationService.FindByNameAsync(dto.LocationName.Trim(), ct).ConfigureAwait(false);
+                Location? location = await _locationService.FindByNameAsync(dto.LocationName.Trim(), ct);
                 if (location != null)
                 {
                     p.LocationId = location.Id;
@@ -994,13 +989,42 @@ namespace Farm.Infrastructure.Services.Printers
                 }
             }
 
-            await AddAsync(p, ct).ConfigureAwait(false);
-
-            // Capability discovery disabled - hardware specs now populated via printer model defaults and Toolhead creation
-            // TODO: Future enhancement - implement automatic discovery to populate Toolhead specs from printer API
+            await AddAsync(p, ct);
 
             // Return offline DTO for newly imported printer (hasn't fetched status yet)
             return CreateOfflinePrinterDto(p);
+        }
+
+        /// <summary>
+        /// Attempts automatic camera discovery for a printer in the background.
+        /// This is separated from CreatePrinterFromDtoAsync to avoid DbContext conflicts during bulk imports.
+        /// </summary>
+        private async Task AttemptBackgroundCameraDiscoveryAsync(Printer p)
+        {
+            try
+            {
+                var backend = (PrinterBackend)p.Backend;
+                if (!_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out _))
+                {
+                    _logger.LogDebug($"[CameraDiscovery] Backend {backend} does not support automatic camera discovery");
+                    return;
+                }
+
+                _logger.LogInformation($"[CameraDiscovery] Attempting automatic camera discovery for {p.Name} ({backend})");
+                try
+                {
+                    await RefreshCameraUrlsAsync(p.Id, CancellationToken.None);
+                    _logger.LogInformation($"[CameraDiscovery] Background camera discovery completed for {p.Name}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[CameraDiscovery] Background camera discovery failed for {p.Name}, continuing without cameras");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"[CameraDiscovery] Failed to start camera discovery for {p.Name}, continuing without cameras");
+            }
         }
 
         // High-level operations moved from controller
@@ -1717,14 +1741,16 @@ namespace Farm.Infrastructure.Services.Printers
             int skippedCount = 0;
             List<dynamic> results = new List<dynamic>();
 
+            // Process each printer sequentially to avoid DbContext concurrency issues
             for (int i = 0; i < printers.Length; i++)
             {
                 try
                 {
                     CreatePrinterDto printerDto = printers[i];
-                    string status = "Imported";
+                    string status = "Success";
                     string? reason = null;
                     PrinterDto? createdDto = null;
+                    Guid? createdPrinterId = null;
 
                     // Check for duplicates by IP address
                     Printer? existingByIp = await FindByIpAddressAsync(printerDto.ServerUrl, ct);
@@ -1745,6 +1771,7 @@ namespace Farm.Infrastructure.Services.Printers
                             // Load a fresh copy of the CSV printer data (not the one we're removing)
                             // This avoids EF Core tracking conflicts when creating the new printer
                             createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
+                            createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                             await SaveChangesAsync(ct);
                             createdPrinters.Add(createdDto);
                             _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
@@ -1760,6 +1787,7 @@ namespace Farm.Infrastructure.Services.Printers
                     {
                         // Create the printer
                         createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
+                        createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                         await SaveChangesAsync(ct);
                         createdPrinters.Add(createdDto);
                         _logger.LogInformation($"[BulkCreate] Successfully created printer: {createdDto.Name}");
@@ -1778,6 +1806,24 @@ namespace Farm.Infrastructure.Services.Printers
 
                     // Broadcast import progress update to all connected clients
                     await _broadcaster.BroadcastPrinterImportProgressAsync(result, ct);
+
+                    // Attempt background camera discovery for successfully imported printers
+                    // This is done as fire-and-forget to avoid blocking the import response
+                    // Camera discovery may take time (network calls to printer APIs)
+                    if (createdPrinterId.HasValue && status == "Success")
+                    {
+                        Printer? createdPrinter = await FindByIdAsync(createdPrinterId.Value, ct);
+                        if (createdPrinter != null && string.IsNullOrEmpty(createdPrinter.CameraStreamUrl) && string.IsNullOrEmpty(createdPrinter.CameraSnapshotUrl))
+                        {
+                            // Clear DbContext before starting background task to avoid conflicts
+                            _repo.DetachAllEntities();
+                            // Fire off background camera discovery - it will complete asynchronously
+                            // NOTE: This does NOT block the import response; cameras may populate after import completes
+                            #pragma warning disable CS4014  // Intentionally not awaiting
+                            AttemptBackgroundCameraDiscoveryAsync(createdPrinter);
+                            #pragma warning restore CS4014
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1819,6 +1865,12 @@ namespace Farm.Infrastructure.Services.Printers
 
                     // Broadcast import progress update for failure
                     await _broadcaster.BroadcastPrinterImportProgressAsync(result, ct);
+                }
+                finally
+                {
+                    // Clear DbContext tracking to prevent "second operation" errors in next iteration
+                    // This ensures a clean slate for each printer in the loop
+                    _repo.DetachAllEntities();
                 }
             }
 

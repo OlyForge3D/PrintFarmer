@@ -106,20 +106,6 @@ describe('useSignalRPrinterStatus Hook', () => {
   it('returns typed status when available', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
-    // Mock status structure
-    const mockStatus: PrinterStatusUpdate = {
-      printerId: 'printer-1',
-      name: 'Test Printer',
-      state: 'Idle',
-      nozzlePosition: { x: 0, y: 0, z: 0 },
-      temperatures: {
-        hotend: 25,
-        hotendTarget: 0,
-        bed: 25,
-        bedTarget: 0,
-      },
-    };
-
     // Status should be null until updated
     expect(result.current.status).toBeNull();
   });
@@ -134,11 +120,9 @@ describe('useSignalRPrinterStatus Hook', () => {
     ];
 
     states.forEach((state) => {
-      const { result, unmount } = renderHook(() => useSignalRPrinterStatus('printer-1'));
+      const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
       expect(result.current).toBeDefined();
-
-      unmount();
     });
   });
 
@@ -149,18 +133,15 @@ describe('useSignalRPrinterStatus Hook', () => {
   });
 
   it('handles multiple printer IDs', () => {
-    const { result: result1, unmount: unmount1 } = renderHook(() =>
+    const { result: result1 } = renderHook(() =>
       useSignalRPrinterStatus('printer-1')
     );
-    const { result: result2, unmount: unmount2 } = renderHook(() =>
+    const { result: result2 } = renderHook(() =>
       useSignalRPrinterStatus('printer-2')
     );
 
     expect(result1.current).toBeDefined();
     expect(result2.current).toBeDefined();
-
-    unmount1();
-    unmount2();
   });
 });
 

@@ -831,14 +831,23 @@ public class PrintersController(
             }
         }
 
-        p.Name = dto.Name;
+        // Only update Name if provided
+        if (!string.IsNullOrWhiteSpace(dto.Name))
+        {
+            p.Name = dto.Name;
+        }
 
-        // Delegate normalization and optional hostname resolution to the PrintersService
-        PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
-        ResolveHostnameResponse resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);
-        p.ServerUrl = resolveResp.ResolvedBaseUrl ?? resolveResp.NormalizedInputUrl;
-        p.OriginalServerUrl = resolveResp.NormalizedInputUrl;
-        p.IpAddress = resolveResp.ResolvedIp;
+        // Only resolve hostname if a new ServerUrl is provided
+        if (!string.IsNullOrWhiteSpace(dto.ServerUrl))
+        {
+            // Delegate normalization and optional hostname resolution to the PrintersService
+            PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
+            ResolveHostnameResponse resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);
+            p.ServerUrl = resolveResp.ResolvedBaseUrl ?? resolveResp.NormalizedInputUrl;
+            p.OriginalServerUrl = resolveResp.NormalizedInputUrl;
+            p.IpAddress = resolveResp.ResolvedIp;
+        }
+        
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;

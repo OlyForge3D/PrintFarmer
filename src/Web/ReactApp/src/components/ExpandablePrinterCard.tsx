@@ -71,7 +71,7 @@ interface ExpandablePrinterCardProps {
 export function ExpandablePrinterCard({ printer: initialPrinter, onEdit }: ExpandablePrinterCardProps) {
   // Use the API hook to get the complete printer data with merged realtime status
   // The backend/API layer handles merging realtime status with printer data
-  const { data: printer = initialPrinter, isLoading } = usePrinter(initialPrinter.id);
+  const { data: printer = initialPrinter } = usePrinter(initialPrinter.id);
   
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCamera, setShowCamera] = useState(false);

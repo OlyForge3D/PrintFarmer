@@ -9,6 +9,7 @@ import { PrinterModelDto } from '@/types/api';
 import type { PrinterStatus } from './PrinterBedVisualization';
 
 // Mock canvas-related APIs
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
   clear: vi.fn(),
   drawImage: vi.fn(),

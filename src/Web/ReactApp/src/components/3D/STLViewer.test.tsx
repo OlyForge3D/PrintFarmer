@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { STLViewer } from './STLViewer';
 
 // Since STLViewer uses Complex Three.js rendering, we test the exposed behavior
