@@ -62,7 +62,7 @@ public class ModelController : ControllerBase
     [HttpPost("upload")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [RequestSizeLimit(100_000_000)] // 100MB limit
+    [RequestSizeLimit(500_000_000)] // 500MB limit for individual 3D model files
     [SuppressMessage("Security", "CA3003", Justification = "File name is GUID-based and path validated via IsSafePath; no user-controlled traversal.")]
     public async Task<IActionResult> UploadModelAsync([FromForm] IFormFile modelFile)
     {
@@ -269,7 +269,7 @@ public class ModelController : ControllerBase
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
     {
         string? thumbPath = await _modelService.GetModelThumbnailPathAsync(id, CancellationToken.None);
-        if (string.IsNullOrEmpty(thumbPath) || !_fileSystem.FileExists(thumbPath) || !_fileManagementService.IsSafePath(thumbPath, Path.GetDirectoryName(thumbPath) ?? string.Empty))
+        if (string.IsNullOrEmpty(thumbPath) || !_fileSystem.FileExists(thumbPath))
         {
             return NotFound("Thumbnail not available");
         }

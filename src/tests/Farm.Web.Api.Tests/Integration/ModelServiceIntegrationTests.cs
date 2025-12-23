@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Model;
 using Farm.Web.Api.Services.Model;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -731,6 +732,61 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert
         filePath.Should().NotBeNull();
         File.Exists(filePath).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_GeneratesThumbnail_WhenValidModelUploaded()
+    {
+        // Arrange
+        using var scope = _factory.Services.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<IModelService>();
+        var repository = scope.ServiceProvider.GetRequiredService<IModelRepository>();
+
+        // Create a valid STL file for upload
+        var stlContent = "solid test\n" +
+                       "  facet normal 0.0 0.0 1.0\n" +
+                       "    outer loop\n" +
+                       "      vertex 0.0 0.0 0.0\n" +
+                       "      vertex 1.0 0.0 0.0\n" +
+                       "      vertex 0.0 1.0 0.0\n" +
+                       "    endloop\n" +
+                       "  endfacet\n" +
+                       "endsolid test\n";
+
+        var formFile = CreateMockFormFile("thumbnail-test.stl", stlContent);
+
+        // Act
+        var result = await service.UploadModelAsync(formFile, CancellationToken.None);
+
+        // Assert - Upload should succeed
+        result.Should().NotBeNull();
+        result.Id.Should().NotBe(Guid.Empty);
+
+        // Assert - Check that thumbnail was generated and saved to database
+        var uploadedModel = await repository.GetByIdAsync(result.Id, CancellationToken.None);
+        uploadedModel.Should().NotBeNull();
+
+        // The key assertion: thumbnail path should be set if thumbnail generation succeeded
+        // If this fails, it means thumbnail generation is not working
+        // Possible causes:
+        // 1. ThumbnailGenerationService is null (not registered in DI)
+        // 2. Thumbnail generation failed but error was silently caught
+        // 3. File path validation (IsSafePath) rejected the thumbnail path
+        // 4. Assimp failed to load the model file
+        uploadedModel!.ThumbnailPath.Should().NotBeNullOrEmpty(
+            "Thumbnail should be generated for uploaded STL model. " +
+            "If this fails, check: " +
+            "(1) IThumbnailGenerationService is registered in DI, " +
+            "(2) Model storage path is configured in appsettings.json, " +
+            "(3) Assimp can load the model file, " +
+            "(4) File system permissions allow writing thumbnail");
+
+        // Verify the thumbnail file actually exists on disk
+        if (!string.IsNullOrEmpty(uploadedModel.ThumbnailPath))
+        {
+            File.Exists(uploadedModel.ThumbnailPath).Should().BeTrue(
+                $"Thumbnail file should exist at {uploadedModel.ThumbnailPath}");
+        }
     }
 
     #endregion
