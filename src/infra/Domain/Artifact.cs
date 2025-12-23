@@ -49,7 +49,7 @@ public class Artifact
     public long SizeBytes { get; set; }
 
     /// <summary>
-    /// SHA-256 hash (hex) of the artifact for integrity & future dedup.
+    /// SHA-256 hash (hex) of the artifact for integrity and future dedup.
     /// </summary>
     public string Sha256 { get; set; } = string.Empty;
 

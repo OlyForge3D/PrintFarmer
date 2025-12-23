@@ -99,6 +99,7 @@ public class SlicingJobResponse
     public Uri SlicerWorkerUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
 }
 
+/// <summary>
 /// Extended slicing job for distributed processing 
 /// Builds on existing SlicingJobDto with additional distributed processing fields and envelope support
 /// </summary>

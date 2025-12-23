@@ -11,17 +11,23 @@ public sealed class DatabaseConstraintException : Exception
     public string EntityType { get; } = "Entity";
     public string PropertyName { get; } = "Property";
 
+    /// <summary>
+    /// Creates an exception with just a message.
+    /// </summary>
     public DatabaseConstraintException(string message) : base(message) { }
 
+    /// <summary>
+    /// Creates an exception with detailed constraint information.
+    /// </summary>
+#pragma warning disable S3427 // Multiple constructors with default parameters are intentional for flexible initialization
     public DatabaseConstraintException(
         string message,
         string? constraintName = null,
         string entityType = "Entity",
         string propertyName = "Property",
         Exception? inner = null)
-#pragma warning disable S3427 // Multiple constructors intentionally support flexible initialization
-        : base(message, inner)
 #pragma warning restore S3427
+        : base(message, inner)
     {
         ConstraintName = constraintName;
         EntityType = entityType;

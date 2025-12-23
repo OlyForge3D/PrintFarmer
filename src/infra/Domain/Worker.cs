@@ -128,7 +128,7 @@ public class Worker
     public int ArtifactsProduced { get; set; }
 
     /// <summary>
-    /// Aggregate bytes written for produced artifacts (for capacity planning & monitoring).
+    /// Aggregate bytes written for produced artifacts (for capacity planning and monitoring).
     /// </summary>
     public long ArtifactBytesProduced { get; set; }
 }

@@ -58,7 +58,6 @@ public enum MotionType
 /// </summary>
 /// <param name="Id">Printer identifier.</param>
 /// <param name="Name">Friendly printer name assigned by the user.</param>
-/// <param name="ServerUrl">Normalized base URL of the printer backend (e.g. Moonraker / PrusaLink).</param>
 /// <param name="Notes">Optional free-form notes.</param>
 /// <param name="IsOnline">Whether the backend is currently reachable.</param>
 /// <param name="State">Backend reported state (e.g. printing, idle).</param>
@@ -82,6 +81,8 @@ public enum MotionType
 /// <param name="IpAddress">Resolved IP address when known.</param>
 /// <param name="BackendUrl">Calculated backend URL with port (7125 for Moonraker, etc).</param>
 /// <param name="FrontendUrl">Calculated frontend URL (typically port 80 for web UI).</param>
+/// <param name="BackendPort">Backend port number.</param>
+/// <param name="FrontendPort">Frontend port number.</param>
 /// <param name="SpoolInfo">Active spool information (Moonraker + Spoolman integration).</param>
 public record PrinterDto(
     Guid Id,
@@ -168,9 +169,8 @@ public record PrinterFastDto(
     string? BackendUrl = null,
     string? FrontendUrl = null);
 
+/// <summary>
 /// Complete printer DTO combining static config with live real-time status from SignalR.
-/// This is the primary response from GET /api/printers to avoid client-side merge logic.
-/// Real-time status is merged server-side from the in-memory SignalR cache.
 /// </summary>
 public record CompletePrinterDto(
     // Static configuration from database

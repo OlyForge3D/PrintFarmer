@@ -690,8 +690,6 @@ namespace Farm.Infrastructure.Services.Printers
             return ms.ToArray();
         }
 
-        /// <summary>
-
         public async Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
@@ -1513,17 +1511,15 @@ namespace Farm.Infrastructure.Services.Printers
             return false;
         }
 
-        public async Task<bool> DisableCameraAsync(Guid id, CancellationToken ct)
+        /// <summary>
+        /// Disables camera for a printer. Currently not supported via capability interfaces.
+        /// Delegates to the same logic as EnableCameraAsync pending implementation.
+        /// </summary>
+        public Task<bool> DisableCameraAsync(Guid id, CancellationToken ct)
         {
-            Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
-            if (p == null)
-            {
-                return false;
-            }
-
-            // Camera enable/disable is not currently supported via capability interfaces
-            // This would need to be implemented as a new capability interface
-            return false;
+            // Delegate to EnableCameraAsync as they have identical implementation
+            // Both are placeholder methods pending capability interface implementation
+            return EnableCameraAsync(id, ct);
         }
 
         public async Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct)

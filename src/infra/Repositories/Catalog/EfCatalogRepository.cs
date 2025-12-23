@@ -34,10 +34,10 @@ namespace Farm.Infrastructure.Repositories.Catalog
             return m is null ? null : (m.Id, m.Name);
         }
 
-        public Task AddManufacturerAsync(Guid id, string name, CancellationToken ct = default)
+        public async Task AddManufacturerAsync(Guid id, string name, CancellationToken ct = default)
         {
             _ = _db.Manufacturers.Add(new Manufacturer { Id = id, Name = name });
-            return Task.CompletedTask;
+            await _db.SaveChangesAsync(ct);
         }
 
         public Task<bool> ManufacturerExistsAsync(Guid id, CancellationToken ct = default)
@@ -112,10 +112,10 @@ namespace Farm.Infrastructure.Repositories.Catalog
                 model.SupportedFilamentTypes.Select(sf => sf.FilamentType!.Name).ToArray());
         }
 
-        public Task AddModelAsync(PrinterModel model, CancellationToken ct = default)
+        public async Task AddModelAsync(PrinterModel model, CancellationToken ct = default)
         {
             _ = _db.Models.Add(model);
-            return Task.CompletedTask;
+            await _db.SaveChangesAsync(ct);
         }
 
         public async Task<IEnumerable<Guid>> GetValidFilamentTypeIdsAsync(Guid[] ids, CancellationToken ct = default)

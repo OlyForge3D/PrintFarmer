@@ -4,18 +4,17 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Infrastructure.Settings
 {
     /// <summary>
     /// Discovers, loads, and validates all settings classes marked with [AppSetting].
     /// </summary>
-    using Farm.Infrastructure.Data;
-    using Microsoft.EntityFrameworkCore;
-    using Microsoft.EntityFrameworkCore.ChangeTracking;
-
     public class SettingsService : ISettingsService
     {
         /// <summary>

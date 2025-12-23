@@ -238,7 +238,6 @@ public class ImportProcessorService : IImportProcessorService
         };
         
         await _printersRepo.AddAsync(p, ct);
-        await _printersRepo.SaveChangesAsync(ct);
 
         // Create default toolhead for the imported printer
         var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead
