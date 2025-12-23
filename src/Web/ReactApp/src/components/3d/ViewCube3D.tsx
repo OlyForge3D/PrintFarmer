@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -13,7 +13,18 @@ interface ViewCube3DProps {
  */
 export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange }) => {
   const groupRef = useRef<THREE.Group>(null);
-  const { camera } = useThree();
+  const { camera, viewport } = useThree();
+
+  // Position the cube in screen space (upper right corner)
+  useEffect(() => {
+    if (groupRef.current) {
+      // Position in upper right corner relative to viewport
+      // viewport.width/height are normalized canvas coordinates
+      const offsetX = viewport.width / 2 - 40;
+      const offsetY = viewport.height / 2 - 40;
+      groupRef.current.position.set(offsetX, offsetY, 0);
+    }
+  }, [viewport]);
 
   const handleFaceClick = (face: string) => {
     const viewMap: Record<string, 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right' | 'iso'> = {
@@ -30,21 +41,22 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange }) => {
 
   const cubeSize = 30;
   const faceSize = cubeSize - 2;
+  const halfSize = cubeSize / 2;
 
   // Faces with their labels and positions
+  // Positions place faces on the surface of the cube (at half the cube size from center)
   const faces = [
-    { name: 'Top', label: 'T', position: [0, cubeSize, 0] as [number, number, number], rotation: [-Math.PI / 2, 0, 0] as [number, number, number] },
-    { name: 'Bottom', label: 'B', position: [0, -cubeSize, 0] as [number, number, number], rotation: [Math.PI / 2, 0, 0] as [number, number, number] },
-    { name: 'Front', label: 'F', position: [0, 0, cubeSize] as [number, number, number], rotation: [0, 0, 0] as [number, number, number] },
-    { name: 'Back', label: 'K', position: [0, 0, -cubeSize] as [number, number, number], rotation: [0, Math.PI, 0] as [number, number, number] },
-    { name: 'Left', label: 'L', position: [-cubeSize, 0, 0] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number] },
-    { name: 'Right', label: 'R', position: [cubeSize, 0, 0] as [number, number, number], rotation: [0, -Math.PI / 2, 0] as [number, number, number] },
+    { name: 'Top', label: 'T', position: [0, halfSize, 0] as [number, number, number], rotation: [-Math.PI / 2, 0, 0] as [number, number, number] },
+    { name: 'Bottom', label: 'B', position: [0, -halfSize, 0] as [number, number, number], rotation: [Math.PI / 2, 0, 0] as [number, number, number] },
+    { name: 'Front', label: 'F', position: [0, 0, halfSize] as [number, number, number], rotation: [0, 0, 0] as [number, number, number] },
+    { name: 'Back', label: 'K', position: [0, 0, -halfSize] as [number, number, number], rotation: [0, Math.PI, 0] as [number, number, number] },
+    { name: 'Left', label: 'L', position: [-halfSize, 0, 0] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number] },
+    { name: 'Right', label: 'R', position: [halfSize, 0, 0] as [number, number, number], rotation: [0, -Math.PI / 2, 0] as [number, number, number] },
   ];
 
   return (
     <group
       ref={groupRef}
-      position={[0, 0, 0]}
       onPointerDown={(e) => {
         e.stopPropagation();
       }}
@@ -93,7 +105,7 @@ export const ViewCube3D: React.FC<ViewCube3DProps> = ({ onViewChange }) => {
       {/* Center cube edges for reference */}
       <lineSegments>
         <edgesGeometry attach="geometry">
-          <boxGeometry args={[cubeSize * 2, cubeSize * 2, cubeSize * 2]} />
+          <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
         </edgesGeometry>
         <lineBasicMaterial attach="material" color="#64748b" linewidth={2} />
       </lineSegments>
