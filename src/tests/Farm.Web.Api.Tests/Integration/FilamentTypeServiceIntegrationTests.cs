@@ -41,23 +41,63 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
+    /// <summary>
+    /// Helper to run async code within a properly disposed scope.
+    /// This ensures DisposeAsync() is called instead of Dispose() on the scope.
+    /// </summary>
+    private async Task<T> RunInScopeAsync<T>(Func<IServiceScope, Task<T>> work)
+    {
+        var scope = _factory.Services.CreateAsyncScope();
+        try
+        {
+            return await work(scope);
+        }
+        finally
+        {
+            await scope.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Helper to run async code within a properly disposed scope (void variant).
+    /// </summary>
+    private async Task RunInScopeAsync(Func<IServiceScope, Task> work)
+    {
+        var scope = _factory.Services.CreateAsyncScope();
+        try
+        {
+            await work(scope);
+        }
+        finally
+        {
+            await scope.DisposeAsync();
+        }
+    }
+
     private async Task<FilamentTypeDto> CreateTestFilamentAsync(
         string? name = null,
         int hotendTemp = 200,
         int bedTemp = 60)
     {
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        var scope = _factory.Services.CreateAsyncScope();
+        try
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        // Generate unique name if not provided
-        var uniqueName = name ?? $"test-filament-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            // Generate unique name if not provided
+            var uniqueName = name ?? $"test-filament-{Guid.NewGuid().ToString().Substring(0, 8)}";
 
-        var request = new CreateFilamentTypeRequest(
-            uniqueName,
-            new TempTargets(hotendTemp, bedTemp)
-        );
+            var request = new CreateFilamentTypeRequest(
+                uniqueName,
+                new TempTargets(hotendTemp, bedTemp)
+            );
 
-        return await service.CreateFilamentTypeAsync(request, CancellationToken.None);
+            return await service.CreateFilamentTypeAsync(request, CancellationToken.None);
+        }
+        finally
+        {
+            await scope.DisposeAsync();
+        }
     }
 
     #region GetFilamentTypesAsync Tests
@@ -66,17 +106,19 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
     public async Task GetFilamentTypesAsync_WhenReady_ReturnsFilamentTypes()
     {
         // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
+        var result = await RunInScopeAsync(async scope =>
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
 
-        var name1 = $"pla-{Guid.NewGuid().ToString().Substring(0, 8)}";
-        var name2 = $"petg-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            var name1 = $"pla-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            var name2 = $"petg-{Guid.NewGuid().ToString().Substring(0, 8)}";
 
-        await CreateTestFilamentAsync(name1);
-        await CreateTestFilamentAsync(name2);
+            await CreateTestFilamentAsync(name1);
+            await CreateTestFilamentAsync(name2);
 
-        // Act
-        var result = await service.GetFilamentTypesAsync(CancellationToken.None);
+            // Act
+            return await service.GetFilamentTypesAsync(CancellationToken.None);
+        });
 
         // Assert
         result.Should().NotBeNull();

@@ -15,7 +15,6 @@ import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
 import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
-import { ViewCube3D } from './ViewCube3D';
 
 export interface ModelViewerProps {
   modelUrl: string;
@@ -370,8 +369,10 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
       case 'ply':
         return <PLYModel url={modelUrl} />;
       case '3mf':
-        // 3MF requires server-side conversion to STL
-        return <STLModel url={`${getApiBaseUrl()}/convert/3mf-to-stl?url=${encodeURIComponent(modelUrl)}`} />;
+        // 3MF format is not currently supported for direct viewing
+        // TODO: Implement 3MF to STL conversion service or use a library
+        setError('3MF file format is not currently supported for viewing. Please convert to STL format.');
+        return null;
       default:
         return <STLModel url={modelUrl} />;
     }
@@ -465,10 +466,8 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
             />
           </GizmoHelper>
         )}
-
-        {/* 3D View Cube - as scene element for proper depth rendering */}
-        <ViewCube3D onViewChange={setViewDirection} />
       </Canvas>
+
       <div className="absolute top-4 left-4 bg-pf-bg-2/95 backdrop-blur px-3 py-2 rounded-lg text-sm border border-pf-border">
         <div className="font-medium text-pf-text-primary">{fileType.toUpperCase()} Model</div>
         <div className="text-pf-text-secondary">Click and drag to rotate</div>

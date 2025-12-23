@@ -127,16 +127,22 @@ namespace Farm.Web.Api.Tests
         }
 
         /// <summary>
+        /// <summary>
         /// Resets the database by deleting all tables and recreating schema.
         /// Useful for tests that share a factory but need a fresh database state.
         /// </summary>
         public async Task ResetDatabaseAsync()
         {
-            using (var scope = Services.CreateAsyncScope())
+            var scope = Services.CreateAsyncScope();
+            try
             {
                 var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await context.Database.EnsureDeletedAsync();
                 await context.Database.EnsureCreatedAsync();
+            }
+            finally
+            {
+                await scope.DisposeAsync();
             }
         }
 
