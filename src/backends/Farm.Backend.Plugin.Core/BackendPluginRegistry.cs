@@ -16,8 +16,7 @@ public class BackendPluginRegistry : IBackendPluginRegistry
     /// <exception cref="InvalidOperationException">Thrown when a plugin is already registered for the backend type.</exception>
     public void Register(IBackendClientPlugin plugin)
     {
-        if (plugin == null)
-            throw new ArgumentNullException(nameof(plugin));
+        ArgumentNullException.ThrowIfNull(plugin);
 
         lock (_lock)
         {

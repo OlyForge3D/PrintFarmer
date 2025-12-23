@@ -6,7 +6,7 @@ namespace Farm.Backend.Plugin.Core;
 /// Stores metadata about the plugin including its unique backend identifier for use in service registration.
 /// </summary>
 [AttributeUsage(AttributeTargets.Assembly)]
-public class BackendPluginAttribute : Attribute
+public sealed class BackendPluginAttribute : Attribute
 {
     /// <summary>
     /// Initializes a new instance of the BackendPluginAttribute.
