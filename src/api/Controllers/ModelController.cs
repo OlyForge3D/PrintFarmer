@@ -47,7 +47,7 @@ public class ModelController : ControllerBase
         _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
         _modelRepo = modelRepo ?? throw new ArgumentNullException(nameof(modelRepo));
         ArgumentNullException.ThrowIfNull(configuration);
-        _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
+        _modelsPath = configuration["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
 
         if (!_fileSystem.DirectoryExists(_modelsPath))
         {
@@ -66,30 +66,39 @@ public class ModelController : ControllerBase
     [SuppressMessage("Security", "CA3003", Justification = "File name is GUID-based and path validated via IsSafePath; no user-controlled traversal.")]
     public async Task<IActionResult> UploadModelAsync([FromForm] IFormFile modelFile)
     {
+        _logger.LogInformation($"[Upload] Received upload request for file: {modelFile?.FileName ?? "NULL"}, Size: {modelFile?.Length ?? 0} bytes");
+        
         if (modelFile == null || modelFile.Length == 0)
         {
+            _logger.LogWarning("[Upload] Model file is null or empty");
             return BadRequest("Model file is required");
         }
 
         // Validate file extension using service
         string fileExtension = Path.GetExtension(modelFile.FileName ?? string.Empty);
+        _logger.LogInformation($"[Upload] File extension: {fileExtension}");
+        
         try
         {
             _fileManagementService.ValidateModelExtension(fileExtension);
+            _logger.LogInformation($"[Upload] File extension validation passed");
         }
         catch (ArgumentException ex)
         {
+            _logger.LogWarning($"[Upload] File extension validation failed: {ex.Message}");
             return BadRequest(ex.Message);
         }
 
         try
         {
+            _logger.LogInformation($"[Upload] Starting model upload service for {modelFile.FileName}");
             Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
+            _logger.LogInformation($"[Upload] Upload completed successfully. Model ID: {result.Id}, File size: {result.FileSize} bytes");
             return CreatedAtRoute("GetModel", new { id = result.Id }, result);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to upload model file: {modelFile.FileName}: {ex.Message}");
+            _logger.LogError(ex, $"[Upload] Failed to upload model file: {modelFile.FileName}: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to upload model file");
         }
     }
@@ -236,8 +245,15 @@ public class ModelController : ControllerBase
     public async Task<IActionResult> GetModelFileAsync(Guid id)
     {
         string? path = await _modelService.GetModelFilePathAsync(id, CancellationToken.None);
-        if (string.IsNullOrEmpty(path) || !_fileSystem.FileExists(path) || !_fileManagementService.IsSafePath(path, _modelsPath))
+        if (string.IsNullOrEmpty(path))
         {
+            _logger.LogWarning($"Model {id} has no file path in database");
+            return NotFound();
+        }
+
+        if (!_fileManagementService.IsSafePath(path, _modelsPath) || !_fileSystem.FileExists(path))
+        {
+            _logger.LogWarning($"Model {id} file path is unsafe or does not exist: {path}");
             return NotFound();
         }
 
@@ -268,14 +284,44 @@ public class ModelController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelThumbnailAsync(Guid id)
     {
-        string? thumbPath = await _modelService.GetModelThumbnailPathAsync(id, CancellationToken.None);
-        if (string.IsNullOrEmpty(thumbPath) || !_fileSystem.FileExists(thumbPath))
+        try
         {
-            return NotFound("Thumbnail not available");
-        }
+            _logger.LogInformation($"[Thumbnail] Retrieving thumbnail for model {id}");
+            
+            string? thumbPath = await _modelService.GetModelThumbnailPathAsync(id, CancellationToken.None);
+            _logger.LogInformation($"[Thumbnail] Service returned path: {thumbPath ?? "NULL"}");
+            
+            if (string.IsNullOrEmpty(thumbPath))
+            {
+                _logger.LogWarning($"[Thumbnail] No thumbnail path in database for model {id}");
+                return NotFound("Thumbnail not available");
+            }
+            
+            // Convert to absolute path if relative
+            string absolutePath = Path.IsPathRooted(thumbPath) 
+                ? thumbPath 
+                : Path.Combine(Directory.GetCurrentDirectory(), thumbPath);
+            _logger.LogInformation($"[Thumbnail] Resolved absolute path: {absolutePath}");
+            
+            bool fileExists = _fileSystem.FileExists(absolutePath);
+            _logger.LogInformation($"[Thumbnail] File exists at '{absolutePath}': {fileExists}");
+            
+            if (!fileExists)
+            {
+                _logger.LogWarning($"[Thumbnail] Thumbnail file not found on disk at {absolutePath}");
+                return NotFound("Thumbnail not available");
+            }
 
-        string contentType = "image/png";
-        return PhysicalFile(thumbPath, contentType);
+            string contentType = "image/png";
+            _logger.LogInformation($"[Thumbnail] File size: {new FileInfo(absolutePath).Length} bytes");
+            _logger.LogInformation($"[Thumbnail] Serving thumbnail from {absolutePath}");
+            return PhysicalFile(absolutePath, contentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Thumbnail] Exception retrieving thumbnail for model {id}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Error retrieving thumbnail");
+        }
     }
 
     /// <summary>

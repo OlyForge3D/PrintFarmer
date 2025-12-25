@@ -1,4 +1,6 @@
 // Slicer service interfaces and types
+import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
+
 export interface SliceRequest {
   modelFile: File;
   slicerEngine: 'prusaslicer' | 'orcaslicer';
@@ -47,16 +49,8 @@ export interface SlicedModelSummary {
 
 class SlicerService {
   private getBaseUrl(): string {
-    const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
-    const baseUrl = envBaseUrl || '/api';
-    
-    // Additional validation
-    if (!baseUrl || baseUrl === 'undefined') {
-      console.warn('Invalid baseUrl detected, using /api fallback:', baseUrl);
-      return '/api';
-    }
-    
-    return baseUrl;
+    // Use shared utility that properly constructs /api URLs
+    return getApiBaseUrl();
   }
 
   async sliceModel(request: SliceRequest): Promise<SliceResult> {

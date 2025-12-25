@@ -53,8 +53,11 @@ export default defineConfig({
     ]
   },
   server: {
+    host: '0.0.0.0',  // Listen on all network interfaces
     port: 3000,
     hmr: {
+      host: undefined,  // Let client determine host from window.location
+      protocol: 'ws',
       port: 3001, // Use a different port for HMR WebSocket to avoid conflicts
     },
     proxy: {

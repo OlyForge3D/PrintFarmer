@@ -9,13 +9,13 @@
 ARG ORCASLICER_VERSION=2.3.1
 ARG BUILD_VERBOSITY=quiet
 
-# Base image tags - use pre-cached upgraded images for faster builds
-# Build these with: docker build -f dockerfiles/Dockerfile.base-sdk -t mcr.microsoft.com/dotnet/sdk:9.0-upgraded .
-ARG SDK_TAG=9.0-upgraded
-ARG ASPNET_TAG=9.0-bookworm-slim-upgraded
+# Base image tags - use Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter compatibility
+# Ubuntu Noble has glibc 2.39 which is compatible with bundled Assimp libraries (built for 2.38)
+ARG SDK_TAG=9.0
+ARG ASPNET_TAG=9.0-noble
 ARG NODE_TAG=22-alpine
-ARG NGINX_TAG=alpine-upgraded
-ARG UBUNTU_TAG=24.04-upgraded
+ARG NGINX_TAG=alpine
+ARG UBUNTU_TAG=24.04
 
 ############################################################
 # Shared Build Stage - Build all .NET projects once
@@ -86,30 +86,50 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create appuser if it doesn't exist (for standard base images)
-RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
+# Use UID 1001 as UID 1000 may already be taken in Ubuntu 24.04
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
 
 # Create necessary directories with proper ownership
-RUN mkdir -p /app/gcode /app/uploads /app/slicers && \
+RUN mkdir -p /app/gcode /app/uploads /app/slicers /app/models && \
     chown -R appuser:appuser /app
 
 # Copy API binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
 
+# Create startup script to fix mounted volume permissions for appuser (UID 1001)
+# This handles the case where mounted volumes from host preserve host UID/GID
+# Run as root initially to fix permissions, then drop to appuser to run the app
+RUN cat > /app/entrypoint.sh << 'EOF'
+#!/bin/bash
+set -e
+# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them
+# The appuser may not own these directories if they're bind mounts from the host
+chmod -R g+rwx /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
+mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
+chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles 2>/dev/null || true
+# Drop to appuser and run application
+exec gosu appuser dotnet Farm.Web.Api.dll
+EOF
+RUN chmod +x /app/entrypoint.sh
+
+# Install gosu for privilege dropping (used by many Docker images)
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/*
+
 # Set environment
 ENV ASPNETCORE_URLS=http://+:5000
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV GCODE_STORAGE_PATH=/app/gcode
-ENV MODEL_UPLOAD_PATH=/app/uploads
+ENV MODEL_UPLOAD_PATH=/app/models
 ENV SLICER_PROFILES_PATH=/app/profiles
 
-# Run as non-root user
-USER appuser
+# Keep as root so entrypoint can fix permissions
+# USER appuser
 
-# Health check
+# Health check (note: changed to run as appuser context would fail, run as is)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
     CMD curl -f http://localhost:5000/healthz || exit 1
 
-ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)
@@ -260,15 +280,16 @@ RUN set -e; \
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
 WORKDIR /app
 
-# Install OrcaSlicer runtime deps (matches upgraded aspnet image)
+# Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl wget ca-certificates \
-        libgtk-3-0 libgl1-mesa-glx libglib2.0-0 libstdc++6 libopengl0 \
+        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 \
         xvfb fuse squashfs-tools file p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
 # Create appuser if it doesn't exist (for standard base images)
-RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1000 -s /bin/bash appuser; fi
+# Use UID 1001 as UID 1000 may already be taken in Ubuntu 24.04
+RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
 
 # Create necessary directories and set ownership for appuser
 RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app

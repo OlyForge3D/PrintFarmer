@@ -248,6 +248,62 @@ function STLModel({ url, color = "#0066cc" }: { url: string; color?: string }) {
   );
 }
 
+/**
+ * Automatically adjusts the camera to fit all geometry in view
+ * This component should be placed inside Canvas to have access to useThree
+ */
+function CameraFitter() {
+  const { camera, scene } = useThree();
+
+  useEffect(() => {
+    // Compute bounding box of all visible objects
+    const box = new THREE.Box3();
+
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.geometry) {
+        const geom = object.geometry as THREE.BufferGeometry;
+        geom.computeBoundingBox();
+        if (geom.boundingBox) {
+          box.expandByObject(object);
+        }
+      }
+    });
+
+    // If we have a bounding box
+    if (box.isEmpty()) {
+      console.warn('[CameraFitter] Scene has no geometry');
+      return;
+    }
+
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    // Calculate the distance needed to fit the box in view
+    const maxDim = Math.max(size.x, size.y, size.z);
+    
+    // Handle both PerspectiveCamera and OrthographicCamera
+    let cameraDistance = 50; // default fallback
+    if ('fov' in camera && typeof (camera as any).fov === 'number') {
+      const fov = (camera as any).fov * (Math.PI / 180); // convert vertical FOV to radians
+      cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+    }
+
+    // Add some padding (20% extra distance)
+    cameraDistance *= 1.2;
+
+    // Position camera to look at center from isometric angle
+    const direction = new THREE.Vector3(1, 1, 1).normalize();
+    camera.position.copy(center).addScaledVector(direction, cameraDistance);
+    camera.lookAt(center);
+
+    // Update near/far clipping planes
+    camera.near = cameraDistance / 100;
+    camera.far = cameraDistance * 2;
+    camera.updateProjectionMatrix();
+  }, [camera, scene]);
+
+  return null;
+}
 function PLYModel({ url }: { url: string }) {
   const geometry = useLoader(PLYLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
@@ -444,6 +500,9 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         <Suspense fallback={<LoadingProgress />}>
           {renderModel()}
         </Suspense>
+
+        {/* Auto-fit camera to model bounds */}
+        <CameraFitter />
 
         {/* Controls and helpers */}
         <OrbitControls

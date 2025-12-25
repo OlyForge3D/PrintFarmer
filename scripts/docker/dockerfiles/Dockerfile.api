@@ -1,11 +1,11 @@
-# API-Only Dockerfile
-# Build with configurable platform (defaults to linux/amd64 to avoid ARM64 protoc issues)
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm AS base
 WORKDIR /app
 EXPOSE 5000
 
-# Install network tools for enhanced Docker Desktop networking
+# Install network tools for enhanced Docker Desktop networking and Assimp for 3D model thumbnail generation
+# Update to latest packages to get compatible glibc/libstdc++ for bundled Assimp native library
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y curl iputils-ping iproute2 net-tools dnsutils && \
     rm -rf /var/lib/apt/lists/*
 

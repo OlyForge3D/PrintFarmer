@@ -1,5 +1,6 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
+import { getApiBaseUrl } from "@/utils/apiUrlHelpers";
 import {
   ApiError,
   PrintJobStatusDto,
@@ -112,16 +113,8 @@ export class ApiClient {
   private client: AxiosInstance;
 
   constructor() {
-    // Use environment variable for API base URL, fallback to relative path for monolithic deployment
-    // If a full origin is provided (e.g., http://localhost:5245), ensure it includes the '/api' prefix.
-    const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    const apiBaseUrl = (() => {
-      if (!rawBase || rawBase.trim() === "") return "/api";
-      const trimmed = rawBase.replace(/\/$/, ""); // drop trailing slash
-      // If it already ends with '/api' or contains '/api/' path segment, keep as-is
-      if (/\/(api)(\/|$)/.test(trimmed)) return trimmed;
-      return `${trimmed}/api`;
-    })();
+    // Use shared utility to properly construct API base URL
+    const apiBaseUrl = getApiBaseUrl();
 
     this.client = axios.create({
       baseURL: apiBaseUrl,

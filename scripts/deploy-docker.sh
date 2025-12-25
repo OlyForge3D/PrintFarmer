@@ -4323,8 +4323,9 @@ ORCA_HOST_PORT=$ORCA_HOST_PORT
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.3.1}
 
 # Docker Base Image Tags (override Dockerfile defaults for normal deployments)
+# Using Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter native library compatibility
 SDK_TAG=9.0
-ASPNET_TAG=9.0-bookworm-slim
+ASPNET_TAG=9.0-noble
 NODE_TAG=22-alpine
 NGINX_TAG=alpine
 UBUNTU_TAG=24.04
@@ -5868,7 +5869,7 @@ prepare_external_storage_directories() {
     current_uid=$(id -u)
     
     print_info "Current user: $current_user (UID: $current_uid)"
-    print_info "Target ownership: Will be readable by appuser (UID 1000) inside containers"
+    print_info "Target ownership: Will be readable by appuser (UID 1001) inside containers"
     echo
     
     local paths_created=0

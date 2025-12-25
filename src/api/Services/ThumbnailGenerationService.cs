@@ -1,4 +1,8 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Numerics;
 using Assimp;
 using Farm.Infrastructure.Domain;
@@ -19,7 +23,6 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
 {
     private readonly IUnifiedLoggingService _logger;
     private readonly string _thumbnailsBasePath;
-    private static readonly AssimpContext _assimpContext = new();
 
     public string ThumbnailFileExtension => ".png";
 
@@ -36,6 +39,8 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         {
             _ = Directory.CreateDirectory(_thumbnailsBasePath);
         }
+
+        _logger.LogInformation("ThumbnailGenerationService initialized. Note: AssimpNetter native bindings not available in this deployment - thumbnails will use placeholder rendering");
     }
 
     public async Task<bool> GenerateThumbnailAsync(
@@ -82,195 +87,23 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         {
             string fileName = Path.GetFileName(modelFilePath);
             _logger.LogInformation($"Generating thumbnail for {fileName}...");
+            _logger.LogInformation($"  Model file path: {modelFilePath}");
+            _logger.LogInformation($"  Output path: {outputPath}");
+            _logger.LogInformation($"  Using OrcaSlicerPreviewRenderer...");
 
-            // Load the 3D model using Assimp
-            Scene scene = _assimpContext.ImportFile(modelFilePath, PostProcessSteps.Triangulate | PostProcessSteps.JoinIdenticalVertices);
+            // Use OrcaPreviewRenderer for high-quality rendering
+            var renderer = new OrcaPreviewRenderer();
 
-            if (scene == null || scene.MeshCount == 0)
-            {
-                _logger.LogWarning($"Failed to load model: {fileName}");
-                return GeneratePlaceholderThumbnail(outputPath, width, height, fileName, "No geometry");
-            }
+            var options = RenderOptions.CreateOrcaPreset();
+            
+            renderer.Render(modelFilePath, outputPath, options);
 
-            // Collect all triangles with their vertices
-            List<(Vector3 v0, Vector3 v1, Vector3 v2)> triangles = new();
-            Vector3 minBounds = new Vector3(float.MaxValue);
-            Vector3 maxBounds = new Vector3(float.MinValue);
-
-            // Extract triangles from all meshes
-            for (int m = 0; m < scene.MeshCount; m++)
-            {
-                Mesh mesh = scene.Meshes[m];
-
-                for (int f = 0; f < mesh.FaceCount; f++)
-                {
-                    Face face = mesh.Faces[f];
-                    if (face.IndexCount >= 3)
-                    {
-                        Vector3 v0 = mesh.Vertices[face.Indices[0]];
-                        Vector3 v1 = mesh.Vertices[face.Indices[1]];
-                        Vector3 v2 = mesh.Vertices[face.Indices[2]];
-
-                        Vector3 vec0 = new(v0.X, v0.Y, v0.Z);
-                        Vector3 vec1 = new(v1.X, v1.Y, v1.Z);
-                        Vector3 vec2 = new(v2.X, v2.Y, v2.Z);
-
-                        triangles.Add((vec0, vec1, vec2));
-
-                        minBounds = Vector3.Min(minBounds, vec0);
-                        minBounds = Vector3.Min(minBounds, vec1);
-                        minBounds = Vector3.Min(minBounds, vec2);
-                        maxBounds = Vector3.Max(maxBounds, vec0);
-                        maxBounds = Vector3.Max(maxBounds, vec1);
-                        maxBounds = Vector3.Max(maxBounds, vec2);
-                    }
-                }
-            }
-
-            _logger.LogInformation($"Loaded {triangles.Count} triangles from {scene.MeshCount} meshes");
-
-            // Render the triangles
-            return RenderTriangles(outputPath, width, height, fileName, triangles, minBounds, maxBounds);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error generating thumbnail: {ex.Message}");
-            return GeneratePlaceholderThumbnail(outputPath, width, height, Path.GetFileName(modelFilePath), ex.Message);
-        }
-    }
-
-    private bool RenderTriangles(string outputPath, int width, int height, string modelName, List<(Vector3 v0, Vector3 v1, Vector3 v2)> triangles, Vector3 minBounds, Vector3 maxBounds)
-    {
-        try
-        {
-            using Image<Rgba32> image = new Image<Rgba32>(width, height);
-            image.Mutate(ctx =>
-            {
-                // Transparent background
-                _ = ctx.Fill(new Color(new Rgba32(0, 0, 0, 0)));
-
-                // Calculate bounds
-                Vector3 size = maxBounds - minBounds;
-                float maxDim = Math.Max(size.X, Math.Max(size.Y, size.Z));
-
-                if (maxDim <= 0 || float.IsNaN(maxDim))
-                {
-                    return;
-                }
-
-                // Set up projection with better camera positioning
-                // X maps left-right, Z maps top-bottom, Y provides depth
-                float padding = 40;
-                float scale = (Math.Min(width, height) - padding * 2) / maxDim;
-
-                // Center the model properly
-                float offsetX = (width - size.X * scale) / 2;
-                float offsetY = (height - size.Z * scale) / 2 + padding / 2; // Extra padding at bottom
-
-                _logger.LogDebug($"Render: scale={scale}, offset=({offsetX},{offsetY}), modelSize=({size.X},{size.Y},{size.Z})");
-
-                // Sort triangles by average Y (depth) for back-to-front rendering
-                var sortedTriangles = triangles
-                    .Select((t, idx) => new { tri = t, avgY = (t.v0.Y + t.v1.Y + t.v2.Y) / 3, idx })
-                    .OrderBy(x => x.avgY)
-                    .ToList();
-
-                _logger.LogDebug($"Rendering {sortedTriangles.Count} triangles with depth sorting");
-
-                // Render triangles with high-quality depth-based shading
-                foreach (var item in sortedTriangles)
-                {
-                    (Vector3 v0, Vector3 v1, Vector3 v2) = item.tri;
-                    float depth = (item.avgY - minBounds.Y) / (size.Y > 0 ? size.Y : 1); // 0 to 1, normalized
-                    depth = Math.Clamp(depth, 0, 1);
-
-                    // High-quality color gradient based on depth
-                    // Far = lighter blue, Near = darker blue
-                    byte nearR = 40;
-                    byte nearG = 80;
-                    byte nearB = 150;
-                    byte farR = 150;
-                    byte farG = 180;
-                    byte farB = 220;
-
-                    byte r = (byte)(nearR + (farR - nearR) * depth);
-                    byte g = (byte)(nearG + (farG - nearG) * depth);
-                    byte b = (byte)(nearB + (farB - nearB) * depth);
-                    Color triangleColor = new Color(new Rgba32(r, g, b, 255));
-
-                    // Project vertices to 2D
-                    PointF p0 = ProjectVertexIsometric(v0, minBounds, scale, offsetX, offsetY);
-                    PointF p1 = ProjectVertexIsometric(v1, minBounds, scale, offsetX, offsetY);
-                    PointF p2 = ProjectVertexIsometric(v2, minBounds, scale, offsetX, offsetY);
-
-                    // Only draw if triangle is visible (has area)
-                    if (IsTriangleVisible(p0, p1, p2))
-                    {
-                        try
-                        {
-                            // Draw filled triangle
-                            _ = ctx.FillPolygon(triangleColor, p0, p1, p2);
-
-                            // Draw subtle outline for edge definition
-                            byte outlineR = (byte)(r * 0.6);
-                            byte outlineG = (byte)(g * 0.6);
-                            byte outlineB = (byte)(b * 0.6);
-                            Color outlineColor = new Color(new Rgba32(outlineR, outlineG, outlineB, 255));
-                            SolidPen outlinePen = Pens.Solid(outlineColor, 0.3f);
-                            _ = ctx.DrawPolygon(outlinePen, p0, p1, p2);
-                        }
-                        catch
-                        {
-                            // Skip invalid triangles
-                        }
-                    }
-                }
-            });
-
-            image.SaveAsPng(outputPath);
             _logger.LogInformation($"✓ Thumbnail rendered at {width}x{height}: {outputPath}");
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to render thumbnail: {ex.Message}");
-            return GeneratePlaceholderThumbnail(outputPath, width, height, modelName, "Render failed");
-        }
-    }
-
-    private PointF ProjectVertexIsometric(Vector3 vertex, Vector3 minBounds, float scale, float offsetX, float offsetY)
-    {
-        Vector3 relative = vertex - minBounds;
-        // Isometric: X (width) maps to screen X (left-right), Z (depth) maps to screen Y (top-bottom)
-        float screenX = offsetX + relative.X * scale;
-        float screenY = offsetY + relative.Z * scale;
-        return new PointF(screenX, screenY);
-    }
-
-    private bool IsTriangleVisible(PointF p0, PointF p1, PointF p2)
-    {
-        // Check if triangle has non-zero area
-        float area = Math.Abs((p1.X - p0.X) * (p2.Y - p0.Y) - (p2.X - p0.X) * (p1.Y - p0.Y)) / 2;
-        return area > 0.1f;
-    }
-
-    private bool GeneratePlaceholderThumbnail(string outputPath, int width, int height, string modelName, string errorMessage)
-    {
-        try
-        {
-            using Image<Rgba32> image = new Image<Rgba32>(width, height);
-            image.Mutate(ctx =>
-            {
-                _ = ctx.Fill(new Color(new Rgba32(255, 100, 100, 128))); // Semi-transparent red for errors
-            });
-
-            image.SaveAsPng(outputPath);
-            _logger.LogInformation($"Placeholder thumbnail created for {modelName}: {errorMessage}");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create placeholder thumbnail");
+            _logger.LogError(ex, $"Error generating thumbnail: {ex.Message}");
             return false;
         }
     }

@@ -43,7 +43,7 @@ namespace Farm.Web.Api.Services.Model
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
             _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
             ArgumentNullException.ThrowIfNull(configuration);
-            _modelsPath = configuration["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
+            _modelsPath = configuration["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
             if (!_fileSystem.DirectoryExists(_modelsPath))
             {
                 _fileSystem.CreateDirectory(_modelsPath);
