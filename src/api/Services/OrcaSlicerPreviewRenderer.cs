@@ -50,9 +50,9 @@ public sealed class OrcaPreviewRenderer : BasePreviewRenderer
     {
         int w = img.Width, h = img.Height;
 
-        // Orca-ish dark slate gradient (tweak to taste)
-        var top = new Vector3(0.16f, 0.17f, 0.19f);
-        var bot = new Vector3(0.10f, 0.11f, 0.13f);
+        // Orca-ish darker slate gradient
+        var top = new Vector3(0.08f, 0.085f, 0.10f);
+        var bot = new Vector3(0.05f, 0.055f, 0.065f);
 
         // Vignette
         float vignetteStrength = 0.22f;

@@ -163,7 +163,7 @@ public static class OrcaPreset
             // CAMERA (Orca-accurate)
             // ------------------------------------------------------------
             UseOrthographic = true,
-            OrthoSize = 1.15f,
+            OrthoSize = 0.85f,
 
             CameraPosition      = new Vector3(-1.75f, -1.75f, 1.35f),
             CameraTarget        = new Vector3(0f, 0f, 0.35f),
@@ -177,8 +177,8 @@ public static class OrcaPreset
             // Orca base color (cool, desaturated green-blue)
             ModelBaseColor = new Rgba32(150, 210, 200),
             
-            // BACKGROUND (Orca gradient)
-            BackgroundColor = new Rgba32(34, 36, 40),
+            // BACKGROUND (Orca gradient) - much darker
+            BackgroundColor = new Rgba32(15, 16, 18),
 
             // ------------------------------------------------------------
             // SILHOUETTE EDGES (A1 subtle)
@@ -221,7 +221,7 @@ public static class PrusaPreset
             // CAMERA (Prusa-style: slightly higher, softer angle)
             // ------------------------------------------------------------
             UseOrthographic = true,
-            OrthoSize = 1.70f,
+            OrthoSize = 1.25f,
 
             CameraPosition = new Vector3(1.65f, 1.65f, 1.45f),
             CameraTarget   = new Vector3(0f, 0f, 0.35f),
