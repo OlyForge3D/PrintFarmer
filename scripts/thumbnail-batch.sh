@@ -16,7 +16,6 @@ WIDTH=1024
 HEIGHT=1024
 ENABLE_SHADOW=1
 TWO_SIDED=1
-ENABLE_PLATE=0
 ENABLE_AO=1
 SUPPORTED_EXTS=("stl" "3mf" "obj" "ply" "amf")
 
@@ -36,7 +35,6 @@ Options:
       --skip-build           Skip building ThumbnailCli before rendering
       --no-shadow            Disable ground shadow
       --single-sided         Disable two-sided rendering (cull backfaces)
-      --no-plate             Disable build plate drawing
       --no-ao                Disable ambient occlusion
   -h, --help                 Show this help
 
@@ -66,8 +64,6 @@ while [[ $# -gt 0 ]]; do
             ENABLE_SHADOW=0; shift 1 ;;
         --single-sided)
             TWO_SIDED=0; shift 1 ;;
-        --no-plate)
-            ENABLE_PLATE=0; shift 1 ;;
         --no-ao)
             ENABLE_AO=0; shift 1 ;;
         -h|--help)
@@ -133,7 +129,6 @@ for src in "${files[@]}"; do
     cmd=(dotnet run --project "$CLI_PROJECT" --configuration "$CONFIGURATION" --no-build -- --input "$src" --output "$out_file" --preset "$PRESET" --width "$WIDTH" --height "$HEIGHT")
     [[ $ENABLE_SHADOW -eq 0 ]] && cmd+=(--no-shadow)
     [[ $TWO_SIDED -eq 0 ]] && cmd+=(--single-sided)
-    [[ $ENABLE_PLATE -eq 0 ]] && cmd+=(--no-plate)
     [[ $ENABLE_AO -eq 0 ]] && cmd+=(--no-ao)
 
     echo "- ${rel} -> ${out_file#$OUTPUT_DIR/}"

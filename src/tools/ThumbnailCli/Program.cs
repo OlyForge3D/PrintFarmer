@@ -15,7 +15,6 @@ internal static class Program
         int Height,
         bool EnableGroundShadow,
         bool TwoSided,
-        bool EnableBuildPlate,
         bool EnableAmbientOcclusion);
 
     private static int Main(string[] args)
@@ -48,7 +47,6 @@ internal static class Program
             options.Height = opts.Height;
             options.EnableGroundShadow = opts.EnableGroundShadow;
             options.TwoSided = opts.TwoSided;
-            options.EnableBuildPlate = opts.EnableBuildPlate;
             options.EnableAmbientOcclusion = opts.EnableAmbientOcclusion;
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(opts.Output)) ?? ".");
@@ -75,10 +73,9 @@ internal static class Program
 
         bool enableGroundShadow = !HasFlag(args, "--no-shadow");
         bool twoSided = !HasFlag(args, "--single-sided");
-        bool enableBuildPlate = !HasFlag(args, "--no-plate");
         bool enableAo = !HasFlag(args, "--no-ao");
 
-        return new CliOptions(input, output, preset, width, height, enableGroundShadow, twoSided, enableBuildPlate, enableAo);
+        return new CliOptions(input, output, preset, width, height, enableGroundShadow, twoSided, enableAo);
     }
 
     private static bool HasFlag(IReadOnlyList<string> args, params string[] keys)
@@ -133,7 +130,6 @@ internal static class Program
         Console.WriteLine("  -h, --height <int>     Height in pixels (default: 1024)");
         Console.WriteLine("      --no-shadow        Disable ground shadow");
         Console.WriteLine("      --single-sided     Disable two-sided rendering (culls backfaces)");
-        Console.WriteLine("      --no-plate         Disable build plate drawing");
         Console.WriteLine("      --no-ao            Disable ambient occlusion");
         Console.WriteLine("  --help                 Show help");
     }

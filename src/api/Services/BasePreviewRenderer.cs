@@ -62,11 +62,6 @@ public abstract class BasePreviewRenderer
 
         DrawBackground(img, options);
 
-        if (options.EnableBuildPlate)
-        {
-            DrawBuildPlate(img, options);
-        }
-
         var depth01 = RasterizeTriangles(img, tris, options);
 
         if (options.EnableGroundShadow)
@@ -121,8 +116,6 @@ public abstract class BasePreviewRenderer
         int w = img.Width, h = img.Height;
         var frame = img.Frames.RootFrame;
 
-        var plateRect = GetBuildPlateRect(w, h);
-
         // 1) Presence mask
         var mask = new float[w, h];
         for (int y = 0; y < h; y++)
@@ -134,12 +127,12 @@ public abstract class BasePreviewRenderer
         int ox = opt.GroundShadowOffsetXPx;
         int oy = opt.GroundShadowOffsetYPx;
 
-        for (int y = plateRect.Top; y < plateRect.Bottom; y++)
+        for (int y = 0; y < h; y++)
         {
             int sy = y - oy;
             if ((uint)sy >= (uint)h) continue;
 
-            for (int x = plateRect.Left; x < plateRect.Right; x++)
+            for (int x = 0; x < w; x++)
             {
                 int sx = x - ox;
                 if ((uint)sx >= (uint)w) continue;
@@ -152,12 +145,12 @@ public abstract class BasePreviewRenderer
         int r = Math.Max(1, opt.GroundShadowBlurRadiusPx);
         var blurred = BoxBlurSeparable(dropped, w, h, r);
 
-        // 4) Composite ONLY on plate
+        // 4) Composite across entire image
         float opacity = Math.Clamp(opt.GroundShadowOpacity, 0f, 1f);
 
-        for (int y = plateRect.Top; y < plateRect.Bottom; y++)
+        for (int y = 0; y < h; y++)
         {
-            for (int x = plateRect.Left; x < plateRect.Right; x++)
+            for (int x = 0; x < w; x++)
             {
                 float a = blurred[x, y] * opacity;
                 if (a <= 0.001f) continue;
@@ -229,17 +222,6 @@ public abstract class BasePreviewRenderer
         }
 
         return dst;
-    }
-
-
-    protected Rectangle GetBuildPlateRect(int w, int h)
-    {
-        return new Rectangle(
-            (int)(w * 0.05f),
-            (int)(h * 0.60f),
-            (int)(w * 0.90f),
-            (int)(h * 0.32f)
-        );
     }
 
     protected static float SmoothStep(float edge0, float edge1, float x)
@@ -352,7 +334,6 @@ public abstract class BasePreviewRenderer
     // Style hooks
     protected abstract void ApplyStyleDefaults(RenderOptions options);
     protected abstract void DrawBackground(Image<Rgba32> img, RenderOptions options);
-    protected abstract void DrawBuildPlate(Image<Rgba32> img, RenderOptions options);
     protected abstract Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options);
 
     // --------------------------------------------------------

@@ -39,12 +39,6 @@ public sealed class OrcaPreviewRenderer : BasePreviewRenderer
         options.SilhouetteAngleThresholdDeg = d.SilhouetteAngleThresholdDeg;
         options.SilhouetteEdgeWidth = d.SilhouetteEdgeWidth;
 
-        options.EnableBuildPlate = d.EnableBuildPlate;
-        options.BuildPlateGridColor = d.BuildPlateGridColor;
-        options.BuildPlateBorderColor = d.BuildPlateBorderColor;
-        options.BuildPlateSize = d.BuildPlateSize;
-        options.BuildPlateGridStep = d.BuildPlateGridStep;
-
         options.EnableAmbientOcclusion = d.EnableAmbientOcclusion;
         options.AmbientOcclusionStrength = d.AmbientOcclusionStrength;
     }
@@ -92,51 +86,6 @@ public sealed class OrcaPreviewRenderer : BasePreviewRenderer
                 frame[x, y] = new Rgba32(ToSRGB(c.X), ToSRGB(c.Y), ToSRGB(c.Z), 255);
             }
         }
-    }
-
-    // ---------------------------------------------------------------------
-    //  ORCA BUILD PLATE
-    // ---------------------------------------------------------------------
-    protected override void DrawBuildPlate(Image<Rgba32> img, RenderOptions options)
-    {
-        int w = img.Width;
-        int h = img.Height;
-
-        img.Mutate(ctx =>
-        {
-            var plateRect = GetBuildPlateRect(w, h);
-
-            // Dark gradient plate
-            ctx.Fill(new LinearGradientBrush(
-                new PointF(0, plateRect.Top),
-                new PointF(0, plateRect.Bottom),
-                GradientRepetitionMode.None,
-                new ColorStop(0f, new Rgba32(45, 47, 52)),
-                new ColorStop(1f, new Rgba32(40, 42, 46))
-            ));
-
-            // Border
-            ctx.Draw(options.BuildPlateBorderColor, 2f, plateRect);
-
-            // Grid
-            int gridLines = (int)(options.BuildPlateSize / options.BuildPlateGridStep);
-
-            for (int i = 1; i < gridLines; i++)
-            {
-                float t = (float)i / gridLines;
-
-                int x = (int)(plateRect.Left + t * plateRect.Width);
-                int y = (int)(plateRect.Top + t * plateRect.Height);
-
-                var pbV = new PathBuilder();
-                pbV.AddLine(new PointF(x, plateRect.Top), new PointF(x, plateRect.Bottom));
-                ctx.Draw(options.BuildPlateGridColor, 0.8f, pbV.Build());
-
-                var pbH = new PathBuilder();
-                pbH.AddLine(new PointF(plateRect.Left, y), new PointF(plateRect.Right, y));
-                ctx.Draw(options.BuildPlateGridColor, 0.8f, pbH.Build());
-            }
-        });
     }
 
     // ---------------------------------------------------------------------

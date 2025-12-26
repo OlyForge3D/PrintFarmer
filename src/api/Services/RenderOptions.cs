@@ -36,12 +36,6 @@ public sealed class RenderOptions
     public float SilhouetteAngleThresholdDeg { get; set; } = 82f;
     public float SilhouetteDepthEpsilon { get; set; } = 0.003f;
 
-    public bool EnableBuildPlate { get; set; } = true;
-    public float BuildPlateSize { get; set; } = 200f;
-    public float BuildPlateGridStep { get; set; } = 5f;
-    public Rgba32 BuildPlateGridColor { get; set; } = new Rgba32(70, 75, 85, 255);
-    public Rgba32 BuildPlateBorderColor { get; set; } = new Rgba32(90, 95, 105, 255);
-
     public bool EnableAmbientOcclusion { get; set; } = true;
     public float AmbientOcclusionStrength { get; set; } = 0.65f;
 
@@ -172,7 +166,7 @@ public static class OrcaPreset
             OrthoSize = 1.15f,
 
             CameraPosition      = new Vector3(-1.75f, -1.75f, 1.35f),
-            CameraTarget        = new Vector3(0f, 0f, 0.55f),
+            CameraTarget        = new Vector3(0f, 0f, 0.35f),
             CameraUp            = Vector3.UnitZ,
 
             // ------------------------------------------------------------
@@ -197,15 +191,6 @@ public static class OrcaPreset
             SilhouetteAngleThresholdDeg = 82f,
 
             // ------------------------------------------------------------
-            // BUILD PLATE (Orca grid)
-            // ------------------------------------------------------------
-            EnableBuildPlate = false,
-            BuildPlateGridColor   = new Rgba32(70, 75, 85, 255),
-            BuildPlateBorderColor = new Rgba32(90, 95, 105, 255),
-            BuildPlateSize = 200f,
-            BuildPlateGridStep = 12f,
-
-            // ------------------------------------------------------------
             // AMBIENT OCCLUSION (softened)
             // ------------------------------------------------------------
             EnableAmbientOcclusion = true,
@@ -221,10 +206,7 @@ public static class OrcaPreset
             SpecularStrength = 0.06f,
             SpecularPower    = 56f,
 
-            // Ground shadow for added definition
-            EnableGroundShadow = true,
-            GroundShadowOpacity = 0.18f,
-            GroundShadowOffsetYPx = 22
+            EnableGroundShadow = false
         };
     }
 }
@@ -242,7 +224,7 @@ public static class PrusaPreset
             OrthoSize = 1.70f,
 
             CameraPosition = new Vector3(1.65f, 1.65f, 1.45f),
-            CameraTarget   = new Vector3(0f, 0f, 0.60f),
+            CameraTarget   = new Vector3(0f, 0f, 0.35f),
             CameraUp       = Vector3.UnitZ,
 
             // ------------------------------------------------------------
@@ -272,15 +254,7 @@ public static class PrusaPreset
             // ------------------------------------------------------------
             BackgroundColor = new Rgba32(245, 245, 248),
 
-            // ------------------------------------------------------------
-            // BUILD PLATE (light gray, soft grid)
-            // ------------------------------------------------------------
-            EnableBuildPlate = true,
-            BuildPlateSize = 200f,
-            BuildPlateGridStep = 10f,
-
-            BuildPlateGridColor   = new Rgba32(180, 180, 185, 255),
-            BuildPlateBorderColor = new Rgba32(160, 160, 165, 255),
+            EnableGroundShadow = false
         };
     }
 }
