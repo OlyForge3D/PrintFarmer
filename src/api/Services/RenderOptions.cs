@@ -19,25 +19,72 @@ public sealed class RenderOptions
     public Vector3 CameraTarget   { get; set; } = new Vector3(0f, 0f, 0.55f);
     public Vector3 CameraUp       { get; set; } = Vector3.UnitZ;
 
+    // Model vertical bounds (min/max Z after normalization) - updated after mesh loading
+    public float ModelBoundsMinZ { get; set; } = 0f;
+    public float ModelBoundsMaxZ { get; set; } = 1f;
+
+    // Camera view name to apply after mesh bounds are known
+    // Used to defer SetCameraView until after mesh normalization and bounds calculation
+    public string? PendingCameraView { get; set; }
+
+    /// <summary>
+    /// View mode for front/back/left/right views: Isometric (diagonal) or Straight (perpendicular)
+    /// </summary>
+    public enum ViewMode
+    {
+        Isometric = 0,  // Diagonal view (45-degree angle)
+        Straight = 1    // Perpendicular/straight-on view
+    }
+
+    public ViewMode CameraViewMode { get; set; } = ViewMode.Isometric;
+
+    /// <summary>
+    /// Gets the vertical center of the model based on its bounding box.
+    /// Computed after mesh normalization to dynamically calculate optimal camera targeting.
+    /// </summary>
+    public float ModelVerticalCenter => (ModelBoundsMinZ + ModelBoundsMaxZ) / 2f;
+
     /// <summary>
     /// Camera view presets: front, back, left, right, top, bottom
-    /// Each preset has position and target adjusted so the model appears centered in the frame
+    /// Supports both isometric (diagonal) and straight (perpendicular) viewing angles.
     /// </summary>
-    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresets = 
+    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresetsIsometric = 
         new(StringComparer.OrdinalIgnoreCase)
     {
-        // Diagonal isometric-ish views (front/back)
+        // Diagonal isometric views (front/back)
         { "front", (new Vector3(-1.75f, -1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
         { "back", (new Vector3(1.75f, 1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
         
-        // Pure side views - adjust target to center model horizontally
-        { "left", (new Vector3(-2.5f, 0f, 1.35f), new Vector3(-0.3f, 0f, 0.35f)) },
-        { "right", (new Vector3(2.5f, 0f, 1.35f), new Vector3(0.3f, 0f, 0.35f)) },
+        // Isometric side views (45-degree angle)
+        { "left", (new Vector3(-1.75f, -1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        { "right", (new Vector3(1.75f, 1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
         
-        // Top and bottom views
+        // Top and bottom views (same for both modes)
         { "top", (new Vector3(0f, 0f, 2.5f), new Vector3(0f, 0f, 0.35f)) },
         { "bottom", (new Vector3(0f, 0f, -1.5f), new Vector3(0f, 0f, 0.35f)) }
     };
+
+    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresetsStraight = 
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Straight-on perpendicular views
+        { "front", (new Vector3(0f, -2.5f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        { "back", (new Vector3(0f, 2.5f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        
+        // Pure side views - straight-on with centering offsets
+        { "left", (new Vector3(-2.5f, 0f, 1.35f), new Vector3(0.3f, 0f, 0.35f)) },
+        { "right", (new Vector3(2.5f, 0f, 1.35f), new Vector3(-0.3f, 0f, 0.35f)) },
+        
+        // Top and bottom views (same for both modes)
+        { "top", (new Vector3(0f, 0f, 2.5f), new Vector3(0f, 0f, 0.35f)) },
+        { "bottom", (new Vector3(0f, 0f, -1.5f), new Vector3(0f, 0f, 0.35f)) }
+    };
+
+    /// <summary>
+    /// Gets the appropriate ViewPresets dictionary based on current view mode
+    /// </summary>
+    private Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresets =>
+        CameraViewMode == ViewMode.Isometric ? ViewPresetsIsometric : ViewPresetsStraight;
 
     public Vector3 LightDirection { get; set; } = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
     
@@ -105,30 +152,140 @@ public sealed class RenderOptions
     /// Sets the camera position and target based on a named view preset
     /// Supports: front, back, left, right, top, bottom
     /// Both position and target are updated to maintain proper centering of the model.
+    /// 
+    /// Note: If called before mesh bounds are known, stores the view name in PendingCameraView
+    /// to be applied later in Render() after bounds are calculated.
     /// </summary>
     public bool SetCameraView(string viewName)
     {
-        if (ViewPresets.TryGetValue(viewName, out var preset))
+        // Store for deferred application if bounds haven't been calculated yet
+        // (bounds are 0-1 initially, then updated to actual values after mesh load)
+        if (Math.Abs(ModelBoundsMaxZ - 1f) < 0.001f)
         {
-            var oldPos = CameraPosition;
-            var oldTarget = CameraTarget;
-            
-            CameraPosition = preset.Position;
-            CameraTarget = preset.Target;
-            
-            Console.WriteLine($"[CAMERA] Changed view to '{viewName}':");
-            Console.WriteLine($"  Position: {oldPos} → {CameraPosition}");
-            Console.WriteLine($"  Target:   {oldTarget} → {CameraTarget}");
-            
+            PendingCameraView = viewName;
+            Console.WriteLine($"[CAMERA] View '{viewName}' queued (awaiting mesh bounds)");
             return true;
         }
-        return false;
+
+        return ApplyCameraView(viewName);
+    }
+
+    /// <summary>
+    /// Internal method that applies camera view once bounds are known.
+    /// Called either directly from SetCameraView (after bounds) or from UpdateMeshBounds.
+    /// </summary>
+    private bool ApplyCameraView(string viewName)
+    {
+        if (!ViewPresets.TryGetValue(viewName, out var preset))
+            return false;
+
+        var oldPos = CameraPosition;
+        var oldTarget = CameraTarget;
+        var oldUp = CameraUp;
+        
+        CameraPosition = preset.Position;
+        
+        // Calculate camera target Z dynamically based on model vertical center
+        // For top/bottom views, use the preset Z (0.35 for optimal view)
+        // For other views, use the model's vertical center plus an offset to center in frame
+        float targetZ;
+        if (viewName.Equals("top", StringComparison.OrdinalIgnoreCase) || 
+            viewName.Equals("bottom", StringComparison.OrdinalIgnoreCase))
+        {
+            targetZ = 0.35f;
+        }
+        else
+        {
+            // Use the model's vertical center plus a fixed offset to keep it centered in frame
+            // Different offset logic for diagonal vs. pure side views
+            float modelCenter = ModelVerticalCenter;
+            float modelHeight = ModelBoundsMaxZ - ModelBoundsMinZ;
+            
+            // Offset depends on view mode and direction
+            float offset;
+            if (CameraViewMode == ViewMode.Isometric)
+            {
+                // Isometric views: all use larger offset for perspective
+                offset = Math.Max(modelHeight * 0.33f, 0.08f);
+            }
+            else
+            {
+                // Straight views: side views (left/right) use smaller offset
+                if (viewName.Equals("left", StringComparison.OrdinalIgnoreCase) || 
+                    viewName.Equals("right", StringComparison.OrdinalIgnoreCase))
+                {
+                    offset = modelHeight * 0.15f;
+                }
+                else
+                {
+                    // Front/back straight views use moderate offset
+                    offset = Math.Max(modelHeight * 0.25f, 0.06f);
+                }
+            }
+            
+            targetZ = modelCenter + offset;
+        }
+        
+        // Update target with calculated Z, preserving X and Y from preset
+        CameraTarget = new Vector3(preset.Target.X, preset.Target.Y, targetZ);
+        
+        // Compute the appropriate up vector based on view direction
+        // This ensures top/bottom views don't have degenerate view matrices
+        Vector3 viewDir = Vector3.Normalize(CameraTarget - CameraPosition);
+        CameraUp = ComputeCameraUpVector(viewDir);
+        
+        // Disable ground shadow for bottom view (looking up, shadow doesn't make sense)
+        // Also disable ambient occlusion which darkens the view significantly
+        if (viewName.Equals("bottom", StringComparison.OrdinalIgnoreCase))
+        {
+            EnableGroundShadow = false;
+            EnableAmbientOcclusion = false;
+            // Significantly increase ambient factor to brighten the view when looking from below
+            // Bottom view has inverted normals relative to camera, making it naturally darker
+            AmbientFactor = 0.80f;
+            DiffuseFactor = 0.20f;
+        }
+        else
+        {
+            // Reset to defaults for other views
+            EnableAmbientOcclusion = true;
+            AmbientFactor = 0.30f;
+            DiffuseFactor = 0.70f;
+        }
+        
+        Console.WriteLine($"[CAMERA] Changed view to '{viewName}':");
+        Console.WriteLine($"  Position: {oldPos} → {CameraPosition}");
+        Console.WriteLine($"  Target:   {oldTarget} → {CameraTarget}");
+        Console.WriteLine($"  Up:       {oldUp} → {CameraUp}");
+        Console.WriteLine($"  Model Z bounds: {ModelBoundsMinZ:F3} to {ModelBoundsMaxZ:F3}, center: {ModelVerticalCenter:F3}");
+        
+        return true;
+    }
+
+    /// <summary>
+    /// Computes an appropriate up vector given a view direction.
+    /// For most views, returns +Z. For top/bottom views (where Z is the view direction),
+    /// returns -Y instead to avoid degenerate matrices.
+    /// </summary>
+    private static Vector3 ComputeCameraUpVector(Vector3 viewDirection)
+    {
+        // If view direction is nearly parallel to +Z or -Z (top/bottom views),
+        // use -Y as the up vector. Otherwise, use +Z (standard for all other views).
+        float absZ = Math.Abs(viewDirection.Z);
+        
+        // Threshold: if the view is pointing mostly in Z direction (> 0.9), use -Y as up
+        if (absZ > 0.9f)
+        {
+            return -Vector3.UnitY;
+        }
+        
+        return Vector3.UnitZ;
     }
 
     /// <summary>
     /// Gets the list of available camera view presets
     /// </summary>
-    public static IEnumerable<string> AvailableViews => ViewPresets.Keys;
+    public IEnumerable<string> AvailableViews => ViewPresets.Keys;
 }
 
 // ------------------------------------------------------------

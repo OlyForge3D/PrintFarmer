@@ -15,6 +15,7 @@ internal static class Program
         int Height,
         int? ZoomPercent,
         string? View,
+        string? ViewMode,
         bool EnableGroundShadow,
         bool TwoSided,
         bool EnableAmbientOcclusion);
@@ -58,6 +59,21 @@ internal static class Program
             options.TwoSided = opts.TwoSided;
             options.EnableAmbientOcclusion = opts.EnableAmbientOcclusion;
             
+            // Apply view mode (isometric or straight)
+            if (!string.IsNullOrWhiteSpace(opts.ViewMode))
+            {
+                if (opts.ViewMode.Equals("straight", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.CameraViewMode = RenderOptions.ViewMode.Straight;
+                    WriteViewModeMessage("Straight");
+                }
+                else if (opts.ViewMode.Equals("isometric", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.CameraViewMode = RenderOptions.ViewMode.Isometric;
+                    WriteViewModeMessage("Isometric");
+                }
+            }
+            
             // Apply camera view
             if (!string.IsNullOrWhiteSpace(opts.View))
             {
@@ -96,12 +112,13 @@ internal static class Program
         int? zoomPercent = int.TryParse(GetValue(args, "--zoom", "-z"), out var zv) ? zv : null;
         
         string? view = GetValue(args, "--view", "-v")?.ToLowerInvariant();
+        string? viewMode = GetValue(args, "--view-mode", "-vm")?.ToLowerInvariant();
 
         bool enableGroundShadow = !HasFlag(args, "--no-shadow");
         bool twoSided = !HasFlag(args, "--single-sided");
         bool enableAo = !HasFlag(args, "--no-ao");
 
-        return new CliOptions(input, output, preset, width, height, zoomPercent, view, enableGroundShadow, twoSided, enableAo);
+        return new CliOptions(input, output, preset, width, height, zoomPercent, view, viewMode, enableGroundShadow, twoSided, enableAo);
     }
 
     private static bool HasFlag(IReadOnlyList<string> args, params string[] keys)
@@ -145,6 +162,11 @@ internal static class Program
     }
 
 #pragma warning disable CA1303 // Do not pass literals as localized parameters
+    private static void WriteViewModeMessage(string mode)
+    {
+        Console.WriteLine($"Applying view mode: {mode}");
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("Thumbnail CLI");
@@ -157,6 +179,7 @@ internal static class Program
         Console.WriteLine("  -h, --height <int>     Height in pixels (default: 1024)");
         Console.WriteLine("  -z, --zoom <percent>   Zoom as percentage 25-500 (default: 40 orca, 44 prusa)");
         Console.WriteLine("  -v, --view <view>      Camera view: front|top|bottom|left|right|back (default: front)");
+        Console.WriteLine("  -vm, --view-mode <mode> Camera view mode: isometric|straight (default: isometric)");
         Console.WriteLine("      --no-shadow        Disable ground shadow");
         Console.WriteLine("      --single-sided     Disable two-sided rendering (culls backfaces)");
         Console.WriteLine("      --no-ao            Disable ambient occlusion");

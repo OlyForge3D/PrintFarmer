@@ -51,6 +51,9 @@ public abstract class BasePreviewRenderer
         }
         var normalized = NormalizeMesh(mesh);
 
+        // Calculate and store mesh bounds for dynamic camera targeting
+        UpdateMeshBounds(normalized, options);
+
         // AO can be injected here; for now assume Ao array is precomputed or flat
         if (normalized.Ao == null || normalized.Ao.Length != normalized.Faces.Count)
         {
@@ -554,6 +557,42 @@ public abstract class BasePreviewRenderer
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Computes the bounding box of a normalized mesh and stores it in RenderOptions
+    /// for dynamic camera target Z calculation.
+    /// </summary>
+    protected void UpdateMeshBounds(NormalizedMesh mesh, RenderOptions options)
+    {
+        if (mesh.Vertices.Count == 0)
+        {
+            options.ModelBoundsMinZ = 0f;
+            options.ModelBoundsMaxZ = 1f;
+            return;
+        }
+
+        float minZ = mesh.Vertices[0].Z;
+        float maxZ = mesh.Vertices[0].Z;
+
+        foreach (var v in mesh.Vertices)
+        {
+            minZ = Math.Min(minZ, v.Z);
+            maxZ = Math.Max(maxZ, v.Z);
+        }
+
+        options.ModelBoundsMinZ = minZ;
+        options.ModelBoundsMaxZ = maxZ;
+        
+        Console.WriteLine($"[BOUNDS] Model Z range: {minZ:F3} to {maxZ:F3}, center: {(minZ + maxZ) / 2f:F3}");
+        
+        // Apply pending camera view now that bounds are known
+        if (!string.IsNullOrWhiteSpace(options.PendingCameraView))
+        {
+            var viewName = options.PendingCameraView;
+            options.PendingCameraView = null;
+            options.SetCameraView(viewName);
+        }
     }
 
     // Computes smooth, area‑weighted normals per vertex (no geometry smoothing, just shading).

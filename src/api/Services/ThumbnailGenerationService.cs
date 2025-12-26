@@ -51,6 +51,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         int height = 512,
         int? zoomPercent = null,
         string? view = null,
+        string? viewMode = null,
         CancellationToken ct = default)
     {
         if (!IsFormatSupported(fileFormat))
@@ -74,7 +75,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 _ = Directory.CreateDirectory(outputDir);
             }
 
-            return await Task.Run(() => GenerateThumbnailInternal(modelFilePath, outputPath, width, height, zoomPercent, view), ct);
+            return await Task.Run(() => GenerateThumbnailInternal(modelFilePath, outputPath, width, height, zoomPercent, view, viewMode), ct);
         }
         catch (Exception ex)
         {
@@ -83,7 +84,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         }
     }
 
-    private bool GenerateThumbnailInternal(string modelFilePath, string outputPath, int width, int height, int? zoomPercent, string? view)
+    private bool GenerateThumbnailInternal(string modelFilePath, string outputPath, int width, int height, int? zoomPercent, string? view, string? viewMode)
     {
         try
         {
@@ -94,6 +95,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             _logger.LogInformation($"  Using OrcaSlicerPreviewRenderer...");
             _logger.LogInformation($"  Zoom percent: {(zoomPercent.HasValue ? zoomPercent.Value.ToString() : "default")}");
             _logger.LogInformation($"  View: {view ?? "default(front)"}");
+            _logger.LogInformation($"  View mode: {viewMode ?? "default(isometric)"}");
 
             // Use OrcaPreviewRenderer for high-quality rendering
             var renderer = new OrcaPreviewRenderer();
@@ -110,6 +112,25 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             else
             {
                 _logger.LogInformation($"    Using default OrthoSize: {options.OrthoSize:F4}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(viewMode))
+            {
+                _logger.LogInformation($"    Applying view mode: {viewMode}");
+                if (viewMode.Equals("straight", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.CameraViewMode = RenderOptions.ViewMode.Straight;
+                    _logger.LogInformation($"    Camera view mode set to: Straight (perpendicular)");
+                }
+                else if (viewMode.Equals("isometric", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.CameraViewMode = RenderOptions.ViewMode.Isometric;
+                    _logger.LogInformation($"    Camera view mode set to: Isometric (diagonal)");
+                }
+                else
+                {
+                    _logger.LogWarning($"    Unknown view mode '{viewMode}', using default 'isometric'");
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(view))
