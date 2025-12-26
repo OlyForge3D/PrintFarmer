@@ -171,9 +171,9 @@ public static class OrcaPreset
             UseOrthographic = true,
             OrthoSize = 1.15f,
 
-            CameraPosition = new Vector3(-1.75f, -1.75f, 1.35f),
-            CameraTarget   = new Vector3(0f, 0f, 0.55f),
-            CameraUp       = Vector3.UnitZ,
+            CameraPosition      = new Vector3(-1.75f, -1.75f, 1.35f),
+            CameraTarget        = new Vector3(0f, 0f, 0.55f),
+            CameraUp            = Vector3.UnitZ,
 
             // ------------------------------------------------------------
             // LIGHTING (soft, flat, Orca-style)
@@ -182,7 +182,6 @@ public static class OrcaPreset
             
             // Orca base color (cool, desaturated green-blue)
             ModelBaseColor = new Rgba32(150, 210, 200),
-            //ModelBaseColor = new Rgba32(32, 96, 89),
             
             // BACKGROUND (Orca gradient)
             BackgroundColor = new Rgba32(34, 36, 40),
@@ -200,7 +199,7 @@ public static class OrcaPreset
             // ------------------------------------------------------------
             // BUILD PLATE (Orca grid)
             // ------------------------------------------------------------
-            EnableBuildPlate = true,
+            EnableBuildPlate = false,
             BuildPlateGridColor   = new Rgba32(70, 75, 85, 255),
             BuildPlateBorderColor = new Rgba32(90, 95, 105, 255),
             BuildPlateSize = 200f,
@@ -222,8 +221,10 @@ public static class OrcaPreset
             SpecularStrength = 0.06f,
             SpecularPower    = 56f,
 
-            // Keep ground shadow off for clarity with plate overlay
-            EnableGroundShadow = false
+            // Ground shadow for added definition
+            EnableGroundShadow = true,
+            GroundShadowOpacity = 0.18f,
+            GroundShadowOffsetYPx = 22
         };
     }
 }
