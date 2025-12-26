@@ -22,7 +22,20 @@ public abstract class BasePreviewRenderer
     public void Render(string inputPath, string outputPath, RenderOptions options)
     {
         options ??= new RenderOptions();
+        
+        // Capture all user-provided property values BEFORE ApplyStyleDefaults overwrites them
+        var userProperties = CaptureRenderOptions(options);
+        
+        // Create default options for comparison
+        var defaultOptions = new RenderOptions();
+        ApplyStyleDefaults(defaultOptions);
+        
+        // Apply preset defaults to working options
         ApplyStyleDefaults(options);
+        
+        // Restore user settings that differ from preset defaults (automatic for all properties)
+        RestoreUserSettings(options, userProperties, defaultOptions);
+        
         Mesh mesh;
         try
         {
@@ -333,6 +346,94 @@ public abstract class BasePreviewRenderer
     
     // Style hooks
     protected abstract void ApplyStyleDefaults(RenderOptions options);
+    
+    /// <summary>
+    /// Capture all property values from RenderOptions into a dictionary.
+    /// Used to preserve user settings before ApplyStyleDefaults overwrites them.
+    /// </summary>
+    private static Dictionary<string, object?> CaptureRenderOptions(RenderOptions options)
+    {
+        var properties = new Dictionary<string, object?>();
+        
+        foreach (var prop in typeof(RenderOptions).GetProperties(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+        {
+            if (prop.CanRead)
+            {
+                properties[prop.Name] = prop.GetValue(options);
+            }
+        }
+        
+        return properties;
+    }
+    
+    /// <summary>
+    /// Restore user-provided settings that differ from preset defaults.
+    /// Uses reflection to automatically handle all RenderOptions properties,
+    /// so new properties don't require code changes.
+    /// </summary>
+    protected virtual void RestoreUserSettings(
+        RenderOptions options,
+        Dictionary<string, object?> userProperties,
+        RenderOptions defaultOptions)
+    {
+        var optionsType = typeof(RenderOptions);
+        
+        // Only restore properties that differ from the preset defaults
+        foreach (var kvp in userProperties)
+        {
+            var prop = optionsType.GetProperty(kvp.Key,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            
+            if (prop == null || !prop.CanWrite)
+                continue;
+            
+            var userValue = kvp.Value;
+            var defaultValue = prop.GetValue(defaultOptions);
+            
+            // Only restore if values differ
+            if (!PropertyValuesEqual(userValue, defaultValue))
+            {
+                prop.SetValue(options, userValue);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Check if two property values are equal, with special handling for float and Vector3.
+    /// </summary>
+    private static bool PropertyValuesEqual(object? a, object? b)
+    {
+        if (ReferenceEquals(a, b))
+            return true;
+        
+        if (a == null || b == null)
+            return a == b;
+        
+        // Special handling for float values (epsilon comparison)
+        if (a is float fa && b is float fb)
+            return ApproximatelyEqual(fa, fb);
+        
+        // Special handling for Vector3 (epsilon comparison)
+        if (a is Vector3 va && b is Vector3 vb)
+            return ApproximatelyEqual(va, vb);
+        
+        // Default equality
+        return a.Equals(b);
+    }
+    
+    private static bool ApproximatelyEqual(float a, float b, float epsilon = 1e-6f)
+    {
+        return Math.Abs(a - b) < epsilon;
+    }
+    
+    private static bool ApproximatelyEqual(Vector3 a, Vector3 b, float epsilon = 1e-6f)
+    {
+        return ApproximatelyEqual(a.X, b.X, epsilon) &&
+               ApproximatelyEqual(a.Y, b.Y, epsilon) &&
+               ApproximatelyEqual(a.Z, b.Z, epsilon);
+    }
+    
     protected abstract void DrawBackground(Image<Rgba32> img, RenderOptions options);
     protected abstract Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options);
 

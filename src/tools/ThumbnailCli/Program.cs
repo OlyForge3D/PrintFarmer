@@ -51,6 +51,7 @@ internal static class Program
             int defaultZoomPercent = opts.Preset.Equals("prusa", StringComparison.OrdinalIgnoreCase) ? 44 : 40;
             if (opts.ZoomPercent.HasValue)
             {
+                Console.WriteLine($"Applying zoom: {opts.ZoomPercent.Value}%");
                 options.SetZoomPercent(defaultZoomPercent, opts.ZoomPercent.Value);
             }
             options.EnableGroundShadow = opts.EnableGroundShadow;
@@ -61,6 +62,7 @@ internal static class Program
             if (!string.IsNullOrWhiteSpace(opts.View))
             {
                 var viewName = opts.View;
+                Console.WriteLine($"Applying camera view: {viewName}");
                 if (!options.SetCameraView(viewName))
                 {
                     Console.Error.WriteLine($"Warning: Unknown view '{viewName}', using default 'front'");
@@ -72,6 +74,7 @@ internal static class Program
 
             renderer.Render(opts.Input, opts.Output, options);
             Console.WriteLine($"✓ Rendered {opts.Preset} thumbnail -> {opts.Output}");
+            Console.WriteLine($"  Camera: Pos=({options.CameraPosition.X:F2}, {options.CameraPosition.Y:F2}, {options.CameraPosition.Z:F2}) Target=({options.CameraTarget.X:F2}, {options.CameraTarget.Y:F2}, {options.CameraTarget.Z:F2})");
             return 0;
         }
         catch (Exception ex)
