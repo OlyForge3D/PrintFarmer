@@ -109,7 +109,10 @@ done
 unset 'find_expr[${#find_expr[@]}-1]'
 find_expr+=(\))
 
-mapfile -t files < <(find "$INPUT_DIR" "${find_expr[@]}" -print | sort)
+files=()
+while IFS= read -r path; do
+    files+=("$path")
+done < <(find "$INPUT_DIR" "${find_expr[@]}" -print | sort)
 
 if [[ ${#files[@]} -eq 0 ]]; then
     echo "No supported model files found under $INPUT_DIR" >&2
