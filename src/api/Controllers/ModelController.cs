@@ -56,6 +56,23 @@ public class ModelController : ControllerBase
     }
 
     /// <summary>
+    /// Resolves a model file path to an absolute path.
+    /// Handles both relative paths (from database) and absolute paths.
+    /// </summary>
+    private string ResolvePath(string? relativePath)
+    {
+        if (string.IsNullOrEmpty(relativePath))
+            return string.Empty;
+
+        // If already absolute, return as-is
+        if (Path.IsPathRooted(relativePath))
+            return relativePath;
+
+        // If relative, combine with _modelsPath
+        return Path.Combine(_modelsPath, Path.GetFileName(relativePath));
+    }
+
+    /// <summary>
     /// Upload a 3D model file
     /// </summary>
     /// <returns>Model upload result with ID and URL</returns>
@@ -251,13 +268,15 @@ public class ModelController : ControllerBase
             return NotFound();
         }
 
-        if (!_fileManagementService.IsSafePath(path, _modelsPath) || !_fileSystem.FileExists(path))
+        string fullPath = ResolvePath(path);
+
+        if (!_fileManagementService.IsSafePath(fullPath, _modelsPath) || !_fileSystem.FileExists(fullPath))
         {
-            _logger.LogWarning($"Model {id} file path is unsafe or does not exist: {path}");
+            _logger.LogWarning($"Model {id} file path is unsafe or does not exist: {fullPath}");
             return NotFound();
         }
 
-        string fileExtension = Path.GetExtension(path);
+        string fileExtension = Path.GetExtension(fullPath);
         string contentType = fileExtension.ToLowerInvariant() switch
         {
             ".stl" => "application/vnd.ms-pki.stl",
@@ -270,8 +289,8 @@ public class ModelController : ControllerBase
         // Lookup original name to set Content-Disposition filename
         // For performance, fetch model DTO
         Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
-        string fileName = dto?.FileName ?? Path.GetFileName(path);
-        return PhysicalFile(path, contentType, fileName);
+        string fileName = dto?.FileName ?? Path.GetFileName(fullPath);
+        return PhysicalFile(fullPath, contentType, fileName);
     }
 
     /// <summary>
@@ -297,10 +316,8 @@ public class ModelController : ControllerBase
                 return NotFound("Thumbnail not available");
             }
             
-            // Convert to absolute path if relative
-            string absolutePath = Path.IsPathRooted(thumbPath) 
-                ? thumbPath 
-                : Path.Combine(Directory.GetCurrentDirectory(), thumbPath);
+            // Use common path resolution helper
+            string absolutePath = ResolvePath(thumbPath);
             _logger.LogInformation($"[Thumbnail] Resolved absolute path: {absolutePath}");
             
             bool fileExists = _fileSystem.FileExists(absolutePath);
