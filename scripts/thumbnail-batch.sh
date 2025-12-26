@@ -14,7 +14,8 @@ OUTPUT_DIR=""
 PRESET="orca"
 WIDTH=1024
 HEIGHT=1024
-ENABLE_SHADOW=1
+ZOOM=""
+VIEW=""
 TWO_SIDED=1
 ENABLE_AO=1
 SUPPORTED_EXTS=("stl" "3mf" "obj" "ply" "amf")
@@ -31,6 +32,8 @@ Options:
   -p, --preset NAME          Renderer preset: orca | prusa (default: orca)
   -w, --width INT            Output width in pixels (default: 1024)
   -H, --height INT           Output height in pixels (default: 1024)
+  -z, --zoom PERCENT         Zoom as percentage 25-500 (default: 40 orca, 44 prusa)
+  -v, --view VIEW            Camera view: front|back|left|right|top|bottom (default: front)
       --config CONFIG        Build configuration for ThumbnailCli (default: Release)
       --skip-build           Skip building ThumbnailCli before rendering
       --no-shadow            Disable ground shadow
@@ -56,6 +59,10 @@ while [[ $# -gt 0 ]]; do
             WIDTH="$2"; shift 2 ;;
         -H|--height)
             HEIGHT="$2"; shift 2 ;;
+        -z|--zoom)
+            ZOOM="$2"; shift 2 ;;
+        -v|--view)
+            VIEW="$2"; shift 2 ;;
         --config)
             CONFIGURATION="$2"; shift 2 ;;
         --skip-build)
@@ -127,6 +134,8 @@ for src in "${files[@]}"; do
     mkdir -p "$out_dir"
 
     cmd=(dotnet run --project "$CLI_PROJECT" --configuration "$CONFIGURATION" --no-build -- --input "$src" --output "$out_file" --preset "$PRESET" --width "$WIDTH" --height "$HEIGHT")
+    [[ -n "$ZOOM" ]] && cmd+=(--zoom "$ZOOM")
+    [[ -n "$VIEW" ]] && cmd+=(--view "$VIEW")
     [[ $ENABLE_SHADOW -eq 0 ]] && cmd+=(--no-shadow)
     [[ $TWO_SIDED -eq 0 ]] && cmd+=(--single-sided)
     [[ $ENABLE_AO -eq 0 ]] && cmd+=(--no-ao)

@@ -49,6 +49,8 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         string outputPath,
         int width = 512,
         int height = 512,
+        int? zoomPercent = null,
+        string? view = null,
         CancellationToken ct = default)
     {
         if (!IsFormatSupported(fileFormat))
@@ -72,7 +74,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
                 _ = Directory.CreateDirectory(outputDir);
             }
 
-            return await Task.Run(() => GenerateThumbnailInternal(modelFilePath, outputPath, width, height), ct);
+            return await Task.Run(() => GenerateThumbnailInternal(modelFilePath, outputPath, width, height, zoomPercent, view), ct);
         }
         catch (Exception ex)
         {
@@ -81,7 +83,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
         }
     }
 
-    private bool GenerateThumbnailInternal(string modelFilePath, string outputPath, int width, int height)
+    private bool GenerateThumbnailInternal(string modelFilePath, string outputPath, int width, int height, int? zoomPercent, string? view)
     {
         try
         {
@@ -90,11 +92,27 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             _logger.LogInformation($"  Model file path: {modelFilePath}");
             _logger.LogInformation($"  Output path: {outputPath}");
             _logger.LogInformation($"  Using OrcaSlicerPreviewRenderer...");
+            _logger.LogInformation($"  Zoom percent: {(zoomPercent.HasValue ? zoomPercent.Value.ToString() : "default")}");
+            _logger.LogInformation($"  View: {view ?? "default(front)"}");
 
             // Use OrcaPreviewRenderer for high-quality rendering
             var renderer = new OrcaPreviewRenderer();
 
             var options = OrcaPreset.Create();
+            const int defaultZoomPercent = 40; // matches existing Orca default appearance
+
+            if (zoomPercent.HasValue)
+            {
+                options.SetZoomPercent(defaultZoomPercent, zoomPercent.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(view))
+            {
+                if (!options.SetCameraView(view))
+                {
+                    options.SetCameraView("front");
+                }
+            }
             
             renderer.Render(modelFilePath, outputPath, options);
 

@@ -23,6 +23,8 @@ public interface IThumbnailGenerationService
         string outputPath,
         int width = 512,
         int height = 512,
+        int? zoomPercent = null,
+        string? view = null,
         CancellationToken ct = default);
 
     /// <summary>

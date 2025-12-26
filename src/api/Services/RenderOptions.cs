@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
 
@@ -17,6 +18,20 @@ public sealed class RenderOptions
     public Vector3 CameraPosition { get; set; } = new Vector3(1.75f, 1.75f, 1.35f);
     public Vector3 CameraTarget   { get; set; } = new Vector3(0f, 0f, 0.55f);
     public Vector3 CameraUp       { get; set; } = Vector3.UnitZ;
+
+    /// <summary>
+    /// Camera view presets: front, back, left, right, top, bottom
+    /// </summary>
+    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresets = 
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "front", (new Vector3(-1.75f, -1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        { "back", (new Vector3(1.75f, 1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        { "left", (new Vector3(-2.5f, 0f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        { "right", (new Vector3(2.5f, 0f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        { "top", (new Vector3(0f, 0f, 2.5f), new Vector3(0f, 0f, 0.35f)) },
+        { "bottom", (new Vector3(0f, 0f, -1.5f), new Vector3(0f, 0f, 0.35f)) }
+    };
 
     public Vector3 LightDirection { get; set; } = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
     
@@ -68,6 +83,37 @@ public sealed class RenderOptions
     public int GroundShadowOffsetYPx { get; set; } = 25;
 
     public bool AntiAlias2x { get; set; } = true;
+
+    /// <summary>
+    /// Applies a zoom percentage relative to a preset baseline.
+    /// Example: if defaultPercent is 40 (orca) and requestedPercent is 80, OrthoSize is halved (zoom in).
+    /// Only invoke when a user value is provided; preset defaults remain untouched otherwise.
+    /// </summary>
+    public void SetZoomPercent(int defaultPercent, int requestedPercent)
+    {
+        int percent = requestedPercent <= 0 ? defaultPercent : requestedPercent;
+        OrthoSize = OrthoSize * (defaultPercent / (float)percent);
+    }
+
+    /// <summary>
+    /// Sets the camera position and target based on a named view preset
+    /// Supports: front, back, left, right, top, bottom
+    /// </summary>
+    public bool SetCameraView(string viewName)
+    {
+        if (ViewPresets.TryGetValue(viewName, out var preset))
+        {
+            CameraPosition = preset.Position;
+            CameraTarget = preset.Target;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the list of available camera view presets
+    /// </summary>
+    public static IEnumerable<string> GetAvailableViews() => ViewPresets.Keys;
 }
 
 // ------------------------------------------------------------
@@ -163,7 +209,7 @@ public static class OrcaPreset
             // CAMERA (Orca-accurate)
             // ------------------------------------------------------------
             UseOrthographic = true,
-            OrthoSize = 0.85f,
+            OrthoSize = 0.69f,
 
             CameraPosition      = new Vector3(-1.75f, -1.75f, 1.35f),
             CameraTarget        = new Vector3(0f, 0f, 0.35f),

@@ -13,6 +13,8 @@ internal static class Program
         string Preset,
         int Width,
         int Height,
+        int? ZoomPercent,
+        string? View,
         bool EnableGroundShadow,
         bool TwoSided,
         bool EnableAmbientOcclusion);
@@ -45,9 +47,26 @@ internal static class Program
 
             options.Width = opts.Width;
             options.Height = opts.Height;
+
+            int defaultZoomPercent = opts.Preset.Equals("prusa", StringComparison.OrdinalIgnoreCase) ? 44 : 40;
+            if (opts.ZoomPercent.HasValue)
+            {
+                options.SetZoomPercent(defaultZoomPercent, opts.ZoomPercent.Value);
+            }
             options.EnableGroundShadow = opts.EnableGroundShadow;
             options.TwoSided = opts.TwoSided;
             options.EnableAmbientOcclusion = opts.EnableAmbientOcclusion;
+            
+            // Apply camera view
+            if (!string.IsNullOrWhiteSpace(opts.View))
+            {
+                var viewName = opts.View;
+                if (!options.SetCameraView(viewName))
+                {
+                    Console.Error.WriteLine($"Warning: Unknown view '{viewName}', using default 'front'");
+                    options.SetCameraView("front");
+                }
+            }
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(opts.Output)) ?? ".");
 
@@ -70,12 +89,16 @@ internal static class Program
 
         int width = int.TryParse(GetValue(args, "--width", "-w"), out var w) ? w : 1024;
         int height = int.TryParse(GetValue(args, "--height", "-h"), out var h) ? h : 1024;
+        
+        int? zoomPercent = int.TryParse(GetValue(args, "--zoom", "-z"), out var zv) ? zv : null;
+        
+        string? view = GetValue(args, "--view", "-v")?.ToLowerInvariant();
 
         bool enableGroundShadow = !HasFlag(args, "--no-shadow");
         bool twoSided = !HasFlag(args, "--single-sided");
         bool enableAo = !HasFlag(args, "--no-ao");
 
-        return new CliOptions(input, output, preset, width, height, enableGroundShadow, twoSided, enableAo);
+        return new CliOptions(input, output, preset, width, height, zoomPercent, view, enableGroundShadow, twoSided, enableAo);
     }
 
     private static bool HasFlag(IReadOnlyList<string> args, params string[] keys)
@@ -128,6 +151,8 @@ internal static class Program
         Console.WriteLine("  -p, --preset <orca|prusa>  Renderer preset (default: orca)");
         Console.WriteLine("  -w, --width <int>      Width in pixels (default: 1024)");
         Console.WriteLine("  -h, --height <int>     Height in pixels (default: 1024)");
+        Console.WriteLine("  -z, --zoom <percent>   Zoom as percentage 25-500 (default: 40 orca, 44 prusa)");
+        Console.WriteLine("  -v, --view <view>      Camera view: front|top|bottom|left|right|back (default: front)");
         Console.WriteLine("      --no-shadow        Disable ground shadow");
         Console.WriteLine("      --single-sided     Disable two-sided rendering (culls backfaces)");
         Console.WriteLine("      --no-ao            Disable ambient occlusion");
