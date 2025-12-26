@@ -147,8 +147,8 @@ public sealed class OrcaPreviewRenderer : BasePreviewRenderer
         var n = Vector3.Normalize(normal);
         var l = Vector3.Normalize(options.LightDirection);
 
-        // View direction (from surface toward camera). For orthographic, this is constant.
-        var v = Vector3.Normalize(options.CameraPosition - options.CameraTarget);
+        // View direction (from surface toward camera). In View Space, this is +Z.
+        var v = Vector3.UnitZ;
 
         // Wrap diffuse (softens terminator)
         float ndotl = Vector3.Dot(n, -l);

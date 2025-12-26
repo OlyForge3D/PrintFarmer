@@ -581,8 +581,10 @@ public abstract class BasePreviewRenderer
             var v0 = input[i];
             var v1 = input[(i + 1) % 3];
 
-            float s0 = v0.C.W - v0.C.Z;
-            float s1 = v1.C.W - v1.C.Z;
+            // Clip against Near Plane (Z >= 0 in Clip Space [0, W])
+            // Previously was clipping against Far Plane (W - Z >= 0) which is wrong for Near Plane clipping
+            float s0 = v0.C.Z;
+            float s1 = v1.C.Z;
 
             bool in0 = s0 >= 0f;
             bool in1 = s1 >= 0f;
@@ -693,7 +695,7 @@ public abstract class BasePreviewRenderer
                     float zOverW = w0 * zOverW0 + w1 * zOverW1 + w2 * zOverW2;
                     float zNdc = zOverW / invW;
 
-                    float d01 = (zNdc + 1f) * 0.5f; // OpenGL-style NDC depth
+                    float d01 = zNdc; // System.Numerics uses [0, 1] depth range
                     if (d01 >= depth01[x, y])
                         continue;
 
