@@ -3,244 +3,270 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace Farm.Web.Api.Services;
 
+// ------------------------------------------------------------
+// RENDER OPTIONS
+// ------------------------------------------------------------
 public sealed class RenderOptions
 {
-    // Output resolution
-    public int Width { get; set; } = 1024;
-    public int Height { get; set; } = 1024;
+    public int Width { get; set; } = 800;
+    public int Height { get; set; } = 600;
 
-    // Camera
-    public Vector3 CameraPosition { get; set; } = new Vector3(1.8f, 1.8f, 1.1f);
-    public Vector3 CameraTarget { get; set; } = new Vector3(0, 0, 0.2f);
-    public Vector3 CameraUp { get; set; } = Vector3.UnitZ;
-
-    // Projection
-    public float OrthoSize { get; set; } = 2.2f;
-    public float FovDegrees { get; set; } = 45f;
-    public float NearPlane { get; set; } = 0.1f;
-    public float FarPlane { get; set; } = 20f;
     public bool UseOrthographic { get; set; } = true;
+    public float OrthoSize { get; set; } = 1.65f;
 
-    // Lighting
-    public Vector3 LightDirection { get; set; } =
-        Vector3.Normalize(new Vector3(-0.4f, -0.3f, 1.0f));
+    public Vector3 CameraPosition { get; set; } = new Vector3(1.75f, 1.75f, 1.35f);
+    public Vector3 CameraTarget   { get; set; } = new Vector3(0f, 0f, 0.55f);
+    public Vector3 CameraUp       { get; set; } = Vector3.UnitZ;
 
-    // Model color
+    public Vector3 LightDirection { get; set; } = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
+
+    // Base material color in linear space (Orca-ish teal)
+    public Vector3 BaseColorLinear { get; set; } = new(0.20f, 0.70f, 0.90f);
+
     public Rgba32 ModelBaseColor { get; set; } = new Rgba32(150, 210, 200);
+    public Rgba32 BackgroundColor { get; set; } = new Rgba32(34, 36, 40);
 
-    // Background
-    public Rgba32 BackgroundColor { get; set; } = new Rgba32(30, 31, 34);
-
-    // Silhouette edges
     public bool EnableSilhouetteEdges { get; set; } = true;
-    public Rgba32 SilhouetteColor { get; set; } = new Rgba32(10, 12, 15);
-    public float SilhouetteAngleThresholdDeg { get; set; } = 75f;
-    public float SilhouetteEdgeWidth { get; set; } = 0.8f;
+    public Rgba32 SilhouetteColor { get; set; } = new Rgba32(20, 20, 25, 180);
+    public float SilhouetteEdgeWidth { get; set; } = 1.0f;
+    public float SilhouetteAngleThresholdDeg { get; set; } = 82f;
+    public float SilhouetteDepthEpsilon { get; set; } = 0.003f;
 
-    // Build plate
     public bool EnableBuildPlate { get; set; } = true;
-    public Rgba32 BuildPlateGridColor { get; set; } = new Rgba32(70, 72, 78);
-    public Rgba32 BuildPlateBorderColor { get; set; } = new Rgba32(110, 112, 118);
-    public float BuildPlateSize { get; set; } = 220f;
+    public float BuildPlateSize { get; set; } = 200f;
     public float BuildPlateGridStep { get; set; } = 5f;
+    public Rgba32 BuildPlateGridColor { get; set; } = new Rgba32(70, 75, 85, 255);
+    public Rgba32 BuildPlateBorderColor { get; set; } = new Rgba32(90, 95, 105, 255);
 
-    // Ambient occlusion
     public bool EnableAmbientOcclusion { get; set; } = true;
-    public float AmbientOcclusionStrength { get; set; } = 0.25f;
+    public float AmbientOcclusionStrength { get; set; } = 0.65f;
 
-    // Style presets will be applied by subclasses
-    public enum PreviewStyle
+    // Lifted diffuse base
+    public float AmbientFactor { get; set; } = 0.30f;
+    public float DiffuseFactor { get; set; } = 0.70f;
+
+    // NEW: wrap lighting (soft terminator)
+    public float DiffuseWrap { get; set; } = 0.32f; // 0 = Lambert, 0.25-0.40 = Orca-ish
+
+    // NEW: AO shaping
+    public float AOMin { get; set; } = 0.70f;
+    public float AOMax { get; set; } = 1.00f;
+    public float AOPower { get; set; } = 1.25f;     // >1 makes AO less linear / more Orca-like
+
+    // NEW: subtle sheen
+    public float SpecularStrength { get; set; } = 0.08f;
+    public float SpecularPower { get; set; } = 48f;
+
+    public bool EnableGroundShadow { get; set; } = true; 
+    public float GroundShadowOpacity { get; set; } = 0.22f; 
+    public int GroundShadowBlurRadiusPx { get; set; } = 10; 
+    public int GroundShadowOffsetXPx { get; set; } = 2; 
+    public int GroundShadowOffsetYPx { get; set; } = 10;
+
+    public bool AntiAlias2x { get; set; } = true;
+}
+
+// ------------------------------------------------------------
+// MESH TYPES
+// ------------------------------------------------------------
+public sealed class Mesh
+{
+    public List<Vector3> Vertices { get; } = new();
+    public List<Face> Faces { get; } = new();
+}
+
+public sealed class Face
+{
+    public int[] Indices { get; set; } = Array.Empty<int>();
+    public int FaceIndex { get; set; }
+    public int IndexCount => Indices?.Length ?? 0;
+}
+
+public sealed class NormalizedMesh
+{
+    public List<Vector3> Vertices { get; } = new();
+    public List<Face> Faces { get; } = new();
+    public float[] Ao { get; set; } = Array.Empty<float>();
+    
+    public List<Vector3> Normals { get; } = new();
+}
+
+#pragma warning disable CA1051
+#pragma warning disable CA1815
+public struct Triangle
+{
+    public Vector4 V0;
+    public Vector4 V1;
+    public Vector4 V2;
+
+    // Shading
+    public Vector3 Normal;        // keep if you want (optional after per-vertex)
+    public float Ao;              // keep if you want (optional after per-vertex)
+
+    // Silhouette / facing
+    public Vector3 FaceNormal;
+
+    // Per-vertex shading inputs (view-space normals + AO)
+    public Vector3 N0, N1, N2;
+    public float Ao0, Ao1, Ao2;
+
+    // Clip-space (pre-divide), used for perspective-correct depth
+    public float Cz0, Cw0;
+    public float Cz1, Cw1;
+    public float Cz2, Cw2;
+
+    public float D0, D1, D2; // depth in [0,1]
+}
+
+public struct ClipVertex
+{
+    public Vector4 C;   // clip-space position
+    public Vector3 N;   // view-space normal
+    public float Ao;
+}
+
+#pragma warning restore CA1051
+#pragma warning restore CA1815
+
+public static class VectorExtensions 
+{
+    public static Vector3 XYZ(this Vector4 v) 
     {
-        Orca,
-        Prusa
+         return new Vector3(v.X, v.Y, v.Z);
     }
+}
 
-    public PreviewStyle Style { get; set; } = PreviewStyle.Orca;
+public sealed class MeshLoadOptions
+{
+    public bool MergeMeshes { get; set; } = true;
+    public bool UseZUp { get; set; } = true;   // false = Y-up
+}
 
-    // ---------------------------------------------------------------------
-    // FACTORY METHODS FOR STYLE DEFAULTS
-    // ---------------------------------------------------------------------
-
-    public static RenderOptions CreateOrcaDefaults()
+// ---------------------------------------------------------------------
+// FACTORY METHODS FOR STYLE DEFAULTS
+// ---------------------------------------------------------------------
+public static class OrcaPreset
+{
+    public static RenderOptions Create()
     {
-        return new RenderOptions
+        return new RenderOptions()
         {
-            Style = PreviewStyle.Orca,
-
             Width = 1024,
             Height = 1024,
 
+            // ------------------------------------------------------------
+            // CAMERA (Orca-accurate)
+            // ------------------------------------------------------------
             UseOrthographic = true,
-            OrthoSize = 2.2f,
+            OrthoSize = 1.65f,
 
-            CameraPosition = new Vector3(1.8f, 1.8f, 1.1f),
-            CameraTarget = new Vector3(0, 0, 0.2f),
-            CameraUp = Vector3.UnitZ,
+            CameraPosition = new Vector3(1.75f, 1.75f, 1.35f),
+            CameraTarget   = new Vector3(0f, 0f, 0.55f),
+            CameraUp       = Vector3.UnitZ,
 
-            LightDirection = Vector3.Normalize(new Vector3(-0.4f, -0.3f, 1.0f)),
-
+            // ------------------------------------------------------------
+            // LIGHTING (soft, flat, Orca-style)
+            // ------------------------------------------------------------
+            LightDirection = Vector3.Normalize(new Vector3(-0.4f, -0.8f, -0.4f)),
+            
+            // Orca base color (cool, desaturated green-blue)
             ModelBaseColor = new Rgba32(150, 210, 200),
-            BackgroundColor = new Rgba32(30, 31, 34),
+            //ModelBaseColor = new Rgba32(32, 96, 89),
+            
+            // BACKGROUND (Orca gradient)
+            BackgroundColor = new Rgba32(34, 36, 40),
 
+            // ------------------------------------------------------------
+            // SILHOUETTE EDGES (A1 subtle)
+            // ------------------------------------------------------------
             EnableSilhouetteEdges = true,
-            SilhouetteColor = new Rgba32(10, 12, 15),
-            SilhouetteAngleThresholdDeg = 75f,
-            SilhouetteEdgeWidth = 0.8f,
+            SilhouetteColor = new Rgba32(18, 20, 26, 160), // cooler + lighter
+            SilhouetteDepthEpsilon = 0.002f,              // tighter depth test
 
+            SilhouetteEdgeWidth = 0.9f,                   // was 1.0f. subtle thinning
+            SilhouetteAngleThresholdDeg = 82f,
+
+            // ------------------------------------------------------------
+            // BUILD PLATE (Orca grid)
+            // ------------------------------------------------------------
             EnableBuildPlate = true,
-            BuildPlateGridColor = new Rgba32(70, 72, 78),
-            BuildPlateBorderColor = new Rgba32(110, 112, 118),
-            BuildPlateSize = 220f,
-            BuildPlateGridStep = 5f,
-
-            EnableAmbientOcclusion = true,
-            AmbientOcclusionStrength = 0.25f
-        };
-    }
-
-    public static RenderOptions CreateOrcaPreset()
-    {
-        var o = new RenderOptions();
-
-        // ------------------------------------------------------------
-        // CAMERA (Orca-accurate)
-        // ------------------------------------------------------------
-        o.UseOrthographic = true;
-        o.OrthoSize = 1.65f;
-
-        o.CameraPosition = new Vector3(1.75f, 1.75f, 1.35f);
-        o.CameraTarget   = new Vector3(0f, 0f, 0.55f);
-        o.CameraUp       = Vector3.UnitZ;
-
-        // ------------------------------------------------------------
-        // LIGHTING (soft, flat, Orca-style)
-        // ------------------------------------------------------------
-        o.LightDirection = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
-
-        // Orca base color (cool, desaturated green-blue)
-        o.ModelBaseColor = new Rgba32(150, 210, 200);
-
-        // ------------------------------------------------------------
-        // SILHOUETTE EDGES (A1 subtle)
-        // ------------------------------------------------------------
-        o.EnableSilhouetteEdges = true;
-        o.SilhouetteColor = new Rgba32(20, 20, 25, 180);
-        o.SilhouetteEdgeWidth = 1.0f;
-        o.SilhouetteAngleThresholdDeg = 82f;
-
-        // ------------------------------------------------------------
-        // AMBIENT OCCLUSION (softened)
-        // ------------------------------------------------------------
-        o.EnableAmbientOcclusion = true;
-        o.AmbientOcclusionStrength = 0.65f; // softened AO
-
-        // ------------------------------------------------------------
-        // BACKGROUND (Orca gradient)
-        // ------------------------------------------------------------
-        o.BackgroundColor = new Rgba32(34, 36, 40);
-
-        // ------------------------------------------------------------
-        // BUILD PLATE (Orca grid)
-        // ------------------------------------------------------------
-        o.EnableBuildPlate = true;
-        o.BuildPlateSize = 200f;
-        o.BuildPlateGridStep = 5f;
-
-        o.BuildPlateGridColor   = new Rgba32(70, 75, 85, 255);
-        o.BuildPlateBorderColor = new Rgba32(90, 95, 105, 255);
-
-        return o;
-    }
-
-    public static RenderOptions CreatePrusaDefaults()
-    {
-        return new RenderOptions
-        {
-            Style = PreviewStyle.Prusa,
-
-            Width = 1024,
-            Height = 1024,
-
-            UseOrthographic = true,
-            OrthoSize = 2.4f,
-
-            CameraPosition = new Vector3(2.0f, 2.0f, 2.0f),
-            CameraTarget = new Vector3(0, 0, 0.3f),
-            CameraUp = Vector3.UnitZ,
-
-            LightDirection = Vector3.Normalize(new Vector3(-0.2f, -0.3f, 1.0f)),
-
-            ModelBaseColor = new Rgba32(210, 205, 200),
-            BackgroundColor = new Rgba32(235, 235, 238),
-
-            EnableSilhouetteEdges = true,
-            SilhouetteColor = new Rgba32(180, 180, 185),
-            SilhouetteAngleThresholdDeg = 65f,
-            SilhouetteEdgeWidth = 0.6f,
-
-            EnableBuildPlate = true,
-            BuildPlateGridColor = new Rgba32(200, 200, 205),
-            BuildPlateBorderColor = new Rgba32(160, 160, 165),
-            BuildPlateSize = 250f,
+            BuildPlateGridColor   = new Rgba32(70, 75, 85, 255),
+            BuildPlateBorderColor = new Rgba32(90, 95, 105, 255),
+            BuildPlateSize = 200f,
             BuildPlateGridStep = 10f,
 
+            // ------------------------------------------------------------
+            // AMBIENT OCCLUSION (softened)
+            // ------------------------------------------------------------
             EnableAmbientOcclusion = true,
-            AmbientOcclusionStrength = 0.18f
+            AmbientOcclusionStrength = 0.55f, // was 0.65
+
+            AmbientFactor = 0.34f,   // was 0.30
+            DiffuseFactor = 0.66f,   // was 0.70
+            DiffuseWrap   = 0.38f,   // was 0.32
+
+            AOMin   = 0.78f,   // was 0.70
+            AOPower = 1.45f,   // was 1.25
+            
+            SpecularStrength = 0.06f,
+            SpecularPower    = 56f
         };
     }
+}
 
-    public static RenderOptions CreatePrusaPreset()
+public static class PrusaPreset
+{
+    public static RenderOptions Create()
     {
-        var o = new RenderOptions();
+        return new RenderOptions()
+        {
+            // ------------------------------------------------------------
+            // CAMERA (Prusa-style: slightly higher, softer angle)
+            // ------------------------------------------------------------
+            UseOrthographic = true,
+            OrthoSize = 1.70f,
 
-        // ------------------------------------------------------------
-        // CAMERA (Prusa-style: slightly higher, softer angle)
-        // ------------------------------------------------------------
-        o.UseOrthographic = true;
-        o.OrthoSize = 1.70f;
+            CameraPosition = new Vector3(1.65f, 1.65f, 1.45f),
+            CameraTarget   = new Vector3(0f, 0f, 0.60f),
+            CameraUp       = Vector3.UnitZ,
 
-        o.CameraPosition = new Vector3(1.65f, 1.65f, 1.45f);
-        o.CameraTarget   = new Vector3(0f, 0f, 0.60f);
-        o.CameraUp       = Vector3.UnitZ;
+            // ------------------------------------------------------------
+            // LIGHTING (soft, warm, low-contrast)
+            // ------------------------------------------------------------
+            LightDirection = Vector3.Normalize(new Vector3(-0.55f, -0.55f, -1f)),
 
-        // ------------------------------------------------------------
-        // LIGHTING (soft, warm, low-contrast)
-        // ------------------------------------------------------------
-        o.LightDirection = Vector3.Normalize(new Vector3(-0.55f, -0.55f, -1f));
+            // Prusa base color (warm neutral gray)
+            ModelBaseColor = new Rgba32(205, 205, 210),
 
-        // Prusa base color (warm neutral gray)
-        o.ModelBaseColor = new Rgba32(205, 205, 210);
+            // ------------------------------------------------------------
+            // SILHOUETTE EDGES (very subtle)
+            // ------------------------------------------------------------
+            EnableSilhouetteEdges = true,
+            SilhouetteColor = new Rgba32(40, 40, 45, 160),
+            SilhouetteEdgeWidth = 1.0f,
+            SilhouetteAngleThresholdDeg = 84f,
 
-        // ------------------------------------------------------------
-        // SILHOUETTE EDGES (very subtle)
-        // ------------------------------------------------------------
-        o.EnableSilhouetteEdges = true;
-        o.SilhouetteColor = new Rgba32(40, 40, 45, 160);
-        o.SilhouetteEdgeWidth = 1.0f;
-        o.SilhouetteAngleThresholdDeg = 84f;
+            // ------------------------------------------------------------
+            // AMBIENT OCCLUSION (softest of all slicers)
+            // ------------------------------------------------------------
+            EnableAmbientOcclusion = true,
+            AmbientOcclusionStrength = 0.55f,
 
-        // ------------------------------------------------------------
-        // AMBIENT OCCLUSION (softest of all slicers)
-        // ------------------------------------------------------------
-        o.EnableAmbientOcclusion = true;
-        o.AmbientOcclusionStrength = 0.55f;
+            // ------------------------------------------------------------
+            // BACKGROUND (Prusa light gradient)
+            // ------------------------------------------------------------
+            BackgroundColor = new Rgba32(245, 245, 248),
 
-        // ------------------------------------------------------------
-        // BACKGROUND (Prusa light gradient)
-        // ------------------------------------------------------------
-        o.BackgroundColor = new Rgba32(245, 245, 248);
+            // ------------------------------------------------------------
+            // BUILD PLATE (light gray, soft grid)
+            // ------------------------------------------------------------
+            EnableBuildPlate = true,
+            BuildPlateSize = 200f,
+            BuildPlateGridStep = 10f,
 
-        // ------------------------------------------------------------
-        // BUILD PLATE (light gray, soft grid)
-        // ------------------------------------------------------------
-        o.EnableBuildPlate = true;
-        o.BuildPlateSize = 200f;
-        o.BuildPlateGridStep = 5f;
-
-        o.BuildPlateGridColor   = new Rgba32(180, 180, 185, 255);
-        o.BuildPlateBorderColor = new Rgba32(160, 160, 165, 255);
-
-        return o;
+            BuildPlateGridColor   = new Rgba32(180, 180, 185, 255),
+            BuildPlateBorderColor = new Rgba32(160, 160, 165, 255),
+        };
     }
 }
 

@@ -10,87 +10,203 @@ using SixLabors.ImageSharp.Drawing;
 using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.Processing;
 
+using Numerics = System.Numerics;
+
 namespace Farm.Web.Api.Services;
 
-public class BasePreviewRenderer
+// ------------------------------------------------------------
+// BASE PREVIEW RENDERER (FULL TRIANGLE PIPELINE)
+// ------------------------------------------------------------
+public abstract class BasePreviewRenderer
 {
-    // ---------------------------------------------------------------------
-    //  VIRTUAL METHODS (subclasses override these)
-    // ---------------------------------------------------------------------
-
-    protected virtual void ApplyStyleDefaults(RenderOptions options)
-    {
-        // Subclasses override to apply Orca or Prusa defaults
-    }
-
-    protected virtual void DrawBackground(Image<Rgba32> img, RenderOptions options)
-    {
-        // Subclasses override
-    }
-
-    protected virtual void DrawBuildPlate(Image<Rgba32> img, RenderOptions options)
-    {
-        // Subclasses override
-    }
-
-    protected virtual Rgba32 ShadeTriangle(
-        Vector3 normal,
-        float ao,
-        RenderOptions options)
-    {
-        // Subclasses override with Orca or Prusa shading
-        return options.ModelBaseColor;
-    }
-
-    // ---------------------------------------------------------------------
-    //  PUBLIC ENTRY POINT
-    // ---------------------------------------------------------------------
-
     public void Render(string inputPath, string outputPath, RenderOptions options)
     {
+        options ??= new RenderOptions();
         ApplyStyleDefaults(options);
-
         var mesh = LoadMesh(inputPath);
         var normalized = NormalizeMesh(mesh);
-        var triangles = BuildTriangles(normalized);
 
-        if (options.EnableAmbientOcclusion)
-            ComputeAmbientOcclusion(triangles, options);
+        // AO can be injected here; for now assume Ao array is precomputed or flat
+        if (normalized.Ao == null || normalized.Ao.Length != normalized.Faces.Count)
+        {
+            normalized.Ao = new float[normalized.Faces.Count];
+            for (int i = 0; i < normalized.Ao.Length; i++)
+                normalized.Ao[i] = 1f;
+        }
 
-        var view = Matrix4x4.CreateLookAt(
-            options.CameraPosition,
-            options.CameraTarget,
-            options.CameraUp
-        );
+        // NEW: compute smoothed vertex normals in model space
+        ComputeVertexNormals(normalized);
 
-        var proj = CreateProjection(options);
+        var (view, proj) = BuildCameraMatrices(options);
 
-        var ndcTriangles = TransformToNdc(triangles, view, proj);
-        ndcTriangles.Sort((a, b) => a.Depth.CompareTo(b.Depth));
+        var tris = BuildTriangleList(normalized, view, proj);
 
-        using var img = new Image<Rgba32>(options.Width, options.Height);
+        var img = new Image<Rgba32>(options.Width, options.Height);
 
         DrawBackground(img, options);
 
         if (options.EnableBuildPlate)
+        {
             DrawBuildPlate(img, options);
+        }
 
-        RasterizeTriangles(img, ndcTriangles, options);
+        var depth01 = RasterizeTriangles(img, tris, options);
+
+        if (options.EnableGroundShadow)
+        {
+            DrawGroundShadow(img, depth01, options);
+        }
 
         if (options.EnableSilhouetteEdges)
-            DrawSilhouetteEdges(img, ndcTriangles, options);
+        {
+            DrawSilhouetteEdges(img, tris, depth01, options);
+        }
+
 
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(outputPath)) ?? ".");
         img.Save(outputPath);
     }
 
+    protected void DrawGroundShadow(Image<Rgba32> img, float[,] depth01, RenderOptions opt)
+    {
+        int w = img.Width, h = img.Height;
+        var frame = img.Frames.RootFrame;
+
+        var plateRect = GetBuildPlateRect(w, h);
+
+        // 1) Presence mask
+        var mask = new float[w, h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                mask[x, y] = depth01[x, y] < float.PositiveInfinity ? 1f : 0f;
+
+        // 2) Drop shadow offset
+        var dropped = new float[w, h];
+        int ox = opt.GroundShadowOffsetXPx;
+        int oy = opt.GroundShadowOffsetYPx;
+
+        for (int y = plateRect.Top; y < plateRect.Bottom; y++)
+        {
+            int sy = y - oy;
+            if ((uint)sy >= (uint)h) continue;
+
+            for (int x = plateRect.Left; x < plateRect.Right; x++)
+            {
+                int sx = x - ox;
+                if ((uint)sx >= (uint)w) continue;
+
+                dropped[x, y] = mask[sx, sy];
+            }
+        }
+
+        // 3) Blur
+        int r = Math.Max(1, opt.GroundShadowBlurRadiusPx);
+        var blurred = BoxBlurSeparable(dropped, w, h, r);
+
+        // 4) Composite ONLY on plate
+        float opacity = Math.Clamp(opt.GroundShadowOpacity, 0f, 1f);
+
+        for (int y = plateRect.Top; y < plateRect.Bottom; y++)
+        {
+            for (int x = plateRect.Left; x < plateRect.Right; x++)
+            {
+                float a = blurred[x, y] * opacity;
+                if (a <= 0.001f) continue;
+
+                var c = frame[x, y];
+                frame[x, y] = new Rgba32(
+                    (byte)(c.R * (1f - a)),
+                    (byte)(c.G * (1f - a)),
+                    (byte)(c.B * (1f - a)),
+                    255
+                );
+            }
+        }
+    }
+
+    protected float[,] BoxBlurSeparable(float[,] src, int w, int h, int r)
+    {
+        var tmp = new float[w, h];
+        var dst = new float[w, h];
+
+        // Horizontal
+        for (int y = 0; y < h; y++)
+        {
+            float sum = 0f;
+            int count = 0;
+
+            for (int x = -r; x <= r; x++)
+            {
+                int ix = Math.Clamp(x, 0, w - 1);
+                sum += src[ix, y];
+                count++;
+            }
+
+            for (int x = 0; x < w; x++)
+            {
+                tmp[x, y] = sum / count;
+
+                int x0 = x - r;
+                int x1 = x + r + 1;
+
+                sum -= src[Math.Clamp(x0, 0, w - 1), y];
+                sum += src[Math.Clamp(x1, 0, w - 1), y];
+            }
+        }
+
+        // Vertical
+        for (int x = 0; x < w; x++)
+        {
+            float sum = 0f;
+            int count = 0;
+
+            for (int y = -r; y <= r; y++)
+            {
+                int iy = Math.Clamp(y, 0, h - 1);
+                sum += tmp[x, iy];
+                count++;
+            }
+
+            for (int y = 0; y < h; y++)
+            {
+                dst[x, y] = sum / count;
+
+                int y0 = y - r;
+                int y1 = y + r + 1;
+
+                sum -= tmp[x, Math.Clamp(y0, 0, h - 1)];
+                sum += tmp[x, Math.Clamp(y1, 0, h - 1)];
+            }
+        }
+
+        return dst;
+    }
+
+
+    protected Rectangle GetBuildPlateRect(int w, int h)
+    {
+        return new Rectangle(
+            (int)(w * 0.05f),
+            (int)(h * 0.55f),
+            (int)(w * 0.90f),
+            (int)(h * 0.30f)
+        );
+    }
+
+    protected static float SmoothStep(float edge0, float edge1, float x)
+    {
+        x = Math.Clamp((x - edge0) / (edge1 - edge0), 0f, 1f);
+        return x * x * (3f - 2f * x);
+    }
+
     // ---------------------------------------------------------------------
     //  MESH LOADING
     // ---------------------------------------------------------------------
-
-    private Mesh LoadMesh(string inputPath)
+    private Mesh LoadMesh(string inputPath, MeshLoadOptions? opts = null)
     {
+        opts ??= new MeshLoadOptions();
         var ctx = new AssimpContext();
+
         var scene = ctx.ImportFile(inputPath,
             PostProcessSteps.Triangulate |
             PostProcessSteps.GenerateNormals |
@@ -100,20 +216,134 @@ public class BasePreviewRenderer
         if (scene == null || !scene.HasMeshes)
             throw new InvalidOperationException("No mesh found in file.");
 
-        return scene.Meshes[0];
+        var mesh = new Mesh();
+
+        // Rotation for Y-up → Z-up
+        Numerics.Matrix4x4 axisFix = Numerics.Matrix4x4.Identity;
+        if (!opts.UseZUp)
+        {
+            // Convert Y-up to Z-up: rotate +90° around X
+            axisFix = Numerics.Matrix4x4.CreateRotationX(MathF.PI / 2f);
+        }
+
+        int vertexOffset = 0;
+
+        for (int meshIndex = 0; meshIndex < scene.Meshes.Count; meshIndex++)
+        {
+            var aMesh = scene.Meshes[meshIndex];
+
+            Numerics.Matrix4x4 nodeTransform = Numerics.Matrix4x4.Identity;
+            if (scene.RootNode != null)
+            {
+                var node = FindNodeForMesh(scene.RootNode, meshIndex);
+                if (node != null)
+                    nodeTransform = ToNumerics(node);
+            }
+
+            foreach (var v in aMesh.Vertices)
+            {
+                Vector3 p = new Vector3(v.X, v.Y, v.Z);
+
+                // Apply node transform
+                p = Vector3.Transform(p, nodeTransform);
+
+                // Apply axis fix
+                p = Vector3.Transform(p, axisFix);
+
+                mesh.Vertices.Add(p);
+            }
+
+            // Faces
+            foreach (var f in aMesh.Faces)
+            {
+                if (f.IndexCount != 3)
+                    continue;
+
+                mesh.Faces.Add(new Face
+                {
+                    FaceIndex = mesh.Faces.Count,
+                    Indices = new[]
+                    {
+                        vertexOffset + f.Indices[0],
+                        vertexOffset + f.Indices[1],
+                        vertexOffset + f.Indices[2]
+                    }
+                });
+            }
+
+            vertexOffset = mesh.Vertices.Count;
+
+            if (!opts.MergeMeshes)
+                break; // only first mesh
+        }
+
+        return mesh;
     }
 
-    // ---------------------------------------------------------------------
-    //  NORMALIZATION (with grounding to Z=0)
-    // ---------------------------------------------------------------------
-
-    private class NormalizedMesh
+    private Assimp.Node? FindNodeForMesh(Assimp.Node node, int meshIndex)
     {
-        public List<Vector3> Vertices { get; } = new();
-        public List<Face> Faces { get; } = new();
+        if (node.MeshIndices.Contains(meshIndex))
+            return node;
+
+        foreach (var child in node.Children)
+        {
+            var found = FindNodeForMesh(child, meshIndex);
+            if (found != null)
+                return found;
+        }
+
+        return null;
     }
 
-    private NormalizedMesh NormalizeMesh(Mesh mesh)
+    private Numerics.Matrix4x4 ToNumerics(Assimp.Node node)
+    {
+        return node.Transform; // already a System.Numerics.Matrix4x4
+    }
+    
+    // Style hooks
+    protected abstract void ApplyStyleDefaults(RenderOptions options);
+    protected abstract void DrawBackground(Image<Rgba32> img, RenderOptions options);
+    protected abstract void DrawBuildPlate(Image<Rgba32> img, RenderOptions options);
+    protected abstract Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options);
+
+    // --------------------------------------------------------
+    // CAMERA
+    // --------------------------------------------------------
+    protected (Numerics.Matrix4x4 view, Numerics.Matrix4x4 proj) BuildCameraMatrices(RenderOptions options)
+    {
+        var view = Numerics.Matrix4x4.CreateLookAt(
+            options.CameraPosition,
+            options.CameraTarget,
+            options.CameraUp
+        );
+
+        Numerics.Matrix4x4 proj;
+        if (options.UseOrthographic)
+        {
+            float s = options.OrthoSize;
+            proj = Numerics.Matrix4x4.CreateOrthographicOffCenter(
+                -s, s, -s, s,
+                0.1f,   // TEMP: push near plane forward
+                10f
+            );
+        }
+        else
+        {
+            proj = Numerics.Matrix4x4.CreatePerspectiveFieldOfView(
+                MathF.PI / 4f,
+                (float)options.Width / options.Height,
+                0.1f,
+                10f
+            );
+        }
+
+        return (view, proj);
+    }
+
+    // --------------------------------------------------------
+    // NORMALIZATION
+    // --------------------------------------------------------
+    protected NormalizedMesh NormalizeMesh(Mesh mesh)
     {
         var result = new NormalizedMesh();
 
@@ -125,9 +355,8 @@ public class BasePreviewRenderer
 
         foreach (var v in mesh.Vertices)
         {
-            var p = new Vector3(v.X, v.Y, v.Z);
-            min = Vector3.Min(min, p);
-            max = Vector3.Max(max, p);
+            min = Vector3.Min(min, v);
+            max = Vector3.Max(max, v);
         }
 
         float minZ = min.Z;
@@ -137,7 +366,9 @@ public class BasePreviewRenderer
         // ------------------------------------------------------------
         Vector2 centroid = Vector2.Zero;
         foreach (var v in mesh.Vertices)
+        {
             centroid += new Vector2(v.X, v.Y);
+        }
 
         centroid /= mesh.Vertices.Count;
 
@@ -154,7 +385,7 @@ public class BasePreviewRenderer
         // ------------------------------------------------------------
         foreach (var v in mesh.Vertices)
         {
-            var p = new Vector3(v.X, v.Y, v.Z);
+            var p = v;
 
             // Center using centroid (NOT bounding box midpoint)
             p.X -= centroid.X;
@@ -176,319 +407,443 @@ public class BasePreviewRenderer
         // 5. Copy faces
         // ------------------------------------------------------------
         foreach (var f in mesh.Faces)
+        {
             if (f.IndexCount == 3)
+            {
                 result.Faces.Add(f);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // 6. prepare normals list (one per vertex) 
+        // ------------------------------------------------------------
+        for (int i = 0; i < result.Vertices.Count; i++) 
+        {
+            result.Normals.Add(Vector3.Zero);
+        }
 
         return result;
     }
 
-    // ---------------------------------------------------------------------
-    //  TRIANGLE BUILDING
-    // ---------------------------------------------------------------------
-
-    private class Triangle
+    // Computes smooth, area‑weighted normals per vertex (no geometry smoothing, just shading).
+    protected void ComputeVertexNormals(NormalizedMesh mesh)
     {
-        public Vector3 World0, World1, World2;
-        public Vector3 Normal;
-        public float Ao;
+        // Accumulate face normals into vertex normals
+        for (int fi = 0; fi < mesh.Faces.Count; fi++)
+        {
+            var f = mesh.Faces[fi];
+            int i0 = f.Indices[0];
+            int i1 = f.Indices[1];
+            int i2 = f.Indices[2];
 
-        public Vector3 V0, V1, V2; // NDC
-        public float Depth;
+            var p0 = mesh.Vertices[i0];
+            var p1 = mesh.Vertices[i1];
+            var p2 = mesh.Vertices[i2];
+
+            var e1 = p1 - p0;
+            var e2 = p2 - p0;
+
+            // Face normal (area-weighted)
+            var fn = Vector3.Cross(e1, e2);
+            if (fn.LengthSquared() < 1e-12f)
+                continue;
+
+            fn = Vector3.Normalize(fn);
+
+            mesh.Normals[i0] += fn;
+            mesh.Normals[i1] += fn;
+            mesh.Normals[i2] += fn;
+        }
+
+        // Normalize accumulated normals
+        for (int i = 0; i < mesh.Normals.Count; i++)
+        {
+            var n = mesh.Normals[i];
+            float lenSq = n.LengthSquared();
+            if (lenSq > 1e-12f)
+                mesh.Normals[i] = Vector3.Normalize(n);
+            else
+                mesh.Normals[i] = Vector3.UnitZ; // fallback
+        }
     }
 
-    private List<Triangle> BuildTriangles(NormalizedMesh nmesh)
+    // --------------------------------------------------------
+    // TRIANGLE PIPELINE
+    // --------------------------------------------------------
+
+    protected List<Triangle> BuildTriangleList(NormalizedMesh mesh, Numerics.Matrix4x4 view, Numerics.Matrix4x4 proj)
     {
-        var tris = new List<Triangle>(nmesh.Faces.Count);
+        var tris = new List<Triangle>(mesh.Faces.Count);
 
-        foreach (var face in nmesh.Faces)
+        for (int i = 0; i < mesh.Faces.Count; i++)
         {
-            var v0 = nmesh.Vertices[face.Indices[0]];
-            var v1 = nmesh.Vertices[face.Indices[1]];
-            var v2 = nmesh.Vertices[face.Indices[2]];
+            var f = mesh.Faces[i];
 
-            var normal = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
+            int i0 = f.Indices[0];
+            int i1 = f.Indices[1];
+            int i2 = f.Indices[2];
 
-            tris.Add(new Triangle
+            var p0 = mesh.Vertices[i0];
+            var p1 = mesh.Vertices[i1];
+            var p2 = mesh.Vertices[i2];
+
+            // View-space positions
+            Vector3 v0 = Vector3.Transform(p0, view);
+            Vector3 v1 = Vector3.Transform(p1, view);
+            Vector3 v2 = Vector3.Transform(p2, view);
+
+            // View-space vertex normals
+            var n0v = Vector3.Normalize(Vector3.TransformNormal(mesh.Normals[i0], view));
+            var n1v = Vector3.Normalize(Vector3.TransformNormal(mesh.Normals[i1], view));
+            var n2v = Vector3.Normalize(Vector3.TransformNormal(mesh.Normals[i2], view));
+
+            // Face normal (view space)
+            var faceNormal = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
+
+            // Clip-space (pre-divide)
+            Vector4 c0 = Vector4.Transform(new Vector4(v0, 1f), proj);
+            Vector4 c1 = Vector4.Transform(new Vector4(v1, 1f), proj);
+            Vector4 c2 = Vector4.Transform(new Vector4(v2, 1f), proj);
+
+            // Per-vertex AO
+            float ao0 = mesh.Ao.Length > i0 ? mesh.Ao[i0] : 1f;
+            float ao1 = mesh.Ao.Length > i1 ? mesh.Ao[i1] : 1f;
+            float ao2 = mesh.Ao.Length > i2 ? mesh.Ao[i2] : 1f;
+
+            var clipped = ClipToNearPlane(
+                new ClipVertex { C = c0, N = n0v, Ao = ao0 },
+                new ClipVertex { C = c1, N = n1v, Ao = ao1 },
+                new ClipVertex { C = c2, N = n2v, Ao = ao2 }
+            );
+
+            if (clipped.Count < 3)
+                continue;
+
+            // Triangulate fan (max 2 triangles)
+            for (int k = 1; k + 1 < clipped.Count; k++)
             {
-                World0 = v0,
-                World1 = v1,
-                World2 = v2,
-                Normal = normal,
-                Ao = 1f
-            });
+                var vA = clipped[0];
+                var vB = clipped[k];
+                var vC = clipped[k + 1];
+
+                Vector4 ndcA = vA.C / vA.C.W;
+                Vector4 ndcB = vB.C / vB.C.W;
+                Vector4 ndcC = vC.C / vC.C.W;
+
+                float d0 = (ndcA.Z + 1f) * 0.5f;
+                float d1 = (ndcB.Z + 1f) * 0.5f;
+                float d2 = (ndcC.Z + 1f) * 0.5f;
+
+                tris.Add(new Triangle
+                {
+                    V0 = ndcA,
+                    V1 = ndcB,
+                    V2 = ndcC,
+
+                    D0 = d0,
+                    D1 = d1,
+                    D2 = d2,
+
+                    FaceNormal = Vector3.Normalize(
+                        Vector3.Cross(
+                            (vB.C / vB.C.W).XYZ() - (vA.C / vA.C.W).XYZ(),
+                            (vC.C / vC.C.W).XYZ() - (vA.C / vA.C.W).XYZ()
+                        )
+                    ),
+
+                    N0 = vA.N,
+                    N1 = vB.N,
+                    N2 = vC.N,
+
+                    Ao0 = vA.Ao,
+                    Ao1 = vB.Ao,
+                    Ao2 = vC.Ao,
+
+                    Cz0 = vA.C.Z, Cw0 = vA.C.W,
+                    Cz1 = vB.C.Z, Cw1 = vB.C.W,
+                    Cz2 = vC.C.Z, Cw2 = vC.C.W
+                });
+            }
         }
 
         return tris;
     }
 
-    // ---------------------------------------------------------------------
-    //  PROJECTION
-    // ---------------------------------------------------------------------
-
-    private Matrix4x4 CreateProjection(RenderOptions options)
+    private List<ClipVertex> ClipToNearPlane(ClipVertex a, ClipVertex b, ClipVertex c)
     {
-        if (options.UseOrthographic)
+        Span<ClipVertex> input = stackalloc ClipVertex[3] { a, b, c };
+        var output = new List<ClipVertex>(4);
+        
+        static float Lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+        for (int i = 0; i < 3; i++)
         {
-            float s = options.OrthoSize;
-            return Matrix4x4.CreateOrthographic(s, s, options.NearPlane, options.FarPlane);
-        }
-        else
-        {
-            float fovRad = options.FovDegrees * (float)Math.PI / 180f;
-            float aspect = (float)options.Width / options.Height;
-            return Matrix4x4.CreatePerspectiveFieldOfView(
-                fovRad, aspect, options.NearPlane, options.FarPlane);
-        }
-    }
+            var v0 = input[i];
+            var v1 = input[(i + 1) % 3];
 
-    // ---------------------------------------------------------------------
-    //  TRANSFORM TO CLIP SPACE → NDC
-    // ---------------------------------------------------------------------
+            float s0 = v0.C.W - v0.C.Z;
+            float s1 = v1.C.W - v1.C.Z;
 
-    private Vector4 TransformClip(Vector3 pos, Matrix4x4 view, Matrix4x4 proj)
-    {
-        var v = Vector4.Transform(new Vector4(pos, 1f), view);
-        v = Vector4.Transform(v, proj);
+            bool in0 = s0 >= 0f;
+            bool in1 = s1 >= 0f;
 
-        if (Math.Abs(v.W) > float.Epsilon)
-        {
-            v.X /= v.W;
-            v.Y /= v.W;
-            v.Z /= v.W;
-        }
+            if (in0)
+                output.Add(v0);
 
-        // Tiny depth bias to avoid z-fighting
-        v.Z -= 0.0001f;
-
-        return v;
-    }
-
-    private List<Triangle> TransformToNdc(
-        List<Triangle> tris,
-        Matrix4x4 view,
-        Matrix4x4 proj)
-    {
-        var result = new List<Triangle>(tris.Count);
-
-        foreach (var t in tris)
-        {
-            var v0 = TransformClip(t.World0, view, proj);
-            var v1 = TransformClip(t.World1, view, proj);
-            var v2 = TransformClip(t.World2, view, proj);
-
-            float depth = (v0.Z + v1.Z + v2.Z) / 3f;
-
-            result.Add(new Triangle
+            if (in0 ^ in1)
             {
-                World0 = t.World0,
-                World1 = t.World1,
-                World2 = t.World2,
-                Normal = t.Normal,
-                Ao = t.Ao,
+                float t = s0 / (s0 - s1);
 
-                V0 = new Vector3(v0.X, v0.Y, v0.Z),
-                V1 = new Vector3(v1.X, v1.Y, v1.Z),
-                V2 = new Vector3(v2.X, v2.Y, v2.Z),
-
-                Depth = depth
-            });
+                output.Add(new ClipVertex
+                {
+                    C  = Vector4.Lerp(v0.C, v1.C, t),
+                    N  = Vector3.Normalize(Vector3.Lerp(v0.N, v1.N, t)),
+                    Ao = Lerp(v0.Ao, v1.Ao, t)
+                });
+            }
         }
 
-        return result;
+        return output;
     }
 
     // ---------------------------------------------------------------------
     //  NDC → SCREEN
     // ---------------------------------------------------------------------
 
-    private static Vector2 NdcToScreen(Vector3 ndc, int width, int height)
+    protected Vector2 NdcToScreen(Vector4 ndc, int w, int h)
     {
-        float x = (ndc.X * 0.5f + 0.5f) * width;
-        float y = (-ndc.Y * 0.5f + 0.5f) * height;
+        float x = (ndc.X * 0.5f + 0.5f) * (w - 1);
+        float y = (1f - (ndc.Y * 0.5f + 0.5f)) * (h - 1);
         return new Vector2(x, y);
-    }
-
-    // ---------------------------------------------------------------------
-    //  AMBIENT OCCLUSION (simple triangle-density AO)
-    // ---------------------------------------------------------------------
-
-    private void ComputeAmbientOcclusion(List<Triangle> tris, RenderOptions options)
-    {
-        var centers = tris
-            .Select(t => (t.World0 + t.World1 + t.World2) / 3f)
-            .ToArray();
-
-        float maxDensity = 0f;
-        var densities = new float[tris.Count];
-
-        for (int i = 0; i < tris.Count; i++)
-        {
-            float density = 0f;
-            var ci = centers[i];
-
-            for (int j = 0; j < tris.Count; j++)
-            {
-                if (i == j) continue;
-
-                var cj = centers[j];
-                float dist = (ci - cj).Length();
-
-                if (dist < 0.25f)
-                    density += 1f / (1f + dist * 10f);
-            }
-
-            densities[i] = density;
-            if (density > maxDensity)
-                maxDensity = density;
-        }
-
-        for (int i = 0; i < tris.Count; i++)
-        {
-            float norm = maxDensity > 0 ? densities[i] / maxDensity : 0f;
-            float ao = 1f - norm * options.AmbientOcclusionStrength;
-            ao = Math.Clamp(ao, 0.4f, 1f);
-
-            tris[i].Ao = ao;
-        }
     }
 
     // ---------------------------------------------------------------------
     //  TRIANGLE RASTERIZATION
     // ---------------------------------------------------------------------
 
-    private void RasterizeTriangles(
-        Image<Rgba32> img,
-        List<Triangle> tris,
-        RenderOptions options)
+    protected float[,] RasterizeTriangles(Image<Rgba32> img, List<Triangle> tris, RenderOptions options)
     {
         int w = img.Width;
         int h = img.Height;
 
-        // Helper for screen-space winding
-        static float Cross2D(Vector2 a, Vector2 b, Vector2 c)
+        var depth01 = new float[w, h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                depth01[x, y] = float.PositiveInfinity;
+
+        static float Edge(Vector2 a, Vector2 b, Vector2 c)
         {
-            return (b.X - a.X) * (c.Y - a.Y) -
-                (b.Y - a.Y) * (c.X - a.X);
+            return (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
         }
 
-        img.Mutate(ctx =>
+        var frame = img.Frames.RootFrame;
+
+        foreach (var tri in tris)
         {
-            foreach (var tri in tris)
+            var s0 = NdcToScreen(tri.V0, w, h);
+            var s1 = NdcToScreen(tri.V1, w, h);
+            var s2 = NdcToScreen(tri.V2, w, h);
+
+            float area = Edge(s0, s1, s2);
+            if (area <= 0f)
+                continue;
+
+            float invArea = 1f / area;
+
+            int minX = (int)MathF.Floor(MathF.Min(s0.X, MathF.Min(s1.X, s2.X)));
+            int maxX = (int)MathF.Ceiling(MathF.Max(s0.X, MathF.Max(s1.X, s2.X)));
+            int minY = (int)MathF.Floor(MathF.Min(s0.Y, MathF.Min(s1.Y, s2.Y)));
+            int maxY = (int)MathF.Ceiling(MathF.Max(s0.Y, MathF.Max(s1.Y, s2.Y)));
+
+            minX = Math.Clamp(minX, 0, w - 1);
+            maxX = Math.Clamp(maxX, 0, w - 1);
+            minY = Math.Clamp(minY, 0, h - 1);
+            maxY = Math.Clamp(maxY, 0, h - 1);
+
+            // Perspective-correct depth terms
+            float invW0 = 1f / tri.Cw0;
+            float invW1 = 1f / tri.Cw1;
+            float invW2 = 1f / tri.Cw2;
+
+            float zOverW0 = tri.Cz0 * invW0;
+            float zOverW1 = tri.Cz1 * invW1;
+            float zOverW2 = tri.Cz2 * invW2;
+
+            for (int y = minY; y <= maxY; y++)
             {
-                // Convert to screen space
-                var s0 = NdcToScreen(tri.V0, w, h);
-                var s1 = NdcToScreen(tri.V1, w, h);
-                var s2 = NdcToScreen(tri.V2, w, h);
+                for (int x = minX; x <= maxX; x++)
+                {
+                    var p = new Vector2(x + 0.5f, y + 0.5f);
 
-                // ------------------------------------------------------------
-                // SCREEN-SPACE BACK-FACE CULLING (the missing piece)
-                // ------------------------------------------------------------
-                float winding = Cross2D(s0, s1, s2);
+                    float w0 = Edge(s1, s2, p);
+                    float w1 = Edge(s2, s0, p);
+                    float w2 = Edge(s0, s1, p);
 
-                // If winding <= 0, triangle is facing away from the camera
-                if (winding <= 0f)
-                    continue;
+                    if (w0 < 0f || w1 < 0f || w2 < 0f)
+                        continue;
 
-                // Shade
-                Rgba32 color = ShadeTriangle(tri.Normal, tri.Ao, options);
+                    w0 *= invArea;
+                    w1 *= invArea;
+                    w2 *= invArea;
 
-                // Fill triangle
-                ctx.FillPolygon(
-                    color,
-                    new PointF(s0.X, s0.Y),
-                    new PointF(s1.X, s1.Y),
-                    new PointF(s2.X, s2.Y)
-                );
+                    float invW = w0 * invW0 + w1 * invW1 + w2 * invW2;
+                    if (invW <= 0f)
+                        continue;
+
+                    float zOverW = w0 * zOverW0 + w1 * zOverW1 + w2 * zOverW2;
+                    float zNdc = zOverW / invW;
+
+                    float d01 = (zNdc + 1f) * 0.5f; // OpenGL-style NDC depth
+                    if (d01 >= depth01[x, y])
+                        continue;
+
+                    depth01[x, y] = d01;
+
+                    // Per-pixel normal + AO (screen-space barycentric; good enough for normals)
+                    Vector3 n = Vector3.Normalize(w0 * tri.N0 + w1 * tri.N1 + w2 * tri.N2);
+                    float ao = w0 * tri.Ao0 + w1 * tri.Ao1 + w2 * tri.Ao2;
+
+                    frame[x, y] = ShadeTriangle(n, ao, options);
+                }
             }
-        });
+        }
+
+        return depth01;
     }
 
     // ---------------------------------------------------------------------
     //  TRUE SILHOUETTE EDGE DETECTION (A1 subtle)
     // ---------------------------------------------------------------------
 
-private void DrawSilhouetteEdges(
-    Image<Rgba32> img,
-    List<Triangle> tris,
-    RenderOptions options)
-{
-    int w = img.Width;
-    int h = img.Height;
-
-    // Same helper used in RasterizeTriangles()
-    static float Cross2D(Vector2 a, Vector2 b, Vector2 c)
+    protected void DrawSilhouetteEdges(Image<Rgba32> img, List<Triangle> tris, float[,] depth01, RenderOptions options)
     {
-        return (b.X - a.X) * (c.Y - a.Y) -
-               (b.Y - a.Y) * (c.X - a.X);
-    }
+        int w = img.Width;
+        int h = img.Height;
 
-    img.Mutate(ctx =>
-    {
-        foreach (var tri in tris)
+        static float Cross2D(Vector2 a, Vector2 b, Vector2 c)
         {
-            // Convert to screen space
+            return (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+        }
+
+        static (PointF, PointF) MakeEdgeKey(PointF a, PointF b)
+        {
+            if (a.X < b.X || (Math.Abs(a.X - b.X) < 0.0001f && a.Y <= b.Y))
+                return (a, b);
+            return (b, a);
+        }
+
+        Vector3 viewDir = Vector3.Normalize(options.CameraTarget - options.CameraPosition);
+
+        // edge -> list of triangle contributions
+        var edgeMap = new Dictionary<(PointF, PointF), List<(Vector3 faceNormal, bool frontFacing, Vector2 s0, Vector2 s1, Vector2 s2, float d0, float d1, float d2)>>();
+
+        float ndcEpsilon = 1e-4f;
+
+        for (int i = 0; i < tris.Count; i++)
+        {
+            var tri = tris[i];
+
             var s0 = NdcToScreen(tri.V0, w, h);
             var s1 = NdcToScreen(tri.V1, w, h);
             var s2 = NdcToScreen(tri.V2, w, h);
 
-            // ------------------------------------------------------------
-            // SCREEN-SPACE BACK-FACE CULLING (match rasterizer)
-            // ------------------------------------------------------------
+            if ((s0 - s1).LengthSquared() < ndcEpsilon ||
+                (s1 - s2).LengthSquared() < ndcEpsilon ||
+                (s2 - s0).LengthSquared() < ndcEpsilon)
+                continue;
+
             float winding = Cross2D(s0, s1, s2);
             if (winding <= 0f)
                 continue;
 
-            // ------------------------------------------------------------
-            // TRUE SILHOUETTE EDGE TEST
-            //
-            // A silhouette edge occurs when the triangle is front-facing
-            // in screen space, but its normal is nearly perpendicular
-            // to the view direction (dot ≈ 0).
-            // ------------------------------------------------------------
+            float ndotv = Vector3.Dot(tri.FaceNormal, viewDir);
+            bool frontFacing = ndotv < 0f;
 
-            // Depth fade (subtle A1 style)
-            if (tri.Depth > 0.9f)
-                continue;
+            var p0 = new PointF(s0.X, s0.Y);
+            var p1 = new PointF(s1.X, s1.Y);
+            var p2 = new PointF(s2.X, s2.Y);
+    
+            float d0 = tri.D0;
+            float d1 = tri.D1;
+            float d2 = tri.D2;
 
-            // Angle threshold
-            float ndotv = Math.Abs(Vector3.Dot(tri.Normal,
-                Vector3.Normalize(options.CameraTarget - options.CameraPosition)));
+            void RegisterEdge((PointF, PointF) edgeKey)
+            {
+                if (!edgeMap.TryGetValue(edgeKey, out var list))
+                {
+                    list = new List<(Vector3, bool, Vector2, Vector2, Vector2, float, float, float)>(2);
+                    edgeMap[edgeKey] = list;
+                }
 
-            float threshold = (float)Math.Cos(options.SilhouetteAngleThresholdDeg * Math.PI / 180f);
-            if (ndotv > threshold)
-                continue;
+                list.Add((tri.FaceNormal, frontFacing, s0, s1, s2, d0, d1, d2));
+            }
 
-            // Build the triangle outline path
-            var pb = new PathBuilder();
-            pb.AddLine(new PointF(s0.X, s0.Y), new PointF(s1.X, s1.Y));
-            pb.AddLine(new PointF(s1.X, s1.Y), new PointF(s2.X, s2.Y));
-            pb.AddLine(new PointF(s2.X, s2.Y), new PointF(s0.X, s0.Y));
-
-            ctx.Draw(
-                options.SilhouetteColor,
-                options.SilhouetteEdgeWidth,
-                pb.Build()
-            );
+            RegisterEdge(MakeEdgeKey(p0, p1));
+            RegisterEdge(MakeEdgeKey(p1, p2));
+            RegisterEdge(MakeEdgeKey(p2, p0));
         }
-    });
-}
 
-    // ---------------------------------------------------------------------
-    //  UTILITY: LINE DRAWING (for debugging or future features)
-    // ---------------------------------------------------------------------
-
-    protected void DrawLine(
-        Image<Rgba32> img,
-        Vector2 a,
-        Vector2 b,
-        Rgba32 color,
-        float thickness = 1f)
-    {
         img.Mutate(ctx =>
         {
-            var pb = new PathBuilder();
-            pb.AddLine(new PointF(a.X, a.Y), new PointF(b.X, b.Y));
-            ctx.Draw(color, thickness, pb.Build());
+            var color = options.SilhouetteColor;
+            float width = options.SilhouetteEdgeWidth <= 0f ? 1.0f : options.SilhouetteEdgeWidth;
+
+            foreach (var kvp in edgeMap)
+            {
+                var edgeKey = kvp.Key;
+                var list = kvp.Value;
+
+                bool isSilhouette = false;
+
+                if (list.Count == 1)
+                {
+                    // Boundary edges: only if face is near perpendicular to view (contour-like)
+                    var n = Vector3.Normalize(list[0].faceNormal);
+                    float ndotvAbs = MathF.Abs(Vector3.Dot(n, viewDir));
+                    if (ndotvAbs < 0.25f)
+                        isSilhouette = true;
+                }
+                else if (list.Count == 2)
+                {
+                    bool f0 = list[0].frontFacing;
+                    bool f1 = list[1].frontFacing;
+
+                    if (f0 != f1)
+                    {
+                        var n0 = Vector3.Normalize(list[0].faceNormal);
+                        var n1 = Vector3.Normalize(list[1].faceNormal);
+                        float ndot = Vector3.Dot(n0, n1);
+
+                        if (ndot < 0.5f)
+                            isSilhouette = true;
+                    }
+                }
+
+                if (!isSilhouette)
+                    continue;
+
+                // Depth-aware: test midpoint against z-buffer
+                var (a, b) = edgeKey;
+                var mid = new Vector2((a.X + b.X) * 0.5f, (a.Y + b.Y) * 0.5f);
+
+                int mx = (int)MathF.Floor(mid.X);
+                int my = (int)MathF.Floor(mid.Y);
+                if ((uint)mx >= (uint)w || (uint)my >= (uint)h)
+                    continue;
+
+                // Choose a front-facing entry if possible (more likely to be visible surface)
+                var entry = list.Count == 2
+                    ? (list[0].frontFacing ? list[0] : list[1])
+                    : list[0];
+
+                float zbuf = depth01[mx, my];
+                if (zbuf >= 1f)
+                    continue; // background, edge not visible
+
+                var pb = new PathBuilder();
+                pb.AddLine(a, b);
+                ctx.Draw(color, width, pb.Build());
+            }
         });
     }
 
@@ -496,4 +851,3 @@ private void DrawSilhouetteEdges(
     //  END OF CLASS
     // ---------------------------------------------------------------------
 }
-

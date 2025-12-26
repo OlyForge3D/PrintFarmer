@@ -7,159 +7,188 @@ using SixLabors.ImageSharp.Processing;
 
 namespace Farm.Web.Api.Services;
 
-    public sealed class OrcaPreviewRenderer : BasePreviewRenderer
-    {
-        // ---------------------------------------------------------------------
-        //  APPLY ORCA DEFAULTS
-        // ---------------------------------------------------------------------
-        protected override void ApplyStyleDefaults(RenderOptions options)
-        {
-            var d = RenderOptions.CreateOrcaDefaults();
-
-            options.Width = d.Width;
-            options.Height = d.Height;
-
-            options.UseOrthographic = d.UseOrthographic;
-            options.OrthoSize = d.OrthoSize;
-
-            options.CameraPosition = d.CameraPosition;
-            //options.CameraTarget = d.CameraTarget;
-            options.CameraTarget = new Vector3(0, 0, 0.55f);
-
-            options.CameraUp = d.CameraUp;
-
-            options.LightDirection = d.LightDirection;
-
-            options.ModelBaseColor = d.ModelBaseColor;
-            options.BackgroundColor = d.BackgroundColor;
-
-            options.EnableSilhouetteEdges = d.EnableSilhouetteEdges;
-            options.SilhouetteColor = d.SilhouetteColor;
-            options.SilhouetteAngleThresholdDeg = d.SilhouetteAngleThresholdDeg;
-            options.SilhouetteEdgeWidth = d.SilhouetteEdgeWidth;
-
-            options.EnableBuildPlate = d.EnableBuildPlate;
-            options.BuildPlateGridColor = d.BuildPlateGridColor;
-            options.BuildPlateBorderColor = d.BuildPlateBorderColor;
-            options.BuildPlateSize = d.BuildPlateSize;
-            options.BuildPlateGridStep = d.BuildPlateGridStep;
-
-            options.EnableAmbientOcclusion = d.EnableAmbientOcclusion;
-            options.AmbientOcclusionStrength = d.AmbientOcclusionStrength;
-        }
-
-        // ---------------------------------------------------------------------
-        //  ORCA BACKGROUND
-        // ---------------------------------------------------------------------
-        protected override void DrawBackground(Image<Rgba32> img, RenderOptions options)
-        {
-            int h = img.Height;
-
-            img.Mutate(ctx =>
-            {
-                ctx.Fill(new LinearGradientBrush(
-                    new PointF(0, 0),
-                    new PointF(0, h),
-                    GradientRepetitionMode.None,
-                    new ColorStop(0f, new Rgba32(28, 29, 32)),
-                    new ColorStop(1f, new Rgba32(34, 36, 40))
-                ));
-            });
-        }
-        // ---------------------------------------------------------------------
-        //  ORCA BUILD PLATE
-        // ---------------------------------------------------------------------
-        protected override void DrawBuildPlate(Image<Rgba32> img, RenderOptions options)
-        {
-            int w = img.Width;
-            int h = img.Height;
-
-            img.Mutate(ctx =>
-            {
-                // Plate rectangle (lower portion of the image)
-                var plateRect = new Rectangle(
-                    0,
-                    (int)(h * 0.55f),
-                    w,
-                    (int)(h * 0.35f)
-                );
-
-                // Dark gradient plate
-                ctx.Fill(new LinearGradientBrush(
-                    new PointF(0, plateRect.Top),
-                    new PointF(0, plateRect.Bottom),
-                    GradientRepetitionMode.None,
-                    new ColorStop(0f, new Rgba32(28, 29, 32)),
-                    new ColorStop(1f, new Rgba32(22, 23, 26))
-                ));
-
-                // Border
-                ctx.Draw(options.BuildPlateBorderColor, 2f, plateRect);
-
-                // Grid
-                int gridLines = (int)(options.BuildPlateSize / options.BuildPlateGridStep);
-
-                for (int i = 1; i < gridLines; i++)
-                {
-                    float t = (float)i / gridLines;
-
-                    int x = (int)(plateRect.Left + t * plateRect.Width);
-                    int y = (int)(plateRect.Top + t * plateRect.Height);
-
-                    var pbV = new PathBuilder();
-                    pbV.AddLine(new PointF(x, plateRect.Top), new PointF(x, plateRect.Bottom));
-                    ctx.Draw(options.BuildPlateGridColor, 1f, pbV.Build());
-
-                    var pbH = new PathBuilder();
-                    pbH.AddLine(new PointF(plateRect.Left, y), new PointF(plateRect.Right, y));
-                    ctx.Draw(options.BuildPlateGridColor, 1f, pbH.Build());
-                }
-            });
-        }
-
-        // ---------------------------------------------------------------------
-        //  ORCA SHADING MODEL
-        // ---------------------------------------------------------------------
-protected override Rgba32 ShadeTriangle(
-    Vector3 normal,
-    float ao,
-    RenderOptions options)
+// ------------------------------------------------------------
+// ORCA RENDERER
+// ------------------------------------------------------------
+public sealed class OrcaPreviewRenderer : BasePreviewRenderer
 {
-    // Normalize lighting vectors
-    Vector3 lightDir = Vector3.Normalize(-options.LightDirection);
-    Vector3 fillLight = Vector3.Normalize(new Vector3(0.3f, 0.2f, 1f));
+    // ---------------------------------------------------------------------
+    //  APPLY ORCA DEFAULTS
+    // ---------------------------------------------------------------------
+    protected override void ApplyStyleDefaults(RenderOptions options)
+    {
+        var d = OrcaPreset.Create();
 
-    // Primary lambert
-    float lambert = Math.Max(0.15f, Vector3.Dot(normal, lightDir));
+        options.Width = d.Width;
+        options.Height = d.Height;
 
-    // Stronger fill light (brightens shadowed side)
-    lambert += Math.Max(0f, Vector3.Dot(normal, fillLight)) * 0.25f;
+        options.UseOrthographic = d.UseOrthographic;
+        options.OrthoSize = d.OrthoSize;
 
-    // Upward boost (keeps top surfaces bright)
-    lambert += Math.Max(0f, Vector3.Dot(normal, Vector3.UnitZ)) * 0.10f;
+        options.CameraPosition = d.CameraPosition;
+        options.CameraTarget = d.CameraTarget;
+        options.CameraUp = d.CameraUp;
 
-    // Brighter ambient term
-    lambert = lambert * 0.80f + 0.20f;
+        options.LightDirection = d.LightDirection;
 
-    // Apply ambient occlusion
-    lambert *= ao;
+        options.ModelBaseColor = d.ModelBaseColor;
+        options.BackgroundColor = d.BackgroundColor;
 
-    lambert = Math.Clamp(lambert, 0f, 1f);
+        options.EnableSilhouetteEdges = d.EnableSilhouetteEdges;
+        options.SilhouetteColor = d.SilhouetteColor;
+        options.SilhouetteAngleThresholdDeg = d.SilhouetteAngleThresholdDeg;
+        options.SilhouetteEdgeWidth = d.SilhouetteEdgeWidth;
 
-    // Slightly brightened base color
-    var baseColor = new Rgba32(
-        (byte)Math.Clamp(options.ModelBaseColor.R * 1.05f, 0, 255),
-        (byte)Math.Clamp(options.ModelBaseColor.G * 1.05f, 0, 255),
-        (byte)Math.Clamp(options.ModelBaseColor.B * 1.05f, 0, 255)
-    );
+        options.EnableBuildPlate = d.EnableBuildPlate;
+        options.BuildPlateGridColor = d.BuildPlateGridColor;
+        options.BuildPlateBorderColor = d.BuildPlateBorderColor;
+        options.BuildPlateSize = d.BuildPlateSize;
+        options.BuildPlateGridStep = d.BuildPlateGridStep;
 
-    // Final shaded color
-    return new Rgba32(
-        (byte)(baseColor.R * lambert),
-        (byte)(baseColor.G * lambert),
-        (byte)(baseColor.B * lambert)
-    );
-}
-
+        options.EnableAmbientOcclusion = d.EnableAmbientOcclusion;
+        options.AmbientOcclusionStrength = d.AmbientOcclusionStrength;
     }
+
+    // ---------------------------------------------------------------------
+    //  ORCA BACKGROUND
+    // ---------------------------------------------------------------------
+    protected override void DrawBackground(Image<Rgba32> img, RenderOptions options)
+    {
+        int w = img.Width, h = img.Height;
+
+        // Orca-ish dark slate gradient (tweak to taste)
+        var top = new Vector3(0.16f, 0.17f, 0.19f);
+        var bot = new Vector3(0.10f, 0.11f, 0.13f);
+
+        // Vignette
+        float vignetteStrength = 0.22f;
+        float invW = 1f / Math.Max(1, w - 1);
+        float invH = 1f / Math.Max(1, h - 1);
+
+        var frame = img.Frames.RootFrame;
+
+        static byte ToSRGB(float x)
+        {
+            x = Math.Clamp(x, 0f, 1f);
+            return (byte)(MathF.Pow(x, 1f / 2.2f) * 255f + 0.5f);
+        }
+
+        for (int y = 0; y < h; y++)
+        {
+            float t = y * invH; // 0 top -> 1 bottom
+            var baseLin = Vector3.Lerp(top, bot, t);
+
+            for (int x = 0; x < w; x++)
+            {
+                float nx = (x * invW) * 2f - 1f;
+                float ny = (y * invH) * 2f - 1f;
+
+                // radial vignette (soft)
+                float r2 = nx * nx + ny * ny;
+                float vig = 1f - vignetteStrength * SmoothStep(0.0f, 1.6f, r2);
+
+                var c = baseLin * vig;
+
+                frame[x, y] = new Rgba32(ToSRGB(c.X), ToSRGB(c.Y), ToSRGB(c.Z), 255);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    //  ORCA BUILD PLATE
+    // ---------------------------------------------------------------------
+    protected override void DrawBuildPlate(Image<Rgba32> img, RenderOptions options)
+    {
+        int w = img.Width;
+        int h = img.Height;
+
+        img.Mutate(ctx =>
+        {
+            var plateRect = GetBuildPlateRect(w, h);
+
+            // Dark gradient plate
+            ctx.Fill(new LinearGradientBrush(
+                new PointF(0, plateRect.Top),
+                new PointF(0, plateRect.Bottom),
+                GradientRepetitionMode.None,
+                new ColorStop(0f, new Rgba32(45, 47, 52)),
+                new ColorStop(1f, new Rgba32(40, 42, 46))
+            ));
+
+            // Border
+            ctx.Draw(options.BuildPlateBorderColor, 2f, plateRect);
+
+            // Grid
+            int gridLines = (int)(options.BuildPlateSize / options.BuildPlateGridStep);
+
+            for (int i = 1; i < gridLines; i++)
+            {
+                float t = (float)i / gridLines;
+
+                int x = (int)(plateRect.Left + t * plateRect.Width);
+                int y = (int)(plateRect.Top + t * plateRect.Height);
+
+                var pbV = new PathBuilder();
+                pbV.AddLine(new PointF(x, plateRect.Top), new PointF(x, plateRect.Bottom));
+                ctx.Draw(options.BuildPlateGridColor, 0.8f, pbV.Build());
+
+                var pbH = new PathBuilder();
+                pbH.AddLine(new PointF(plateRect.Left, y), new PointF(plateRect.Right, y));
+                ctx.Draw(options.BuildPlateGridColor, 0.8f, pbH.Build());
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    //  ORCA SHADING MODEL
+    // ---------------------------------------------------------------------
+    protected override Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options)
+    {
+        var n = Vector3.Normalize(normal);
+        var l = Vector3.Normalize(options.LightDirection);
+
+        // View direction (from surface toward camera). For orthographic, this is constant.
+        var v = Vector3.Normalize(options.CameraPosition - options.CameraTarget);
+
+        // Wrap diffuse (softens terminator)
+        float ndotl = Vector3.Dot(n, -l);
+        float wrap = options.DiffuseWrap;
+
+        float diffuseWrapped = (ndotl + wrap) / (1f + wrap);
+        diffuseWrapped = Math.Clamp(diffuseWrapped, 0f, 1f);
+
+        float lightTerm = options.AmbientFactor + options.DiffuseFactor * diffuseWrapped;
+        lightTerm = Math.Clamp(lightTerm, 0f, 1f);
+
+        // AO shaping (Orca-like “velvet”)
+        float aoClamped = Math.Clamp(ao, options.AOMin, options.AOMax);
+        float aoTerm = options.EnableAmbientOcclusion
+            ? MathF.Pow(aoClamped, options.AOPower) * options.AmbientOcclusionStrength
+            + (1f - options.AmbientOcclusionStrength)
+            : 1f;
+
+        // Subtle specular sheen (half-vector)
+        var h = Vector3.Normalize((-l) + v);
+        float ndoth = Math.Clamp(Vector3.Dot(n, h), 0f, 1f);
+        float spec = options.SpecularStrength * MathF.Pow(ndoth, options.SpecularPower);
+
+        // Final linear color
+        var baseColor = options.BaseColorLinear;
+        var lit = baseColor * lightTerm * aoTerm + new Vector3(spec);
+
+        // Linear -> sRGB
+        static byte ToSRGB(float x)
+        {
+            x = Math.Clamp(x, 0f, 1f);
+            float srgb = MathF.Pow(x, 1f / 2.2f);
+            return (byte)(srgb * 255f + 0.5f);
+        }
+
+        return new Rgba32(
+            ToSRGB(lit.X),
+            ToSRGB(lit.Y),
+            ToSRGB(lit.Z),
+            255);
+    }
+}
 

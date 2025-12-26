@@ -94,7 +94,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             // Use OrcaPreviewRenderer for high-quality rendering
             var renderer = new OrcaPreviewRenderer();
 
-            var options = RenderOptions.CreateOrcaPreset();
+            var options = OrcaPreset.Create();
             
             renderer.Render(modelFilePath, outputPath, options);
 
