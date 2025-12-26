@@ -373,13 +373,19 @@ cd "$SRC_DIR"
 if [[ ! -f "$API_DIR/bin/Debug/net9.0/Farm.Web.Api.dll" ]] || [[ $CLEAN -eq 1 ]]; then
   log_info "Restoring and building .NET solution..."
   dotnet restore ./farm-web.sln
-  dotnet build ./farm-web.sln -c Debug
+  if ! dotnet build ./farm-web.sln -c Debug; then
+    log_error "❌ .NET build failed! Fix build errors before starting services."
+  fi
+  log_success "✅ .NET build completed successfully"
 fi
 
 cd "$REACT_DIR"
 if [[ ! -d "node_modules" ]] || [[ $CLEAN -eq 1 ]]; then
   log_info "Installing React dependencies..."
-  npm install --legacy-peer-deps
+  if ! npm install --legacy-peer-deps; then
+    log_error "❌ npm install failed! Check npm errors before starting services."
+  fi
+  log_success "✅ React dependencies installed successfully"
 fi
 
 # Always clear Vite cache to ensure fresh dev server with latest code
