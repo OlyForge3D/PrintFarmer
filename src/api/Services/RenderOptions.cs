@@ -21,14 +21,20 @@ public sealed class RenderOptions
 
     /// <summary>
     /// Camera view presets: front, back, left, right, top, bottom
+    /// Each preset has position and target adjusted so the model appears centered in the frame
     /// </summary>
     private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresets = 
         new(StringComparer.OrdinalIgnoreCase)
     {
+        // Diagonal isometric-ish views (front/back)
         { "front", (new Vector3(-1.75f, -1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
         { "back", (new Vector3(1.75f, 1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
-        { "left", (new Vector3(-2.5f, 0f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
-        { "right", (new Vector3(2.5f, 0f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
+        
+        // Pure side views - adjust target to center model horizontally
+        { "left", (new Vector3(-2.5f, 0f, 1.35f), new Vector3(0.15f, 0f, 0.35f)) },
+        { "right", (new Vector3(2.5f, 0f, 1.35f), new Vector3(-0.15f, 0f, 0.35f)) },
+        
+        // Top and bottom views
         { "top", (new Vector3(0f, 0f, 2.5f), new Vector3(0f, 0f, 0.35f)) },
         { "bottom", (new Vector3(0f, 0f, -1.5f), new Vector3(0f, 0f, 0.35f)) }
     };
@@ -98,13 +104,22 @@ public sealed class RenderOptions
     /// <summary>
     /// Sets the camera position and target based on a named view preset
     /// Supports: front, back, left, right, top, bottom
+    /// Both position and target are updated to maintain proper centering of the model.
     /// </summary>
     public bool SetCameraView(string viewName)
     {
         if (ViewPresets.TryGetValue(viewName, out var preset))
         {
+            var oldPos = CameraPosition;
+            var oldTarget = CameraTarget;
+            
             CameraPosition = preset.Position;
             CameraTarget = preset.Target;
+            
+            Console.WriteLine($"[CAMERA] Changed view to '{viewName}':");
+            Console.WriteLine($"  Position: {oldPos} → {CameraPosition}");
+            Console.WriteLine($"  Target:   {oldTarget} → {CameraTarget}");
+            
             return true;
         }
         return false;
