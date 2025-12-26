@@ -705,7 +705,7 @@ public abstract class BasePreviewRenderer
             float area = Edge(s0, s1, s2);
 
             // Backface culling; allow two-sided if configured
-            if (area == 0f)
+            if (Math.Abs(area) < 1e-6f)
                 continue;
 
             float sign = 1f;

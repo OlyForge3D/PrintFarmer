@@ -113,7 +113,7 @@ public sealed class RenderOptions
     /// <summary>
     /// Gets the list of available camera view presets
     /// </summary>
-    public static IEnumerable<string> GetAvailableViews() => ViewPresets.Keys;
+    public static IEnumerable<string> AvailableViews => ViewPresets.Keys;
 }
 
 // ------------------------------------------------------------

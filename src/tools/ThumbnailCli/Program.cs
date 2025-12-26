@@ -141,6 +141,7 @@ internal static class Program
         return null;
     }
 
+#pragma warning disable CA1303 // Do not pass literals as localized parameters
     private static void PrintHelp()
     {
         Console.WriteLine("Thumbnail CLI");
@@ -158,4 +159,5 @@ internal static class Program
         Console.WriteLine("      --no-ao            Disable ambient occlusion");
         Console.WriteLine("  --help                 Show help");
     }
+#pragma warning restore CA1303
 }
