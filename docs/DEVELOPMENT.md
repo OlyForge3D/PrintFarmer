@@ -124,6 +124,140 @@ export function PrinterGrid({ printers, onSelect }: PrinterGridProps) {
 }
 ```
 
+## Logging & Diagnostics
+
+### Overview
+
+PrintFarmer uses structured logging through `IUnifiedLoggingService` to provide visibility into application behavior. A logging extensions system automatically captures caller information (class and method names) to make debugging easier without manual context tracking.
+
+### Using IUnifiedLoggingService
+
+Inject `IUnifiedLoggingService` into your services and controllers:
+
+```csharp
+public class PrinterService
+{
+    private readonly IUnifiedLoggingService _logger;
+    
+    public PrinterService(IUnifiedLoggingService logger)
+    {
+        _logger = logger;
+    }
+    
+    public async Task<Printer?> GetPrinterAsync(Guid printerId)
+    {
+        _logger.LogInformationWithSource($"Retrieving printer {printerId}");
+        
+        try
+        {
+            var printer = await _repository.GetPrinterAsync(printerId);
+            return printer;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogErrorWithSource(ex, $"Failed to retrieve printer {printerId}");
+            throw;
+        }
+    }
+}
+```
+
+### Extension Methods for Automatic Source Context
+
+The following extension methods automatically capture the calling class and method name:
+
+- `LogDebugWithSource(message)`
+- `LogInformationWithSource(message)`
+- `LogWarningWithSource(message)`
+- `LogWarningWithSource(exception, message)`
+- `LogErrorWithSource(message)`
+- `LogErrorWithSource(exception, message)`
+- `LogCriticalWithSource(message)`
+- `LogCriticalWithSource(exception, message)`
+
+**Example Output**:
+```
+[PrinterService.GetPrinterAsync] Retrieving printer 12345678-1234-1234-1234-123456789012
+[PrinterService.GetPrinterAsync] Failed to retrieve printer 12345678-1234-1234-1234-123456789012
+```
+
+### How It Works
+
+When you call `_logger.LogErrorWithSource(ex, "Failed to retrieve printer")`, the extension method uses .NET caller attributes (`CallerMemberName` and `CallerFilePath`) to automatically capture:
+- **Method name**: The method calling the logger (e.g., `GetPrinterAsync`)
+- **Class name**: Extracted from the file path (e.g., `PrinterService`)
+
+The result is formatted as `[ClassName.MethodName]` and prepended to your log message, providing immediate context without manual string concatenation.
+
+### Usage Guidelines
+
+**Use `LogXxxWithSource` when:**
+- You want automatic caller context (recommended for most logs)
+- Debugging errors and warnings
+- Tracking important operations (service startup, job completion, etc.)
+
+**Use regular `LogXxx` methods when:**
+- You need custom formatting or additional metadata
+- Logging health checks or routine operations
+- You're including correlationId or trace IDs
+
+**Example - Error with Exception**:
+```csharp
+try
+{
+    await _printerClient.SendCommandAsync(command);
+}
+catch (HttpRequestException ex)
+{
+    _logger.LogErrorWithSource(ex, $"Failed to send command to printer {printerId}");
+    throw;
+}
+```
+
+**Example - Info with Context**:
+```csharp
+public async Task<List<Printer>> ImportPrintersAsync(List<PrinterDto> dtos)
+{
+    _logger.LogInformationWithSource($"Importing {dtos.Count} printers");
+    
+    var importedPrinters = new List<Printer>();
+    foreach (var dto in dtos)
+    {
+        importedPrinters.Add(await CreatePrinterAsync(dto));
+    }
+    
+    _logger.LogInformationWithSource($"Successfully imported {importedPrinters.Count} printers");
+    return importedPrinters;
+}
+```
+
+### Viewing Logs
+
+**Local Development**:
+```bash
+# View real-time logs from running API
+dotnet run --project ./api/Farm.Web.Api.csproj 2>&1 | tee api.log
+```
+
+**Docker Deployment**:
+```bash
+# View API logs
+docker compose logs -f printfarmer-api
+
+# Search for specific service
+docker compose logs printfarmer-api | grep "PrinterService"
+
+# Follow logs with timestamp
+docker compose logs -f --timestamps printfarmer-api
+```
+
+**Log Format**:
+```
+[2025-12-26 14:30:45.123] [Information] [PrinterService.GetStatusAsync] Retrieving status for printer Ender 3 V2
+[2025-12-26 14:30:46.456] [Error] [MoonrakerClient.GetStatusAsync] HTTP 500: Internal server error
+[2025-12-26 14:30:46.789] [Warning] [PrinterService.UpdateStatusAsync] Printer offline, will retry in 30 seconds
+```
+
 ## Git Workflow
 
 ### Branch Naming
