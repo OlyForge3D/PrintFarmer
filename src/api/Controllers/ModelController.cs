@@ -313,7 +313,8 @@ public class ModelController : ControllerBase
             }
 
             string contentType = "image/png";
-            _logger.LogInformation($"[Thumbnail] File size: {new FileInfo(absolutePath).Length} bytes");
+            var fileInfo = _fileSystem.GetFileInfo(absolutePath);
+            _logger.LogInformation($"[Thumbnail] File size: {fileInfo.Length} bytes");
             _logger.LogInformation($"[Thumbnail] Serving thumbnail from {absolutePath}");
             return PhysicalFile(absolutePath, contentType);
         }

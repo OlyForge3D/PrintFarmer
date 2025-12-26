@@ -19,6 +19,10 @@ public sealed class RenderOptions
     public Vector3 CameraUp       { get; set; } = Vector3.UnitZ;
 
     public Vector3 LightDirection { get; set; } = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
+    
+    // View-space light direction (computed at render time from LightDirection and view matrix)
+    // This ensures consistent lighting when normals are in view space
+    public Vector3 ViewSpaceLightDirection { get; set; } = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
 
     // Base material color in linear space (Orca-ish teal)
     public Vector3 BaseColorLinear { get; set; } = new(0.20f, 0.70f, 0.90f);
@@ -41,6 +45,12 @@ public sealed class RenderOptions
     public bool EnableAmbientOcclusion { get; set; } = true;
     public float AmbientOcclusionStrength { get; set; } = 0.65f;
 
+    // Render both windings to avoid holes when viewing from back/inside
+    public bool TwoSided { get; set; } = true;
+
+    // Limit normal smoothing to preserve sharp interior detail
+    public float NormalSmoothingAngleDeg { get; set; } = 70f;
+
     // Lifted diffuse base
     public float AmbientFactor { get; set; } = 0.30f;
     public float DiffuseFactor { get; set; } = 0.70f;
@@ -58,10 +68,10 @@ public sealed class RenderOptions
     public float SpecularPower { get; set; } = 48f;
 
     public bool EnableGroundShadow { get; set; } = true; 
-    public float GroundShadowOpacity { get; set; } = 0.22f; 
+    public float GroundShadowOpacity { get; set; } = 0.08f; 
     public int GroundShadowBlurRadiusPx { get; set; } = 10; 
     public int GroundShadowOffsetXPx { get; set; } = 2; 
-    public int GroundShadowOffsetYPx { get; set; } = 10;
+    public int GroundShadowOffsetYPx { get; set; } = 25;
 
     public bool AntiAlias2x { get; set; } = true;
 }
@@ -103,8 +113,9 @@ public struct Triangle
     public Vector3 Normal;        // keep if you want (optional after per-vertex)
     public float Ao;              // keep if you want (optional after per-vertex)
 
-    // Silhouette / facing
+    // Silhouette / facing - stored in VIEW SPACE for correct comparisons
     public Vector3 FaceNormal;
+    public Vector3 ViewSpaceFaceNormal;
 
     // Per-vertex shading inputs (view-space normals + AO)
     public Vector3 N0, N1, N2;
@@ -158,9 +169,9 @@ public static class OrcaPreset
             // CAMERA (Orca-accurate)
             // ------------------------------------------------------------
             UseOrthographic = true,
-            OrthoSize = 1.65f,
+            OrthoSize = 1.15f,
 
-            CameraPosition = new Vector3(1.75f, 1.75f, 1.35f),
+            CameraPosition = new Vector3(-1.75f, -1.75f, 1.35f),
             CameraTarget   = new Vector3(0f, 0f, 0.55f),
             CameraUp       = Vector3.UnitZ,
 
@@ -179,11 +190,11 @@ public static class OrcaPreset
             // ------------------------------------------------------------
             // SILHOUETTE EDGES (A1 subtle)
             // ------------------------------------------------------------
-            EnableSilhouetteEdges = true,
-            SilhouetteColor = new Rgba32(18, 20, 26, 160), // cooler + lighter
-            SilhouetteDepthEpsilon = 0.002f,              // tighter depth test
+            EnableSilhouetteEdges = false,
+            SilhouetteColor = new Rgba32(18, 20, 26, 90),  // softer edge
+            SilhouetteDepthEpsilon = 0.0025f,             // avoid over-drawing coplanar edges
 
-            SilhouetteEdgeWidth = 0.9f,                   // was 1.0f. subtle thinning
+            SilhouetteEdgeWidth = 0.6f,                   // thinner lines
             SilhouetteAngleThresholdDeg = 82f,
 
             // ------------------------------------------------------------
@@ -193,7 +204,7 @@ public static class OrcaPreset
             BuildPlateGridColor   = new Rgba32(70, 75, 85, 255),
             BuildPlateBorderColor = new Rgba32(90, 95, 105, 255),
             BuildPlateSize = 200f,
-            BuildPlateGridStep = 10f,
+            BuildPlateGridStep = 12f,
 
             // ------------------------------------------------------------
             // AMBIENT OCCLUSION (softened)
@@ -209,7 +220,10 @@ public static class OrcaPreset
             AOPower = 1.45f,   // was 1.25
             
             SpecularStrength = 0.06f,
-            SpecularPower    = 56f
+            SpecularPower    = 56f,
+
+            // Keep ground shadow off for clarity with plate overlay
+            EnableGroundShadow = false
         };
     }
 }

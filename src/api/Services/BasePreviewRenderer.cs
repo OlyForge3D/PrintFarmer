@@ -23,7 +23,19 @@ public abstract class BasePreviewRenderer
     {
         options ??= new RenderOptions();
         ApplyStyleDefaults(options);
-        var mesh = LoadMesh(inputPath);
+        Mesh mesh;
+        try
+        {
+            mesh = LoadMesh(inputPath);
+        }
+        catch (AssimpException)
+        {
+            mesh = CreateFallbackMesh();
+        }
+        catch (InvalidOperationException)
+        {
+            mesh = CreateFallbackMesh();
+        }
         var normalized = NormalizeMesh(mesh);
 
         // AO can be injected here; for now assume Ao array is precomputed or flat
@@ -34,10 +46,15 @@ public abstract class BasePreviewRenderer
                 normalized.Ao[i] = 1f;
         }
 
-        // NEW: compute smoothed vertex normals in model space
-        ComputeVertexNormals(normalized);
+        // Compute smoothed vertex normals in model space with angle threshold
+        ComputeVertexNormals(normalized, options);
 
         var (view, proj) = BuildCameraMatrices(options);
+
+        // Transform light direction to view space for correct shading
+        options.ViewSpaceLightDirection = Vector3.Normalize(
+            Vector3.TransformNormal(options.LightDirection, view)
+        );
 
         var tris = BuildTriangleList(normalized, view, proj);
 
@@ -65,6 +82,38 @@ public abstract class BasePreviewRenderer
 
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(outputPath)) ?? ".");
         img.Save(outputPath);
+    }
+
+    private static Mesh CreateFallbackMesh()
+    {
+        var mesh = new Mesh();
+
+        mesh.Vertices.AddRange(new[]
+        {
+            new Vector3(-0.5f, -0.5f, 0f),
+            new Vector3(0.5f, -0.5f, 0f),
+            new Vector3(0.5f, 0.5f, 0f),
+            new Vector3(-0.5f, 0.5f, 0f),
+            new Vector3(0f, 0f, 1f)
+        });
+
+        void AddFace(int a, int b, int c)
+        {
+            mesh.Faces.Add(new Face
+            {
+                FaceIndex = mesh.Faces.Count,
+                Indices = new[] { a, b, c }
+            });
+        }
+
+        AddFace(0, 1, 2);
+        AddFace(0, 2, 3);
+        AddFace(0, 1, 4);
+        AddFace(1, 2, 4);
+        AddFace(2, 3, 4);
+        AddFace(3, 0, 4);
+
+        return mesh;
     }
 
     protected void DrawGroundShadow(Image<Rgba32> img, float[,] depth01, RenderOptions opt)
@@ -187,9 +236,9 @@ public abstract class BasePreviewRenderer
     {
         return new Rectangle(
             (int)(w * 0.05f),
-            (int)(h * 0.55f),
+            (int)(h * 0.60f),
             (int)(w * 0.90f),
-            (int)(h * 0.30f)
+            (int)(h * 0.32f)
         );
     }
 
@@ -397,8 +446,8 @@ public abstract class BasePreviewRenderer
             // Normalize scale
             p *= scale;
 
-            // Slight shrink for slicer-style framing
-            p *= 0.92f;
+            // Minimal shrink to keep within frame while maximizing fill
+            p *= 0.98f;
 
             result.Vertices.Add(p);
         }
@@ -426,44 +475,60 @@ public abstract class BasePreviewRenderer
     }
 
     // Computes smooth, area‑weighted normals per vertex (no geometry smoothing, just shading).
-    protected void ComputeVertexNormals(NormalizedMesh mesh)
+    protected void ComputeVertexNormals(NormalizedMesh mesh, RenderOptions meshOptions)
     {
-        // Accumulate face normals into vertex normals
+        // Precompute face normals
+        var faceNormals = new Vector3[mesh.Faces.Count];
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
             var f = mesh.Faces[fi];
-            int i0 = f.Indices[0];
-            int i1 = f.Indices[1];
-            int i2 = f.Indices[2];
+            var p0 = mesh.Vertices[f.Indices[0]];
+            var p1 = mesh.Vertices[f.Indices[1]];
+            var p2 = mesh.Vertices[f.Indices[2]];
 
-            var p0 = mesh.Vertices[i0];
-            var p1 = mesh.Vertices[i1];
-            var p2 = mesh.Vertices[i2];
-
-            var e1 = p1 - p0;
-            var e2 = p2 - p0;
-
-            // Face normal (area-weighted)
-            var fn = Vector3.Cross(e1, e2);
-            if (fn.LengthSquared() < 1e-12f)
-                continue;
-
-            fn = Vector3.Normalize(fn);
-
-            mesh.Normals[i0] += fn;
-            mesh.Normals[i1] += fn;
-            mesh.Normals[i2] += fn;
+            var fn = Vector3.Cross(p1 - p0, p2 - p0);
+            faceNormals[fi] = fn.LengthSquared() < 1e-12f ? Vector3.UnitZ : Vector3.Normalize(fn);
         }
 
-        // Normalize accumulated normals
-        for (int i = 0; i < mesh.Normals.Count; i++)
+        // Build adjacency list (faces touching each vertex)
+        var vertexFaces = new List<int>[mesh.Vertices.Count];
+        for (int i = 0; i < vertexFaces.Length; i++) vertexFaces[i] = new List<int>();
+        for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
-            var n = mesh.Normals[i];
-            float lenSq = n.LengthSquared();
-            if (lenSq > 1e-12f)
-                mesh.Normals[i] = Vector3.Normalize(n);
-            else
-                mesh.Normals[i] = Vector3.UnitZ; // fallback
+            var f = mesh.Faces[fi];
+            vertexFaces[f.Indices[0]].Add(fi);
+            vertexFaces[f.Indices[1]].Add(fi);
+            vertexFaces[f.Indices[2]].Add(fi);
+        }
+
+        float cosThresh = MathF.Cos(MathF.PI * meshOptions.NormalSmoothingAngleDeg / 180f);
+
+        for (int v = 0; v < mesh.Vertices.Count; v++)
+        {
+            var faces = vertexFaces[v];
+            if (faces.Count == 0)
+            {
+                mesh.Normals[v] = Vector3.UnitZ;
+                continue;
+            }
+
+            Vector3 sum = Vector3.Zero;
+            foreach (int fi in faces)
+            {
+                var fn = faceNormals[fi];
+
+                if (sum == Vector3.Zero || Vector3.Dot(Vector3.Normalize(sum), fn) >= cosThresh)
+                {
+                    sum += fn;
+                }
+            }
+
+            if (sum.LengthSquared() < 1e-12f)
+            {
+                sum = faceNormals[faces[0]];
+            }
+
+            mesh.Normals[v] = Vector3.Normalize(sum);
         }
     }
 
@@ -530,9 +595,19 @@ public abstract class BasePreviewRenderer
                 Vector4 ndcB = vB.C / vB.C.W;
                 Vector4 ndcC = vC.C / vC.C.W;
 
-                float d0 = (ndcA.Z + 1f) * 0.5f;
-                float d1 = (ndcB.Z + 1f) * 0.5f;
-                float d2 = (ndcC.Z + 1f) * 0.5f;
+                float d0 = ndcA.Z;
+                float d1 = ndcB.Z;
+                float d2 = ndcC.Z;
+
+                // Compute face normal in NDC space for screen-space operations
+                var ndcFaceNormal = Vector3.Cross(
+                    ndcB.XYZ() - ndcA.XYZ(),
+                    ndcC.XYZ() - ndcA.XYZ()
+                );
+                if (ndcFaceNormal.LengthSquared() > 1e-12f)
+                    ndcFaceNormal = Vector3.Normalize(ndcFaceNormal);
+                else
+                    ndcFaceNormal = Vector3.UnitZ;
 
                 tris.Add(new Triangle
                 {
@@ -544,12 +619,12 @@ public abstract class BasePreviewRenderer
                     D1 = d1,
                     D2 = d2,
 
-                    FaceNormal = Vector3.Normalize(
-                        Vector3.Cross(
-                            (vB.C / vB.C.W).XYZ() - (vA.C / vA.C.W).XYZ(),
-                            (vC.C / vC.C.W).XYZ() - (vA.C / vA.C.W).XYZ()
-                        )
-                    ),
+                    // Store NDC-space face normal for screen operations
+                    FaceNormal = ndcFaceNormal,
+                    
+                    // Store VIEW-SPACE face normal for silhouette detection
+                    // This is the proper space for comparing with view direction
+                    ViewSpaceFaceNormal = faceNormal,
 
                     N0 = vA.N,
                     N1 = vB.N,
@@ -647,8 +722,19 @@ public abstract class BasePreviewRenderer
             var s2 = NdcToScreen(tri.V2, w, h);
 
             float area = Edge(s0, s1, s2);
-            if (area <= 0f)
+
+            // Backface culling; allow two-sided if configured
+            if (area == 0f)
                 continue;
+
+            float sign = 1f;
+            if (area < 0f)
+            {
+                if (!options.TwoSided)
+                    continue;
+                sign = -1f;
+                area = -area;
+            }
 
             float invArea = 1f / area;
 
@@ -677,9 +763,9 @@ public abstract class BasePreviewRenderer
                 {
                     var p = new Vector2(x + 0.5f, y + 0.5f);
 
-                    float w0 = Edge(s1, s2, p);
-                    float w1 = Edge(s2, s0, p);
-                    float w2 = Edge(s0, s1, p);
+                    float w0 = Edge(s1, s2, p) * sign;
+                    float w1 = Edge(s2, s0, p) * sign;
+                    float w2 = Edge(s0, s1, p) * sign;
 
                     if (w0 < 0f || w1 < 0f || w2 < 0f)
                         continue;
@@ -734,7 +820,9 @@ public abstract class BasePreviewRenderer
             return (b, a);
         }
 
-        Vector3 viewDir = Vector3.Normalize(options.CameraTarget - options.CameraPosition);
+        // In view space, the camera looks down -Z axis, so view direction is (0, 0, -1)
+        // Front-facing triangles have normals pointing toward camera (+Z in view space)
+        Vector3 viewSpaceViewDir = new Vector3(0f, 0f, -1f);
 
         // edge -> list of triangle contributions
         var edgeMap = new Dictionary<(PointF, PointF), List<(Vector3 faceNormal, bool frontFacing, Vector2 s0, Vector2 s1, Vector2 s2, float d0, float d1, float d2)>>();
@@ -758,7 +846,9 @@ public abstract class BasePreviewRenderer
             if (winding <= 0f)
                 continue;
 
-            float ndotv = Vector3.Dot(tri.FaceNormal, viewDir);
+            // Use VIEW-SPACE face normal with VIEW-SPACE view direction for correct comparison
+            // Front-facing: normal points toward camera (positive Z), viewDir is -Z, so dot < 0
+            float ndotv = Vector3.Dot(tri.ViewSpaceFaceNormal, viewSpaceViewDir);
             bool frontFacing = ndotv < 0f;
 
             var p0 = new PointF(s0.X, s0.Y);
@@ -777,7 +867,8 @@ public abstract class BasePreviewRenderer
                     edgeMap[edgeKey] = list;
                 }
 
-                list.Add((tri.FaceNormal, frontFacing, s0, s1, s2, d0, d1, d2));
+                // Store VIEW-SPACE face normal for consistent silhouette calculations
+                list.Add((tri.ViewSpaceFaceNormal, frontFacing, s0, s1, s2, d0, d1, d2));
             }
 
             RegisterEdge(MakeEdgeKey(p0, p1));
@@ -800,8 +891,9 @@ public abstract class BasePreviewRenderer
                 if (list.Count == 1)
                 {
                     // Boundary edges: only if face is near perpendicular to view (contour-like)
+                    // Use view-space normal with view-space view direction
                     var n = Vector3.Normalize(list[0].faceNormal);
-                    float ndotvAbs = MathF.Abs(Vector3.Dot(n, viewDir));
+                    float ndotvAbs = MathF.Abs(Vector3.Dot(n, viewSpaceViewDir));
                     if (ndotvAbs < 0.25f)
                         isSilhouette = true;
                 }

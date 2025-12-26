@@ -145,7 +145,9 @@ public sealed class OrcaPreviewRenderer : BasePreviewRenderer
     protected override Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options)
     {
         var n = Vector3.Normalize(normal);
-        var l = Vector3.Normalize(options.LightDirection);
+        
+        // Use VIEW-SPACE light direction since normals are in view space
+        var l = Vector3.Normalize(options.ViewSpaceLightDirection);
 
         // View direction (from surface toward camera). In View Space, this is +Z.
         var v = Vector3.UnitZ;
@@ -168,7 +170,7 @@ public sealed class OrcaPreviewRenderer : BasePreviewRenderer
             : 1f;
 
         // Subtle specular sheen (half-vector)
-        var h = Vector3.Normalize((-l) + v);
+        var h = Vector3.Normalize(-l + v);
         float ndoth = Math.Clamp(Vector3.Dot(n, h), 0f, 1f);
         float spec = options.SpecularStrength * MathF.Pow(ndoth, options.SpecularPower);
 

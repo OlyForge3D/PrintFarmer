@@ -124,7 +124,8 @@ public sealed class PrusaPreviewRenderer : BasePreviewRenderer
     // ---------------------------------------------------------------------
     protected override Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options)
     {
-        Vector3 lightDir = Vector3.Normalize(-options.LightDirection);
+        // Use VIEW-SPACE light direction since normals are in view space
+        Vector3 lightDir = Vector3.Normalize(-options.ViewSpaceLightDirection);
 
         float lambert = Math.Max(0.2f, Vector3.Dot(normal, lightDir));
         lambert *= 0.85f;
