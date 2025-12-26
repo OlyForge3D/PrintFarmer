@@ -31,8 +31,8 @@ public sealed class RenderOptions
         { "back", (new Vector3(1.75f, 1.75f, 1.35f), new Vector3(0f, 0f, 0.35f)) },
         
         // Pure side views - adjust target to center model horizontally
-        { "left", (new Vector3(-2.5f, 0f, 1.35f), new Vector3(0.15f, 0f, 0.35f)) },
-        { "right", (new Vector3(2.5f, 0f, 1.35f), new Vector3(-0.15f, 0f, 0.35f)) },
+        { "left", (new Vector3(-2.5f, 0f, 1.35f), new Vector3(-0.3f, 0f, 0.35f)) },
+        { "right", (new Vector3(2.5f, 0f, 1.35f), new Vector3(0.3f, 0f, 0.35f)) },
         
         // Top and bottom views
         { "top", (new Vector3(0f, 0f, 2.5f), new Vector3(0f, 0f, 0.35f)) },
