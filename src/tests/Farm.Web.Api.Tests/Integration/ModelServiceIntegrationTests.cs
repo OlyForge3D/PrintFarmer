@@ -11,6 +11,7 @@ using Farm.Infrastructure.Repositories.Model;
 using Farm.Web.Api.Services.Model;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
@@ -721,6 +722,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModelService>();
+        var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
         var uploadResult = await service.UploadModelAsync(
             CreateMockFormFile("path-test.stl"),
@@ -731,7 +733,11 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
         // Assert
         filePath.Should().NotBeNull();
-        File.Exists(filePath).Should().BeTrue();
+        
+        // Database now stores only relative paths (e.g., "uuid.stl"), so resolve to absolute before checking
+        string modelsPath = config["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
+        string absolutePath = Path.Combine(modelsPath, filePath!);
+        File.Exists(absolutePath).Should().BeTrue($"Model file should exist at {absolutePath}");
     }
 
     [Fact]
@@ -784,8 +790,12 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Verify the thumbnail file actually exists on disk
         if (!string.IsNullOrEmpty(uploadedModel.ThumbnailPath))
         {
-            File.Exists(uploadedModel.ThumbnailPath).Should().BeTrue(
-                $"Thumbnail file should exist at {uploadedModel.ThumbnailPath}");
+            // Database now stores only relative paths, so resolve to absolute before checking
+            var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            string modelsPath = config["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
+            string absoluteThumbnailPath = Path.Combine(modelsPath, uploadedModel.ThumbnailPath);
+            File.Exists(absoluteThumbnailPath).Should().BeTrue(
+                $"Thumbnail file should exist at {absoluteThumbnailPath}");
         }
     }
 

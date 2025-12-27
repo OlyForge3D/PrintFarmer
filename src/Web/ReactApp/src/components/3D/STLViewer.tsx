@@ -152,24 +152,83 @@ function STLModel({ geometry, autoRotate = false, onMeshLoaded }: STLModelProps)
 
 /**
  * Camera Controller Component
- * Animates camera to preset views
+ * Animates camera to preset views and auto-fits to geometry bounds
  */
-function CameraController({ viewDirection }: { viewDirection: string | null }) {
+function CameraController({ 
+  viewDirection, 
+  geometry 
+}: { 
+  viewDirection: string | null;
+  geometry: THREE.BufferGeometry | null;
+}) {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
 
+  // Auto-fit camera to geometry on load
   useEffect(() => {
-    if (!viewDirection) return;
+    if (!geometry) return;
 
-    const distance = 100;
+    // Calculate bounding box
+    geometry.computeBoundingBox();
+    if (!geometry.boundingBox) return;
+
+    const bbox = geometry.boundingBox;
+    const center = new THREE.Vector3(
+      (bbox.min.x + bbox.max.x) / 2,
+      (bbox.min.y + bbox.max.y) / 2,
+      (bbox.min.z + bbox.max.z) / 2
+    );
+
+    // Calculate model size
+    const size = new THREE.Vector3(
+      bbox.max.x - bbox.min.x,
+      bbox.max.y - bbox.min.y,
+      bbox.max.z - bbox.min.z
+    );
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = camera.fov * (Math.PI / 180);
+    let distance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+    distance *= 1.5; // Add padding
+
+    // Position camera for ISO view
+    const isoDistance = distance / Math.sqrt(3);
+    camera.position.set(isoDistance, isoDistance, isoDistance);
+    camera.lookAt(center);
+    camera.updateProjectionMatrix();
+  }, [geometry, camera]);
+
+  useEffect(() => {
+    if (!viewDirection || !geometry) return;
+
+    // Recalculate distance based on geometry
+    geometry.computeBoundingBox();
+    if (!geometry.boundingBox) return;
+
+    const bbox = geometry.boundingBox;
+    const center = new THREE.Vector3(
+      (bbox.min.x + bbox.max.x) / 2,
+      (bbox.min.y + bbox.max.y) / 2,
+      (bbox.min.z + bbox.max.z) / 2
+    );
+
+    const size = new THREE.Vector3(
+      bbox.max.x - bbox.min.x,
+      bbox.max.y - bbox.min.y,
+      bbox.max.z - bbox.min.z
+    );
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = camera.fov * (Math.PI / 180);
+    let distance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+    distance *= 1.5;
+
     const positions: Record<string, [number, number, number]> = {
-      top: [0, distance, 0],
-      bottom: [0, -distance, 0],
-      front: [0, 0, distance],
-      back: [0, 0, -distance],
-      left: [-distance, 0, 0],
-      right: [distance, 0, 0],
-      iso: [distance * 0.7, distance * 0.7, distance * 0.7],
+      top: [center.x, center.y + distance, center.z],
+      bottom: [center.x, center.y - distance, center.z],
+      front: [center.x, center.y, center.z + distance],
+      back: [center.x, center.y, center.z - distance],
+      left: [center.x - distance, center.y, center.z],
+      right: [center.x + distance, center.y, center.z],
+      iso: [center.x + distance / Math.sqrt(3), center.y + distance / Math.sqrt(3), center.z + distance / Math.sqrt(3)],
     };
 
     const targetPos = positions[viewDirection] || positions.iso;
@@ -187,7 +246,7 @@ function CameraController({ viewDirection }: { viewDirection: string | null }) {
         startPos[1] + (targetPos[1] - startPos[1]) * t,
         startPos[2] + (targetPos[2] - startPos[2]) * t
       );
-      camera.lookAt(0, 0, 0);
+      camera.lookAt(center);
 
       if (t < 1) {
         requestAnimationFrame(animate);
@@ -195,7 +254,7 @@ function CameraController({ viewDirection }: { viewDirection: string | null }) {
     };
 
     requestAnimationFrame(animate);
-  }, [viewDirection, camera]);
+  }, [viewDirection, camera, geometry]);
 
   return null;
 }
@@ -317,8 +376,8 @@ export const STLViewer: React.FC<STLViewerProps> = ({
           enableZoom
         />
 
-        {/* Camera Controller for view animations */}
-        <CameraController viewDirection={viewDirection} />
+        {/* Camera Controller for view animations and auto-fit */}
+        <CameraController viewDirection={viewDirection} geometry={geometry} />
       </Canvas>
 
       {/* View Cube Overlay */}

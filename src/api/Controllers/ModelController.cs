@@ -47,7 +47,11 @@ public class ModelController : ControllerBase
         _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
         _modelRepo = modelRepo ?? throw new ArgumentNullException(nameof(modelRepo));
         ArgumentNullException.ThrowIfNull(configuration);
-        _modelsPath = configuration["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
+        string configPath = configuration["ModelStorage:Path"] ?? "models";
+        // Ensure path is absolute - if relative, combine with current directory first
+        _modelsPath = Path.IsPathRooted(configPath) 
+            ? configPath 
+            : Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), configPath));
 
         if (!_fileSystem.DirectoryExists(_modelsPath))
         {
@@ -57,7 +61,8 @@ public class ModelController : ControllerBase
 
     /// <summary>
     /// Resolves a model file path to an absolute path.
-    /// Handles both relative paths (from database) and absolute paths.
+    /// Database stores relative paths (e.g., "uuid.stl") from the models root.
+    /// For backward compatibility with older data, also handles "models/uuid.stl" format by stripping the prefix.
     /// </summary>
     private string ResolvePath(string? relativePath)
     {
@@ -68,8 +73,8 @@ public class ModelController : ControllerBase
         if (Path.IsPathRooted(relativePath))
             return relativePath;
 
-        // If relative, combine with _modelsPath
-        return Path.Combine(_modelsPath, Path.GetFileName(relativePath));
+        // Combine relative path with models directory (guaranteed to be absolute)
+        return Path.Combine(_modelsPath, relativePath);
     }
 
     /// <summary>

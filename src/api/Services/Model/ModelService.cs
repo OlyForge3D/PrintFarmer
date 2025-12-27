@@ -416,7 +416,7 @@ namespace Farm.Web.Api.Services.Model
                     OriginalFileName = originalName,
                     DisplayName = Path.GetFileNameWithoutExtension(originalName),
                     FileDirectory = Path.GetDirectoryName(finalFilePath) ?? string.Empty,
-                    FilePath = finalFilePath,  // Store final path in DB
+                    FilePath = fileName,  // Store ONLY relative path (e.g., "uuid.stl"), not full absolute path
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
                     FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
@@ -476,8 +476,8 @@ namespace Farm.Web.Api.Services.Model
 
                             if (thumbSuccess)
                             {
-                                // Update model with thumbnail path
-                                model.ThumbnailPath = thumbnailPath;
+                                // Update model with ONLY relative path (e.g., "uuid_thumb.png"), not full absolute path
+                                model.ThumbnailPath = thumbnailFileName;
                                 await _repository.SaveChangesAsync(ct);
 
                                 _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
