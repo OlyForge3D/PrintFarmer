@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronRightIcon, FolderIcon, DocumentIcon, TrashIcon, FolderPlusIcon } from '@heroicons/react/24/outline';
-import { Button } from '@/components/ui';
+import { Button, Checkbox } from '@/components/ui';
 import { toast } from 'sonner';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 
@@ -12,11 +12,14 @@ export interface FileEntry {
   modifiedAt: string;
   isDirectory: boolean;
   thumbnailUrl?: string;
+  modelId?: string;  // File ID (GUID) for efficient file lookups
+  directoryId?: string;  // Directory ID (virtual path) for efficient directory lookups
 }
 
 interface FolderNode {
   name: string;
   path: string;
+  directoryId: string;  // Use GUID for directory lookups
   children: FolderNode[];
   expanded: boolean;
 }
@@ -55,6 +58,9 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [folderNameError, setFolderNameError] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -120,12 +126,21 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
     const root: FolderNode = {
       name: 'Root',
       path: '/',
+      directoryId: '/',  // Root directory uses its path as ID
       children: [],
       expanded: true
     };
 
     const nodeMap = new Map<string, FolderNode>();
     nodeMap.set('/', root);
+
+    // Build a map of folder paths to their directory IDs from the API response
+    const folderIdMap = new Map<string, string>();
+    (hierarchyData?.files || []).forEach((f: FileEntry) => {
+      if (f.isDirectory && f.directoryId) {
+        folderIdMap.set(f.path, f.directoryId);
+      }
+    });
 
     // Sort folders for consistent display
     const sortedFolders = [...allFolders].sort();
@@ -134,6 +149,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
       const node: FolderNode = {
         name: folderPath.split('/').filter(Boolean).pop() || folderPath,
         path: folderPath,
+        directoryId: folderIdMap.get(folderPath) || folderPath,  // Use API directoryId or fall back to path
         children: [],
         expanded: expandedFolders.has(folderPath)
       };
@@ -173,7 +189,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
       toast.success('Files deleted successfully');
       queryClient.invalidateQueries({ queryKey: [`${endpoint}-hierarchy`] });
       queryClient.invalidateQueries({ queryKey: [`${endpoint}-all-folders`] });
-      onFileDelete?.(files.map(f => f.path));
+      onFileDelete?.(files.map((f: FileEntry) => f.path));
     },
     onError: () => {
       toast.error('Failed to delete files');
@@ -183,6 +199,20 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   const handleDeleteFile = (filePath: string) => {
     if (confirm(`Delete ${filePath}?`)) {
       deleteFilesMutation.mutate([filePath]);
+    }
+  };
+
+  const handleSelectFile = (filePath: string, selected: boolean) => {
+    setSelectedFiles(prev =>
+      selected ? [...prev, filePath] : prev.filter(f => f !== filePath)
+    );
+  };
+
+  const handleSelectAll = (selected: boolean) => {
+    if (selected) {
+      setSelectedFiles(files.map((f: FileEntry) => f.path));
+    } else {
+      setSelectedFiles([]);
     }
   };
 
@@ -251,6 +281,42 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
     }
   });
 
+  // Move files mutation
+  const moveFilesMutation = useMutation({
+    mutationFn: async ({ files: modelIds, targetDirectoryId }: { files: string[]; targetDirectoryId: string }) => {
+      const response = await fetch(
+        `${getApiBaseUrl()}/${endpoint === 'models' ? '3d-models' : 'gcode-files'}/move`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({ modelIds, targetDirectoryId })
+        }
+      );
+      if (!response.ok) throw new Error('Failed to move files');
+      const data = await response.json();
+      // Check the success field in the response, not just HTTP status
+      if (!data.success) {
+        throw new Error(data.message || 'Failed to move files');
+      }
+      return data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || 'Files moved successfully');
+      setSelectedFiles([]);
+      setDragOverPath(null);
+      queryClient.invalidateQueries({ queryKey: [`${endpoint}-hierarchy`] });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'Failed to move files';
+      toast.error(message);
+
+      setDragOverPath(null);
+    }
+  });
+
   const handleCreateFolder = () => {
     const error = validateFolderName(newFolderName);
     
@@ -288,6 +354,42 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
     setExpandedFolders(newExpanded);
   };
 
+  const handleDragOver = (e: React.DragEvent, folderPath: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(folderPath);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragLeave = () => {
+    setDragOverPath(null);
+  };
+
+  const handleDropOnFolder = (e: React.DragEvent, folderPath: string, directoryId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+
+    // Get the files from dataTransfer
+    const data = e.dataTransfer.getData('application/json');
+    if (!data) {
+      toast.error('No files to move');
+      return;
+    }
+
+    try {
+      const filesToMove = JSON.parse(data) as string[];
+      if (filesToMove.length === 0) {
+        toast.error('Please select files to move');
+        return;
+      }
+
+      moveFilesMutation.mutate({ files: filesToMove, targetDirectoryId: directoryId });
+    } catch (error) {
+      toast.error('Failed to parse files for move');
+    }
+  };
+
   // Render tree nodes
   const renderTreeNode = (node: FolderNode, level: number): React.ReactNode => {
     const isRoot = node.path === '/';
@@ -296,27 +398,39 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
     return (
       <div key={node.path}>
         <div
-          className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-pf-bg-2 rounded ${
-            selectedFolder === node.path ? 'bg-pf-accent bg-opacity-10 border-l-2 border-pf-accent' : ''
+          className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-pf-bg-2 rounded transition-colors ${
+            selectedFolder === node.path ? 'bg-pf-accent bg-opacity-40 border-l-2 border-pf-accent text-white font-semibold' : ''
+          } ${
+            dragOverPath === node.path 
+              ? 'bg-pf-primary bg-opacity-15 border-l-4 border-pf-primary' 
+              : ''
           }`}
           style={{ paddingLeft: `${isRoot ? 8 : level * 16 + 8}px` }}
           onClick={() => setSelectedFolder(node.path)}
+          onDragOver={(e) => handleDragOver(e, node.path)}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDropOnFolder(e, node.path, node.directoryId)}
         >
           {hasChildren && (
-            <button
+            <Button
               onClick={(e) => {
                 e.stopPropagation();
                 handleToggleFolderExpand(node.path);
               }}
-              className="flex-shrink-0"
+              variant="subtle"
+              size="sm"
+              className="!p-0 !bg-transparent !border-0 flex-shrink-0 text-transparent hover:text-pf-text-secondary"
+              aria-hidden="true"
             >
               <ChevronRightIcon
                 className={`w-4 h-4 transition-transform ${node.expanded ? 'rotate-90' : ''}`}
               />
-            </button>
+            </Button>
           )}
           {!hasChildren && <div className="w-4" />}
-          <FolderIcon className="w-4 h-4 text-pf-text-secondary" />
+          <FolderIcon className={`w-4 h-4 flex-shrink-0 ${
+            dragOverPath === node.path ? 'text-pf-primary' : 'text-pf-text-secondary'
+          }`} />
           <span className="text-sm text-pf-text truncate">{node.name}</span>
         </div>
 
@@ -341,18 +455,19 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
         <div className="p-3 border-b border-pf-border sticky top-0 bg-pf-bg">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-pf-text">
-              {selectedFolder === '/' ? 'Root' : selectedFolder}
+              {selectedFolder === '/' ? '/' : selectedFolder}
             </h3>
             <div className="flex items-center gap-3">
-              <button
+              <Button
                 onClick={() => setIsCreatingFolder(true)}
                 disabled={isCreatingFolder}
-                className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-pf-text-secondary hover:text-pf-text hover:bg-pf-bg-2 rounded transition-colors disabled:opacity-50"
+                variant="secondary"
+                size="sm"
                 title="Create new folder"
               >
-                <FolderPlusIcon className="w-4 h-4" />
+                <FolderPlusIcon className="w-4 h-4 mr-1" />
                 New Folder
-              </button>
+              </Button>
               <span className="text-xs text-pf-text-secondary">{files.length} files</span>
             </div>
           </div>
@@ -380,20 +495,21 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                   <p className="text-xs text-pf-error">{folderNameError}</p>
                 )}
                 <div className="flex gap-2 pt-2">
-                  <button
+                  <Button
                     onClick={handleCreateFolder}
                     disabled={createFolderMutation.isPending}
-                    className="px-3 py-1 text-xs font-medium bg-pf-accent text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+                    size="sm"
                   >
                     {createFolderMutation.isPending ? 'Creating...' : 'Create'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={handleCancelCreateFolder}
                     disabled={createFolderMutation.isPending}
-                    className="px-3 py-1 text-xs font-medium text-pf-text-secondary hover:bg-pf-border rounded transition-colors disabled:opacity-50"
+                    variant="secondary"
+                    size="sm"
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -407,7 +523,15 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-pf-bg-2 border-b border-pf-border">
                 <tr>
-                  <th className="px-4 py-2 text-left font-semibold text-pf-text">Name</th>
+                  <th className="px-4 py-2 text-left w-8">
+                    {files.length > 0 && (
+                      <Checkbox
+                        checked={selectedFiles.length === files.length && files.length > 0}
+                        onChange={(e) => handleSelectAll(e.currentTarget.checked)}
+                      />
+                    )}
+                  </th>
+                  <th className="px-4 py-2 text-left font-semibold text-pf-text">Thumbnail / Name</th>
                   <th className="px-4 py-2 text-right font-semibold text-pf-text w-24">Size</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-40">Modified</th>
                   <th className="px-4 py-2 text-center font-semibold text-pf-text w-12">Action</th>
@@ -417,11 +541,113 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                 {files.map((file: FileEntry) => (
                   <tr
                     key={file.path}
-                    className="border-b border-pf-border hover:bg-pf-bg-2 transition-colors"
+                    className={`border-b border-pf-border hover:bg-pf-bg-2 transition-colors cursor-grab active:cursor-grabbing ${
+                      selectedFiles.includes(file.path) ? 'bg-pf-primary bg-opacity-10' : ''
+                    }`}
+                    draggable={true}
+                    onDragStart={(e) => {
+                      setIsDragging(true);
+                      // If this file isn't selected, move just this file
+                      // Otherwise move all selected files
+                      const filesToMove = selectedFiles.includes(file.path) 
+                        ? selectedFiles 
+                        : [file.path];
+                      
+                      // Store files to move in dataTransfer for use in drop handler
+                      // Note: filesToMove already contains full paths from the API
+                      e.dataTransfer!.setData('application/json', JSON.stringify(filesToMove));
+                      
+                      // Set custom drag image using thumbnail if available
+                      if (file.thumbnailUrl) {
+                        const img = new Image();
+                        img.src = file.thumbnailUrl;
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 80;
+                        canvas.height = 80;
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                          ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                          ctx.fillRect(0, 0, 80, 80);
+                          ctx.drawImage(img, 0, 0, 80, 80);
+                          e.dataTransfer!.setDragImage(canvas, 40, 40);
+                        }
+                      }
+                      e.dataTransfer!.effectAllowed = 'move';
+                    }}
+                    onDragEnd={() => setIsDragging(false)}
                   >
-                    <td className="px-4 py-3 flex items-center gap-2">
-                      <DocumentIcon className="w-4 h-4 text-pf-text-secondary flex-shrink-0" />
-                      <span className="text-pf-text truncate">{file.name}</span>
+                    <td className="px-4 py-3">
+                      <Checkbox
+                        checked={selectedFiles.includes(file.path)}
+                        onChange={(e) => handleSelectFile(file.path, e.currentTarget.checked)}
+                      />
+                    </td>
+                    <td className="px-4 py-3 flex items-center gap-3">
+                      {/* Thumbnail Column */}
+                      <div className="relative flex-shrink-0">
+                        {file.thumbnailUrl ? (
+                          <div
+                            className={`w-12 h-12 rounded border-2 overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
+                              selectedFiles.includes(file.path)
+                                ? 'border-pf-primary shadow-md'
+                                : 'border-pf-border hover:border-pf-primary'
+                            }`}
+                            draggable
+                            onDragStart={(e) => {
+                              e.stopPropagation();
+                              setIsDragging(true);
+                              e.dataTransfer!.effectAllowed = 'move';
+                              // If this file isn't selected, move just this file
+                              // Otherwise move all selected files
+                              const filesToMove = selectedFiles.includes(file.path)
+                                ? selectedFiles
+                                : [file.path];
+                              
+                              // Store files to move in dataTransfer
+                              e.dataTransfer!.setData('application/json', JSON.stringify(filesToMove));
+                              
+                              // Create drag image from thumbnail
+                              const img = document.createElement('img');
+                              img.src = file.thumbnailUrl!;
+                              img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = 60;
+                                canvas.height = 60;
+                                const ctx = canvas.getContext('2d');
+                                if (ctx) {
+                                  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+                                  ctx.fillRect(0, 0, 60, 60);
+                                  ctx.drawImage(img, 0, 0, 60, 60);
+                                  ctx.strokeStyle = 'white';
+                                  ctx.lineWidth = 2;
+                                  ctx.strokeRect(0, 0, 60, 60);
+                                  e.dataTransfer!.setDragImage(canvas, 30, 30);
+                                }
+                              };
+                            }}
+                            onDragEnd={() => setIsDragging(false)}
+                          >
+                            <img
+                              src={file.thumbnailUrl}
+                              alt={file.name}
+                              className="w-full h-full object-cover"
+                            />
+                            {selectedFiles.length > 1 && selectedFiles.includes(file.path) && (
+                              <div className="absolute -top-1 -right-1 bg-pf-primary text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
+                                {selectedFiles.indexOf(file.path) + 1}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded border-2 border-pf-border bg-pf-bg-2 flex items-center justify-center">
+                            <DocumentIcon className="w-6 h-6 text-pf-text-secondary" />
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-pf-text-primary">{file.name}</div>
+                        <div className="text-xs text-pf-text-tertiary">{formatBytes(file.size)}</div>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right text-pf-text-secondary">
                       {formatBytes(file.size)}
@@ -430,13 +656,15 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       {formatDate(file.modifiedAt)}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <button
+                      <Button
                         onClick={() => handleDeleteFile(file.path)}
-                        className="p-1 hover:bg-pf-error hover:bg-opacity-10 rounded text-pf-error transition-colors"
+                        variant="danger"
+                        size="sm"
+                        className="!p-0 !bg-transparent !border-0 text-pf-error hover:text-pf-error hover:opacity-70"
                         title="Delete"
                       >
                         <TrashIcon className="w-4 h-4" />
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

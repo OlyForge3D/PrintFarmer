@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronRightIcon, FolderIcon, DocumentIcon, FolderPlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { ChevronRightIcon, FolderIcon, DocumentIcon } from '@heroicons/react/24/outline';
 import { Button } from '@/components/ui';
 
 export interface TreeNode {
@@ -54,22 +54,25 @@ const TreeItem: React.FC<{
     <div key={node.path}>
       <div
         className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-pf-bg-2 rounded transition-colors ${
-          currentPath === node.path ? 'bg-pf-accent bg-opacity-10 border-l-2 border-pf-accent' : ''
+          currentPath === node.path ? 'bg-pf-accent bg-opacity-40 border-l-2 border-pf-accent text-white font-semibold' : ''
         }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
       >
         {node.isDirectory && node.children?.length ? (
-          <button
+          <Button
             onClick={(e) => {
               e.stopPropagation();
               setExpanded(!expanded);
             }}
-            className="p-0 flex-shrink-0"
+            variant="subtle"
+            size="sm"
+            className="!p-0 !bg-transparent !border-0 flex-shrink-0 text-transparent hover:text-pf-text-secondary transition-colors"
+            aria-hidden="true"
           >
             <ChevronRightIcon
               className={`w-4 h-4 transition-transform ${expanded ? 'rotate-90' : ''}`}
             />
-          </button>
+          </Button>
         ) : node.isDirectory ? (
           <div className="w-4 h-4 flex-shrink-0" />
         ) : (

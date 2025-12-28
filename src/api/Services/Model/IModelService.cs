@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Model
 {
@@ -92,5 +93,14 @@ namespace Farm.Web.Api.Services.Model
         /// <returns>Model3DUploadResultDto with file info and upload status</returns>
         /// <exception cref="ArgumentException">Thrown if validation fails</exception>
         Task<Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct);
+
+        /// <summary>
+        /// Gets or creates a Folder entity for the given directory path and type
+        /// </summary>
+        /// <param name="directoryPath">The virtual directory path (e.g., "/", "/subfolder")</param>
+        /// <param name="folderType">The folder type: "models" or "gcode"</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>The Folder entity, either existing or newly created</returns>
+        Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct);
     }
 }

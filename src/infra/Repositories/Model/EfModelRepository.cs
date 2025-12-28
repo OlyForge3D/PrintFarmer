@@ -54,9 +54,9 @@ namespace Farm.Infrastructure.Repositories.Model
                 directory = string.Empty;
             }
 
-            // Get valid models where FileDirectory exactly matches (not recursive)
+            // Get valid models by finding the folder with the matching path, then getting all models in that folder
             return await _db.Models3D
-                .Where(m => m.IsValid && m.FileDirectory == directory)
+                .Where(m => m.IsValid && m.Folder != null && m.Folder.Path == directory)
                 .OrderByDescending(m => m.UploadedAt)
                 .ToListAsync(ct);
         }
@@ -70,10 +70,10 @@ namespace Farm.Infrastructure.Repositories.Model
 
             string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
 
-            // Get all unique subdirectories that are direct children of the parent from database
-            var subdirs = await _db.Models3D
-                .Where(m => m.IsValid && m.FileDirectory.StartsWith(normalizedParent))
-                .Select(m => m.FileDirectory)
+            // Get all unique subdirectories that are direct children of the parent from Folder entities
+            var subdirs = await _db.Folders
+                .Where(f => f.FolderType == "models" && f.Path.StartsWith(normalizedParent))
+                .Select(f => f.Path)
                 .Distinct()
                 .ToListAsync(ct);
 

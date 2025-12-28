@@ -73,12 +73,17 @@ public class ModelController : ControllerBase
         if (string.IsNullOrEmpty(relativePath))
             return string.Empty;
 
-        // If already absolute, return as-is
-        if (Path.IsPathRooted(relativePath))
-            return relativePath;
+        // Normalize virtual paths - strip leading slashes to handle virtual path format
+        string normalizedPath = relativePath.TrimStart('/').Trim();
+        if (string.IsNullOrEmpty(normalizedPath))
+            return _modelsPath;
+
+        // If the normalized path is already absolute, return as-is (Windows C:\ or Unix /mnt/etc)
+        if (Path.IsPathRooted(normalizedPath))
+            return normalizedPath;
 
         // Combine relative path with models directory (guaranteed to be absolute)
-        return Path.Combine(_modelsPath, relativePath);
+        return Path.Combine(_modelsPath, normalizedPath);
     }
 
     /// <summary>
@@ -833,7 +838,7 @@ public class ModelController : ControllerBase
             }
 
             _logger.LogInformation($"[CreateFolder] Successfully created folder: {relativePath} at {fullPath}");
-            return CreatedAtAction(nameof(CreateFolderAsync), new FolderOperationResultDto(true, "Folder created successfully"));
+            return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto(true, "Folder created successfully"));
         }
         catch (ArgumentException ex)
         {
@@ -858,140 +863,113 @@ public class ModelController : ControllerBase
     }
 
     /// <summary>
-    /// Move files to a different folder
+    /// Move model files to a different virtual folder by model IDs
     /// </summary>
-    /// <param name="request">Move request with file paths and target folder</param>
+    /// <param name="request">Move request with model IDs and target folder</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Operation result</returns>
     [HttpPost("move")]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> MoveFilesAsync([FromBody] MoveFilesRequest request, CancellationToken ct)
+    public async Task<IActionResult> MoveFilesAsync([FromBody] MoveModelsRequest request, CancellationToken ct)
     {
         try
         {
-            if (request == null || request.FilePaths == null || request.FilePaths.Count == 0)
+            if (request == null || request.ModelIds == null || request.ModelIds.Count == 0)
             {
-                return BadRequest(new FolderOperationResultDto(false, "At least one file path is required"));
+                return BadRequest(new FolderOperationResultDto(false, "At least one model ID is required"));
             }
 
-            if (string.IsNullOrWhiteSpace(request.TargetPath))
+            if (string.IsNullOrWhiteSpace(request.TargetDirectoryId))
             {
-                return BadRequest(new FolderOperationResultDto(false, "Target folder path is required"));
+                return BadRequest(new FolderOperationResultDto(false, "Target directory ID is required"));
             }
 
-            // Normalize target path - strip leading/trailing slashes for relative path
-            string targetRelativePath = request.TargetPath.Trim('/').Trim();
-            if (string.IsNullOrEmpty(targetRelativePath))
-            {
-                return BadRequest(new FolderOperationResultDto(false, "Target folder path cannot be empty"));
-            }
-            string fullTargetPath = ResolvePath(targetRelativePath);
+            // Use the directory ID (virtual path) exactly as provided by the frontend
+            // Frontend is responsible for constructing valid directory IDs
+            string targetDirectoryPath = request.TargetDirectoryId;
 
-            _logger.LogDebug($"[MoveFiles] Target path normalized: '{request.TargetPath}' -> Full: '{fullTargetPath}'");
-
-            // Verify target folder exists
-            if (!_fileSystem.DirectoryExists(fullTargetPath))
-            {
-                _logger.LogWarning($"[MoveFiles] Target directory does not exist: '{fullTargetPath}'");
-                return NotFound(new FolderOperationResultDto(false, "Target folder does not exist"));
-            }
+            _logger.LogDebug($"[MoveModels] Moving {request.ModelIds.Count} model(s) to virtual directory: '{targetDirectoryPath}'");
 
             int movedCount = 0;
             int failedCount = 0;
-            var failedFiles = new List<string>();
+            var failedFiles = new List<(string id, string reason)>();
 
-            // Move each file
-            foreach (var filePath in request.FilePaths)
+            // Move each file - this is a virtual move (just update database)
+            foreach (var modelIdStr in request.ModelIds)
             {
                 try
                 {
-                    if (string.IsNullOrWhiteSpace(filePath))
+                    if (string.IsNullOrWhiteSpace(modelIdStr))
                         continue;
 
-                    string fullSourcePath = ResolvePath(filePath);
-
-                    // Verify source exists
-                    if (!_fileSystem.FileExists(fullSourcePath))
+                    // Parse the model ID (GUID)
+                    if (!Guid.TryParse(modelIdStr, out Guid modelId))
                     {
-                        _logger.LogWarning($"[MoveFiles] Source file not found: '{filePath}' (resolved: '{fullSourcePath}')");
-                        failedFiles.Add(filePath);
+                        _logger.LogWarning($"[MoveModels] Invalid model ID format: '{modelIdStr}'");
+                        failedFiles.Add((modelIdStr, "Invalid model ID format"));
                         failedCount++;
                         continue;
                     }
 
-                    // Extract filename from source path
-                    string fileName = Path.GetFileName(fullSourcePath);
-                    string fullDestPath = Path.Combine(fullTargetPath, fileName);
-
-                    // Check if destination already exists
-                    if (_fileSystem.FileExists(fullDestPath))
+                    // Query the database by primary key (GUID) - O(1) lookup
+                    var targetModel = await _modelRepo.GetByIdAsync(modelId, ct);
+                    
+                    if (targetModel == null)
                     {
-                        // Generate unique name
-                        string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                        string extension = Path.GetExtension(fileName);
-                        int counter = 1;
-                        while (_fileSystem.FileExists(Path.Combine(fullTargetPath, $"{nameWithoutExt}_{counter}{extension}")))
-                        {
-                            counter++;
-                        }
-                        fullDestPath = Path.Combine(fullTargetPath, $"{nameWithoutExt}_{counter}{extension}");
-                        _logger.LogDebug($"[MoveFiles] Destination exists, renamed to: '{Path.GetFileName(fullDestPath)}'");
+                        _logger.LogWarning($"[MoveModels] Model not found: {modelId}");
+                        failedFiles.Add((modelIdStr, "Model not found"));
+                        failedCount++;
+                        continue;
                     }
 
-                    // Move the file
-                    _fileSystem.MoveFile(fullSourcePath, fullDestPath, false);
-                    _logger.LogDebug($"[MoveFiles] File moved: '{filePath}' -> '{fullDestPath}'");
-
-                    // Update model file path in database if it exists
-                    var models = await _modelRepo.ListValidAsync(ct);
-                    var model = models.FirstOrDefault(m => m.FilePath == filePath);
-                    if (model != null)
-                    {
-                        // Update the relative path
-                        string relativePath = Path.GetRelativePath(_modelsPath, fullDestPath);
-                        model.FilePath = relativePath;
-                        await _modelRepo.UpdateAsync(model, ct);
-                        await _modelRepo.SaveChangesAsync(ct);
-                        _logger.LogDebug($"[MoveFiles] Updated model database: {model.Id} -> '{relativePath}'");
-                    }
+                    // Get or create the target folder
+                    var targetFolder = await _modelService.GetOrCreateFolderAsync(targetDirectoryPath, "models", ct);
+                    
+                    // Update the folder reference (not physical files - those stay where they are)
+                    targetModel.FolderId = targetFolder.Id;
+                    await _modelRepo.UpdateAsync(targetModel, ct);
+                    await _modelRepo.SaveChangesAsync(ct);
+                    
+                    _logger.LogDebug($"[MoveModels] Updated model folder: {targetModel.Id} ({targetModel.OriginalFileName}) -> '{targetDirectoryPath}'");
 
                     movedCount++;
                 }
                 catch (ArgumentException ex)
                 {
-                    _logger.LogWarning($"[MoveFiles] Invalid path for file {filePath}: {ex.Message}");
-                    failedFiles.Add(filePath);
+                    _logger.LogWarning($"[MoveModels] Invalid argument for model {modelIdStr}: {ex.Message}");
+                    failedFiles.Add((modelIdStr, $"Invalid argument: {ex.Message}"));
                     failedCount++;
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    _logger.LogWarning($"[MoveFiles] Access denied for file {filePath}: {ex.Message}");
-                    failedFiles.Add(filePath);
+                    _logger.LogWarning($"[MoveModels] Access denied for model {modelIdStr}: {ex.Message}");
+                    failedFiles.Add((modelIdStr, "Access denied"));
                     failedCount++;
                 }
                 catch (IOException ex)
                 {
-                    _logger.LogWarning($"[MoveFiles] IO error for file {filePath}: {ex.Message}");
-                    failedFiles.Add(filePath);
+                    _logger.LogWarning($"[MoveModels] IO error for model {modelIdStr}: {ex.Message}");
+                    failedFiles.Add((modelIdStr, $"IO error: {ex.Message}"));
                     failedCount++;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"[MoveFiles] Unexpected error for file {filePath}: {ex.GetType().Name}: {ex.Message}");
-                    failedFiles.Add(filePath);
+                    _logger.LogWarning($"[MoveModels] Unexpected error for model {modelIdStr}: {ex.GetType().Name}: {ex.Message}");
+                    failedFiles.Add((modelIdStr, $"{ex.GetType().Name}: {ex.Message}"));
                     failedCount++;
                 }
             }
 
             string message = failedCount == 0 
-                ? $"Successfully moved {movedCount} file(s)"
-                : $"Moved {movedCount} file(s), failed to move {failedCount} file(s)";
+                ? $"Successfully moved {movedCount} model(s)"
+                : $"Moved {movedCount} model(s), failed to move {failedCount} model(s)";
             
             if (failedFiles.Count > 0)
             {
-                message += $" - Failed: {string.Join(", ", failedFiles.Take(3))}";
+                var failureDetails = failedFiles.Take(3).Select(f => $"{f.id} ({f.reason})").ToList();
+                message += $" - Failed: {string.Join(", ", failureDetails)}";
                 if (failedFiles.Count > 3)
                     message += $" and {failedFiles.Count - 3} more";
             }
@@ -1000,23 +978,28 @@ public class ModelController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            _logger.LogError($"[MoveFiles] Invalid argument: {ex.Message}");
-            return BadRequest(new FolderOperationResultDto(false, $"Invalid path: {ex.Message}"));
+            _logger.LogError($"[MoveModels] Invalid argument: {ex.Message}");
+            return BadRequest(new FolderOperationResultDto(false, $"Invalid request: {ex.Message}"));
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogError($"[MoveFiles] Access denied: {ex.Message}");
+            _logger.LogError($"[MoveModels] Access denied: {ex.Message}");
             return StatusCode(StatusCodes.Status403Forbidden, new FolderOperationResultDto(false, "Access denied: insufficient permissions"));
         }
         catch (IOException ex)
         {
-            _logger.LogError($"[MoveFiles] IO error: {ex.Message}");
+            _logger.LogError($"[MoveModels] IO error: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"I/O error: {ex.Message}"));
         }
         catch (Exception ex)
         {
-            _logger.LogError($"[MoveFiles] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            _logger.LogError($"[MoveModels] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
         }
     }
 }
+
+/// <summary>
+/// Request DTO for creating a new folder
+/// </summary>
+public record CreateFolderRequest(string Path);

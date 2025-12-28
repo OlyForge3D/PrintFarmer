@@ -310,7 +310,6 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             Id = Guid.NewGuid(),
             OriginalFileName = fileName,
             DisplayName = fileName,
-            FileDirectory = Path.GetDirectoryName(filePath) ?? string.Empty,
             FilePath = filePath,
             FileHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLower(),
             FileSizeBytes = 4096,

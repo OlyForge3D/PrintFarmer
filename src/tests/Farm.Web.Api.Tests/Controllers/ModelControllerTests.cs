@@ -219,7 +219,9 @@ namespace Farm.Web.Api.Tests.Controllers
             TestFileSystem testFs = TestFileSystemFactory.WithFile(tmpFile, Encoding.UTF8.GetBytes("content"));
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
 
-            ModelService modelService = new ModelService(mockRepo.Object, mockLogger.Object, configReal, testFs, mockFileManagement.Object);
+            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
+
+            ModelService modelService = new ModelService(mockRepo.Object, mockLogger.Object, configReal, testFs, mockFileManagement.Object, mockDb.Object);
 
             ModelController controller = new ModelController(mockLogger.Object, modelService, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockRepo.Object, CreateMockAppDbContext());
 

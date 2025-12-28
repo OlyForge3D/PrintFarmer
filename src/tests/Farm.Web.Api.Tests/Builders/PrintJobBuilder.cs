@@ -230,7 +230,6 @@ public class PrintJobBuilder
             Id = _gcodeFileId,
             OriginalFileName = "Test.gcode",
             DisplayName = "Test.gcode",
-            FileDirectory = "/tmp",
             FilePath = "/tmp/Test.gcode",
             FileSizeBytes = 0,
             FileHash = string.Empty,

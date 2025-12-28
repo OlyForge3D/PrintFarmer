@@ -1497,7 +1497,9 @@ public record Model3DEntryDto(
     long Size,
     DateTime ModifiedAt,
     bool IsDirectory,
-    string? ThumbnailUrl = null
+    string? ThumbnailUrl = null,
+    string? ModelId = null,  // Include model ID for efficient file lookups
+    string? DirectoryId = null  // Include directory ID for efficient directory lookups
 );
 
 /// <summary>
@@ -1532,6 +1534,14 @@ public record CreateFolderRequest(
 public record MoveFilesRequest(
     [property: JsonPropertyName("filePaths")] IReadOnlyList<string> FilePaths,
     [property: JsonPropertyName("targetPath")] string TargetPath
+);
+
+/// <summary>
+/// Request to move model files by ID using target directory ID (more efficient than by path)
+/// </summary>
+public record MoveModelsRequest(
+    [property: JsonPropertyName("modelIds")] IReadOnlyList<string> ModelIds,
+    [property: JsonPropertyName("targetDirectoryId")] string TargetDirectoryId
 );
 
 /// <summary>

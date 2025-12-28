@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Model;
@@ -26,6 +27,7 @@ namespace Farm.Web.Api.Services.Model
         private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
         private readonly IFileManagementService _fileManagementService;
         private readonly IThumbnailGenerationService? _thumbnailService;
+        private readonly AppDbContext _db;
 
         public ModelService(
             IModelRepository repository,
@@ -33,6 +35,7 @@ namespace Farm.Web.Api.Services.Model
             IConfiguration configuration,
             Farm.Web.Api.Services.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,
+            AppDbContext db,
             IModelAnalysisService? analysisService = null,
             IThumbnailGenerationService? thumbnailService = null)
         {
@@ -42,6 +45,7 @@ namespace Farm.Web.Api.Services.Model
             _thumbnailService = thumbnailService;
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
             _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
+            _db = db ?? throw new ArgumentNullException(nameof(db));
             ArgumentNullException.ThrowIfNull(configuration);
             _modelsPath = configuration["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
             if (!_fileSystem.DirectoryExists(_modelsPath))
@@ -122,7 +126,8 @@ namespace Farm.Web.Api.Services.Model
                     Name: subdir,
                     Size: 0,
                     ModifiedAt: DateTime.UtcNow,
-                    IsDirectory: true
+                    IsDirectory: true,
+                    DirectoryId: childVirtual  // Directory ID is its own virtual path (FileDirectory value)
                 ));
             }
 
@@ -141,7 +146,8 @@ namespace Farm.Web.Api.Services.Model
                     Size: file.FileSizeBytes,
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
-                    ThumbnailUrl: file.ThumbnailPath != null ? $"/api/3d-models/{file.Id}/thumbnail" : null
+                    ThumbnailUrl: file.ThumbnailPath != null ? $"/api/3d-models/{file.Id}/thumbnail" : null,
+                    ModelId: file.Id.ToString()  // Include model GUID for efficient lookups
                 ));
             }
 
@@ -409,13 +415,15 @@ namespace Farm.Web.Api.Services.Model
                     fileHash = _fileManagementService.ToHex(newHashBytes);
                 }
 
-                // Step 4: Create DB record (still pointing to temp file for now)
+                // Step 4: Create folder and DB record (still pointing to temp file for now)
+                var rootFolder = await GetOrCreateFolderAsync("/", "models", ct);
+                
                 Model3D model = new()
                 {
                     Id = modelId,
                     OriginalFileName = originalName,
                     DisplayName = Path.GetFileNameWithoutExtension(originalName),
-                    FileDirectory = string.Empty,  // Root directory for all uploaded files - subdirectories handled via folder operations
+                    FolderId = rootFolder.Id,  // Root folder for uploaded files
                     FilePath = fileName,  // Store ONLY relative path (e.g., "uuid.stl"), not full absolute path
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
@@ -522,6 +530,38 @@ namespace Farm.Web.Api.Services.Model
 
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Gets or creates a Folder entity for the given directory path and type
+        /// </summary>
+        public async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
+        {
+            // Normalize path
+            string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(Path.DirectorySeparatorChar, '/');
+            
+            // Try to find existing folder
+            var existingFolder = await _db.Folders
+                .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, ct);
+            
+            if (existingFolder != null)
+            {
+                return existingFolder;
+            }
+
+            // Create new folder
+            var newFolder = new Folder
+            {
+                Id = Guid.NewGuid(),
+                Path = normalizedPath,
+                FolderType = folderType,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _db.AddAsync(newFolder, ct);
+            await _db.SaveChangesAsync(ct);
+
+            return newFolder;
         }
     }
 }

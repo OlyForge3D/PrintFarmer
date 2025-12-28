@@ -12,6 +12,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.Gcode;
+using Farm.Web.Api.Services.Model;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Moq;
@@ -37,7 +38,8 @@ public class GcodeFilesServiceTests
         logger.Setup(x => x.LogInformation(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
         logger.Setup(x => x.LogWarning(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object);
+        var mockModelService = new Mock<IModelService>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockModelService.Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -92,7 +94,8 @@ public class GcodeFilesServiceTests
         chunkedUpload.Setup(c => c.ExtractMetadataFromFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(metadata);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object);
+        var mockModelService = new Mock<IModelService>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockModelService.Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -108,7 +111,6 @@ public class GcodeFilesServiceTests
         added.Should().NotBeNull();
         added!.Id.Should().NotBeEmpty();
         added.DisplayName.Should().Be("cool-model");
-        added.FileDirectory.Should().Be("prints/models");
         added.SlicerName.Should().Be("TestSlicer");
         added.SlicerVersion.Should().Be("1.0");
         added.RequiredNozzleDiameter.Should().Be(0.4);
@@ -147,6 +149,7 @@ public class GcodeFilesServiceTests
 
         Guid printerId = Guid.NewGuid();
         Guid harvestId = Guid.NewGuid();
+        var folderJob = new Folder { Id = Guid.NewGuid(), Path = "jobs", FolderType = "gcode" };
 
         var dbFiles = new List<GcodeFile>
         {
@@ -155,7 +158,7 @@ public class GcodeFilesServiceTests
                 Id = Guid.NewGuid(),
                 OriginalFileName = "model1.gcode",
                 DisplayName = "model1",
-                FileDirectory = "jobs",
+                FolderId = folderJob.Id,
                 FilePath = Path.Combine(storageDir, "jobs", "model1.gcode"),
                 FileSizeBytes = 1024,
                 UploadedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -167,7 +170,7 @@ public class GcodeFilesServiceTests
                 Id = Guid.NewGuid(),
                 OriginalFileName = "other.gcode",
                 DisplayName = "other",
-                FileDirectory = "jobs",
+                FolderId = folderJob.Id,
                 FilePath = Path.Combine(storageDir, "jobs", "other.gcode"),
                 FileSizeBytes = 2048,
                 UploadedAt = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
@@ -187,8 +190,9 @@ public class GcodeFilesServiceTests
         storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+        var modelService = new Mock<IModelService>(MockBehavior.Loose);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, modelService.Object);
 
         // Act
         GcodeFileListResponse response = await service.ListAsync(

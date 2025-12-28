@@ -15,6 +15,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
+using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Gcode
@@ -26,19 +27,22 @@ namespace Farm.Web.Api.Services.Gcode
         private readonly IStoragePathService _storagePathService;
         private readonly IGcodeMetadataExtractorService _metadataExtractor;
         private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
+        private readonly IModelService _modelService;
 
         public GcodeFilesService(
             IGcodeRepository gcodeRepo,
             IUnifiedLoggingService logger,
             IStoragePathService storagePathService,
             IGcodeMetadataExtractorService metadataExtractor,
-            IGcodeThumbnailExtractorService thumbnailExtractor)
+            IGcodeThumbnailExtractorService thumbnailExtractor,
+            IModelService modelService)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
             _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
             _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
+            _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
         }
 
         public async Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct)
@@ -328,6 +332,9 @@ namespace Farm.Web.Api.Services.Gcode
                 // Normalize virtual directory path
                 string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
                 
+                // Get or create target folder
+                var targetFolder = await _modelService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
+
                 // Create database record
                 GcodeFile gcodeFile = new()
                 {
@@ -335,7 +342,7 @@ namespace Farm.Web.Api.Services.Gcode
                     OriginalFileName = fileName,
                     DisplayName = Path.GetFileNameWithoutExtension(fileName),
                     FilePath = Path.GetFullPath(filePath),
-                    FileDirectory = normalizedVirtualDir,
+                    FolderId = targetFolder.Id,
                     FileSizeBytes = fileInfo.Length,
                     FileHash = fileHash,
                     UploadedAt = DateTime.UtcNow,
@@ -811,13 +818,17 @@ namespace Farm.Web.Api.Services.Gcode
                 }
             }
 
+            // Get or create target folder
+            string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
+            var targetFolder = await _modelService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
+
             // Create database record
             GcodeFile gcodeFile = new()
             {
                 Id = fileId,
                 OriginalFileName = originalFileName,
                 DisplayName = Path.GetFileNameWithoutExtension(originalFileName),
-                FileDirectory = NormalizeVirtualPath(virtualDirectory ?? "/"),
+                FolderId = targetFolder.Id,
                 FilePath = Path.GetFullPath(finalFilePath),
                 FileSizeBytes = fileSizeBytes,
                 FileHash = fileHash,

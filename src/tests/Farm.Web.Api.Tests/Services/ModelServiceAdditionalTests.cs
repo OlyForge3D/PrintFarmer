@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Services.Models;
@@ -58,7 +59,8 @@ namespace Farm.Web.Api.Tests.Services
             _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
+            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
 
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
@@ -90,7 +92,8 @@ namespace Farm.Web.Api.Tests.Services
                     }
                 });
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
+            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
 
             IFormFile badFile = CreateFormFile("file", "x", "model.exe");
 
@@ -109,7 +112,8 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
+            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
 
             IFormFile empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.stl");
 
@@ -135,7 +139,9 @@ namespace Farm.Web.Api.Tests.Services
             _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockAnalysis.Object);
+            Mock<Farm.Infrastructure.Data.AppDbContext> mockDb = new Mock<Farm.Infrastructure.Data.AppDbContext>(MockBehavior.Loose);
+
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, mockAnalysis.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 
@@ -161,7 +167,9 @@ namespace Farm.Web.Api.Tests.Services
             _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
+            Mock<Farm.Infrastructure.Data.AppDbContext> mockDb = new Mock<Farm.Infrastructure.Data.AppDbContext>(MockBehavior.Loose);
+
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 

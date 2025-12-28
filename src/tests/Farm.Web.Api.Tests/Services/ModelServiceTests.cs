@@ -45,7 +45,9 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
+            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
+
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
 
             IFormFile file = CreateFormFile("file", "dummy-content", "model.stl");
 
@@ -97,7 +99,9 @@ namespace Farm.Web.Api.Tests.Services
             _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object);
+            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
+
+            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
             Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);

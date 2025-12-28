@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
@@ -20,6 +21,7 @@ using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MoonrakerDir = Farm.Infrastructure.Contracts.Printers.Moonraker.MoonrakerDirectoryInfo;
@@ -824,6 +826,10 @@ public partial class GcodeHarvestService(
                     }
                 }
 
+                // Get or create target folder for this gcode file
+                string fileDirectory = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
+                var targetFolder = await GetOrCreateFolderAsync(fileDirectory, "gcode", ct);
+
                 // Create library entry
                 // Note: We use TargetModelId instead of SourcePrinterId so the file is usable on ANY printer
                 // of the same model, not just the one it was harvested from
@@ -832,7 +838,7 @@ public partial class GcodeHarvestService(
                     Id = Guid.NewGuid(),
                     OriginalFileName = discoveredFile.FileName,
                     DisplayName = Path.GetFileNameWithoutExtension(discoveredFile.FileName),
-                    FileDirectory = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory(),
+                    FolderId = targetFolder.Id,
                     FilePath = filePath,
                     FileSizeBytes = discoveredFile.Size,
                     FileHash = discoveredFile.FileHash ?? "",
@@ -854,7 +860,7 @@ public partial class GcodeHarvestService(
                     Tags = request.DefaultTags != null ? JsonSerializer.Serialize(request.DefaultTags) : null
                 };
 
-                _logger.LogDebugWithSource($"Adding GcodeFile: Id={gcodeFile.Id}, FileName={gcodeFile.OriginalFileName}, FileDirectory={gcodeFile.FileDirectory}, TargetModelId={gcodeFile.TargetModelId}, CreatedAt={gcodeFile.CreatedAt}");
+                _logger.LogDebugWithSource($"Adding GcodeFile: Id={gcodeFile.Id}, FileName={gcodeFile.OriginalFileName}, FolderId={gcodeFile.FolderId}, TargetModelId={gcodeFile.TargetModelId}, CreatedAt={gcodeFile.CreatedAt}");
 
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 importedFileIds.Add(discoveredFile.Id.ToString());
@@ -1218,6 +1224,41 @@ public partial class GcodeHarvestService(
         {
             _logger.LogError(ex, $"Error waiting for harvest tasks to complete");
         }
+    }
+
+    /// <summary>
+    /// Gets or creates a Folder entity for the given directory path and type
+    /// </summary>
+    private async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
+    {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // Normalize path
+        string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(Path.DirectorySeparatorChar, '/');
+        
+        // Try to find existing folder
+        var existingFolder = await db.Folders
+            .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, ct);
+        
+        if (existingFolder != null)
+        {
+            return existingFolder;
+        }
+
+        // Create new folder
+        var newFolder = new Folder
+        {
+            Id = Guid.NewGuid(),
+            Path = normalizedPath,
+            FolderType = folderType,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await db.AddAsync(newFolder, ct);
+        await db.SaveChangesAsync(ct);
+
+        return newFolder;
     }
 
     [GeneratedRegex(@"PrusaSlicer (\S+)")]

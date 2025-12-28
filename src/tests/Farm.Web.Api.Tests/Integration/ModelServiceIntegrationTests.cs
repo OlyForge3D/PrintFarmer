@@ -74,7 +74,6 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
             OriginalFileName = originalFileName,
             DisplayName = displayName,
             FilePath = filePath,
-            FileDirectory = directory ?? string.Empty,
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),
             FileFormat = ModelFileFormat.STL,

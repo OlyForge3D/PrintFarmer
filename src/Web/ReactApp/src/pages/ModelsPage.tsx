@@ -6,7 +6,6 @@ import { PageTemplate } from '@/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
 import { Button, Input, FileUpload } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
-import { HierarchicalFileBrowser, FileEntry } from '@/components/files/HierarchicalFileBrowser';
 import { ExplorerFileBrowser } from '@/components/files/ExplorerFileBrowser';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
@@ -54,12 +53,21 @@ export const ModelsPage: React.FC = () => {
   // Slicing now redirects to NewSliceJobPage instead of using modal
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'explorer'>('grid');
-  const [showFiltersPanel, setShowFiltersPanel] = useState(true);
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'explorer'>('explorer');
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
 
   const queryClient = useQueryClient();
+
+  // Debounce search query
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Fetch tags
   const { data: allTags = [] } = useQuery<ModelTag[]>({
@@ -77,7 +85,7 @@ export const ModelsPage: React.FC = () => {
 
   // Fetch models with search/filter
   const { data: searchResult, isLoading } = useQuery({
-    queryKey: ['models-search', searchQuery, selectedTags],
+    queryKey: ['models-search', debouncedSearchQuery, selectedTags],
     queryFn: async () => {
       const response = await fetch(`${getApiBaseUrl()}/3d-models/search`, {
         method: 'POST',
@@ -86,7 +94,7 @@ export const ModelsPage: React.FC = () => {
           ...getAuthHeaders()
         },
         body: JSON.stringify({
-          query: searchQuery || undefined,
+          query: debouncedSearchQuery || undefined,
           tagIds: selectedTags.length > 0 ? selectedTags : undefined,
           page: 1,
           pageSize: 100,
@@ -214,228 +222,30 @@ export const ModelsPage: React.FC = () => {
       icon={CubeIcon}
       maxWidth="max-w-7xl"
     >
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
-        {/* ===== SIDEBAR ===== */}
-        <div className="lg:col-span-1 space-y-4">
-          {/* Upload Section */}
-          <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden">
-            <button
-              onClick={() => setShowUploadPanel(!showUploadPanel)}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-pf-bg-2 transition-colors"
-            >
-              <span className="font-semibold text-pf-text-primary flex items-center gap-2">
-                <UploadIcon className="w-5 h-5" />
-                Upload Models
-              </span>
-              <svg className={`w-5 h-5 transition-transform ${showUploadPanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-              </svg>
-            </button>
-
-            {showUploadPanel && (
-              <div className="border-t border-pf-border p-4 space-y-3">
-                {/* Upload Area */}
-                <div
-                  className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
-                    dragOver ? 'border-pf-accent bg-pf-accent-bg bg-opacity-20' : 'border-pf-border hover:border-pf-accent'
-                  }`}
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                >
-                  <div className="flex flex-col items-center space-y-2">
-                    <CubeIcon className="w-8 h-8 text-pf-text-tertiary" />
-                    <p className="text-xs font-medium text-pf-text-secondary">Drag files here</p>
-                    <p className="text-xs text-pf-text-tertiary">or click to browse</p>
-                  </div>
-                  <FileUpload
-                    id="file-upload"
-                    multiple
-                    accept=".stl,.3mf,.obj,.ply"
-                    onChange={(files) => {
-                      if (files) {
-                        const filesToAdd = Array.from(files).filter(file =>
-                          ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
-                        );
-                        setSelectedFiles(prev => [...prev, ...filesToAdd]);
-                      }
-                    }}
-                    buttonText="Browse"
-                    buttonVariant="secondary"
-                    className="mt-3"
-                  />
-                </div>
-
-                {/* Selected files list */}
-                {selectedFiles.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium text-pf-text-primary">{selectedFiles.length} file(s) selected</h4>
-                      <Button
-                        onClick={() => setSelectedFiles([])}
-                        variant="subtle"
-                        size="sm"
-                      >
-                        <CloseIcon className="w-3 h-3" />
-                      </Button>
-                    </div>
-                    <div className="max-h-32 overflow-y-auto space-y-1">
-                      {selectedFiles.map((file, index) => (
-                        <div key={index} className="flex items-center justify-between bg-pf-bg-2 p-2 rounded text-xs">
-                          <span className="truncate text-pf-text-secondary">{file.name}</span>
-                          <Button
-                            onClick={() => removeFile(index)}
-                            variant="subtle"
-                            size="sm"
-                          >
-                            <DeleteIcon className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Upload progress */}
-                    {Object.entries(uploadProgress).length > 0 && (
-                      <div className="space-y-1">
-                        {Object.entries(uploadProgress).map(([name, progress]) => (
-                          <div key={name} className="text-xs">
-                            <div className="flex justify-between mb-1">
-                              <span className="truncate text-pf-text-secondary">{name}</span>
-                              <span className="text-pf-text-tertiary">{progress}%</span>
-                            </div>
-                            <div className="h-1 bg-pf-bg-0 rounded-full border border-pf-border overflow-hidden">
-                              <div className="bg-pf-accent h-full transition-all" style={{ width: `${progress}%` }} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Upload button */}
-                    <Button
-                      onClick={uploadFiles}
-                      disabled={uploadMutation.isPending}
-                      variant="primary"
-                      size="sm"
-                      className="w-full mt-2"
-                    >
-                      <UploadIcon className="w-4 h-4 mr-1" />
-                      {uploadMutation.isPending ? 'Uploading...' : 'Upload All'}
-                    </Button>
-                  </div>
-                )}
-
-                {selectedFiles.length === 0 && Object.entries(uploadProgress).length === 0 && (
-                  <p className="text-xs text-pf-text-tertiary text-center py-2">
-                    STL, 3MF, OBJ, PLY
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Filters Section */}
-          <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden">
-            <button
-              onClick={() => setShowFiltersPanel(!showFiltersPanel)}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-pf-bg-2 transition-colors"
-            >
-              <span className="font-semibold text-pf-text-primary flex items-center gap-2">
-                <TagIcon className="w-5 h-5" />
-                Filters
-              </span>
-              <span className="text-xs bg-pf-accent text-white px-2 py-0.5 rounded-full">
-                {selectedTags.length > 0 ? selectedTags.length : 0}
-              </span>
-            </button>
-
-            {showFiltersPanel && (
-              <div className="border-t border-pf-border p-4 space-y-3 max-h-96 overflow-y-auto">
-                {/* Clear filters */}
-                {selectedTags.length > 0 && (
-                  <Button
-                    onClick={() => setSelectedTags([])}
-                    variant="secondary"
-                    size="sm"
-                    className="w-full text-xs"
-                  >
-                    Clear All Filters
-                  </Button>
-                )}
-
-                {/* Tag list */}
-                {allTags.length > 0 ? (
-                  <div className="space-y-2">
-                    {allTags.map(tag => (
-                      <button
-                        key={tag.id}
-                        onClick={() => toggleTag(tag.id)}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded text-sm transition-colors ${
-                          selectedTags.includes(tag.id)
-                            ? 'bg-pf-accent text-white'
-                            : 'bg-pf-bg-2 text-pf-text-primary hover:bg-pf-border'
-                        }`}
-                        title={tag.description}
-                      >
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: tag.color || '#6366f1' }}
-                        />
-                        <span className="flex-1 text-left truncate">{tag.name}</span>
-                        {selectedTags.includes(tag.id) && (
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-pf-text-tertiary text-center py-3">No tags available</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Tools Section */}
-          <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden p-4 space-y-2">
-            <h4 className="text-xs font-semibold text-pf-text-tertiary uppercase tracking-wide">Tools</h4>
-
-            <Button
-              onClick={() => setShowBulkTagModal(true)}
-              variant="secondary"
-              size="sm"
-              className="w-full justify-start"
-            >
-              <TagIcon className="w-4 h-4 mr-2" />
-              Bulk Tag
-            </Button>
-          </div>
-        </div>
-
-        {/* ===== MAIN CONTENT ===== */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Search Bar */}
-          <div className="relative">
-            <SearchIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-pf-text-tertiary pointer-events-none" />
+      <div className="space-y-4 h-full flex flex-col">
+        {/* Toolbar */}
+        <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 space-y-3">
+          {/* Top Row: Search and Controls */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <Input
               type="text"
-              placeholder="Search models by name or description..."
+              placeholder="Search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 h-10"
+              className="flex-1 min-w-0"
             />
-          </div>
-
-          {/* Content Controls */}
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-pf-text-secondary">
-              {models.length} model{models.length !== 1 ? 's' : ''}
-              {selectedTags.length > 0 && ` (filtered)`}
-            </p>
-
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1 bg-pf-bg-1 border border-pf-border rounded p-1">
+            
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex gap-1 bg-pf-bg-0 border border-pf-border rounded p-1">
+                <Button
+                  onClick={() => setViewMode('explorer')}
+                  variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
+                  size="sm"
+                  title="Explorer view"
+                  className="px-2"
+                >
+                  <FolderIcon className="w-4 h-4" />
+                </Button>
                 <Button
                   onClick={() => setViewMode('grid')}
                   variant={viewMode === 'grid' ? 'primary' : 'secondary'}
@@ -454,40 +264,186 @@ export const ModelsPage: React.FC = () => {
                 >
                   <ListViewIcon className="w-4 h-4" />
                 </Button>
-                <Button
-                  onClick={() => setViewMode('explorer')}
-                  variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
-                  size="sm"
-                  title="Explorer view"
-                  className="px-2"
-                >
-                  <FolderIcon className="w-4 h-4" />
-                </Button>
               </div>
+
+              <Button
+                onClick={() => setShowUploadPanel(!showUploadPanel)}
+                variant="secondary"
+                size="sm"
+                className="whitespace-nowrap"
+              >
+                <UploadIcon className="w-4 h-4 mr-1" />
+                Upload
+              </Button>
+
+              <Button
+                onClick={() => setShowFiltersPanel(!showFiltersPanel)}
+                variant="secondary"
+                size="sm"
+                className="whitespace-nowrap"
+              >
+                <TagIcon className="w-4 h-4 mr-1" />
+                Filters
+                {selectedTags.length > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-pf-accent text-white rounded">
+                    {selectedTags.length}
+                  </span>
+                )}
+              </Button>
+
+              {(selectedTags.length > 0 || models.length > 0) && (
+                <Button
+                  onClick={() => setShowBulkTagModal(true)}
+                  variant="secondary"
+                  size="sm"
+                  className="whitespace-nowrap"
+                >
+                  <TagIcon className="w-4 h-4 mr-1" />
+                  Bulk Tag
+                </Button>
+              )}
             </div>
           </div>
 
-          {/* Explorer View */}
-          {viewMode === 'explorer' ? (
-            <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 h-96">
+          {/* Upload Panel */}
+          {showUploadPanel && (
+            <div className="border-t border-pf-border pt-3 space-y-3">
+              <div
+                className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
+                  dragOver ? 'border-pf-accent bg-pf-accent-bg bg-opacity-20' : 'border-pf-border hover:border-pf-accent'
+                }`}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+              >
+                <div className="flex flex-col items-center space-y-2">
+                  <CubeIcon className="w-8 h-8 text-pf-text-tertiary" />
+                  <p className="text-xs font-medium text-pf-text-secondary">Drag files here or click to browse</p>
+                </div>
+                <FileUpload
+                  id="file-upload"
+                  multiple
+                  accept=".stl,.3mf,.obj,.ply"
+                  onChange={(files) => {
+                    if (files) {
+                      const filesToAdd = Array.from(files).filter(file =>
+                        ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
+                      );
+                      setSelectedFiles(prev => [...prev, ...filesToAdd]);
+                    }
+                  }}
+                  buttonText="Browse"
+                  buttonVariant="secondary"
+                  className="mt-3"
+                />
+              </div>
+
+              {selectedFiles.length > 0 && (
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium text-pf-text-primary">{selectedFiles.length} file(s) selected</h4>
+                    <Button onClick={() => setSelectedFiles([])} variant="subtle" size="sm">
+                      <CloseIcon className="w-3 h-3" />
+                    </Button>
+                  </div>
+                  {selectedFiles.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between bg-pf-bg-2 p-2 rounded text-xs">
+                      <span className="truncate text-pf-text-secondary">{file.name}</span>
+                      <Button onClick={() => removeFile(index)} variant="subtle" size="sm">
+                        <DeleteIcon className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ))}
+
+                  {Object.entries(uploadProgress).length > 0 && (
+                    <div className="space-y-1">
+                      {Object.entries(uploadProgress).map(([name, progress]) => (
+                        <div key={name} className="text-xs">
+                          <div className="flex justify-between mb-1">
+                            <span className="truncate text-pf-text-secondary">{name}</span>
+                            <span className="text-pf-text-tertiary">{progress}%</span>
+                          </div>
+                          <div className="h-1 bg-pf-bg-0 rounded-full border border-pf-border overflow-hidden">
+                            <div className="bg-pf-accent h-full transition-all" style={{ width: `${progress}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={uploadFiles}
+                    disabled={uploadMutation.isPending}
+                    variant="primary"
+                    size="sm"
+                    className="w-full"
+                  >
+                    <UploadIcon className="w-4 h-4 mr-1" />
+                    {uploadMutation.isPending ? 'Uploading...' : 'Upload All'}
+                  </Button>
+                </div>
+              )}
+
+              {selectedFiles.length === 0 && Object.entries(uploadProgress).length === 0 && (
+                <p className="text-xs text-pf-text-tertiary text-center py-2">STL, 3MF, OBJ, PLY</p>
+              )}
+            </div>
+          )}
+
+          {/* Filters Panel */}
+          {showFiltersPanel && (
+            <div className="border-t border-pf-border pt-3 space-y-2">
+              {selectedTags.length > 0 && (
+                <Button onClick={() => setSelectedTags([])} variant="secondary" size="sm" className="w-full text-xs">
+                  Clear All Filters
+                </Button>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                {allTags.length > 0 ? (
+                  allTags.map(tag => (
+                    <button
+                      key={tag.id}
+                      onClick={() => toggleTag(tag.id)}
+                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors ${
+                        selectedTags.includes(tag.id)
+                          ? 'bg-pf-accent text-white'
+                          : 'bg-pf-bg-2 text-pf-text-primary hover:bg-pf-border'
+                      }`}
+                      title={tag.description}
+                    >
+                      <div
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: tag.color || '#6366f1' }}
+                      />
+                      <span className="truncate">{tag.name}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="text-xs text-pf-text-tertiary col-span-full text-center py-2">No tags available</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Content Area - Full Width */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          {models.length === 0 && viewMode !== 'explorer' ? (
+            <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
+              <CubeIcon className="w-12 h-12 text-pf-text-tertiary mx-auto mb-3 opacity-50" />
+              <p className="text-pf-text-secondary">No models found</p>
+              <p className="text-xs text-pf-text-tertiary mt-1">
+                {selectedTags.length > 0 ? 'Try adjusting your filters' : 'Upload your first model to get started'}
+              </p>
+            </div>
+          ) : viewMode === 'explorer' ? (
+            <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 h-full">
               <ExplorerFileBrowser endpoint="models" />
             </div>
-          ) : (
-            <>
-              {/* Models Grid/List View */}
-              {models.length === 0 ? (
-                <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
-                  <CubeIcon className="w-12 h-12 text-pf-text-tertiary mx-auto mb-3 opacity-50" />
-                  <p className="text-pf-text-secondary">No models found</p>
-                  <p className="text-xs text-pf-text-tertiary mt-1">
-                    {selectedTags.length > 0 ? 'Try adjusting your filters' : 'Upload your first model to get started'}
-                  </p>
-                </div>
-              ) : viewMode === 'grid' ? (
-                // Grid View
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                  {models.map((model: Model) => (
-                    <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group">
+          ) : viewMode === 'grid' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto">
+              {models.map((model: Model) => (
+                <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group">
                   {/* Model Preview */}
                   <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
                     {model.thumbnailUrl ? (
@@ -501,18 +457,20 @@ export const ModelsPage: React.FC = () => {
                     )}
 
                     {/* Quick View Button */}
-                    <Button
-                      onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                      onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                      onClick={() => setViewerModel(model)}
-                      variant="primary"
-                      size="sm"
-                      className="absolute inset-0 m-auto w-fit opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="View 3D Model"
-                    >
-                      <EyeIcon className="w-4 h-4 mr-1" />
-                      View
-                    </Button>
+                    {model.fileType !== '3mf' && (
+                      <Button
+                        onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                        onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                        onClick={() => setViewerModel(model)}
+                        variant="primary"
+                        size="sm"
+                        className="absolute inset-0 m-auto w-fit opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="View 3D Model"
+                      >
+                        <EyeIcon className="w-4 h-4 mr-1" />
+                        View
+                      </Button>
+                    )}
                   </div>
 
                   {/* Model Info */}
@@ -582,10 +540,10 @@ export const ModelsPage: React.FC = () => {
             </div>
           ) : (
             // List View
-            <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto">
+            <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto flex-1">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-pf-border bg-pf-bg-2">
+                  <tr className="border-b border-pf-border bg-pf-bg-2 sticky top-0">
                     <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Name</th>
                     <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Type</th>
                     <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Size</th>
@@ -677,8 +635,6 @@ export const ModelsPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
-              )}
-            </>
           )}
         </div>
       </div>

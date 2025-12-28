@@ -49,7 +49,6 @@ public class TagServiceIntegrationTests : IAsyncLifetime
             Id = Guid.NewGuid(),
             OriginalFileName = $"{displayName}.stl",
             DisplayName = displayName,
-            FileDirectory = "/models",
             FilePath = $"/models/{displayName}.stl",
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),

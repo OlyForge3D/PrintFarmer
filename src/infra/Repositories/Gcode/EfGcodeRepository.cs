@@ -121,10 +121,10 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 normalizedParent = normalizedParent[..^1];
             }
 
-            // Get all unique subdirectories that are direct children of the parent
-            var subdirs = await _db.GcodeFiles
-                .Where(g => g.FileDirectory == normalizedParent || g.FileDirectory.StartsWith(normalizedParent + "/") || g.FileDirectory.StartsWith(normalizedParent + Path.DirectorySeparatorChar))
-                .Select(g => g.FileDirectory)
+            // Get all unique subdirectories from Folder entities for gcode files
+            var subdirs = await _db.Folders
+                .Where(f => f.FolderType == "gcode" && !f.DeletedAt.HasValue && f.Path.StartsWith(normalizedParent))
+                .Select(f => f.Path)
                 .Distinct()
                 .ToListAsync(ct);
 
@@ -166,38 +166,6 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 }
             }
 
-            // Also include folders from the Folder table that exist at this level
-            var foldersFolders = await _db.Folders
-                .Where(f => f.FolderType == "gcode" && !f.DeletedAt.HasValue)
-                .AsNoTracking()
-                .ToListAsync();
-
-            foreach (var folder in foldersFolders)
-            {
-                var folderSegments = folder.Path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-                
-                if (normalizedParent == "")
-                {
-                    // Looking for root-level folders
-                    if (folderSegments.Length == 1)
-                    {
-                        directChildren.Add(folderSegments[0]);
-                    }
-                }
-                else
-                {
-                    // Looking for nested folders - check if this folder's parent matches
-                    if (folderSegments.Length > 1)
-                    {
-                        string parentPath = string.Join("/", folderSegments.SkipLast(1));
-                        if (parentPath == normalizedParent)
-                        {
-                            directChildren.Add(folderSegments[^1]);
-                        }
-                    }
-                }
-            }
-
             return directChildren.Distinct().OrderBy(d => d).ToList();
         }
 
@@ -208,9 +176,9 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 directory = string.Empty;
             }
 
-            // Get files where FileDirectory exactly matches (not recursive)
+            // Get files by finding the folder with matching path
             return await _db.GcodeFiles
-                .Where(g => g.FileDirectory == directory)
+                .Where(g => g.Folder != null && g.Folder.Path == directory)
                 .ToListAsync(ct);
         }
 

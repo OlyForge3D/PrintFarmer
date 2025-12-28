@@ -258,9 +258,10 @@ public class GcodeFile
     public Guid Id { get; set; }
     public string OriginalFileName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string FileDirectory { get; set; } = string.Empty; // Directory path (e.g., "/home/user/gcode")
+    public Guid? FolderId { get; set; } // Foreign key to Folder entity
+    public Folder? Folder { get; set; } // Navigation property to Folder
     public string FilePath { get; set; } = string.Empty; // Physical path on disk (full path)
-    public long FileSizeBytes { get; set; }
+    public long FileSizeBytes { get; set;}
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public DateTime UploadedAt { get; set; }
     public string? Description { get; set; }
@@ -400,7 +401,8 @@ public class Model3D
     public Guid Id { get; set; }
     public string OriginalFileName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string FileDirectory { get; set; } = string.Empty; // Directory path (e.g., "/home/user/models")
+    public Guid? FolderId { get; set; } // Foreign key to Folder entity
+    public Folder? Folder { get; set; } // Navigation property to Folder
     public string FilePath { get; set; } = string.Empty; // Physical path on disk
     public long FileSizeBytes { get; set; }
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
@@ -854,6 +856,24 @@ public enum FileAuditType
     FullAudit = 3
 }
 
+/// <summary>
+/// Represents a virtual folder for organizing 3D models and G-code files.
+/// Folders provide hierarchical organization and enable referential integrity through FK relationships.
+/// Each folder is associated with a specific content type (models or gcode).
+/// </summary>
+public class Folder
+{
+    public Guid Id { get; set; }
+    public string Path { get; set; } = string.Empty; // Virtual folder path (e.g., "/", "/subfolder")
+    public string FolderType { get; set; } = string.Empty; // "models" or "gcode" - specifies which files this folder contains
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? DeletedAt { get; set; } // Soft delete support
+    
+    // Navigation properties to files in this folder
+    public ICollection<Model3D> Models { get; set; } = new List<Model3D>();
+    public ICollection<GcodeFile> Files { get; set; } = new List<GcodeFile>();
+}
+
 [SuppressMessage("Naming", "CA1724:Type names should not match namespace", Justification = "Renamed infra domain type to PasswordPolicyEntity to avoid CA1724 conflicts with API domain type.")]
 public class PasswordPolicyEntity
 {
@@ -895,28 +915,6 @@ public class Model3DTagMapping
     // Navigation properties
     public Model3D? Model3D { get; set; }
     public Model3DTag? Tag { get; set; }
-}
-
-/// <summary>
-/// Represents a virtual folder for organizing 3D models and G-code files.
-/// Folders are created via the API and tracked in the database for proper hierarchy management.
-/// </summary>
-public class Folder
-{
-    public Guid Id { get; set; }
-    
-    /// <summary>
-    /// Virtual path of the folder (e.g., "/MyFolder" or "/Parent/Child")
-    /// </summary>
-    public required string Path { get; set; }
-    
-    /// <summary>
-    /// Folder type: "models" or "gcode"
-    /// </summary>
-    public required string FolderType { get; set; }
-    
-    public DateTime CreatedAt { get; set; }
-    public DateTime? DeletedAt { get; set; }
 }
 
 /// <summary>
