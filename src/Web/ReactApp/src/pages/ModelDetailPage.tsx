@@ -16,6 +16,13 @@ interface ModelDetail {
     uploadedAt: string;
     url: string;
     thumbnailUrl?: string;
+    description?: string;
+    dimensionX?: number;
+    dimensionY?: number;
+    dimensionZ?: number;
+    triangleCount?: number;
+    isValid: boolean;
+    validationErrors?: string;
     tags?: Array<{ id: string; name: string; color?: string; description?: string }>;
 }
 
@@ -34,6 +41,8 @@ export const ModelDetailPage: React.FC = () => {
     const [newTags, setNewTags] = useState<{ name: string; color?: string; description?: string }[]>([]);
     const [isEditingName, setIsEditingName] = useState(false);
     const [editedName, setEditedName] = useState('');
+    const [isEditingDescription, setIsEditingDescription] = useState(false);
+    const [editedDescription, setEditedDescription] = useState('');
     const [isEditingTags, setIsEditingTags] = useState(false);
 
     // Fetch model details
@@ -66,9 +75,9 @@ export const ModelDetailPage: React.FC = () => {
         gcTime: 10 * 60 * 1000
     });
 
-    // Update model name mutation
-    const updateNameMutation = useMutation({
-        mutationFn: async (newName: string) => {
+    // Update model mutation (name and/or description)
+    const updateModelMutation = useMutation({
+        mutationFn: async (updates: { name?: string; description?: string }) => {
             const response = await fetch(
                 `${getApiBaseUrl()}/3d-models/${modelId}`,
                 {
@@ -77,14 +86,15 @@ export const ModelDetailPage: React.FC = () => {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ name: newName })
+                    body: JSON.stringify(updates)
                 }
             );
-            if (!response.ok) throw new Error('Failed to update model name');
+            if (!response.ok) throw new Error('Failed to update model');
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['model-detail', modelId] });
             setIsEditingName(false);
+            setIsEditingDescription(false);
         }
     });
 
@@ -157,13 +167,16 @@ export const ModelDetailPage: React.FC = () => {
         }
     });
 
-    // Initialize selected tags and name when model loads
+    // Initialize selected tags and editable fields when model loads
     React.useEffect(() => {
         if (model?.tags) {
             setSelectedTagIds(model.tags.map(t => t.id));
         }
         if (model?.name) {
             setEditedName(model.name);
+        }
+        if (model?.description) {
+            setEditedDescription(model.description);
         }
     }, [model]);
 
@@ -274,12 +287,12 @@ export const ModelDetailPage: React.FC = () => {
                                             size="sm"
                                             onClick={() => {
                                                 if (editedName.trim() && editedName !== model?.name) {
-                                                    updateNameMutation.mutate(editedName.trim());
+                                                    updateModelMutation.mutate({ name: editedName.trim() });
                                                 } else {
                                                     setIsEditingName(false);
                                                 }
                                             }}
-                                            disabled={updateNameMutation.isPending}
+                                            disabled={updateModelMutation.isPending}
                                         >
                                             <SaveIcon className="w-4 h-4" />
                                         </Button>
@@ -310,38 +323,119 @@ export const ModelDetailPage: React.FC = () => {
                             </FormField>
                         </div>
 
+                        {/* Description - Editable */}
                         <div>
-                            <label className="text-sm text-pf-text-tertiary">File Name</label>
-                            <p className="text-pf-text-primary font-medium">{model.fileName}</p>
+                            <FormField label="Description">
+                                {isEditingDescription ? (
+                                    <div className="flex gap-2 mt-2">
+                                        <textarea
+                                            value={editedDescription}
+                                            onChange={(e) => setEditedDescription(e.target.value)}
+                                            placeholder="Add a description for this model..."
+                                            className="flex-1 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent resize-none"
+                                            rows={4}
+                                        />
+                                        <div className="flex flex-col gap-2">
+                                            <Button
+                                                variant="primary"
+                                                size="sm"
+                                                onClick={() => {
+                                                    if (editedDescription !== model?.description) {
+                                                        updateModelMutation.mutate({ description: editedDescription });
+                                                    } else {
+                                                        setIsEditingDescription(false);
+                                                    }
+                                                }}
+                                                disabled={updateModelMutation.isPending}
+                                            >
+                                                <SaveIcon className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setEditedDescription(model?.description || '');
+                                                    setIsEditingDescription(false);
+                                                }}
+                                            >
+                                                <CloseIcon className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-start justify-between gap-4">
+                                        <p className="text-pf-text-primary whitespace-pre-wrap flex-1">
+                                            {model.description || <span className="text-pf-text-tertiary italic">No description</span>}
+                                        </p>
+                                        <Button
+                                            variant="subtle"
+                                            size="sm"
+                                            onClick={() => setIsEditingDescription(true)}
+                                            className="p-1 flex-shrink-0"
+                                        >
+                                            <EditIcon className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                )}
+                            </FormField>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-sm text-pf-text-tertiary">File Type</label>
-                                <p className="text-pf-text-primary font-medium">{model.fileType}</p>
+                        {/* File Info - Hidden by default, shown on click or if dimensions available */}
+                        <details className="group">
+                            <summary className="cursor-pointer text-sm text-pf-text-secondary hover:text-pf-text-primary">
+                                File Details
+                            </summary>
+                            <div className="mt-3 space-y-3 pt-3 border-t border-pf-border">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-sm text-pf-text-tertiary">File Type</label>
+                                        <p className="text-pf-text-primary font-medium">{model.fileType}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm text-pf-text-tertiary">File Size</label>
+                                        <p className="text-pf-text-primary font-medium">{formatFileSize(model.fileSize)}</p>
+                                    </div>
+                                </div>
+
+                                {model.triangleCount && (
+                                    <div>
+                                        <label className="text-sm text-pf-text-tertiary">Triangle Count</label>
+                                        <p className="text-pf-text-primary font-medium">{model.triangleCount.toLocaleString()}</p>
+                                    </div>
+                                )}
+
+                                {(model.dimensionX || model.dimensionY || model.dimensionZ) && (
+                                    <div>
+                                        <label className="text-sm text-pf-text-tertiary">Dimensions (mm)</label>
+                                        <p className="text-pf-text-primary font-medium">
+                                            X: {model.dimensionX?.toFixed(2) || '—'} × Y: {model.dimensionY?.toFixed(2) || '—'} × Z: {model.dimensionZ?.toFixed(2) || '—'}
+                                        </p>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <label className="text-sm text-pf-text-tertiary">Uploaded</label>
+                                    <p className="text-pf-text-primary font-medium">
+                                        {new Date(model.uploadedAt).toLocaleString()}
+                                    </p>
+                                </div>
+
+                                {!model.isValid && model.validationErrors && (
+                                    <div>
+                                        <label className="text-sm text-pf-text-tertiary">Validation Issues</label>
+                                        <p className="text-pf-alert text-sm">{model.validationErrors}</p>
+                                    </div>
+                                )}
+
+                                <a
+                                    href={model.url}
+                                    download
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover mt-3"
+                                >
+                                    Download File
+                                </a>
                             </div>
-                            <div>
-                                <label className="text-sm text-pf-text-tertiary">File Size</label>
-                                <p className="text-pf-text-primary font-medium">{formatFileSize(model.fileSize)}</p>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="text-sm text-pf-text-tertiary">Uploaded</label>
-                            <p className="text-pf-text-primary font-medium">
-                                {new Date(model.uploadedAt).toLocaleString()}
-                            </p>
-                        </div>
-
-                        <div>
-                            <a
-                                href={model.url}
-                                download
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover"
-                            >
-                                Download File
-                            </a>
-                        </div>
+                        </details>
                     </div>
                 </div>
             </div>

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;

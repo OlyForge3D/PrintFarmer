@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,15 +45,15 @@ namespace Farm.Backend.Plugin.Moonraker
             try
             {
                 _logger.LogInformation($"[Moonraker] GetPrinterStatusAsync for {printer.Name} (ID={printer.Id}): BackendUrl={printer.BackendUrl}");
-                
+
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
-                
+
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
-                
+
                 _logger.LogInformation($"[Moonraker] Status received for {printer.Name}: IsOnline={status.IsOnline}, State={status.State}");
-                
+
                 return new PrinterStatusDto(
                     Id: printer.Id,
                     IsOnline: status.IsOnline,
@@ -90,18 +90,18 @@ namespace Farm.Backend.Plugin.Moonraker
             try
             {
                 _logger.LogInformation($"[Moonraker] GetPrinterDtoAsync for {printer.Name} (ID={printer.Id}): BackendUrl={printer.BackendUrl}");
-                
+
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
-                
+
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
-                
+
                 // Get Spoolman integration info for Moonraker
                 PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoAsync(printer.BackendUrl, ct);
-                
+
                 _logger.LogInformation($"[Moonraker] DTO created for {printer.Name}: IsOnline={status.IsOnline}, State={status.State}");
-                
+
                 return await _client.CreatePrinterDtoAsync(printer, status, spoolInfo, ct);
             }
             catch (Exception ex)

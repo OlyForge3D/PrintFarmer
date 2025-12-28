@@ -1,8 +1,8 @@
+﻿using Farm.Infrastructure;
 using Farm.Web.Api.Controllers.Requests;
-using Farm.Infrastructure;
 using FluentAssertions;
-using Moq;
 using Microsoft.AspNetCore.Http;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Controllers.Requests;
 
@@ -257,10 +257,10 @@ public class FileOperationRequestTests
     public void FileName_CanBeMultipleTimesSet()
     {
         var request = new FileOperationRequest();
-        
+
         request.FileName = "file1.gcode";
         request.FileName.Should().Be("file1.gcode");
-        
+
         request.FileName = "file2.gcode";
         request.FileName.Should().Be("file2.gcode");
     }

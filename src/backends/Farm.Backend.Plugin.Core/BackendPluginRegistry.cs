@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.Core;
+﻿namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// Default implementation of the backend plugin registry.
@@ -21,7 +21,9 @@ public class BackendPluginRegistry : IBackendPluginRegistry
         lock (_lock)
         {
             if (_plugins.ContainsKey(plugin.BackendType))
+            {
                 throw new InvalidOperationException($"A plugin is already registered for backend type '{plugin.BackendType}'.");
+            }
 
             _plugins[plugin.BackendType] = plugin;
         }

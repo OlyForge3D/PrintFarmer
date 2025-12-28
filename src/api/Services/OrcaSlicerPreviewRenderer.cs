@@ -1,8 +1,8 @@
 ﻿using System.Numerics;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Drawing;
 using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
 namespace Farm.Web.Api.Services;
@@ -94,7 +94,7 @@ public sealed class OrcaPreviewRenderer : BasePreviewRenderer
     protected override Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options)
     {
         var n = Vector3.Normalize(normal);
-        
+
         // Use VIEW-SPACE light direction since normals are in view space
         var l = Vector3.Normalize(options.ViewSpaceLightDirection);
 

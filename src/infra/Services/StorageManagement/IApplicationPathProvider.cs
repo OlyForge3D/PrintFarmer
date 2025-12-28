@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.StorageManagement;
+﻿namespace Farm.Infrastructure.Services.StorageManagement;
 
 /// <summary>
 /// Abstraction for application path resolution to decouple from ASP.NET Core.

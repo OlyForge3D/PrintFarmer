@@ -6,9 +6,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.Extensions.Configuration;
 
 namespace Farm.Infrastructure.Settings
 {
@@ -59,7 +59,7 @@ namespace Farm.Infrastructure.Settings
 
             // Persist to DB (AppSettings only)
             string json = JsonSerializer.Serialize(settings);
-            
+
             using var dbContext = _dbContextFactory.CreateDbContext();
             AppSettingsEntity? entity = dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
             if (entity == null)
@@ -121,7 +121,7 @@ namespace Farm.Infrastructure.Settings
         {
             Dictionary<string, object> newSettings = new Dictionary<string, object>();
             using var dbContext = _dbContextFactory.CreateDbContext();
-            
+
             foreach (Type type in _settingTypes)
             {
                 AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>();

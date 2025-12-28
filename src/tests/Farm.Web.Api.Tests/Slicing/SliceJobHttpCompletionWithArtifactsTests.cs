@@ -204,7 +204,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
     {
         // Arrange - use a client without worker key header
         HttpClient clientWithoutWorkerKey = await _factory.CreateAuthenticatedClientAsync();
-        
+
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();

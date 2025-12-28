@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -38,7 +38,7 @@ namespace Farm.Web.Api.Tests.Controllers
         public void Constructor_WithNullAssetService_ThrowsArgumentNullException()
         {
             // Act & Assert
-            Assert.Throws<ArgumentNullException>(() => 
+            Assert.Throws<ArgumentNullException>(() =>
                 new AssetsController(null!, _loggerMock.Object));
         }
 
@@ -46,7 +46,7 @@ namespace Farm.Web.Api.Tests.Controllers
         public void Constructor_WithNullLogger_ThrowsArgumentNullException()
         {
             // Act & Assert
-            Assert.Throws<ArgumentNullException>(() => 
+            Assert.Throws<ArgumentNullException>(() =>
                 new AssetsController(_assetServiceMock.Object, null!));
         }
 

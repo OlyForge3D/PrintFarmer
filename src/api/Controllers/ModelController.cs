@@ -53,8 +53,8 @@ public class ModelController : ControllerBase
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
         // Ensure path is absolute - if relative, combine with current directory first
-        _modelsPath = Path.IsPathRooted(configPath) 
-            ? configPath 
+        _modelsPath = Path.IsPathRooted(configPath)
+            ? configPath
             : Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), configPath));
 
         if (!_fileSystem.DirectoryExists(_modelsPath))
@@ -71,16 +71,22 @@ public class ModelController : ControllerBase
     private string ResolvePath(string? relativePath)
     {
         if (string.IsNullOrEmpty(relativePath))
+        {
             return string.Empty;
+        }
 
         // Normalize virtual paths - strip leading slashes to handle virtual path format
         string normalizedPath = relativePath.TrimStart('/').Trim();
         if (string.IsNullOrEmpty(normalizedPath))
+        {
             return _modelsPath;
+        }
 
         // If the normalized path is already absolute, return as-is (Windows C:\ or Unix /mnt/etc)
         if (Path.IsPathRooted(normalizedPath))
+        {
             return normalizedPath;
+        }
 
         // Combine relative path with models directory (guaranteed to be absolute)
         return Path.Combine(_modelsPath, normalizedPath);
@@ -98,7 +104,7 @@ public class ModelController : ControllerBase
     public async Task<IActionResult> UploadModelAsync([FromForm] IFormFile modelFile)
     {
         _logger.LogInformation($"[Upload] Received upload request for file: {modelFile?.FileName ?? "NULL"}, Size: {modelFile?.Length ?? 0} bytes");
-        
+
         if (modelFile == null || modelFile.Length == 0)
         {
             _logger.LogWarning("[Upload] Model file is null or empty");
@@ -108,7 +114,7 @@ public class ModelController : ControllerBase
         // Validate file extension using service
         string fileExtension = Path.GetExtension(modelFile.FileName ?? string.Empty);
         _logger.LogInformation($"[Upload] File extension: {fileExtension}");
-        
+
         try
         {
             _fileManagementService.ValidateModelExtension(fileExtension);
@@ -247,6 +253,13 @@ public class ModelController : ControllerBase
                 UploadedAt = model.UploadedAt,
                 Url = $"/api/3d-models/{model.Id}/file",
                 ThumbnailUrl = model.ThumbnailPath != null ? $"/api/3d-models/{model.Id}/thumbnail" : null,
+                Description = model.Description,
+                DimensionX = model.DimensionX,
+                DimensionY = model.DimensionY,
+                DimensionZ = model.DimensionZ,
+                TriangleCount = model.TriangleCount,
+                IsValid = model.IsValid,
+                ValidationErrors = model.ValidationErrors,
                 Tags = model.TagMappings.Select(tm => new Model3DTagDto
                 {
                     Id = tm.Tag!.Id,
@@ -320,23 +333,23 @@ public class ModelController : ControllerBase
         try
         {
             _logger.LogInformation($"[Thumbnail] Retrieving thumbnail for model {id}");
-            
+
             string? thumbPath = await _modelService.GetModelThumbnailPathAsync(id, CancellationToken.None);
             _logger.LogInformation($"[Thumbnail] Service returned path: {thumbPath ?? "NULL"}");
-            
+
             if (string.IsNullOrEmpty(thumbPath))
             {
                 _logger.LogWarning($"[Thumbnail] No thumbnail path in database for model {id}");
                 return NotFound("Thumbnail not available");
             }
-            
+
             // Use common path resolution helper
             string absolutePath = ResolvePath(thumbPath);
             _logger.LogInformation($"[Thumbnail] Resolved absolute path: {absolutePath}");
-            
+
             bool fileExists = _fileSystem.FileExists(absolutePath);
             _logger.LogInformation($"[Thumbnail] File exists at '{absolutePath}': {fileExists}");
-            
+
             if (!fileExists)
             {
                 _logger.LogWarning($"[Thumbnail] Thumbnail file not found on disk at {absolutePath}");
@@ -762,7 +775,7 @@ public class ModelController : ControllerBase
 
             // Normalize path - strip leading/trailing slashes for relative path
             string relativePath = request.Path.Trim('/').Trim();
-            
+
             _logger.LogDebug($"[CreateFolder] Input path: '{request.Path}' -> Relative: '{relativePath}', Models path: '{_modelsPath}'");
 
             // Validate path for security - prevent directory traversal
@@ -797,11 +810,11 @@ public class ModelController : ControllerBase
             // Verify parent directory exists
             string? parentPath = Path.GetDirectoryName(fullPath);
             _logger.LogDebug($"[CreateFolder] Parent path: '{parentPath}', Full path: '{fullPath}', Models base: '{_modelsPath}'");
-            
+
             // Also check if models directory exists
             bool modelsPathExists = _fileSystem.DirectoryExists(_modelsPath);
             _logger.LogDebug($"[CreateFolder] Models path '{_modelsPath}' exists: {modelsPathExists}");
-            
+
             if (string.IsNullOrEmpty(parentPath) || !_fileSystem.DirectoryExists(parentPath))
             {
                 string diagnostic = $"Requested path: '{relativePath}', Resolved full path: '{fullPath}', Parent: '{parentPath}', Models base exists: {modelsPathExists}";
@@ -825,7 +838,7 @@ public class ModelController : ControllerBase
                         CreatedAt = DateTime.UtcNow,
                         DeletedAt = null
                     };
-                    
+
                     _db.Folders.Add(folder);
                     await _db.SaveChangesAsync();
                     _logger.LogInformation($"[CreateFolder] Recorded folder in database: {folder.Path}");
@@ -902,7 +915,9 @@ public class ModelController : ControllerBase
                 try
                 {
                     if (string.IsNullOrWhiteSpace(modelIdStr))
+                    {
                         continue;
+                    }
 
                     // Parse the model ID (GUID)
                     if (!Guid.TryParse(modelIdStr, out Guid modelId))
@@ -915,7 +930,7 @@ public class ModelController : ControllerBase
 
                     // Query the database by primary key (GUID) - O(1) lookup
                     var targetModel = await _modelRepo.GetByIdAsync(modelId, ct);
-                    
+
                     if (targetModel == null)
                     {
                         _logger.LogWarning($"[MoveModels] Model not found: {modelId}");
@@ -926,12 +941,12 @@ public class ModelController : ControllerBase
 
                     // Get or create the target folder
                     var targetFolder = await _modelService.GetOrCreateFolderAsync(targetDirectoryPath, "models", ct);
-                    
+
                     // Update the folder reference (not physical files - those stay where they are)
                     targetModel.FolderId = targetFolder.Id;
                     await _modelRepo.UpdateAsync(targetModel, ct);
                     await _modelRepo.SaveChangesAsync(ct);
-                    
+
                     _logger.LogDebug($"[MoveModels] Updated model folder: {targetModel.Id} ({targetModel.OriginalFileName}) -> '{targetDirectoryPath}'");
 
                     movedCount++;
@@ -962,16 +977,18 @@ public class ModelController : ControllerBase
                 }
             }
 
-            string message = failedCount == 0 
+            string message = failedCount == 0
                 ? $"Successfully moved {movedCount} model(s)"
                 : $"Moved {movedCount} model(s), failed to move {failedCount} model(s)";
-            
+
             if (failedFiles.Count > 0)
             {
                 var failureDetails = failedFiles.Take(3).Select(f => $"{f.id} ({f.reason})").ToList();
                 message += $" - Failed: {string.Join(", ", failureDetails)}";
                 if (failedFiles.Count > 3)
+                {
                     message += $" and {failedFiles.Count - 3} more";
+                }
             }
 
             return Ok(new FolderOperationResultDto(failedCount == 0, message));

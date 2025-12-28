@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.RateLimiting;
+﻿using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Telemetry;
 using Moq;
 using Xunit;
@@ -65,7 +65,7 @@ public class InMemoryRateLimitServiceTests
     {
         // Arrange
         string email = "user@example.com";
-        
+
         // Record 2 attempts
         await _service.RecordPasswordResetAttemptAsync(email);
         await _service.RecordPasswordResetAttemptAsync(email);
@@ -83,7 +83,7 @@ public class InMemoryRateLimitServiceTests
     {
         // Arrange
         string email = "user@example.com";
-        
+
         // Record all 3 hourly attempts
         await _service.RecordPasswordResetAttemptAsync(email);
         await _service.RecordPasswordResetAttemptAsync(email);
@@ -98,13 +98,13 @@ public class InMemoryRateLimitServiceTests
         Assert.True(result.RetryAfter > TimeSpan.Zero);
     }
 
-        [Fact]
+    [Fact]
     public async Task CheckPasswordResetLimitAsync_CaseInsensitive_SameLimit()
     {
         // Arrange
         string email1 = "User@Example.Com";
         string email2 = "user@example.com";
-        
+
         // Record one attempt using uppercase version
         await _service.RecordPasswordResetAttemptAsync(email1);
 
@@ -153,7 +153,7 @@ public class InMemoryRateLimitServiceTests
     {
         // Arrange
         string email = "user@example.com";
-        
+
         // Record all 5 hourly attempts
         for (int i = 0; i < 5; i++)
         {
@@ -224,7 +224,7 @@ public class InMemoryRateLimitServiceTests
     {
         // Arrange
         Guid userId = Guid.NewGuid();
-        
+
         // Record all 20 hourly attempts
         for (int i = 0; i < 20; i++)
         {
@@ -262,7 +262,7 @@ public class InMemoryRateLimitServiceTests
         // Act
         await _service.RecordSliceJobSubmitAttemptAsync(user1);
         await _service.RecordSliceJobSubmitAttemptAsync(user1);
-        
+
         var result1 = await _service.CheckSliceJobSubmitLimitAsync(user1);
         var result2 = await _service.CheckSliceJobSubmitLimitAsync(user2);
 
@@ -314,7 +314,7 @@ public class InMemoryRateLimitServiceTests
     {
         // Arrange
         string ipAddress = "192.168.1.1";
-        
+
         // Record all 10 per-minute attempts
         for (int i = 0; i < 10; i++)
         {
@@ -402,7 +402,7 @@ public class InMemoryRateLimitServiceTests
     {
         // Arrange
         string ipAddress = "192.168.1.1";
-        
+
         // Record all 10 per-minute attempts
         for (int i = 0; i < 10; i++)
         {
@@ -454,7 +454,7 @@ public class InMemoryRateLimitServiceTests
     {
         // Arrange
         string email = "user@example.com";
-        
+
         // Record all attempts
         for (int i = 0; i < 3; i++)
         {

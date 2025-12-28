@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Extensions;
+﻿namespace Farm.Web.Api.Extensions;
 
 #pragma warning disable CA1303, S3885 // Debug logging strings don't need localization; Assembly.LoadFrom intentional for plugin discovery
 
@@ -26,7 +26,7 @@ public static class BackendPluginExtensions
         // Write marker to console immediately so we know this method was called
         Console.WriteLine("=== AddBackendClientPlugins called ===");
         Console.Out.Flush();
-        
+
         // Register the plugin registry as singleton
         var registry = new BackendPluginRegistry();
         services.AddSingleton<IBackendPluginRegistry>(registry);
@@ -34,7 +34,7 @@ public static class BackendPluginExtensions
 
         // Discover and load plugins dynamically
         DiscoverAndLoadPlugins(registry, services, pluginAssemblies);
-        
+
         Console.WriteLine("=== AddBackendClientPlugins completed ===");
         Console.Out.Flush();
 
@@ -63,10 +63,10 @@ public static class BackendPluginExtensions
             {
                 var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
                 Console.WriteLine($"[Plugin Discovery] Plugin search directory: {appDirectory}");
-                
+
                 var pluginDlls = Directory.GetFiles(appDirectory, "Farm.Backend.Plugin.*.dll");
                 Console.WriteLine($"[Plugin Discovery] Found {pluginDlls.Length} plugin DLLs to load");
-                
+
                 foreach (var dllPath in pluginDlls)
                 {
                     try
@@ -98,9 +98,9 @@ public static class BackendPluginExtensions
                 // Check if assembly has the BackendPluginAttribute
                 var pluginAttribute = assembly.GetCustomAttributes(typeof(BackendPluginAttribute), false)
                     .FirstOrDefault() as BackendPluginAttribute;
-                
+
                 var assemblyName = assembly.GetName().Name ?? "Unknown";
-                
+
                 if (pluginAttribute != null)
                 {
                     Console.WriteLine($"[Plugin Discovery] ✓ Plugin found: {assemblyName} ({pluginAttribute.Name})");
@@ -134,7 +134,7 @@ public static class BackendPluginExtensions
                         {
                             registry.Register(plugin);
                             Console.WriteLine($"[Plugin Discovery]   Registered plugin: {plugin.BackendType}");
-                            
+
                             // If this is an extended plugin, call RegisterAdditionalServices
                             if (plugin is IExtendedBackendPlugin extendedPlugin)
                             {
@@ -168,7 +168,7 @@ public static class BackendPluginExtensions
                 Console.WriteLine($"[Plugin Discovery] Error scanning assembly: {ex.Message}");
             }
         }
-        
+
         Console.WriteLine($"[Plugin Discovery] Plugin discovery complete. Discovered {discoveredCount} plugins");
     }
 

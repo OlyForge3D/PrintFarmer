@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>
 /// Represents a single hotend/nozzle configuration.

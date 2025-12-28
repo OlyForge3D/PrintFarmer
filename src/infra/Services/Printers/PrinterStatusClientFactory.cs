@@ -1,4 +1,4 @@
-#pragma warning disable S2219 // Type pattern matching style is intentional
+﻿#pragma warning disable S2219 // Type pattern matching style is intentional
 
 using System;
 using System.Collections.Generic;
@@ -86,7 +86,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
                         .FirstOrDefault() as BackendPluginAttribute;
 
                     PrinterBackend backendId;
-                    
+
                     if (backendAttr != null)
                     {
                         // Use BackendId from assembly attribute if available
@@ -163,16 +163,16 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
             // so we create them in a proper scope rather than registering them in DI.
             using var scope = _serviceScopeFactory.CreateScope();
             var scopedProvider = scope.ServiceProvider;
-            
+
             // Activate the status client with its dependencies resolved from the scope
             // Use ActivatorUtilities which automatically resolves constructor dependencies
             var statusClient = ActivatorUtilities.CreateInstance(scopedProvider, statusClientType);
-            
+
             if (statusClient == null)
             {
                 throw new InvalidOperationException($"Failed to instantiate status client type: {statusClientType.Name}");
             }
-            
+
             // Verify it's assignable to IPrinterStatusClient
             // (don't use explicit cast due to potential assembly loading issues)
             if (!typeof(IPrinterStatusClient).IsAssignableFrom(statusClient.GetType()))
@@ -182,7 +182,7 @@ public class PrinterStatusClientFactory : IPrinterStatusClientFactory
                     $"Expected interface assembly: {typeof(IPrinterStatusClient).Assembly.FullName}, " +
                     $"Status client type: {statusClient.GetType().FullName}");
             }
-            
+
             // Cast is safe now - we verified it
             var typedClient = (IPrinterStatusClient)statusClient;
             _logger.LogDebug($"✓ Instantiated status client for {backend}: {statusClientType.Name}");

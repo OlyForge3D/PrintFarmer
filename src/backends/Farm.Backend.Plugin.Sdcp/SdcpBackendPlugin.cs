@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.Sdcp;
+﻿namespace Farm.Backend.Plugin.Sdcp;
 
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;

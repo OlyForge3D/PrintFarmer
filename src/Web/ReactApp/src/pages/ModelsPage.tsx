@@ -1,9 +1,11 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { DeleteIcon, CloseIcon, SettingsIcon, CubeIcon, EyeIcon, TagIcon, GridViewIcon, ListViewIcon, FileIcon, FolderIcon, UploadIcon, SearchIcon } from '@/components/icons/MdiIcons';
+import { useNavigate, Link } from 'react-router-dom';
+import { useViewModePreference } from '@/hooks/useViewModePreference';
+import { DeleteIcon, CloseIcon, SettingsIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, GridViewIcon, ListViewIcon, FileIcon, FolderIcon, UploadIcon, SearchIcon } from '@/components/icons/MdiIcons';
 import { PageTemplate } from '@/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentModal';
+import { ModelUploadModal } from '@/components/modals/ModelUploadModal';
 import { Button, Input, FileUpload } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { ExplorerFileBrowser } from '@/components/files/ExplorerFileBrowser';
@@ -45,17 +47,14 @@ interface GCodeFile {
 
 export const ModelsPage: React.FC = () => {
   const navigate = useNavigate();
+  const { viewMode, setViewMode } = useViewModePreference();
   const [dragOver, setDragOver] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [showUploadPanel, setShowUploadPanel] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
-  // Slicing now redirects to NewSliceJobPage instead of using modal
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'explorer'>('explorer');
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
 
@@ -122,16 +121,6 @@ export const ModelsPage: React.FC = () => {
     gcTime: 10 * 60 * 1000
   });
 
-  // Upload mutation
-  const uploadMutation = useMutation({
-    mutationFn: (file: File) => slicerService.uploadModel(file),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['models-search'] });
-      setSelectedFiles([]);
-      setUploadProgress({});
-    }
-  });
-
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: (modelId: string) => slicerService.deleteModel(modelId),
@@ -139,50 +128,6 @@ export const ModelsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['models-search'] });
     }
   });
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-
-    const files = Array.from(e.dataTransfer.files).filter(file =>
-      ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
-    );
-    setSelectedFiles(prev => [...prev, ...files]);
-  }, []);
-
-  const uploadFiles = async () => {
-    for (const file of selectedFiles) {
-      try {
-        setUploadProgress(prev => ({ ...prev, [file.name]: 0 }));
-
-        const progressInterval = setInterval(() => {
-          setUploadProgress(prev => {
-            const current = prev[file.name] || 0;
-            if (current < 90) {
-              return { ...prev, [file.name]: current + 10 };
-            }
-            return prev;
-          });
-        }, 200);
-
-        await uploadMutation.mutateAsync(file);
-
-        clearInterval(progressInterval);
-        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
-      } catch (error) {
-        console.error('Upload failed:', error);
-        setUploadProgress(prev => {
-          const rest = { ...prev };
-          delete rest[file.name];
-          return rest;
-        });
-      }
-    }
-  };
-
-  const removeFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  };
 
   const toggleTag = (tagId: string) => {
     setSelectedTags(prev =>
@@ -229,10 +174,11 @@ export const ModelsPage: React.FC = () => {
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <Input
               type="text"
-              placeholder="Search"
+              placeholder="Search models..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="flex-1 min-w-0"
+              autoComplete="off"
             />
             
             <div className="flex items-center gap-2 flex-wrap">
@@ -267,7 +213,7 @@ export const ModelsPage: React.FC = () => {
               </div>
 
               <Button
-                onClick={() => setShowUploadPanel(!showUploadPanel)}
+                onClick={() => setShowUploadModal(true)}
                 variant="secondary"
                 size="sm"
                 className="whitespace-nowrap"
@@ -304,91 +250,6 @@ export const ModelsPage: React.FC = () => {
               )}
             </div>
           </div>
-
-          {/* Upload Panel */}
-          {showUploadPanel && (
-            <div className="border-t border-pf-border pt-3 space-y-3">
-              <div
-                className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
-                  dragOver ? 'border-pf-accent bg-pf-accent-bg bg-opacity-20' : 'border-pf-border hover:border-pf-accent'
-                }`}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={handleDrop}
-              >
-                <div className="flex flex-col items-center space-y-2">
-                  <CubeIcon className="w-8 h-8 text-pf-text-tertiary" />
-                  <p className="text-xs font-medium text-pf-text-secondary">Drag files here or click to browse</p>
-                </div>
-                <FileUpload
-                  id="file-upload"
-                  multiple
-                  accept=".stl,.3mf,.obj,.ply"
-                  onChange={(files) => {
-                    if (files) {
-                      const filesToAdd = Array.from(files).filter(file =>
-                        ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
-                      );
-                      setSelectedFiles(prev => [...prev, ...filesToAdd]);
-                    }
-                  }}
-                  buttonText="Browse"
-                  buttonVariant="secondary"
-                  className="mt-3"
-                />
-              </div>
-
-              {selectedFiles.length > 0 && (
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-medium text-pf-text-primary">{selectedFiles.length} file(s) selected</h4>
-                    <Button onClick={() => setSelectedFiles([])} variant="subtle" size="sm">
-                      <CloseIcon className="w-3 h-3" />
-                    </Button>
-                  </div>
-                  {selectedFiles.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between bg-pf-bg-2 p-2 rounded text-xs">
-                      <span className="truncate text-pf-text-secondary">{file.name}</span>
-                      <Button onClick={() => removeFile(index)} variant="subtle" size="sm">
-                        <DeleteIcon className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  ))}
-
-                  {Object.entries(uploadProgress).length > 0 && (
-                    <div className="space-y-1">
-                      {Object.entries(uploadProgress).map(([name, progress]) => (
-                        <div key={name} className="text-xs">
-                          <div className="flex justify-between mb-1">
-                            <span className="truncate text-pf-text-secondary">{name}</span>
-                            <span className="text-pf-text-tertiary">{progress}%</span>
-                          </div>
-                          <div className="h-1 bg-pf-bg-0 rounded-full border border-pf-border overflow-hidden">
-                            <div className="bg-pf-accent h-full transition-all" style={{ width: `${progress}%` }} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={uploadFiles}
-                    disabled={uploadMutation.isPending}
-                    variant="primary"
-                    size="sm"
-                    className="w-full"
-                  >
-                    <UploadIcon className="w-4 h-4 mr-1" />
-                    {uploadMutation.isPending ? 'Uploading...' : 'Upload All'}
-                  </Button>
-                </div>
-              )}
-
-              {selectedFiles.length === 0 && Object.entries(uploadProgress).length === 0 && (
-                <p className="text-xs text-pf-text-tertiary text-center py-2">STL, 3MF, OBJ, PLY</p>
-              )}
-            </div>
-          )}
 
           {/* Filters Panel */}
           {showFiltersPanel && (
@@ -455,22 +316,6 @@ export const ModelsPage: React.FC = () => {
                     ) : (
                       <CubeIcon className="w-12 h-12 text-pf-text-tertiary opacity-30" />
                     )}
-
-                    {/* Quick View Button */}
-                    {model.fileType !== '3mf' && (
-                      <Button
-                        onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                        onFocus={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                        onClick={() => setViewerModel(model)}
-                        variant="primary"
-                        size="sm"
-                        className="absolute inset-0 m-auto w-fit opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="View 3D Model"
-                      >
-                        <EyeIcon className="w-4 h-4 mr-1" />
-                        View
-                      </Button>
-                    )}
                   </div>
 
                   {/* Model Info */}
@@ -504,24 +349,36 @@ export const ModelsPage: React.FC = () => {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex gap-1">
+                    <div className="flex gap-2">
+                      {model.fileType !== '3mf' && (
+                        <Button
+                          onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                          onClick={() => setViewerModel(model)}
+                          variant="secondary"
+                          size="sm"
+                          className="flex-1"
+                          title="View 3D Model"
+                        >
+                          <EyeIcon className="w-4 h-4" />
+                        </Button>
+                      )}
                       <Button
                         onClick={() => navigate(`/models/${model.id}`)}
                         variant="secondary"
                         size="sm"
-                        className="flex-1 text-xs"
+                        className="flex-1"
                         title="View Details"
                       >
-                        Details
+                        <FileIcon className="w-4 h-4" />
                       </Button>
                       <Button
                         onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
                         variant="primary"
                         size="sm"
-                        className="flex-1 text-xs"
-                        title="Slice this model"
+                        className="flex-1"
+                        title="Slice Model"
                       >
-                        Slice
+                        <LayersTripleOutlineIcon className="w-4 h-4" />
                       </Button>
                       <Button
                         onClick={() => deleteMutation.mutate(model.id)}
@@ -531,7 +388,7 @@ export const ModelsPage: React.FC = () => {
                         className="px-2"
                         title="Delete Model"
                       >
-                        <DeleteIcon className="w-3 h-3" />
+                        <DeleteIcon className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
@@ -556,12 +413,27 @@ export const ModelsPage: React.FC = () => {
                   {models.map((model: Model) => (
                     <tr key={model.id} className="hover:bg-pf-bg-2 transition-colors">
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => navigate(`/models/${model.id}`)}
-                          className="font-medium text-pf-accent hover:underline text-left"
-                        >
-                          {model.name}
-                        </button>
+                        <div className="flex items-center gap-3 min-w-0">
+                          {/* Thumbnail */}
+                          <div className="w-12 h-12 flex-shrink-0 rounded bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
+                            {model.thumbnailUrl ? (
+                              <img
+                                src={model.thumbnailUrl}
+                                alt={model.name}
+                                className="w-full h-full object-contain"
+                              />
+                            ) : (
+                              <CubeIcon className="w-6 h-6 text-pf-text-tertiary opacity-50" />
+                            )}
+                          </div>
+                          {/* Filename as link, not button */}
+                          <Link
+                            to={`/models/${model.id}`}
+                            className="font-medium text-pf-accent hover:underline text-left min-w-0 truncate"
+                          >
+                            {model.name}
+                          </Link>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-pf-text-secondary text-xs font-medium">
                         {model.fileType?.toUpperCase() || '—'}
@@ -594,15 +466,17 @@ export const ModelsPage: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-2">
-                          <Button
-                            onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                            onClick={() => setViewerModel(model)}
-                            variant="subtle"
-                            size="sm"
-                            title="View 3D Model"
-                          >
-                            <EyeIcon className="w-4 h-4" />
-                          </Button>
+                          {model.fileType !== '3mf' && (
+                            <Button
+                              onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
+                              onClick={() => setViewerModel(model)}
+                              variant="subtle"
+                              size="sm"
+                              title="View 3D Model"
+                            >
+                              <EyeIcon className="w-4 h-4" />
+                            </Button>
+                          )}
                           <Button
                             onClick={() => navigate(`/models/${model.id}`)}
                             variant="subtle"
@@ -617,7 +491,7 @@ export const ModelsPage: React.FC = () => {
                             size="sm"
                             title="Slice Model"
                           >
-                            <SettingsIcon className="w-4 h-4" />
+                            <LayersTripleOutlineIcon className="w-4 h-4" />
                           </Button>
                           <Button
                             onClick={() => deleteMutation.mutate(model.id)}
@@ -690,6 +564,12 @@ export const ModelsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Model Upload Modal */}
+      <ModelUploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+      />
 
       {/* Bulk Tag Assignment Modal */}
       <BulkTagAssignmentModal

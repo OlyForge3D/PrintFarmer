@@ -412,8 +412,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         // Prefer print job state (printing, paused, complete) over system state, but not for error states
         // If system is shutdown/error, that takes precedence over print_stats state
         string? state = null;
-        if (!string.IsNullOrEmpty(status.State) && 
-            (status.State.Equals("shutdown", StringComparison.OrdinalIgnoreCase) || 
+        if (!string.IsNullOrEmpty(status.State) &&
+            (status.State.Equals("shutdown", StringComparison.OrdinalIgnoreCase) ||
              status.State.Equals("error", StringComparison.OrdinalIgnoreCase)))
         {
             // System is in error state, use system state
@@ -1976,7 +1976,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     }
 
     // Explicit interface implementations for capability markers
-    
+
     /// <summary>
     /// ISupportsFileDownload implementation - downloads a file from the printer.
     /// </summary>
@@ -2047,7 +2047,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     async Task<PrinterFileMetadata?> ISupportsFileMetadata.GetFileMetadataAsync(string baseUrl, string filePath, string? apiKey = null, CancellationToken ct = default)
     {
         var metadata = await GetFileMetadataAsync(baseUrl, filePath, ct);
-        if (metadata == null) return null;
+        if (metadata == null)
+        {
+            return null;
+        }
 
         return new PrinterFileMetadata
         {

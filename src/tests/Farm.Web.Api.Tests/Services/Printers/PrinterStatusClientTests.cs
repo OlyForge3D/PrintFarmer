@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.Core;
@@ -47,7 +47,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             services.AddSingleton(prusaLinkClient);
             services.AddSingleton(sdcpClient);
             services.AddSingleton(octoPrintClient);
-            
+
             // Register status clients - plugins would register these by their concrete type or a factory interface
             services.AddSingleton(moonrakerStatusClient);
             services.AddSingleton(prusaLinkStatusClient);
@@ -63,21 +63,21 @@ namespace Farm.Web.Api.Tests.Services.Printers
             mockMoonrakerPlugin.Setup(p => p.Description).Returns("Klipper firmware backend via Moonraker API");
             mockMoonrakerPlugin.Setup(p => p.StatusClientType).Returns(typeof(MoonrakerStatusClient));
             mockMoonrakerPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(MoonrakerStatusClient));
-            
+
             var mockPrusaLinkPlugin = new Mock<IExtendedBackendPlugin>();
             mockPrusaLinkPlugin.Setup(p => p.BackendType).Returns("PrusaLink");
             mockPrusaLinkPlugin.Setup(p => p.DisplayName).Returns("PrusaLink Backend");
             mockPrusaLinkPlugin.Setup(p => p.Description).Returns("Prusa printers via PrusaLink API");
             mockPrusaLinkPlugin.Setup(p => p.StatusClientType).Returns(typeof(PrusaLinkStatusClient));
             mockPrusaLinkPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(PrusaLinkStatusClient));
-            
+
             var mockSdcpPlugin = new Mock<IExtendedBackendPlugin>();
             mockSdcpPlugin.Setup(p => p.BackendType).Returns("SDCP");
             mockSdcpPlugin.Setup(p => p.DisplayName).Returns("SDCP Backend");
             mockSdcpPlugin.Setup(p => p.Description).Returns("Simple Data Communication Protocol");
             mockSdcpPlugin.Setup(p => p.StatusClientType).Returns(typeof(SdcpStatusClient));
             mockSdcpPlugin.Setup(p => p.StatusClientInterfaceType).Returns(typeof(SdcpStatusClient));
-            
+
             var mockOctoPrintPlugin = new Mock<IExtendedBackendPlugin>();
             mockOctoPrintPlugin.Setup(p => p.BackendType).Returns("OctoPrint");
             mockOctoPrintPlugin.Setup(p => p.DisplayName).Returns("OctoPrint Backend");

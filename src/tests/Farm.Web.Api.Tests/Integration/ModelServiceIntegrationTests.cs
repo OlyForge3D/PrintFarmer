@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -589,7 +589,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Create a minimal valid 3MF file (ZIP-based format with XML manifest)
         // 3MF files are essentially ZIP archives containing XML and model data
         var threeMFContent = "PK\x03\x04"; // ZIP magic bytes - minimal ZIP structure for testing
-        
+
         var formFile = CreateMockFormFile("thumbnail-test.3mf", threeMFContent);
 
         // Act
@@ -769,7 +769,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
         // Assert
         filePath.Should().NotBeNull();
-        
+
         // Database now stores only relative paths (e.g., "uuid.stl"), so resolve to absolute before checking
         string modelsPath = config["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
         string absolutePath = Path.Combine(modelsPath, filePath!);

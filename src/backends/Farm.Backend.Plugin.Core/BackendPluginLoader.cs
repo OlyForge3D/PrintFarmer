@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.Core;
+﻿namespace Farm.Backend.Plugin.Core;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -17,7 +17,9 @@ public class BackendPluginLoader : IBackendPluginLoader
     public Task LoadPluginsAsync(string pluginDirectory, IBackendPluginRegistry registry, IServiceCollection services)
     {
         if (!Directory.Exists(pluginDirectory))
+        {
             return Task.CompletedTask;
+        }
 
         var dllFiles = Directory.GetFiles(pluginDirectory, "Farm.Backend.Plugin.*.dll");
 
@@ -26,9 +28,9 @@ public class BackendPluginLoader : IBackendPluginLoader
             try
             {
                 // S3885: Assembly.LoadFrom is intentional here for plugin loading from a specific directory
-                #pragma warning disable S3885
+#pragma warning disable S3885
                 var assembly = System.Reflection.Assembly.LoadFrom(dll);
-                #pragma warning restore S3885
+#pragma warning restore S3885
                 var pluginTypes = assembly.GetTypes()
                     .Where(t => typeof(IBackendClientPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract);
 

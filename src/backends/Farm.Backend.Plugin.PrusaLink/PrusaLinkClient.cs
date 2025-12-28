@@ -4,8 +4,8 @@ using System.Diagnostics.CodeAnalysis;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -44,8 +44,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             // Determine if printer is online: 
             // - Check StatusPrinter/StatusConnect if available (newer firmware versions that include these fields)
             // - If those fields don't exist (null), just check that we got a valid status response
-            bool isOnline = status != null && 
-                           ((status.Printer.StatusPrinter != null && status.Printer.StatusConnect != null && 
+            bool isOnline = status != null &&
+                           ((status.Printer.StatusPrinter != null && status.Printer.StatusConnect != null &&
                              status.Printer.StatusPrinter.Ok && status.Printer.StatusConnect.Ok) ||
                             (status.Printer.StatusPrinter == null && status.Printer.StatusConnect == null));
 
@@ -86,15 +86,15 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             StatusInfo? status = await _apiClient.GetStatusAsync(baseUrl, apiKey, ct);
-            
+
             // Determine if printer is online:
             // - Check StatusPrinter/StatusConnect if available (newer firmware versions)
             // - If those fields don't exist (null), just check that we got a valid status response
-            bool isOnline = status != null && 
-                           ((status.Printer.StatusPrinter != null && status.Printer.StatusConnect != null && 
+            bool isOnline = status != null &&
+                           ((status.Printer.StatusPrinter != null && status.Printer.StatusConnect != null &&
                              status.Printer.StatusPrinter.Ok && status.Printer.StatusConnect.Ok) ||
                             (status.Printer.StatusPrinter == null && status.Printer.StatusConnect == null));
-            
+
             return new PrusaStatus(isOnline, status?.Printer?.State);
         }
         catch (Exception ex)

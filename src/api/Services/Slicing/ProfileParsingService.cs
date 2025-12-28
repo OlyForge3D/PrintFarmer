@@ -168,20 +168,40 @@ public sealed class ProfileParsingService : IProfileParsingService
         try
         {
             if (value.TryGetValue(out string? s))
+            {
                 return s;
+            }
+
             if (value.TryGetValue(out int i))
+            {
                 return i;
+            }
+
             if (value.TryGetValue(out double d))
+            {
                 return d;
+            }
+
             if (value.TryGetValue(out float f))
+            {
                 return f;
+            }
+
             if (value.TryGetValue(out bool b))
+            {
                 return b;
+            }
+
             if (value.TryGetValue(out long l))
+            {
                 return l;
+            }
+
             if (value.TryGetValue(out decimal dec))
+            {
                 return dec;
-            
+            }
+
             // Fallback: try to parse as string
             return value.ToString();
         }
@@ -199,17 +219,19 @@ public sealed class ProfileParsingService : IProfileParsingService
     private static JsonNode? CloneJsonNode(JsonNode? node)
     {
         if (node is null)
+        {
             return null;
+        }
 
         return node switch
         {
-            JsonObject obj => new JsonObject(obj.Select(kvp => 
+            JsonObject obj => new JsonObject(obj.Select(kvp =>
                 new KeyValuePair<string, JsonNode?>(kvp.Key, CloneJsonNode(kvp.Value)))),
-            
+
             JsonArray arr => new JsonArray(arr.Select(CloneJsonNode).ToArray()),
-            
+
             JsonValue val => JsonValue.Create(val.GetValue<object>()),
-            
+
             _ => node
         };
     }

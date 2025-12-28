@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Catalog.Caching;
+﻿namespace Farm.Infrastructure.Services.Catalog.Caching;
 
 /// <summary>
 /// Abstraction for catalog caching implementation.

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
@@ -73,7 +73,7 @@ public class SliceJobEventServiceTests
             _service.NotifyJobQueuedAsync(null!, CancellationToken.None));
     }
 
-        [Fact]
+    [Fact]
     public async Task NotifyJobQueuedAsync_WithValidJob_BroadcastsAndLogs()
     {
         // Arrange

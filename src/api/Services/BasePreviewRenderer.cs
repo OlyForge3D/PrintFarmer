@@ -1,15 +1,14 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
 using Assimp;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Drawing;
 using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-
 using Numerics = System.Numerics;
 
 namespace Farm.Web.Api.Services;
@@ -22,20 +21,20 @@ public abstract class BasePreviewRenderer
     public void Render(string inputPath, string outputPath, RenderOptions options)
     {
         options ??= new RenderOptions();
-        
+
         // Capture all user-provided property values BEFORE ApplyStyleDefaults overwrites them
         var userProperties = CaptureRenderOptions(options);
-        
+
         // Create default options for comparison
         var defaultOptions = new RenderOptions();
         ApplyStyleDefaults(defaultOptions);
-        
+
         // Apply preset defaults to working options
         ApplyStyleDefaults(options);
-        
+
         // Restore user settings that differ from preset defaults (automatic for all properties)
         RestoreUserSettings(options, userProperties, defaultOptions);
-        
+
         Mesh mesh;
         try
         {
@@ -59,7 +58,9 @@ public abstract class BasePreviewRenderer
         {
             normalized.Ao = new float[normalized.Faces.Count];
             for (int i = 0; i < normalized.Ao.Length; i++)
+            {
                 normalized.Ao[i] = 1f;
+            }
         }
 
         // Compute smoothed vertex normals in model space with angle threshold
@@ -135,8 +136,12 @@ public abstract class BasePreviewRenderer
         // 1) Presence mask
         var mask = new float[w, h];
         for (int y = 0; y < h; y++)
+        {
             for (int x = 0; x < w; x++)
+            {
                 mask[x, y] = depth01[x, y] < float.PositiveInfinity ? 1f : 0f;
+            }
+        }
 
         // 2) Drop shadow offset
         var dropped = new float[w, h];
@@ -146,12 +151,18 @@ public abstract class BasePreviewRenderer
         for (int y = 0; y < h; y++)
         {
             int sy = y - oy;
-            if ((uint)sy >= (uint)h) continue;
+            if ((uint)sy >= (uint)h)
+            {
+                continue;
+            }
 
             for (int x = 0; x < w; x++)
             {
                 int sx = x - ox;
-                if ((uint)sx >= (uint)w) continue;
+                if ((uint)sx >= (uint)w)
+                {
+                    continue;
+                }
 
                 dropped[x, y] = mask[sx, sy];
             }
@@ -169,7 +180,10 @@ public abstract class BasePreviewRenderer
             for (int x = 0; x < w; x++)
             {
                 float a = blurred[x, y] * opacity;
-                if (a <= 0.001f) continue;
+                if (a <= 0.001f)
+                {
+                    continue;
+                }
 
                 var c = frame[x, y];
                 frame[x, y] = new Rgba32(
@@ -252,7 +266,7 @@ public abstract class BasePreviewRenderer
     private Mesh LoadMesh(string inputPath, MeshLoadOptions? opts = null)
     {
         opts ??= new MeshLoadOptions();
-        
+
         // Use Lib3MF for 3MF files, Assimp for others
         string extension = System.IO.Path.GetExtension(inputPath).ToLowerInvariant();
         if (extension == ".3mf")
@@ -269,7 +283,9 @@ public abstract class BasePreviewRenderer
             PostProcessSteps.FlipUVs);
 
         if (scene == null || !scene.HasMeshes)
+        {
             throw new InvalidOperationException("No mesh found in file.");
+        }
 
         var mesh = new Mesh();
 
@@ -292,7 +308,9 @@ public abstract class BasePreviewRenderer
             {
                 var node = FindNodeForMesh(scene.RootNode, meshIndex);
                 if (node != null)
+                {
                     nodeTransform = ToNumerics(node);
+                }
             }
 
             foreach (var v in aMesh.Vertices)
@@ -312,7 +330,9 @@ public abstract class BasePreviewRenderer
             foreach (var f in aMesh.Faces)
             {
                 if (f.IndexCount != 3)
+                {
                     continue;
+                }
 
                 mesh.Faces.Add(new Face
                 {
@@ -329,7 +349,9 @@ public abstract class BasePreviewRenderer
             vertexOffset = mesh.Vertices.Count;
 
             if (!opts.MergeMeshes)
+            {
                 break; // only first mesh
+            }
         }
 
         return mesh;
@@ -359,7 +381,9 @@ public abstract class BasePreviewRenderer
                     PostProcessSteps.FlipUVs);
 
                 if (scene == null || !scene.HasMeshes)
+                {
                     throw new InvalidOperationException("No mesh found in file.");
+                }
 
                 var mesh = new Mesh();
                 int vertexOffset = 0;
@@ -377,8 +401,8 @@ public abstract class BasePreviewRenderer
                         {
                             mesh.Faces.Add(new Face
                             {
-                                Indices = new[] 
-                                { 
+                                Indices = new[]
+                                {
                                     face.Indices[0] + vertexOffset,
                                     face.Indices[1] + vertexOffset,
                                     face.Indices[2] + vertexOffset
@@ -414,14 +438,14 @@ public abstract class BasePreviewRenderer
         {
             // Create a model
             var model = Lib3MF.Wrapper.CreateModel();
-            
+
             // Get a reader and load the file
             var reader = model.QueryReader("3mf");
             reader.ReadFromFile(inputPath);
 
             // Get mesh objects from the model using iterator
             var meshObjectIterator = model.GetMeshObjects();
-            
+
             int meshCount = 0;
             while (meshObjectIterator.MoveNext())
             {
@@ -462,12 +486,16 @@ public abstract class BasePreviewRenderer
 
                 vertexOffset = mesh.Vertices.Count;
             }
-            
+
             if (meshCount == 0)
+            {
                 throw new InvalidOperationException("No mesh objects found in 3MF file.");
+            }
 
             if (mesh.Vertices.Count == 0)
+            {
                 throw new InvalidOperationException("Failed to extract vertices from 3MF file.");
+            }
 
             return mesh;
         }
@@ -480,13 +508,17 @@ public abstract class BasePreviewRenderer
     private Assimp.Node? FindNodeForMesh(Assimp.Node node, int meshIndex)
     {
         if (node.MeshIndices.Contains(meshIndex))
+        {
             return node;
+        }
 
         foreach (var child in node.Children)
         {
             var found = FindNodeForMesh(child, meshIndex);
             if (found != null)
+            {
                 return found;
+            }
         }
 
         return null;
@@ -496,10 +528,10 @@ public abstract class BasePreviewRenderer
     {
         return node.Transform; // already a System.Numerics.Matrix4x4
     }
-    
+
     // Style hooks
     protected abstract void ApplyStyleDefaults(RenderOptions options);
-    
+
     /// <summary>
     /// Capture all property values from RenderOptions into a dictionary.
     /// Used to preserve user settings before ApplyStyleDefaults overwrites them.
@@ -507,7 +539,7 @@ public abstract class BasePreviewRenderer
     private static Dictionary<string, object?> CaptureRenderOptions(RenderOptions options)
     {
         var properties = new Dictionary<string, object?>();
-        
+
         foreach (var prop in typeof(RenderOptions).GetProperties(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
         {
@@ -516,10 +548,10 @@ public abstract class BasePreviewRenderer
                 properties[prop.Name] = prop.GetValue(options);
             }
         }
-        
+
         return properties;
     }
-    
+
     /// <summary>
     /// Restore user-provided settings that differ from preset defaults.
     /// Uses reflection to automatically handle all RenderOptions properties,
@@ -531,19 +563,21 @@ public abstract class BasePreviewRenderer
         RenderOptions defaultOptions)
     {
         var optionsType = typeof(RenderOptions);
-        
+
         // Only restore properties that differ from the preset defaults
         foreach (var kvp in userProperties)
         {
             var prop = optionsType.GetProperty(kvp.Key,
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-            
+
             if (prop == null || !prop.CanWrite)
+            {
                 continue;
-            
+            }
+
             var userValue = kvp.Value;
             var defaultValue = prop.GetValue(defaultOptions);
-            
+
             // Only restore if values differ
             if (!PropertyValuesEqual(userValue, defaultValue))
             {
@@ -551,42 +585,50 @@ public abstract class BasePreviewRenderer
             }
         }
     }
-    
+
     /// <summary>
     /// Check if two property values are equal, with special handling for float and Vector3.
     /// </summary>
     private static bool PropertyValuesEqual(object? a, object? b)
     {
         if (ReferenceEquals(a, b))
+        {
             return true;
-        
+        }
+
         if (a == null || b == null)
+        {
             return a == b;
-        
+        }
+
         // Special handling for float values (epsilon comparison)
         if (a is float fa && b is float fb)
+        {
             return ApproximatelyEqual(fa, fb);
-        
+        }
+
         // Special handling for Vector3 (epsilon comparison)
         if (a is Vector3 va && b is Vector3 vb)
+        {
             return ApproximatelyEqual(va, vb);
-        
+        }
+
         // Default equality
         return a.Equals(b);
     }
-    
+
     private static bool ApproximatelyEqual(float a, float b, float epsilon = 1e-6f)
     {
         return Math.Abs(a - b) < epsilon;
     }
-    
+
     private static bool ApproximatelyEqual(Vector3 a, Vector3 b, float epsilon = 1e-6f)
     {
         return ApproximatelyEqual(a.X, b.X, epsilon) &&
                ApproximatelyEqual(a.Y, b.Y, epsilon) &&
                ApproximatelyEqual(a.Z, b.Z, epsilon);
     }
-    
+
     protected abstract void DrawBackground(Image<Rgba32> img, RenderOptions options);
     protected abstract Rgba32 ShadeTriangle(Vector3 normal, float ao, RenderOptions options);
 
@@ -701,7 +743,7 @@ public abstract class BasePreviewRenderer
         // ------------------------------------------------------------
         // 6. prepare normals list (one per vertex) 
         // ------------------------------------------------------------
-        for (int i = 0; i < result.Vertices.Count; i++) 
+        for (int i = 0; i < result.Vertices.Count; i++)
         {
             result.Normals.Add(Vector3.Zero);
         }
@@ -733,9 +775,9 @@ public abstract class BasePreviewRenderer
 
         options.ModelBoundsMinZ = minZ;
         options.ModelBoundsMaxZ = maxZ;
-        
+
         Console.WriteLine($"[BOUNDS] Model Z range: {minZ:F3} to {maxZ:F3}, center: {(minZ + maxZ) / 2f:F3}");
-        
+
         // Apply pending camera view now that bounds are known
         if (!string.IsNullOrWhiteSpace(options.PendingCameraView))
         {
@@ -763,7 +805,11 @@ public abstract class BasePreviewRenderer
 
         // Build adjacency list (faces touching each vertex)
         var vertexFaces = new List<int>[mesh.Vertices.Count];
-        for (int i = 0; i < vertexFaces.Length; i++) vertexFaces[i] = new List<int>();
+        for (int i = 0; i < vertexFaces.Length; i++)
+        {
+            vertexFaces[i] = new List<int>();
+        }
+
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
             var f = mesh.Faces[fi];
@@ -853,7 +899,9 @@ public abstract class BasePreviewRenderer
             );
 
             if (clipped.Count < 3)
+            {
                 continue;
+            }
 
             // Triangulate fan (max 2 triangles)
             for (int k = 1; k + 1 < clipped.Count; k++)
@@ -876,9 +924,13 @@ public abstract class BasePreviewRenderer
                     ndcC.XYZ() - ndcA.XYZ()
                 );
                 if (ndcFaceNormal.LengthSquared() > 1e-12f)
+                {
                     ndcFaceNormal = Vector3.Normalize(ndcFaceNormal);
+                }
                 else
+                {
                     ndcFaceNormal = Vector3.UnitZ;
+                }
 
                 tris.Add(new Triangle
                 {
@@ -892,7 +944,7 @@ public abstract class BasePreviewRenderer
 
                     // Store NDC-space face normal for screen operations
                     FaceNormal = ndcFaceNormal,
-                    
+
                     // Store VIEW-SPACE face normal for silhouette detection
                     // This is the proper space for comparing with view direction
                     ViewSpaceFaceNormal = faceNormal,
@@ -905,9 +957,12 @@ public abstract class BasePreviewRenderer
                     Ao1 = vB.Ao,
                     Ao2 = vC.Ao,
 
-                    Cz0 = vA.C.Z, Cw0 = vA.C.W,
-                    Cz1 = vB.C.Z, Cw1 = vB.C.W,
-                    Cz2 = vC.C.Z, Cw2 = vC.C.W
+                    Cz0 = vA.C.Z,
+                    Cw0 = vA.C.W,
+                    Cz1 = vB.C.Z,
+                    Cw1 = vB.C.W,
+                    Cz2 = vC.C.Z,
+                    Cw2 = vC.C.W
                 });
             }
         }
@@ -919,8 +974,9 @@ public abstract class BasePreviewRenderer
     {
         Span<ClipVertex> input = stackalloc ClipVertex[3] { a, b, c };
         var output = new List<ClipVertex>(4);
-        
-        static float Lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+        static float Lerp(float a, float b, float t)
+        { return a + (b - a) * t; }
 
         for (int i = 0; i < 3; i++)
         {
@@ -936,7 +992,9 @@ public abstract class BasePreviewRenderer
             bool in1 = s1 >= 0f;
 
             if (in0)
+            {
                 output.Add(v0);
+            }
 
             if (in0 ^ in1)
             {
@@ -944,8 +1002,8 @@ public abstract class BasePreviewRenderer
 
                 output.Add(new ClipVertex
                 {
-                    C  = Vector4.Lerp(v0.C, v1.C, t),
-                    N  = Vector3.Normalize(Vector3.Lerp(v0.N, v1.N, t)),
+                    C = Vector4.Lerp(v0.C, v1.C, t),
+                    N = Vector3.Normalize(Vector3.Lerp(v0.N, v1.N, t)),
                     Ao = Lerp(v0.Ao, v1.Ao, t)
                 });
             }
@@ -976,8 +1034,12 @@ public abstract class BasePreviewRenderer
 
         var depth01 = new float[w, h];
         for (int y = 0; y < h; y++)
+        {
             for (int x = 0; x < w; x++)
+            {
                 depth01[x, y] = float.PositiveInfinity;
+            }
+        }
 
         static float Edge(Vector2 a, Vector2 b, Vector2 c)
         {
@@ -996,13 +1058,18 @@ public abstract class BasePreviewRenderer
 
             // Backface culling; allow two-sided if configured
             if (Math.Abs(area) < 1e-6f)
+            {
                 continue;
+            }
 
             float sign = 1f;
             if (area < 0f)
             {
                 if (!options.TwoSided)
+                {
                     continue;
+                }
+
                 sign = -1f;
                 area = -area;
             }
@@ -1039,7 +1106,9 @@ public abstract class BasePreviewRenderer
                     float w2 = Edge(s0, s1, p) * sign;
 
                     if (w0 < 0f || w1 < 0f || w2 < 0f)
+                    {
                         continue;
+                    }
 
                     w0 *= invArea;
                     w1 *= invArea;
@@ -1047,14 +1116,18 @@ public abstract class BasePreviewRenderer
 
                     float invW = w0 * invW0 + w1 * invW1 + w2 * invW2;
                     if (invW <= 0f)
+                    {
                         continue;
+                    }
 
                     float zOverW = w0 * zOverW0 + w1 * zOverW1 + w2 * zOverW2;
                     float zNdc = zOverW / invW;
 
                     float d01 = zNdc; // System.Numerics uses [0, 1] depth range
                     if (d01 >= depth01[x, y])
+                    {
                         continue;
+                    }
 
                     depth01[x, y] = d01;
 
@@ -1087,7 +1160,10 @@ public abstract class BasePreviewRenderer
         static (PointF, PointF) MakeEdgeKey(PointF a, PointF b)
         {
             if (a.X < b.X || (Math.Abs(a.X - b.X) < 0.0001f && a.Y <= b.Y))
+            {
                 return (a, b);
+            }
+
             return (b, a);
         }
 
@@ -1111,11 +1187,15 @@ public abstract class BasePreviewRenderer
             if ((s0 - s1).LengthSquared() < ndcEpsilon ||
                 (s1 - s2).LengthSquared() < ndcEpsilon ||
                 (s2 - s0).LengthSquared() < ndcEpsilon)
+            {
                 continue;
+            }
 
             float winding = Cross2D(s0, s1, s2);
             if (winding <= 0f)
+            {
                 continue;
+            }
 
             // Use VIEW-SPACE face normal with VIEW-SPACE view direction for correct comparison
             // Front-facing: normal points toward camera (positive Z), viewDir is -Z, so dot < 0
@@ -1125,7 +1205,7 @@ public abstract class BasePreviewRenderer
             var p0 = new PointF(s0.X, s0.Y);
             var p1 = new PointF(s1.X, s1.Y);
             var p2 = new PointF(s2.X, s2.Y);
-    
+
             float d0 = tri.D0;
             float d1 = tri.D1;
             float d2 = tri.D2;
@@ -1166,7 +1246,9 @@ public abstract class BasePreviewRenderer
                     var n = Vector3.Normalize(list[0].faceNormal);
                     float ndotvAbs = MathF.Abs(Vector3.Dot(n, viewSpaceViewDir));
                     if (ndotvAbs < 0.25f)
+                    {
                         isSilhouette = true;
+                    }
                 }
                 else if (list.Count == 2)
                 {
@@ -1180,12 +1262,16 @@ public abstract class BasePreviewRenderer
                         float ndot = Vector3.Dot(n0, n1);
 
                         if (ndot < 0.5f)
+                        {
                             isSilhouette = true;
+                        }
                     }
                 }
 
                 if (!isSilhouette)
+                {
                     continue;
+                }
 
                 // Depth-aware: test midpoint against z-buffer
                 var (a, b) = edgeKey;
@@ -1194,7 +1280,9 @@ public abstract class BasePreviewRenderer
                 int mx = (int)MathF.Floor(mid.X);
                 int my = (int)MathF.Floor(mid.Y);
                 if ((uint)mx >= (uint)w || (uint)my >= (uint)h)
+                {
                     continue;
+                }
 
                 // Choose a front-facing entry if possible (more likely to be visible surface)
                 var entry = list.Count == 2
@@ -1203,7 +1291,9 @@ public abstract class BasePreviewRenderer
 
                 float zbuf = depth01[mx, my];
                 if (zbuf >= 1f)
+                {
                     continue; // background, edge not visible
+                }
 
                 var pb = new PathBuilder();
                 pb.AddLine(a, b);

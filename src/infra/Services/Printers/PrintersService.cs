@@ -100,7 +100,7 @@ namespace Farm.Infrastructure.Services.Printers
             try
             {
                 var backend = (PrinterBackend)printer.Backend;
-                
+
                 // Use factory to get strongly-typed history client
                 if (_capabilityFactory.TryGetHistoryClientTyped(backend, out var historyClient))
                 {
@@ -148,7 +148,7 @@ namespace Farm.Infrastructure.Services.Printers
             try
             {
                 var backend = (PrinterBackend)printer.Backend;
-                
+
                 if (!_capabilityFactory.TryGetHistoryClientTyped(backend, out var historyClient))
                 {
                     throw new InvalidOperationException("History is only available for backends that support it");
@@ -168,7 +168,10 @@ namespace Farm.Infrastructure.Services.Printers
             {
                 _logger.LogWarning(ex, $"[History] Failed to retrieve job {jobId} for printer {printerId}: {ex.Message}");
                 if (ex is KeyNotFoundException || ex is InvalidOperationException)
+                {
                     throw;
+                }
+
                 throw new KeyNotFoundException($"History job {jobId} not found", ex);
             }
         }
@@ -189,12 +192,16 @@ namespace Farm.Infrastructure.Services.Printers
                 {
                     HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.ApiKey, ct).ConfigureAwait(false);
                     if (totals != null)
+                    {
                         return totals;
-                    
+                    }
+
                     // Fallback: get full history and calculate totals
                     HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, printer.ApiKey, ct).ConfigureAwait(false);
                     if (response != null)
+                    {
                         return CalculateOctoPrintHistoryTotals(response.Jobs);
+                    }
                 }
 
                 return new HistoryTotals { JobTotals = new JobTotals() };
@@ -215,7 +222,7 @@ namespace Farm.Infrastructure.Services.Printers
             }
 
             var backend = (PrinterBackend)printer.Backend;
-            
+
             if (!_capabilityFactory.TryGetHistoryClientTyped(backend, out var historyClient))
             {
                 throw new InvalidOperationException("History deletion is only available for backends that support it");
@@ -389,7 +396,7 @@ namespace Farm.Infrastructure.Services.Printers
                 string? snapshotUrl = null;
 
                 var backend = (PrinterBackend)p.Backend;
-                
+
                 // Check if this backend supports camera operations
                 var backendCapabilities = _capabilityFactory.GetSupportedCapabilities(backend);
                 if ((backendCapabilities & BackendCapabilities.Camera) == BackendCapabilities.Camera)
@@ -441,7 +448,7 @@ namespace Farm.Infrastructure.Services.Printers
         {
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
             var dtos = new List<PrinterFastDto>();
-            
+
             foreach (var p in items)
             {
                 try
@@ -449,22 +456,22 @@ namespace Farm.Infrastructure.Services.Printers
                     // Get real-time status for each printer
                     PrinterStatusDto status = await GetStatusDtoAsync(p.Id, ct);
                     dtos.Add(new PrinterFastDto(
-                        Id: p.Id, 
-                        Name: p.Name, 
+                        Id: p.Id,
+                        Name: p.Name,
                         BackendUrl: p.BackendUrl,
                         FrontendUrl: p.FrontendUrl,
-                        Notes: p.Notes, 
+                        Notes: p.Notes,
                         IsOnline: status.IsOnline,
                         State: status.State,
-                        ManufacturerName: p.Manufacturer?.Name, 
-                        ModelName: p.Model?.Name, 
-                        Backend: MapBackendEnum(p.Backend), 
-                        ApiKey: p.ApiKey, 
-                        OriginalServerUrl: p.OriginalServerUrl, 
-                        IpAddress: p.IpAddress, 
-                        BackendPort: p.BackendPort, 
-                        FrontendPort: p.FrontendPort, 
-                        InMaintenance: p.InMaintenance, 
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Backend: MapBackendEnum(p.Backend),
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress,
+                        BackendPort: p.BackendPort,
+                        FrontendPort: p.FrontendPort,
+                        InMaintenance: p.InMaintenance,
                         IsEnabled: p.IsEnabled,
                         // Camera URLs from database (discovered at registration)
                         CameraStreamUrl: p.CameraStreamUrl,
@@ -475,29 +482,29 @@ namespace Farm.Infrastructure.Services.Printers
                     _logger.LogWarning($"Failed to get status for printer {p.Id}: {ex.Message}. Using offline status.");
                     // Fallback to offline status if retrieval fails
                     dtos.Add(new PrinterFastDto(
-                        Id: p.Id, 
-                        Name: p.Name, 
+                        Id: p.Id,
+                        Name: p.Name,
                         BackendUrl: p.BackendUrl,
                         FrontendUrl: p.FrontendUrl,
-                        Notes: p.Notes, 
+                        Notes: p.Notes,
                         IsOnline: false,
                         State: null,
-                        ManufacturerName: p.Manufacturer?.Name, 
-                        ModelName: p.Model?.Name, 
-                        Backend: MapBackendEnum(p.Backend), 
-                        ApiKey: p.ApiKey, 
-                        OriginalServerUrl: p.OriginalServerUrl, 
-                        IpAddress: p.IpAddress, 
-                        BackendPort: p.BackendPort, 
-                        FrontendPort: p.FrontendPort, 
-                        InMaintenance: p.InMaintenance, 
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Backend: MapBackendEnum(p.Backend),
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress,
+                        BackendPort: p.BackendPort,
+                        FrontendPort: p.FrontendPort,
+                        InMaintenance: p.InMaintenance,
                         IsEnabled: p.IsEnabled,
                         // Camera URLs from database (discovered at registration)
                         CameraStreamUrl: p.CameraStreamUrl,
                         CameraSnapshotUrl: p.CameraSnapshotUrl));
                 }
             }
-            
+
             return dtos.ToArray();
         }
 
@@ -506,7 +513,7 @@ namespace Farm.Infrastructure.Services.Printers
             List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
             var dtos = new List<CompletePrinterDto>();
             var cachedStatuses = _statusCache.GetAllStatuses();
-            
+
             foreach (var p in items)
             {
                 try
@@ -525,29 +532,29 @@ namespace Farm.Infrastructure.Services.Printers
                             CameraStreamUrl: null,
                             CameraSnapshotUrl: null,
                             SpoolInfo: null);
-                    
+
                     // Use database camera URLs (discovered at registration) - they use frontend port
                     // Fall back to status camera URLs only if database URLs are not set
-                    string? cameraStreamUrl = !string.IsNullOrEmpty(p.CameraStreamUrl) 
-                        ? p.CameraStreamUrl 
+                    string? cameraStreamUrl = !string.IsNullOrEmpty(p.CameraStreamUrl)
+                        ? p.CameraStreamUrl
                         : status.CameraStreamUrl;
-                    
+
                     dtos.Add(new CompletePrinterDto(
                         // Static configuration from database
-                        Id: p.Id, 
-                        Name: p.Name, 
-                        Notes: p.Notes, 
-                        ManufacturerName: p.Manufacturer?.Name, 
-                        ModelName: p.Model?.Name, 
-                        Backend: MapBackendEnum(p.Backend), 
-                        ApiKey: p.ApiKey, 
-                        OriginalServerUrl: p.OriginalServerUrl, 
-                        IpAddress: p.IpAddress, 
-                        BackendPort: p.BackendPort, 
-                        FrontendPort: p.FrontendPort, 
-                        InMaintenance: p.InMaintenance, 
+                        Id: p.Id,
+                        Name: p.Name,
+                        Notes: p.Notes,
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Backend: MapBackendEnum(p.Backend),
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress,
+                        BackendPort: p.BackendPort,
+                        FrontendPort: p.FrontendPort,
+                        InMaintenance: p.InMaintenance,
                         IsEnabled: p.IsEnabled,
-                        
+
                         // Live status from cache (or placeholder if not cached yet)
                         IsOnline: status.IsOnline,
                         State: status.State,
@@ -574,20 +581,20 @@ namespace Farm.Infrastructure.Services.Printers
                     _logger.LogWarning($"Failed to build complete DTO for printer {p.Id}: {ex.Message}. Using offline status.");
                     // Fallback to offline status if DTO building fails
                     dtos.Add(new CompletePrinterDto(
-                        Id: p.Id, 
-                        Name: p.Name, 
-                        Notes: p.Notes, 
-                        ManufacturerName: p.Manufacturer?.Name, 
-                        ModelName: p.Model?.Name, 
-                        Backend: MapBackendEnum(p.Backend), 
-                        ApiKey: p.ApiKey, 
-                        OriginalServerUrl: p.OriginalServerUrl, 
-                        IpAddress: p.IpAddress, 
-                        BackendPort: p.BackendPort, 
-                        FrontendPort: p.FrontendPort, 
-                        InMaintenance: p.InMaintenance, 
+                        Id: p.Id,
+                        Name: p.Name,
+                        Notes: p.Notes,
+                        ManufacturerName: p.Manufacturer?.Name,
+                        ModelName: p.Model?.Name,
+                        Backend: MapBackendEnum(p.Backend),
+                        ApiKey: p.ApiKey,
+                        OriginalServerUrl: p.OriginalServerUrl,
+                        IpAddress: p.IpAddress,
+                        BackendPort: p.BackendPort,
+                        FrontendPort: p.FrontendPort,
+                        InMaintenance: p.InMaintenance,
                         IsEnabled: p.IsEnabled,
-                        
+
                         // Offline status - but still include camera URL from database
                         IsOnline: false,
                         State: null,
@@ -609,7 +616,7 @@ namespace Farm.Infrastructure.Services.Printers
                     ));
                 }
             }
-            
+
             return dtos.ToArray();
         }
 
@@ -628,20 +635,20 @@ namespace Farm.Infrastructure.Services.Printers
             // Delegate to StreamExportToResponseAsync using a memory stream wrapper
             using MemoryStream ms = new MemoryStream();
             using StreamWriter writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
-            
+
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
             IQueryable<Printer> query = printers.AsQueryable();
-            
+
             // Export fields matching AdminCli CSV format for consistency
             List<string> headerParts = new() { "Name", "IpAddress", "Backend", "BackendPort", "FrontendPort", "ManufacturerName", "ModelName", "Notes", "ApiKey", "IsEnabled", "CameraStreamUrl", "CameraSnapshotUrl", "DateAcquired", "LocationName" };
-            
+
             await writer.WriteLineAsync(string.Join(',', headerParts));
-            
+
             foreach (Printer p in query)
             {
                 PrinterBackend backend = (PrinterBackend)p.Backend;
                 string backendName = backend.ToString();
-                
+
                 string backendPort = p.BackendPort.ToString();
                 string frontendPort = p.FrontendPort?.ToString() ?? "";
                 string apiKey = p.ApiKey ?? "";
@@ -652,7 +659,7 @@ namespace Farm.Infrastructure.Services.Printers
                 string csvLine = $"{EscapeCsvValue(p.Name)},{EscapeCsvValue(p.IpAddress)},{backendName},{backendPort},{frontendPort},{EscapeCsvValue(p.Manufacturer?.Name)},{EscapeCsvValue(p.Model?.Name)},{EscapeCsvValue(p.Notes)},{EscapeCsvValue(apiKey)},{p.IsEnabled},{EscapeCsvValue(cameraStreamUrl)},{EscapeCsvValue(cameraSnapshotUrl)},{dateAcquired},{EscapeCsvValue(locationName)}";
                 await writer.WriteLineAsync(csvLine);
             }
-            
+
             await writer.FlushAsync();
             return ms.ToArray();
         }
@@ -667,7 +674,7 @@ namespace Farm.Infrastructure.Services.Printers
 
             using MemoryStream ms = new MemoryStream();
             await using StreamWriter writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
-            
+
             await writer.WriteAsync("[");
             bool first = true;
             // Process each printer and include toolheads data
@@ -686,7 +693,7 @@ namespace Farm.Infrastructure.Services.Printers
             }
             await writer.WriteAsync("]");
             await writer.FlushAsync();
-            
+
             return ms.ToArray();
         }
 
@@ -1041,10 +1048,10 @@ namespace Farm.Infrastructure.Services.Printers
                 if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out var cameraClient) && cameraClient != null)
                 {
                     // Try to get camera snapshot URL from the client
-                    string snapUrl = backendEnum == PrinterBackend.Moonraker 
+                    string snapUrl = backendEnum == PrinterBackend.Moonraker
                         ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
                         : p.BackendUrl;
-                    
+
                     // Get camera snapshot URL using capability interface
                     string? snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.ApiKey, ct).ConfigureAwait(false);
                     if (!string.IsNullOrWhiteSpace(snapshotUrl))
@@ -1129,7 +1136,7 @@ namespace Farm.Infrastructure.Services.Printers
             {
                 var backend = (PrinterBackend)p.Backend;
                 var client = GetBackendClient(backend);
-                
+
                 if (client is not ISupportsMovement movement)
                 {
                     return false;
@@ -1163,7 +1170,7 @@ namespace Farm.Infrastructure.Services.Printers
             {
                 var backend = (PrinterBackend)p.Backend;
                 var client = GetBackendClient(backend);
-                
+
                 if (client is ISupportsMovement movement)
                 {
                     string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1191,7 +1198,7 @@ namespace Farm.Infrastructure.Services.Printers
             {
                 var backend = (PrinterBackend)p.Backend;
                 var client = GetBackendClient(backend);
-                
+
                 if (client is ISupportsMovement movement)
                 {
                     string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
@@ -1226,7 +1233,7 @@ namespace Farm.Infrastructure.Services.Printers
                     if (client is ISupportsOctoPrintTemperature octoPrintTemp)
                     {
                         bool success = true;
-                        
+
                         if (bed.HasValue)
                         {
                             bool bedSuccess = await octoPrintTemp.SetBedTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, bed.Value, ct).ConfigureAwait(false);
@@ -1234,13 +1241,13 @@ namespace Farm.Infrastructure.Services.Printers
                             success = success && bedSuccess;
 #pragma warning restore S2589
                         }
-                        
+
                         if (hotend.HasValue)
                         {
                             bool hotendSuccess = await octoPrintTemp.SetHotendTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, hotend.Value, "tool0", ct).ConfigureAwait(false);
                             success = success && hotendSuccess;
                         }
-                        
+
                         return success;
                     }
 
@@ -1330,7 +1337,7 @@ namespace Farm.Infrastructure.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
-                
+
                 // Try print job control capability
                 if (_capabilityFactory.TryGetControlOperationsClientTyped(backend, out var controlClient))
                 {
@@ -1357,7 +1364,7 @@ namespace Farm.Infrastructure.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
-                
+
                 // Try print job control capability
                 if (_capabilityFactory.TryGetControlOperationsClientTyped(backend, out var controlClient))
                 {
@@ -1384,7 +1391,7 @@ namespace Farm.Infrastructure.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
-                
+
                 // Try print job control capability
                 if (_capabilityFactory.TryGetControlOperationsClientTyped(backend, out var controlClient))
                 {
@@ -1467,7 +1474,7 @@ namespace Farm.Infrastructure.Services.Printers
             try
             {
                 var backend = (PrinterBackend)p.Backend;
-                
+
                 // Try start print capability
                 if (_capabilityFactory.TryGetStartPrintClientTyped(backend, out var startPrintClient))
                 {
@@ -1571,7 +1578,7 @@ namespace Farm.Infrastructure.Services.Printers
 
                 // Get file list with standardized PrinterFileInfo objects
                 List<PrinterFileInfo> fileInfos = await fileListClient.GetFileListAsync(baseUrl, p.ApiKey, ct).ConfigureAwait(false);
-                
+
                 if (fileInfos.Count == 0)
                 {
                     return Array.Empty<PrinterFileDto>();
@@ -1815,16 +1822,16 @@ namespace Farm.Infrastructure.Services.Printers
                             _repo.DetachAllEntities();
                             // Fire off background camera discovery - it will complete asynchronously
                             // NOTE: This does NOT block the import response; cameras may populate after import completes
-                            #pragma warning disable CS4014  // Intentionally not awaiting
+#pragma warning disable CS4014  // Intentionally not awaiting
                             AttemptBackgroundCameraDiscoveryAsync(createdPrinter);
-                            #pragma warning restore CS4014
+#pragma warning restore CS4014
                         }
                     }
                 }
                 catch (Exception ex)
                 {
                     string errorMessage;
-                    
+
                     // Try to extract meaningful error from database exceptions
                     if (ex.Message.Contains("constraint failed", StringComparison.OrdinalIgnoreCase) ||
                         ex.InnerException?.Message.Contains("constraint", StringComparison.OrdinalIgnoreCase) == true)
@@ -1845,7 +1852,7 @@ namespace Farm.Infrastructure.Services.Printers
                     {
                         errorMessage = $"Failed to create printer: {ex.Message}";
                     }
-                    
+
                     errorResults[i] = errorMessage;
                     _logger.LogWarning(ex, $"[BulkCreate] Error creating printer {printers[i].Name} at index {i}: {errorMessage}");
 
@@ -1913,7 +1920,7 @@ namespace Farm.Infrastructure.Services.Printers
                     : printer.BackendUrl;
 
                 PrinterJob? job = await jobClient.GetJobAsync(url, printer.ApiKey, ct).ConfigureAwait(false);
-                
+
                 if (job != null)
                 {
                     return new PrintJobStatusDto
@@ -2236,7 +2243,7 @@ namespace Farm.Infrastructure.Services.Printers
 
             return totals;
         }
-        
+
         /// <summary>
         /// Refreshes camera URLs for a printer by querying the backend API.
         /// Updates the stored camera URLs in the database.
@@ -2246,14 +2253,14 @@ namespace Farm.Infrastructure.Services.Printers
         public async Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
         {
             _logger.LogInformation($"RefreshCameraUrlsAsync: Starting refresh for printer {id}");
-            
+
             Printer? printer = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
             if (printer == null)
             {
                 _logger.LogWarning($"RefreshCameraUrlsAsync: Printer {id} not found");
                 return null;
             }
-            
+
             _logger.LogInformation($"RefreshCameraUrlsAsync: Found printer {printer.Name}, Backend={printer.Backend}, ServerUrl={printer.ServerUrl}, FrontendPort={printer.FrontendPort}");
 
             var backend = (PrinterBackend)printer.Backend;
@@ -2266,38 +2273,38 @@ namespace Farm.Infrastructure.Services.Printers
                 if (_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out var detectionClient) && detectionClient != null)
                 {
                     _logger.LogInformation($"RefreshCameraUrlsAsync: Using configured camera detection for backend {backend}");
-                    
+
                     // For Moonraker, use the frontend URL (not backend port 7125)
-                    string baseUrlForCamera = backend == PrinterBackend.Moonraker 
+                    string baseUrlForCamera = backend == PrinterBackend.Moonraker
                         ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                         : printer.BackendUrl;
-                    
+
                     _logger.LogInformation($"RefreshCameraUrlsAsync: Using baseUrlForCamera={baseUrlForCamera}");
-                    
+
                     // Call the detection method - it will ONLY return URLs if cameras actually exist
                     (streamUrl, snapshotUrl) = await detectionClient.DetectConfiguredCameraUrlsAsync(
-                        baseUrlForCamera, 
-                        printer.FrontendPort, 
-                        printer.ApiKey, 
+                        baseUrlForCamera,
+                        printer.FrontendPort,
+                        printer.ApiKey,
                         ct).ConfigureAwait(false);
-                    
+
                     _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from detection - stream={streamUrl}, snapshot={snapshotUrl}");
                 }
                 else
                 {
                     // Fallback: Use standard camera client (may return default URLs even if cameras don't exist)
                     _logger.LogWarning($"RefreshCameraUrlsAsync: Configured camera detection not available for backend {backend}, falling back to standard interface");
-                    
+
                     bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out var cameraClient);
                     if (gotCameraClient && cameraClient != null)
                     {
-                        string baseUrlForCamera = backend == PrinterBackend.Moonraker 
+                        string baseUrlForCamera = backend == PrinterBackend.Moonraker
                             ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
                             : printer.BackendUrl;
-                        
+
                         streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
                         snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.ApiKey, ct).ConfigureAwait(false);
-                        
+
                         _logger.LogInformation($"RefreshCameraUrlsAsync: Got URLs from standard interface - stream={streamUrl}, snapshot={snapshotUrl}");
                     }
                 }

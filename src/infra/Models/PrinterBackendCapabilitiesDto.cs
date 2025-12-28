@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure;
 
@@ -32,17 +32,61 @@ public record PrinterBackendCapabilitiesDto(
         get
         {
             var caps = new List<string>();
-            if (SupportsCamera) caps.Add("Camera");
-            if (SupportsFileDownload) caps.Add("FileDownload");
-            if (SupportsFileList) caps.Add("FileList");
-            if (SupportsFileUpload) caps.Add("FileUpload");
-            if (SupportsStartPrint) caps.Add("StartPrint");
-            if (SupportsControlOperations) caps.Add("ControlOperations");
-            if (SupportsFileMetadata) caps.Add("FileMetadata");
-            if (SupportsMovement) caps.Add("Movement");
-            if (SupportsTemperatureControl) caps.Add("TemperatureControl");
-            if (SupportsPrinterInformation) caps.Add("PrinterInformation");
-            if (SupportsHistory) caps.Add("History");
+            if (SupportsCamera)
+            {
+                caps.Add("Camera");
+            }
+
+            if (SupportsFileDownload)
+            {
+                caps.Add("FileDownload");
+            }
+
+            if (SupportsFileList)
+            {
+                caps.Add("FileList");
+            }
+
+            if (SupportsFileUpload)
+            {
+                caps.Add("FileUpload");
+            }
+
+            if (SupportsStartPrint)
+            {
+                caps.Add("StartPrint");
+            }
+
+            if (SupportsControlOperations)
+            {
+                caps.Add("ControlOperations");
+            }
+
+            if (SupportsFileMetadata)
+            {
+                caps.Add("FileMetadata");
+            }
+
+            if (SupportsMovement)
+            {
+                caps.Add("Movement");
+            }
+
+            if (SupportsTemperatureControl)
+            {
+                caps.Add("TemperatureControl");
+            }
+
+            if (SupportsPrinterInformation)
+            {
+                caps.Add("PrinterInformation");
+            }
+
+            if (SupportsHistory)
+            {
+                caps.Add("History");
+            }
+
             return caps.ToArray();
         }
     }

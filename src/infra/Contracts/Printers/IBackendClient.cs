@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Contracts.Printers;
+﻿namespace Farm.Infrastructure.Contracts.Printers;
 
 #pragma warning disable CA1040 // Marker interface intentionally empty
 

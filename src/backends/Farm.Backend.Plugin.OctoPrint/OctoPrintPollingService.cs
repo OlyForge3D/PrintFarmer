@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -144,8 +144,8 @@ public sealed class OctoPrintPollingService(
                                     _statusCacheWriter);
 
                                 _webSocketAdapters.TryAdd(id, adapter);
-                                var state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState 
-                                { 
+                                var state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
+                                {
                                     PrinterId = printerId,
                                     LastKnownIsOnline = false,
                                     LastApiState = "unset",
@@ -220,9 +220,9 @@ public sealed class OctoPrintPollingService(
     private async Task PollPrinterAsync(Guid printerId, CancellationToken ct)
     {
 #pragma warning disable S6612 // Capturing printerId in lambda is intentional and safe
-        var state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState 
-        { 
-            PrinterId = printerId, 
+        var state = _printerStates.GetOrAdd(printerId, _ => new PrinterPollingState
+        {
+            PrinterId = printerId,
             LastKnownIsOnline = false,
             LastApiState = "unset"
         });
@@ -336,7 +336,7 @@ public sealed class OctoPrintPollingService(
                             $"OctoPrint printer {printerId} marked offline after {state.ConsecutiveFailures} HTTP fallback failures " +
                             $"(apiState={apiState})");
                         state.LastKnownIsOnline = false;
-                        
+
                         // Create cache update (PrinterStatusDto - no HomedAxes)
                         var offlineCacheUpdate = new PrinterStatusDto(
                             Id: printerId,

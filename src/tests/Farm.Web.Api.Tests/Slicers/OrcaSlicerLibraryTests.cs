@@ -1,4 +1,4 @@
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Farm.Slicers.OrcaSlicer.v2_3_1;
 using FluentAssertions;
 using Xunit;

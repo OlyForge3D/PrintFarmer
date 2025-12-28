@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -160,7 +160,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         await context.SaveChangesAsync();
 
         await CreateTestWorkerAsync();
-        
+
         // Create jobs with different statuses
         var processingJob = await CreateTestJobAsync(SliceJobStatus.Processing);
         var queuedJob = await CreateTestJobAsync(SliceJobStatus.Queued);
@@ -678,7 +678,7 @@ public class JobDispatcherServiceIntegrationTests : IAsyncLifetime
         // Check that we found the high priority job by checking job states
         var lowPriority = await context.SliceJobs.FindAsync(lowPriorityJob.Id);
         var highPriority = await context.SliceJobs.FindAsync(highPriorityJob.Id);
-        
+
         // The dispatcher should prioritize, so if dispatch failed, low-priority should still be Queued
         // If dispatch succeeded, one job would be Processing and one Queued
         (lowPriority!.Status == SliceJobStatus.Queued || lowPriority.Status == SliceJobStatus.Processing).Should().BeTrue();

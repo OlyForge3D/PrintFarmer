@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Farm.Infrastructure;
 
@@ -61,7 +61,9 @@ namespace Farm.Infrastructure.Services.Printers
         public void UpdateStatuses(IEnumerable<PrinterStatusDto> statuses)
         {
             if (statuses == null)
+            {
                 return;
+            }
 
             lock (_lockObj)
             {

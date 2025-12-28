@@ -1,7 +1,7 @@
-using Farm.Infrastructure.Contracts.Printers.PrusaLink;
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -37,7 +37,7 @@ public interface IPrusaLinkApiClient
     Task<StorageListResponse> GetStorageAsync(string baseUrl, string? apiKey = null, string? acceptLanguage = null, CancellationToken ct = default);
 
     /// <summary>Gets information about a specific file.</summary>
-    Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null, 
+    Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, string? apiKey = null,
         string? acceptLanguage = null, string? accept = null, CancellationToken ct = default);
 
     /// <summary>Gets a list of files from the specified location (legacy endpoint).</summary>

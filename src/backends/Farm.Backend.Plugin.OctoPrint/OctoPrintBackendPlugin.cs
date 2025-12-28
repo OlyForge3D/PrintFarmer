@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.OctoPrint;
+﻿namespace Farm.Backend.Plugin.OctoPrint;
 
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;

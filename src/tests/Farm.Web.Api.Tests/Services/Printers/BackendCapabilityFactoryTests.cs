@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Farm.Backend.Plugin.Core;
 using Farm.Backend.Plugin.Moonraker;
@@ -40,7 +40,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
 
             // Act & Assert
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"Moonraker client ({client.GetType().FullName}) should implement ISupportsFileList interface");
             Assert.True(client is ISupportsFileDownload, "Moonraker should support file downloads");
             Assert.True(client is ISupportsStartPrint, "Moonraker should support starting prints");
@@ -54,7 +54,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
 
             // Act & Assert
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"PrusaLink client ({client.GetType().FullName}) should implement ISupportsFileList interface");
             Assert.True(client is ISupportsFileDownload, "PrusaLink should support file downloads");
         }
@@ -67,7 +67,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
 
             // Act & Assert
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"OctoPrint client ({client.GetType().FullName}) should implement ISupportsFileList interface");
             Assert.True(client is ISupportsFileDownload, "OctoPrint should support file downloads");
         }
@@ -80,7 +80,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
 
             // Act & Assert
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"SDCP client ({client.GetType().FullName}) should implement ISupportsFileList interface");
             Assert.True(client is ISupportsFileDownload, "SDCP should support file downloads");
         }
@@ -90,7 +90,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         {
             // Arrange - Create a mock registry with all plugins
             var registry = new Mock<IBackendPluginRegistry>();
-            
+
             // Create mock plugins
             var moonrakerPlugin = CreateMockPlugin("moonraker", PrinterBackend.Moonraker);
             var prusaLinkPlugin = CreateMockPlugin("prusalink", PrinterBackend.PrusaLink);
@@ -181,7 +181,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             plugin.Setup(p => p.BackendType).Returns(backendType);
             plugin.Setup(p => p.DisplayName).Returns(backendType);
             plugin.Setup(p => p.Description).Returns($"{backendType} plugin");
-            
+
             // Return the correct capabilities based on backend type
             var capabilities = GetCapabilitiesForBackend(backend);
             plugin.Setup(p => p.GetCapabilities()).Returns(capabilities);

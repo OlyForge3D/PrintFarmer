@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Basic printer status information.

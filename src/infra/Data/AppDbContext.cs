@@ -117,7 +117,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .HasForeignKey(p => p.LocationId)
              .OnDelete(DeleteBehavior.SetNull); // Allow setting location to null
             _ = b.Property(p => p.DateAcquired);
-            
+
             // Toolheads collection - one printer can have multiple hotends
             _ = b.HasMany(p => p.Toolheads)
              .WithOne(t => t.Printer)
@@ -137,19 +137,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(t => t.HasHeatedEnclosure).HasDefaultValue(false);
             _ = b.Property(t => t.IsPrimary).HasDefaultValue(false);
             _ = b.Property(t => t.UpdatedAt).IsRequired();
-            
+
             // JSON array properties
             _ = b.Property(t => t.SupportedMaterials)
                 .HasConversion(
                     v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
                     v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
-            
+
             // Foreign Key
             _ = b.HasOne(t => t.Printer)
              .WithMany(p => p.Toolheads)
              .HasForeignKey(t => t.PrinterId)
              .OnDelete(DeleteBehavior.Cascade);
-            
+
             // Indexes
             _ = b.HasIndex(t => t.PrinterId);
             _ = b.HasIndex(t => t.Index);
@@ -165,13 +165,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(l => l.CreatedAt).IsRequired();
             _ = b.Property(l => l.ModifiedAt).IsRequired();
             _ = b.Property(l => l.IsActive).HasDefaultValue(true);
-            
+
             // One location can have many printers
             _ = b.HasMany(l => l.Printers)
              .WithOne(p => p.Location)
              .HasForeignKey(p => p.LocationId)
              .OnDelete(DeleteBehavior.SetNull);
-            
+
             // Indexes
             _ = b.HasIndex(l => l.Name).IsUnique();
             _ = b.HasIndex(l => l.IsActive);

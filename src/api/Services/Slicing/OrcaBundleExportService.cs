@@ -3,10 +3,10 @@
 using System.Linq;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Filament;
 using Farm.Infrastructure.Repositories.Slicing;
-using Farm.Infrastructure.Domain;
 
 /// <summary>
 /// Exports PrintFarmer profiles to OrcaSlicer config bundle JSON format.
@@ -85,7 +85,7 @@ public class OrcaBundleExportService(ICatalogRepository catalogRepo, IProcessPro
         {
             var manufacturerTuples = await _catalogRepo.GetManufacturersAsync();
             var manufacturer = manufacturerTuples.FirstOrDefault(m => m.Id == modelDto.ManufacturerId);
-            
+
             Dictionary<string, object> preset = new Dictionary<string, object>
             {
                 ["name"] = $"{manufacturer.Name ?? "Unknown"} {modelDto.Name}",
@@ -118,7 +118,7 @@ public class OrcaBundleExportService(ICatalogRepository catalogRepo, IProcessPro
 
         // Get all public process profiles
         var profiles = await _processRepo.GetPublicAsync();
-        
+
         if (profiles.Count == 0)
         {
             presets.AddRange(GetDefaultProcessPresets());

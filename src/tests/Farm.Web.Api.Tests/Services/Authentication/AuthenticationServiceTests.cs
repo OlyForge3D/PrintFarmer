@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
@@ -631,7 +631,7 @@ public class AuthenticationServiceTests
             _mockAccountLockoutService.Object,
             _mockAuthAuditService.Object
         );
-        
+
         _mockUsersRepository.Setup(r => r.GetActiveRoleNamesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<string> { "farm_user" });
         _mockUsersRepository.Setup(r => r.GetGrantedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))

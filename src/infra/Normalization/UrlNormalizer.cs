@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Normalization;
+﻿namespace Farm.Infrastructure.Normalization;
 
 /// <summary>
 /// Centralized utility for URL normalization to ensure consistent handling across the application.

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -43,7 +43,7 @@ public class TagServiceIntegrationTests : IAsyncLifetime
     {
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        
+
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
@@ -682,7 +682,7 @@ public class TagServiceIntegrationTests : IAsyncLifetime
                 Description = ""
             };
             var created = await service.CreateTagAsync(dto, CancellationToken.None);
-            
+
             firstTag ??= created;
         }
 

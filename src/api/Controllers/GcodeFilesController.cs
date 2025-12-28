@@ -229,7 +229,7 @@ public class GcodeFilesController(
                 {
                     // Retrieve virtual directory from upload session
                     string? virtualDir = chunkedUploadService.GetUploadVirtualDirectory(uploadId);
-                    
+
                     // Try to finalize the upload to database, passing the thumbnail path and virtual directory
                     var gcodeFile = await gcodeFilesService.FinalizeChunkedUploadAsync(
                         GetUploadFilePath(result),
@@ -238,7 +238,7 @@ public class GcodeFilesController(
                         virtualDir,
                         chunkedUploadService,
                         CancellationToken.None);
-                    
+
                     if (gcodeFile != null)
                     {
                         gcodeFileId = gcodeFile.Id;

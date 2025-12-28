@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -92,7 +92,8 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
+            using (var stream = file.OpenReadStream())
+            { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("No valid printer");
     }
@@ -110,7 +111,8 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
+            using (var stream = file.OpenReadStream())
+            { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
     }
 
@@ -133,7 +135,8 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
         {
-            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
+            using (var stream = file.OpenReadStream())
+            { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("CSV or JSON");
     }
@@ -152,7 +155,8 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            using (var stream = file.OpenReadStream()) { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
+            using (var stream = file.OpenReadStream())
+            { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
         exception.Message.Should().Contain("required columns");
     }
@@ -168,17 +172,17 @@ public sealed class PrinterImportFacadeIntegrationTests : IClassFixture<CustomWe
 
         var jsonContent = JsonSerializer.Serialize(new[]
         {
-            new CreatePrinterDto 
-            { 
-                Name = "JsonPrinter1", 
+            new CreatePrinterDto
+            {
+                Name = "JsonPrinter1",
                 IpAddress = "192.168.1.110",
-                Backend = PrinterBackend.Moonraker 
+                Backend = PrinterBackend.Moonraker
             },
-            new CreatePrinterDto 
-            { 
-                Name = "JsonPrinter2", 
+            new CreatePrinterDto
+            {
+                Name = "JsonPrinter2",
                 IpAddress = "192.168.1.111",
-                Backend = PrinterBackend.PrusaLink 
+                Backend = PrinterBackend.PrusaLink
             }
         });
         var file = CreateJsonFormFile("printers.json", jsonContent);

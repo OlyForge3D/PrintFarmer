@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -43,7 +43,7 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
     {
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -53,7 +53,7 @@ public class AuthAuditServiceIntegrationTests : IAsyncLifetime
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
-        
+
         context.Users.Add(user);
         await context.SaveChangesAsync();
         return user;

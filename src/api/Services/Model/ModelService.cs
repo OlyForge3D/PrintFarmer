@@ -417,7 +417,7 @@ namespace Farm.Web.Api.Services.Model
 
                 // Step 4: Create folder and DB record (still pointing to temp file for now)
                 var rootFolder = await GetOrCreateFolderAsync("/", "models", ct);
-                
+
                 Model3D model = new()
                 {
                     Id = modelId,
@@ -435,8 +435,7 @@ namespace Farm.Web.Api.Services.Model
                     DimensionX = analysis?.DimensionX,
                     DimensionY = analysis?.DimensionY,
                     DimensionZ = analysis?.DimensionZ,
-                    TriangleCount = analysis?.TriangleCount,
-                    VolumeM3 = analysis?.VolumeMm3
+                    TriangleCount = analysis?.TriangleCount
                 };
 
                 await _repository.AddAsync(model, ct);
@@ -539,11 +538,11 @@ namespace Farm.Web.Api.Services.Model
         {
             // Normalize path
             string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(Path.DirectorySeparatorChar, '/');
-            
+
             // Try to find existing folder
             var existingFolder = await _db.Folders
                 .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, ct);
-            
+
             if (existingFolder != null)
             {
                 return existingFolder;

@@ -150,7 +150,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
             {
                 _logger.LogInformation($"    Using default camera view (front): Pos({options.CameraPosition.X:F2},{options.CameraPosition.Y:F2},{options.CameraPosition.Z:F2})");
             }
-            
+
             renderer.Render(modelFilePath, outputPath, options);
 
             _logger.LogInformation($"✓ Thumbnail rendered at {width}x{height}: {outputPath}");

@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Email;
+﻿namespace Farm.Infrastructure.Services.Email;
 
 public record EmailMessage(
     string To,

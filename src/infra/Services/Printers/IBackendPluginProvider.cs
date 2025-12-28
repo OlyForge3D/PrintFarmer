@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Lightweight abstraction for plugin registry metadata.

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Catalog.Caching;
+﻿using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Web.Api.Infrastructure.Caching;
 
 namespace Farm.Web.Api.Services.Catalog;

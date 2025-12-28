@@ -5,9 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Importing.Services.Adapters;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Printers;
-using Farm.Infrastructure.Domain;
 using FluentValidation.Results;
 
 namespace Farm.Importing.Services.Import;
@@ -175,11 +175,11 @@ public class ImportProcessorService : IImportProcessorService
             if (existingModel?.Id == null || existingModel.Id == Guid.Empty)
             {
                 // Add new model
-                var newModel = new Farm.Infrastructure.Domain.PrinterModel 
-                { 
-                    Id = Guid.NewGuid(), 
-                    ManufacturerId = manufacturerId, 
-                    Name = mname 
+                var newModel = new Farm.Infrastructure.Domain.PrinterModel
+                {
+                    Id = Guid.NewGuid(),
+                    ManufacturerId = manufacturerId,
+                    Name = mname
                 };
                 await _catalogRepo.AddModelAsync(newModel, ct);
                 modelId = newModel.Id;
@@ -236,7 +236,7 @@ public class ImportProcessorService : IImportProcessorService
             CurrentSpoolId = dto.CurrentSpoolId,
             IsAvailable = true
         };
-        
+
         await _printersRepo.AddAsync(p, ct);
 
         // Create default toolhead for the imported printer
@@ -253,7 +253,7 @@ public class ImportProcessorService : IImportProcessorService
             MaxHotendTemp = dto.MaxHotendTemp,
             UpdatedAt = DateTime.UtcNow
         };
-        
+
         // TODO: Add toolhead via repository if one exists, or directly via context
         // For now, we'll need to add it to the database - this may need a toolhead repository
 

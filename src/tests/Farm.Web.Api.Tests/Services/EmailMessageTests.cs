@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Email;
+﻿using Farm.Infrastructure.Services.Email;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services;

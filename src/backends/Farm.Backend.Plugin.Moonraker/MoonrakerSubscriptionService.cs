@@ -900,7 +900,7 @@ public sealed class MoonrakerSubscriptionService(
 
         // Initialize klippy ready state from webhooks if not yet set
         // This handles the initial subscription response which contains the current klippy state
-        if (!_klippyReadyState.ContainsKey(printerId) && 
+        if (!_klippyReadyState.ContainsKey(printerId) &&
             statusObj.TryGetProperty("webhooks", out JsonElement wh) &&
             wh.TryGetProperty("state", out JsonElement ws) && ws.ValueKind == JsonValueKind.String)
         {

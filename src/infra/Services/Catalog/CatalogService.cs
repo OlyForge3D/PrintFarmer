@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
@@ -59,7 +59,7 @@ public class CatalogService : ICatalogService
         // Check if manufacturer already exists - return it without creating
         IReadOnlyList<(Guid Id, string Name)> manufacturerRows = await _repo.GetManufacturersAsync(ct);
         (Guid Id, string Name) existing = manufacturerRows.ToList().Find(r => string.Equals(r.Name, normalized, StringComparison.OrdinalIgnoreCase));
-        
+
         if (existing.Id != Guid.Empty)
         {
             _logger.LogInformation($"Manufacturer '{normalized}' already exists with ID {existing.Id}, returning existing manufacturer");
@@ -86,7 +86,7 @@ public class CatalogService : ICatalogService
                 _logger.LogInformation($"Found existing manufacturer '{normalized}' with ID {found.Id} after race condition");
                 return new ManufacturerDto(found.Id, found.Name);
             }
-            
+
             throw new InvalidOperationException(
                 $"Failed to create or retrieve manufacturer '{normalized}' due to database constraint", ex);
         }
@@ -143,7 +143,7 @@ public class CatalogService : ICatalogService
         // Check if model already exists - return it without creating
         List<PrinterModelDto> candidateModels = (await _repo.GetModelsCachedAsync(manufacturerId, ct)).ToList();
         PrinterModelDto? existing = candidateModels.Find(m => string.Equals(m.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
-        
+
         if (existing is not null)
         {
             _logger.LogInformation($"Model '{normalizedName}' already exists for manufacturer {manufacturerId}, returning existing model");
@@ -182,7 +182,7 @@ public class CatalogService : ICatalogService
                 _logger.LogInformation($"Found existing model '{normalizedName}' with ID {existingNowDto.Id} after race condition");
                 return existingNowDto;
             }
-            
+
             throw new InvalidOperationException(
                 $"Failed to create or retrieve model '{normalizedName}' due to database constraint", ex);
         }

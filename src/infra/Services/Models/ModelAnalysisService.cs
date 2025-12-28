@@ -97,14 +97,14 @@ public class ModelAnalysisService : IModelAnalysisService
 
             if (double.IsInfinity(minX) || double.IsInfinity(minY) || double.IsInfinity(minZ))
             {
-                return new ModelAnalysisResult(null, null, null, vertexCount / 3, null);
+                return new ModelAnalysisResult(null, null, null, vertexCount / 3);
             }
 
             double dimX = maxX - minX;
             double dimY = maxY - minY;
             double dimZ = maxZ - minZ;
             // Volume estimation is complex; leave null for now
-            return new ModelAnalysisResult(dimX, dimY, dimZ, vertexCount / 3, null);
+            return new ModelAnalysisResult(dimX, dimY, dimZ, vertexCount / 3);
         }
         else
         {
@@ -150,18 +150,18 @@ public class ModelAnalysisService : IModelAnalysisService
 
                 if (double.IsInfinity(minX) || double.IsInfinity(minY) || double.IsInfinity(minZ))
                 {
-                    return new ModelAnalysisResult(null, null, null, (int)triangleCount, null);
+                    return new ModelAnalysisResult(null, null, null, (int)triangleCount);
                 }
 
                 double dimX = maxX - minX;
                 double dimY = maxY - minY;
                 double dimZ = maxZ - minZ;
 
-                return new ModelAnalysisResult(dimX, dimY, dimZ, (int)triangleCount, null);
+                return new ModelAnalysisResult(dimX, dimY, dimZ, (int)triangleCount);
             }
             catch
             {
-                return new ModelAnalysisResult(null, null, null, (int)triangleCount, null);
+                return new ModelAnalysisResult(null, null, null, (int)triangleCount);
             }
         }
     }

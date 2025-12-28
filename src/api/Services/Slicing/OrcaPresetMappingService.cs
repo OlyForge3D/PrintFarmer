@@ -1,7 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Catalog;
 
 namespace Farm.Web.Api.Services.Slicing;
 

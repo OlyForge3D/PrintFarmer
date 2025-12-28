@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.FileConsistency;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.DTOs;
@@ -27,12 +27,12 @@ public class FileConsistencyControllerTests
         _repoMock.Setup(r => r.CountHealthyModel3DFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(90);
         _repoMock.Setup(r => r.CountMissingModel3DFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(5);
         _repoMock.Setup(r => r.CountCorruptedModel3DFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(5);
-        
+
         _repoMock.Setup(r => r.CountGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(200);
         _repoMock.Setup(r => r.CountHealthyGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(180);
         _repoMock.Setup(r => r.CountMissingGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(10);
         _repoMock.Setup(r => r.CountCorruptedGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(10);
-        
+
         _repoMock.Setup(r => r.GetMostRecentHealthyAuditAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHealthAudit { AuditDate = DateTime.UtcNow });
 
@@ -277,12 +277,12 @@ public class FileConsistencyControllerTests
         _repoMock.Setup(r => r.CountHealthyModel3DFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
         _repoMock.Setup(r => r.CountMissingModel3DFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
         _repoMock.Setup(r => r.CountCorruptedModel3DFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
-        
+
         _repoMock.Setup(r => r.CountGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
         _repoMock.Setup(r => r.CountHealthyGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
         _repoMock.Setup(r => r.CountMissingGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
         _repoMock.Setup(r => r.CountCorruptedGcodeFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
-        
+
         _repoMock.Setup(r => r.GetMostRecentHealthyAuditAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((FileHealthAudit?)null);
 

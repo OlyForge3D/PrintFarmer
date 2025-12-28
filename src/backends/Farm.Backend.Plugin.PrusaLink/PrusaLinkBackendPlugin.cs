@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.PrusaLink;
+﻿namespace Farm.Backend.Plugin.PrusaLink;
 
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;

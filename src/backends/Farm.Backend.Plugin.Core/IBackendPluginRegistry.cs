@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.Core;
+﻿namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// Registry for managing backend client plugins.

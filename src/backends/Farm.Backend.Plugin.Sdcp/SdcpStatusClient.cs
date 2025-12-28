@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Backend.Plugin.Sdcp
 {
@@ -42,11 +42,11 @@ namespace Farm.Backend.Plugin.Sdcp
             try
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{printer.Id}");
-                
+
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
-                
+
                 return new PrinterStatusDto(
                     Id: printer.Id,
                     IsOnline: status.IsOnline,
@@ -83,14 +83,16 @@ namespace Farm.Backend.Plugin.Sdcp
             try
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"sdcp-{printer.Id}");
-                
+
                 PrinterCompositeStatus status = await breaker.ExecuteAsync(
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                     ct);
-                
+
                 if (status == null)
+                {
                     throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
-                    
+                }
+
                 return await _client.CreatePrinterDtoAsync(printer, status, ct);
             }
             catch (Exception ex)

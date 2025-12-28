@@ -1,8 +1,8 @@
-namespace Farm.Backend.Plugin.Core;
+﻿namespace Farm.Backend.Plugin.Core;
 
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
-using System.Reflection;
 
 /// <summary>
 /// Extension methods for registering HTTP clients from plugin code.
@@ -38,27 +38,37 @@ public static class HttpClientRegistrationExtensions
                 .FirstOrDefault(m =>
                 {
                     if (m.Name != "AddHttpClient" || !m.IsGenericMethodDefinition)
+                    {
                         return false;
-                    
+                    }
+
                     var genericArgs = m.GetGenericArguments();
                     if (genericArgs.Length != 2)
+                    {
                         return false;
-                    
+                    }
+
                     var parameters = m.GetParameters();
                     // We want the overload with (IServiceCollection, Action<HttpClient>) parameters
                     if (parameters.Length != 2)
+                    {
                         return false;
-                        
+                    }
+
                     // Check if first param is IServiceCollection
                     if (parameters[0].ParameterType != typeof(IServiceCollection))
+                    {
                         return false;
-                    
+                    }
+
                     // Check if second param is Action<HttpClient>
                     var secondParamType = parameters[1].ParameterType;
                     var expectedActionType = typeof(Action<System.Net.Http.HttpClient>);
                     if (secondParamType != expectedActionType)
+                    {
                         return false;
-                    
+                    }
+
                     return true;
                 });
 

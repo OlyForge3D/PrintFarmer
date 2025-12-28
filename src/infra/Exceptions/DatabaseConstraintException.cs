@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Exceptions;
+﻿namespace Farm.Infrastructure.Exceptions;
 
 /// <summary>
 /// Thrown when a database constraint violation occurs during entity creation or update.

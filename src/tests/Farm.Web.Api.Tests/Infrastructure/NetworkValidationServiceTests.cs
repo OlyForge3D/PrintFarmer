@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Network;
+﻿using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
 
@@ -123,8 +123,8 @@ public class NetworkValidationServiceTests
     {
         var settings = new NetworkDiscoverySettings
         {
-            DiscoverySubnets = new List<string> 
-            { 
+            DiscoverySubnets = new List<string>
+            {
                 "192.168.1.0/24",
                 "10.0.0.0/25",
                 "172.16.0.0/26"
@@ -144,8 +144,8 @@ public class NetworkValidationServiceTests
     {
         var settings = new NetworkDiscoverySettings
         {
-            DiscoverySubnets = new List<string> 
-            { 
+            DiscoverySubnets = new List<string>
+            {
                 "192.168.1.0/24",
                 "",
                 "   "
@@ -165,8 +165,8 @@ public class NetworkValidationServiceTests
     {
         var settings = new NetworkDiscoverySettings
         {
-            DiscoverySubnets = new List<string> 
-            { 
+            DiscoverySubnets = new List<string>
+            {
                 "192.168.1.0/24",   // 192.168.1.0 - 192.168.1.255
                 "192.168.1.0/25"    // Overlaps: 192.168.1.0 - 192.168.1.127
             },

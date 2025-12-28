@@ -4,19 +4,6 @@
 using System.Diagnostics.CodeAnalysis;
 
 [assembly: SuppressMessage(
-    category: "Naming",
-    checkId: "CA1711:Identifiers should not have incorrect suffix",
-    Justification = "Queue naming is intentional and part of the public API surface; renaming would be a breaking change.",
-    Scope = "type",
-    Target = "~T:Farm.Web.Api.Services.Interfaces.IHarvestQueue")]
-
-[assembly: SuppressMessage(
-    category: "Naming",
-    checkId: "CA1711:Identifiers should not have incorrect suffix",
-    Justification = "Queue naming is intentional and part of the public API surface; renaming would be a breaking change.",
-    Scope = "type",
-    Target = "~T:Farm.Web.Api.Services.InMemoryHarvestQueue")]
-[assembly: SuppressMessage(
     "Security",
     "CA3003:Review code for file path injection vulnerabilities",
     Justification = "All file and directory paths are validated, sanitized, or constructed from trusted sources throughout the codebase. Project reviewed for path injection risks.")]

@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Gcode;
@@ -124,10 +124,10 @@ public class GcodeLibraryControllerTests
         var fileMock = new Mock<IFormFile>();
         fileMock.Setup(f => f.FileName).Returns("test.gcode");
         fileMock.Setup(f => f.Length).Returns(1024);
-        
+
         var metadata = new CreateGcodeFileDto { DisplayName = "Test File" };
         var created = new GcodeFileDto(Id: Guid.NewGuid(), OriginalFileName: "test.gcode", DisplayName: "Test File", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow);
-        
+
         _gcodeServiceMock
             .Setup(s => s.UploadFileAsync(fileMock.Object, metadata, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(created);
@@ -195,7 +195,7 @@ public class GcodeLibraryControllerTests
         fileMock.Setup(f => f.FileName).Returns("test.gcode");
         fileMock.Setup(f => f.Length).Returns(1024);
         var metadata = new CreateGcodeFileDto { DisplayName = "Test" };
-        
+
         _gcodeServiceMock
             .Setup(s => s.UploadFileAsync(fileMock.Object, metadata, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("duplicate"));
@@ -215,7 +215,7 @@ public class GcodeLibraryControllerTests
         var fileId = Guid.NewGuid();
         var request = new UpdateGcodeFileDto(DisplayName: "Updated Name");
         var updated = new GcodeFileDto(Id: fileId, OriginalFileName: "test.gcode", DisplayName: "Updated Name", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow);
-        
+
         _gcodeServiceMock
             .Setup(s => s.UpdateFileAsync(fileId, request, It.IsAny<CancellationToken>()))
             .ReturnsAsync(updated);
@@ -279,7 +279,7 @@ public class GcodeLibraryControllerTests
         var fileId = Guid.NewGuid();
         var file = new GcodeFileDto(Id: fileId, OriginalFileName: "test.gcode", DisplayName: "Test", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow);
         var fileBytes = new byte[] { 1, 2, 3, 4 };
-        
+
         _gcodeServiceMock
             .Setup(s => s.GetFileAsync(fileId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(file);

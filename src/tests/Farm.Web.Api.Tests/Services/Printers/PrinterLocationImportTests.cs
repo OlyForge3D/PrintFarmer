@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -211,7 +211,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
         // Arrange - Create initial printer with no location
         var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
         var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        
+
         var ip = GetNextIpAddress();
         var initialPrinter = new Printer
         {
@@ -251,7 +251,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Name == "OverwritePrinter");
         printer.Should().NotBeNull("printer should exist after import");
-        
+
         // Verify printer was overwritten (should have new ID from import, not original)
         printer!.Id.Should().NotBe(initialPrinter.Id, "printer should have new ID after overwrite");
     }
@@ -485,7 +485,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
             var ip = ipAddress ?? GetNextIpAddress();
             var csvLine = $"\"{name}\",\"{ip}\",\"Moonraker\",\"7125\",\"80\",\"{manufacturerName}\",\"Ender3\",\"Test\",\"\",\"true\",\"\",\"\",\"\",\"{location}\"";
             lines.AppendLine(csvLine);
-            
+
             // Only use provided IP for first printer, generate new ones for subsequent
             if (ipAddress != null && ipIdx == 0)
             {

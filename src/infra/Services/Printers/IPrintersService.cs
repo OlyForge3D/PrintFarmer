@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -77,7 +77,7 @@ namespace Farm.Infrastructure.Services.Printers
 
         // File-based import - accepts Stream instead of IFormFile (HTTP abstraction removed)
         Task<object> ImportFromStreamAsync(Stream stream, string fileName, string duplicateHandling = "skip", CancellationToken ct = default);
-        
+
         /// <summary>
         /// Refreshes camera URLs for a printer by querying the backend API.
         /// This updates the stored camera URLs in the database.

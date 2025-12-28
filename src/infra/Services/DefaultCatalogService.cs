@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Repositories.Catalog;
+﻿using Farm.Infrastructure.Repositories.Catalog;
 
 namespace Farm.Infrastructure.Services;
 

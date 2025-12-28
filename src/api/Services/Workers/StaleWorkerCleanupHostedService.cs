@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Workers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -47,7 +47,9 @@ public class StaleWorkerCleanupHostedService : BackgroundService
                 await Task.Delay(TimeSpan.FromSeconds(settings.IntervalSeconds), stoppingToken);
 
                 if (stoppingToken.IsCancellationRequested)
+                {
                     break;
+                }
 
                 settings = _settingsMonitor.CurrentValue; // Reload settings each iteration
                 if (!settings.Enabled)
@@ -121,10 +123,14 @@ public class StaleWorkerCleanupHostedService : BackgroundService
         // 3. Worker is marked as offline
 
         if (worker.LastHeartbeat == null)
+        {
             return true;
+        }
 
         if (worker.LastHeartbeat < cutoffTime)
+        {
             return true;
+        }
 
         return false;
     }
@@ -136,7 +142,9 @@ public class StaleWorkerCleanupHostedService : BackgroundService
             foreach (var worker in staleWorkers)
             {
                 if (worker.Status == WorkerStatus.Offline)
+                {
                     continue;
+                }
 
                 await workerRepository.UpdateStatusAsync(worker.Id, WorkerStatus.Offline);
 

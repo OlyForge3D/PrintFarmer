@@ -59,6 +59,7 @@ import {
   mdiLogin,
   mdiAccountMultiple,
   mdiLayers,
+  mdiLayersTripleOutline,
   mdiPulse,
   mdiBattery,
   mdiAccountPlus,
@@ -613,6 +614,32 @@ export function SettingsIcon({ className = 'w-4 h-4', ariaLabel = 'Settings' }: 
       role="img"
     >
       <path fill="currentColor" d={mdiCog} />
+    </svg>
+  );
+}
+
+/**
+ * Layers triple outline icon
+ * 
+ * Material Design icon component for slicing/layering operations.
+ * 
+ * @component
+ * @preview ![layers-triple-outline](https://unpkg.com/@mdi/svg@7.4.47/svg/layers-triple-outline.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/layers-triple-outline.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <LayersTripleOutlineIcon className="w-5 h-5" ariaLabel="Slice Model" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function LayersTripleOutlineIcon({ className = 'w-4 h-4', ariaLabel = 'Layers' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiLayersTripleOutline} />
     </svg>
   );
 }

@@ -33,7 +33,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
             if (!string.IsNullOrEmpty(search))
             {
                 var searchLower = search.ToLowerInvariant();
-                query = query.Where(g => 
+                query = query.Where(g =>
                     (g.OriginalFileName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
                     (g.DisplayName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
                     (g.Description != null && g.Description.Contains(searchLower, StringComparison.OrdinalIgnoreCase)));
@@ -155,7 +155,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
                     {
                         // Extract the relative path
                         string relative = dir.Substring(normalizedParent.Length + 1);
-                        
+
                         // Get the first segment of the relative path
                         var segments = relative.Split(new[] { '/', Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
                         if (segments.Length > 0)

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -193,7 +193,7 @@ public sealed class PrusaLinkPollingService(
                     // Check if any values changed
                     // Use tolerance for float progress comparison
 #pragma warning disable S1244 // Using explicit tolerance (0.01) for float comparison is appropriate here
-                    bool progressChanged = state.LastKnownProgress == null || status.Progress == null 
+                    bool progressChanged = state.LastKnownProgress == null || status.Progress == null
                         ? state.LastKnownProgress != status.Progress
                         : Math.Abs(state.LastKnownProgress.Value - status.Progress.Value) > 0.01;
 #pragma warning restore S1244

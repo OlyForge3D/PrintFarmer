@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Capability marker interface for backend clients that support file download functionality.

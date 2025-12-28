@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -281,9 +281,9 @@ public class JobQueueServiceTests
     {
         // Arrange
         var printerId = Guid.NewGuid();
-        var gcodeFile = new GcodeFile 
-        { 
-            Id = Guid.NewGuid(), 
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
             DisplayName = "test.gcode",
             EstimatedPrintTimeMinutes = 120,
             EstimatedFilamentWeightG = 25.5
@@ -321,7 +321,7 @@ public class JobQueueServiceTests
         result.EstimatedPrintTime.Should().Be(TimeSpan.FromMinutes(120));
         result.EstimatedFilamentUsage.Should().Be(25.5);
 
-        _mockRepo.Verify(x => x.AddAsync(It.Is<PrintJob>(j => 
+        _mockRepo.Verify(x => x.AddAsync(It.Is<PrintJob>(j =>
             j.GcodeFileId == gcodeFile.Id &&
             j.AssignedPrinterId == printerId &&
             j.Status == PrintJobStatus.Queued &&
@@ -646,8 +646,8 @@ public class JobQueueServiceTests
     {
         // Arrange
         var job = new PrintJobBuilder().AsQueued().Build();
-        var request = new UpdatePrintJobStatusDto 
-        { 
+        var request = new UpdatePrintJobStatusDto
+        {
             Status = PrintJobStatus.Failed,
             FailureReason = "Printer communication lost"
         };
@@ -670,8 +670,8 @@ public class JobQueueServiceTests
     {
         // Arrange
         var job = new PrintJobBuilder().AsPrinting().Build();
-        var request = new UpdatePrintJobStatusDto 
-        { 
+        var request = new UpdatePrintJobStatusDto
+        {
             Status = PrintJobStatus.Completed,
             ActualFilamentUsage = 28.3
         };

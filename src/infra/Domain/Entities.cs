@@ -28,7 +28,7 @@ public class Printer
         get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out Uri? u) ? u : null);
         set => OriginalServerUrl = value?.ToString();
     }
-    
+
     /// <summary>
     /// Constructs the backend URL by combining ServerUrl with BackendPort.
     /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
@@ -42,18 +42,18 @@ public class Printer
             {
                 return ServerUrl;
             }
-            
+
             try
             {
                 Uri baseUri = new(ServerUrl);
                 int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
-                
+
                 // Only include port in URL if it's non-standard
                 if (BackendPort == defaultPort)
                 {
                     return baseUri.ToString().TrimEnd('/');
                 }
-                
+
                 UriBuilder ub = new(baseUri) { Port = BackendPort };
                 return ub.Uri.ToString().TrimEnd('/');
             }
@@ -78,23 +78,23 @@ public class Printer
             {
                 return BackendUrl; // Fall back to backend URL if no frontend port specified
             }
-            
+
             if (string.IsNullOrWhiteSpace(ServerUrl))
             {
                 return ServerUrl;
             }
-            
+
             try
             {
                 Uri baseUri = new(ServerUrl);
                 int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
-                
+
                 // Only include port in URL if it's non-standard
                 if (FrontendPort.Value == defaultPort)
                 {
                     return baseUri.ToString().TrimEnd('/');
                 }
-                
+
                 UriBuilder ub = new(baseUri) { Port = FrontendPort.Value };
                 return ub.Uri.ToString().TrimEnd('/');
             }
@@ -117,7 +117,7 @@ public class Printer
     public Guid? LocationId { get; set; } // Optional location for organizing printers geographically
     public Location? Location { get; set; }
     public DateTime? DateAcquired { get; set; }
-    
+
     // Hardware Specifications (previously in PrinterCapabilities)
     public double? MaxBuildVolumeX { get; set; }
     public double? MaxBuildVolumeY { get; set; }
@@ -127,23 +127,23 @@ public class Printer
     public bool MultiMaterial { get; set; }
     public bool SupportsAutoLeveling { get; set; }
     public int? MaxPrintSpeed { get; set; }
-    
+
     // Bed temperature ranges
     [ImportExport(ImportExportTargets.Import)]
     public int? MinBedTemp { get; set; }
     public int? MaxBedTemp { get; set; }
-    
+
     // Material and job tracking
     [ImportExport(ImportExportTargets.Import)]
     public string? CurrentMaterial { get; set; } // From Spoolman integration
     [ImportExport(ImportExportTargets.Import)]
     public int? CurrentSpoolId { get; set; } // Spoolman spool ID
-    
+
     // Availability
     [ImportExport(ImportExportTargets.Import)]
     public bool IsAvailable { get; set; } = true; // Can accept new jobs
     public DateTime LastCapabilityUpdate { get; set; } = DateTime.UtcNow;
-    
+
     // Multi-toolhead support (one-to-many with Toolhead)
     /// <summary>
     /// Collection of toolheads (hotends/nozzles) for this printer.
@@ -151,7 +151,7 @@ public class Printer
     /// For multi-toolhead printers (Prusa XL, Bambu Lab X1, etc.), this will have multiple entries.
     /// </summary>
     public ICollection<Toolhead> Toolheads { get; set; } = new List<Toolhead>();
-    
+
     public bool InMaintenance { get; set; } = false;
     public bool IsEnabled { get; set; } = true; // If false, printer is hidden from normal user listings until approved by admin
 }
@@ -183,7 +183,7 @@ public class Location
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime ModifiedAt { get; set; } = DateTime.UtcNow;
     public bool IsActive { get; set; } = true;
-    
+
     // Navigation property: all printers in this location
     public ICollection<Printer> Printers { get; } = new List<Printer>();
 }
@@ -261,7 +261,7 @@ public class GcodeFile
     public Guid? FolderId { get; set; } // Foreign key to Folder entity
     public Folder? Folder { get; set; } // Navigation property to Folder
     public string FilePath { get; set; } = string.Empty; // Physical path on disk (full path)
-    public long FileSizeBytes { get; set;}
+    public long FileSizeBytes { get; set; }
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public DateTime UploadedAt { get; set; }
     public string? Description { get; set; }
@@ -412,7 +412,6 @@ public class Model3D
     public double? DimensionX { get; set; } // in mm
     public double? DimensionY { get; set; } // in mm  
     public double? DimensionZ { get; set; } // in mm
-    public double? VolumeM3 { get; set; } // in cubic mm
     public int? TriangleCount { get; set; }
     public bool IsValid { get; set; } = true;
     public string? ValidationErrors { get; set; } // JSON array of validation issues
@@ -868,7 +867,7 @@ public class Folder
     public string FolderType { get; set; } = string.Empty; // "models" or "gcode" - specifies which files this folder contains
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? DeletedAt { get; set; } // Soft delete support
-    
+
     // Navigation properties to files in this folder
     public ICollection<Model3D> Models { get; set; } = new List<Model3D>();
     public ICollection<GcodeFile> Files { get; set; } = new List<GcodeFile>();
@@ -929,33 +928,33 @@ public class GcodeHarvestQueueItem
     public DateTime? ProcessingStartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public int Priority { get; set; } = 0; // Higher = process sooner
-    
+
     /// <summary>
     /// Current status of the queue item.
     /// </summary>
     public GcodeHarvestQueueItemStatus Status { get; set; } = GcodeHarvestQueueItemStatus.Pending;
-    
+
     /// <summary>
     /// Serialized StartGcodeHarvestDto parameters as JSON for deferred processing.
     /// </summary>
     public string Parameters { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Error message if processing failed.
     /// </summary>
     public string? ErrorMessage { get; set; }
-    
+
     /// <summary>
     /// Error details for debugging (stack trace, additional context).
     /// </summary>
     public string? ErrorDetails { get; set; }
-    
+
     // Results cached after completion
     public int FilesFound { get; set; }
     public int FilesAdded { get; set; }
     public int FilesSkipped { get; set; }
     public int FilesErrored { get; set; }
-    
+
     // Navigation
     public Printer? Printer { get; set; }
 }

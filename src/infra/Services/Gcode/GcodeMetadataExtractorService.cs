@@ -225,7 +225,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         try
         {
             _logger.LogInformation("ExtractThumbnail: Starting thumbnail extraction from {LineCount} lines", lines.Count.ToString());
-            
+
             List<string> thumbnailLines = new List<string>();
             bool inThumbnail = false;
 
@@ -238,7 +238,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                     if (trimmedAfterSemicolon.StartsWith("thumbnail", StringComparison.OrdinalIgnoreCase))
                     {
                         _logger.LogInformation("ExtractThumbnail: Found thumbnail line: {Line}", line.Substring(0, Math.Min(50, line.Length)));
-                        
+
                         if (line.Contains("begin", StringComparison.OrdinalIgnoreCase))
                         {
                             inThumbnail = true;
@@ -272,7 +272,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             {
                 string base64Data = string.Concat(thumbnailLines);
                 _logger.LogInformation("ExtractThumbnail: Attempting to decode {ByteCount} bytes of base64 data (lines={LineCount})", base64Data.Length.ToString(), thumbnailLines.Count.ToString());
-                
+
                 // Log first and last lines for debugging
                 if (thumbnailLines.Count > 0)
                 {
@@ -282,7 +282,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                         _logger.LogDebug("ExtractThumbnail: Last base64 line (len={Len}): {Data}", thumbnailLines[thumbnailLines.Count - 1].Length.ToString(), thumbnailLines[thumbnailLines.Count - 1].Substring(0, Math.Min(50, thumbnailLines[thumbnailLines.Count - 1].Length)));
                     }
                 }
-                
+
                 try
                 {
                     // Pad base64 data to valid length if needed
@@ -291,7 +291,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                     {
                         base64Data = base64Data + new string('=', paddingNeeded);
                     }
-                    
+
                     // Validate it's actual base64
                     if (IsValidBase64(base64Data))
                     {

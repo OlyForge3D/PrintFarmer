@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Farm.Backend.Plugin.Core;
@@ -57,7 +57,7 @@ public class BackendClientFactory : IBackendClientFactory
                 // Use ClientInterfaceType for DI resolution since plugins register interfaces, not implementations
                 // Fall back to ClientType if ClientInterfaceType is not available
                 var typeForDi = plugin.ClientInterfaceType ?? plugin.ClientType;
-                
+
                 if (typeForDi == null)
                 {
                     _logger.LogDebug($"Plugin {plugin.DisplayName} has no client interface type or client type, skipping.");
@@ -133,9 +133,9 @@ public class BackendClientFactory : IBackendClientFactory
             // Resolve the backend client from the current scope
             // Caller MUST be in a scoped context for this to work
             var rawService = _serviceProvider.GetService(clientType);
-            
+
             var client = rawService as IBackendClient;
-            
+
             if (client == null)
             {
                 _logger.LogError($"✗ Failed to resolve backend client for {backend} (type: {clientType.Name}). rawService was: {rawService?.GetType().FullName ?? "NULL"}");

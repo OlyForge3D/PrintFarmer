@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Farm.Backend.Plugin.Core;
 using Farm.Backend.Plugin.Moonraker;
@@ -42,7 +42,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for Moonraker");
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"Client must implement ISupportsFileList. Actual type: {client.GetType().FullName}. " +
                 $"Interfaces: {string.Join(", ", client.GetType().GetInterfaces().Select(i => i.Name))}");
         }
@@ -61,7 +61,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for PrusaLink");
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"PrusaLink client must implement ISupportsFileList. Actual type: {client.GetType().FullName}");
         }
 
@@ -79,7 +79,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for OctoPrint");
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"OctoPrint client must implement ISupportsFileList. Actual type: {client.GetType().FullName}");
         }
 
@@ -97,7 +97,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             // Assert
             Assert.True(result, "TryGetFileListClient should return true for SDCP");
             Assert.NotNull(client);
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"SDCP client must implement ISupportsFileList. Actual type: {client.GetType().FullName}");
         }
 
@@ -146,7 +146,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
             // Arrange
             var mockRegistry = CreateMockRegistry();
             mockRegistry.Setup(r => r.IsRegistered("moonraker")).Returns(true);
-            
+
             var clientFactory = CreateClientFactory();
             var factory = new BackendCapabilityFactory(clientFactory, _mockLogger.Object, mockRegistry.Object);
 
@@ -169,13 +169,13 @@ namespace Farm.Web.Api.Tests.Services.Printers
 
             // Act & Assert - Every backend should support file listing
             var backends = new[] { PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint, PrinterBackend.SDCP };
-            
+
             foreach (var backend in backends)
             {
                 var result = factory.TryGetFileListClient(backend, out var client);
                 Assert.True(result, $"{backend} should support file listing");
                 Assert.NotNull(client);
-                Assert.True(client is ISupportsFileList, 
+                Assert.True(client is ISupportsFileList,
                     $"{backend} client must implement ISupportsFileList");
             }
         }
@@ -231,7 +231,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
         private Mock<IBackendPluginRegistry> CreateMockRegistry()
         {
             var mockRegistry = new Mock<IBackendPluginRegistry>();
-            
+
             // Setup all backends as registered
             mockRegistry.Setup(r => r.IsRegistered("moonraker")).Returns(true);
             mockRegistry.Setup(r => r.IsRegistered("prusalink")).Returns(true);
@@ -240,7 +240,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
 
             // Return mock plugins with proper capabilities
             mockRegistry.Setup(r => r.GetPlugin("moonraker"))
-                .Returns(CreateMockPlugin("moonraker", new[] 
+                .Returns(CreateMockPlugin("moonraker", new[]
                 {
                     typeof(ISupportsFileList),
                     typeof(ISupportsFileDownload),
@@ -254,7 +254,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 }));
 
             mockRegistry.Setup(r => r.GetPlugin("prusalink"))
-                .Returns(CreateMockPlugin("prusalink", new[] 
+                .Returns(CreateMockPlugin("prusalink", new[]
                 {
                     typeof(ISupportsFileList),
                     typeof(ISupportsFileDownload),
@@ -265,7 +265,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 }));
 
             mockRegistry.Setup(r => r.GetPlugin("octoprint"))
-                .Returns(CreateMockPlugin("octoprint", new[] 
+                .Returns(CreateMockPlugin("octoprint", new[]
                 {
                     typeof(ISupportsFileDownload),
                     typeof(ISupportsFileList),
@@ -275,7 +275,7 @@ namespace Farm.Web.Api.Tests.Services.Printers
                 }));
 
             mockRegistry.Setup(r => r.GetPlugin("sdcp"))
-                .Returns(CreateMockPlugin("sdcp", new[] 
+                .Returns(CreateMockPlugin("sdcp", new[]
                 {
                     typeof(ISupportsFileList),
                     typeof(ISupportsFileDownload),

@@ -115,8 +115,8 @@ namespace Farm.Infrastructure.Repositories.Model
             foreach (var folder in foldersFolders)
             {
                 var folderSegments = folder.Path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-                
-                if (normalizedParent == "")
+
+                if (string.IsNullOrEmpty(normalizedParent))
                 {
                     // Looking for root-level folders
                     if (folderSegments.Length == 1)
@@ -162,7 +162,7 @@ namespace Farm.Infrastructure.Repositories.Model
             if (!string.IsNullOrWhiteSpace(query))
             {
                 string searchTerm = query.ToLowerInvariant();
-                queryable = queryable.Where(m => 
+                queryable = queryable.Where(m =>
                     m.DisplayName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
                     (m.Description != null && m.Description.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)));
             }

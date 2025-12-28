@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.Core;
+﻿namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
 /// Attribute that marks an assembly as containing backend plugins.

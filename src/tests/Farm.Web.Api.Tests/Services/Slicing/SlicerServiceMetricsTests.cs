@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.Slicing;
+﻿using Farm.Web.Api.Services.Slicing;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.Slicing;

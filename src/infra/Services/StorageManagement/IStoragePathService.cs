@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.StorageManagement;
+﻿namespace Farm.Infrastructure.Services.StorageManagement;
 
 /// <summary>
 /// Service for managing file storage paths across different deployment architectures.

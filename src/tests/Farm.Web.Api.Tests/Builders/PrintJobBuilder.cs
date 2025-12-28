@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 

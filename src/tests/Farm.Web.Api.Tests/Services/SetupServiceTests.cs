@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Contracts.Setup;
 using Farm.Infrastructure.Domain;
@@ -574,7 +574,7 @@ public class SetupServiceTests
         Assert.Equal("admin", result.User.Username);
         Assert.Equal("admin@example.com", result.User.Email);
         Assert.NotNull(result.ExpiresAt);
-        
+
         _usersRepository.Verify(
             r => r.AddUserWithRoleAsync(It.IsAny<User>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Once);

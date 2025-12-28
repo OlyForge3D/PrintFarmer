@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.RateLimiting;
+﻿namespace Farm.Infrastructure.Services.RateLimiting;
 
 public interface IRateLimitService
 {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
@@ -574,7 +574,7 @@ namespace Farm.Web.Api.Tests.Services.FileManagement
             const string virtualDirectory = "/uploads/user123";
 
             ChunkedUploadInitResult initResult = _service.InitializeUpload(
-                userId, "test.gcode", 2048, _testDirectory, allowedExtensions, 
+                userId, "test.gcode", 2048, _testDirectory, allowedExtensions,
                 virtualDirectory: virtualDirectory);
 
             // Act

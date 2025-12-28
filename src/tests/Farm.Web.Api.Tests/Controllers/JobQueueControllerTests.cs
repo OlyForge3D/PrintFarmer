@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Queue;
@@ -37,10 +37,10 @@ public class JobQueueControllerTests
         // Arrange
         var queueOverview = new List<QueueOverviewDto>
         {
-            new QueueOverviewDto 
-            { 
-                PrinterId = Guid.NewGuid(), 
-                PrinterName = "Printer1", 
+            new QueueOverviewDto
+            {
+                PrinterId = Guid.NewGuid(),
+                PrinterName = "Printer1",
                 PrinterModel = "Model1",
                 IsAvailable = true,
                 QueuedJobsCount = 2
@@ -93,8 +93,8 @@ public class JobQueueControllerTests
     public async Task QueueJobAsync_WithValidRequest_ReturnsCreated()
     {
         // Arrange
-        var request = new QueuePrintJobDto 
-        { 
+        var request = new QueuePrintJobDto
+        {
             GcodeFileId = Guid.NewGuid(),
             AssignedPrinterId = Guid.NewGuid(),
             Priority = PrintJobPriority.Normal
@@ -131,8 +131,8 @@ public class JobQueueControllerTests
     public async Task QueueJobAsync_WithNonExistentFile_ReturnsNotFound()
     {
         // Arrange
-        var request = new QueuePrintJobDto 
-        { 
+        var request = new QueuePrintJobDto
+        {
             GcodeFileId = Guid.NewGuid(),
             Priority = PrintJobPriority.Normal
         };

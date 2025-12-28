@@ -117,7 +117,7 @@ public partial class GcodeHarvestService(
             _logger.LogWarning($"[DIAGNOSTIC] FAILED: Backend {backend} does NOT support file listing capability");
             return new GcodeHarvestResultDto(Guid.Empty, false, $"Printer backend '{backend}' does not support file listing capability required for G-code harvesting");
         }
-        
+
         _logger.LogWarning($"[DIAGNOSTIC] SUCCESS: Backend {backend} DOES support file listing capability, proceeding with harvest");
 
         // Check if there's already an active harvest operation for this printer
@@ -159,7 +159,7 @@ public partial class GcodeHarvestService(
         string printerBackendUrl = printer.BackendUrl;  // Use calculated BackendUrl with port
         string printerApiKey = printer.ApiKey ?? "";
         PrinterBackend printerBackend = (PrinterBackend)printer.Backend;
-        
+
         _logger.LogError($"[DIAGNOSTIC-HARVEST] Extracted printer data: id={printerId}, name={printerName}, backendUrl={printerBackendUrl}, backend={printerBackend}");
 
         // Start file discovery and queueing in background
@@ -202,7 +202,7 @@ public partial class GcodeHarvestService(
                 }
             }
         }
-        
+
         _ = Task.Run(ExecuteHarvestAsync);
 
         _logger.LogDebug($"Queued harvest operation {operation.Id} to thread pool");
@@ -241,7 +241,7 @@ public partial class GcodeHarvestService(
             {
                 // Check if the backend supports file listing using capability factory
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] Checking if backend {backend} supports file listing...");
-                if (scopedCapabilityFactory.TryGetFileListClient(backend, out var fileListClient) && 
+                if (scopedCapabilityFactory.TryGetFileListClient(backend, out var fileListClient) &&
                     fileListClient is ISupportsFileList fileListCapability)
                 {
                     _logger.LogError($"[DIAGNOSTIC-HARVEST] Backend {backend} supports file listing - proceeding with discovery");
@@ -251,7 +251,7 @@ public partial class GcodeHarvestService(
                         // Use the capability interface directly - no switch statement needed!
                         var infrastructureFiles = await fileListCapability.GetFileListAsync(printerBackendUrl, printerApiKey, CancellationToken.None);
                         _logger.LogError($"[DIAGNOSTIC-HARVEST] GetFileListAsync returned {infrastructureFiles?.Count ?? 0} files");
-                        
+
                         // Map from Infrastructure.PrinterFileInfo to local PrinterFileInfo
                         fileList = (infrastructureFiles ?? new()).Select(f => new PrinterFileInfo
                         {
@@ -380,11 +380,11 @@ public partial class GcodeHarvestService(
                     throw;
                 }
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] AFTER SAVE: FilesFound={dbOperation.FilesFound}");
-                
+
                 // Verify the save actually persisted by querying again
                 GcodeHarvestOperation? verifyOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operation.Id);
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] VERIFICATION QUERY: Operation={verifyOperation?.Id}, FilesFound={verifyOperation?.FilesFound}");
-                
+
                 _logger.LogInformation($"Updated operation {operation.Id} with {dbOperation.FilesFound} G-code files found");
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] Updated DB operation: FilesFound={gcodeFileCount}");
 
@@ -475,17 +475,17 @@ public partial class GcodeHarvestService(
         try
         {
             // Check if the backend supports file downloads using capability factory
-            if (_capabilityFactory.TryGetFileDownloadClient(backend, out var downloadClient) && 
+            if (_capabilityFactory.TryGetFileDownloadClient(backend, out var downloadClient) &&
                 downloadClient is ISupportsFileDownload fileDownload)
             {
                 // Use capability interface for file download (works for all backends that support it)
                 // Use the calculated BackendUrl property which includes the proper port
                 string baseUrl = printer.BackendUrl;
-                    
+
                 byte[]? fileBytes = await fileDownload.DownloadFileAsync(baseUrl, filePath, ct: CancellationToken.None);
                 return await ConvertBytesToMemoryStreamAsync(fileBytes);
             }
-            
+
             // For backends that don't support downloads, return null
             log.LogWarning($"Backend {backend} does not support file downloads for {filePath}");
             return null;
@@ -503,12 +503,15 @@ public partial class GcodeHarvestService(
     private static async Task<MemoryStream?> ConvertBytesToMemoryStreamAsync(byte[]? bytes)
     {
         if (bytes == null || bytes.Length == 0)
+        {
             return null;
-        
+        }
+
         var ms = new MemoryStream(bytes);
         ms.Seek(0, SeekOrigin.Begin);
         return await Task.FromResult(ms);
-    }    public async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream gcodeStream, CancellationToken ct = default)
+    }
+    public async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream gcodeStream, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(gcodeStream);
         GcodeMetadataDto metadata = new();
@@ -1236,11 +1239,11 @@ public partial class GcodeHarvestService(
 
         // Normalize path
         string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(Path.DirectorySeparatorChar, '/');
-        
+
         // Try to find existing folder
         var existingFolder = await db.Folders
             .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, ct);
-        
+
         if (existingFolder != null)
         {
             return existingFolder;

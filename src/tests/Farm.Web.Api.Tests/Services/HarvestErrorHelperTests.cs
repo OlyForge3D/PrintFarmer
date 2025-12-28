@@ -1,7 +1,7 @@
+﻿using System.Diagnostics.CodeAnalysis;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Gcode;
 using FluentAssertions;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Farm.Web.Api.Tests.Services;
 
@@ -187,16 +187,16 @@ public class HarvestErrorHelperTests
     {
         // Create exception
         var ex = new Exception("Test error");
-        
+
         // Categorize
         string category = HarvestErrorHelper.CategorizeError(ex);
-        
+
         // Get details
         string details = HarvestErrorHelper.CreateErrorDetailsJson(ex);
-        
+
         // Get user message
         string userMessage = HarvestErrorHelper.GetUserFriendlyMessage(category, ex.Message);
-        
+
         // Check if retryable
         bool retryable = HarvestErrorHelper.IsRetryableError(category);
 

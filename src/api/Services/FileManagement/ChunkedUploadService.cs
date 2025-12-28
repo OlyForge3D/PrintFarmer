@@ -475,7 +475,7 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
 
         // Extract and save thumbnail if this is a .gcode or .bgcode file
-        if (finalPath.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) || 
+        if (finalPath.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) ||
             finalPath.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation($"FinalizeUploadAsync: File is GCODE, attempting thumbnail extraction for {state.FinalSafeName}");

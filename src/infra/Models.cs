@@ -1,5 +1,5 @@
-﻿using System.Diagnostics.CodeAnalysis;
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Annotations;
 
@@ -187,7 +187,7 @@ public record CompletePrinterDto(
     int? FrontendPort,
     bool InMaintenance,
     bool IsEnabled,
-    
+
     // Live status from SignalR cache (merged at API response time)
     bool IsOnline,
     string? State,
@@ -1485,6 +1485,13 @@ public class Model3DDto
     public DateTime UploadedAt { get; set; }
     public string Url { get; set; } = string.Empty;
     public string? ThumbnailUrl { get; set; }
+    public string? Description { get; set; }
+    public double? DimensionX { get; set; } // in mm
+    public double? DimensionY { get; set; } // in mm
+    public double? DimensionZ { get; set; } // in mm
+    public int? TriangleCount { get; set; }
+    public bool IsValid { get; set; } = true;
+    public string? ValidationErrors { get; set; }
     public Model3DTagDto[]? Tags { get; set; }
 }
 
@@ -2560,6 +2567,6 @@ public static class PrinterBackendHelpers
     /// Gets the default backend port for a given printer backend.
     /// Moonraker uses 7125, all other backends use 80.
     /// </summary>
-    public static int GetDefaultPort(PrinterBackend backend) => 
+    public static int GetDefaultPort(PrinterBackend backend) =>
         backend == PrinterBackend.Moonraker ? 7125 : 80;
 }

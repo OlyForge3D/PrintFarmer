@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.SignalR;
@@ -239,7 +239,7 @@ namespace Farm.Web.Api.Tests.Hubs
         {
             // Arrange
             var operationId = Guid.NewGuid();
-            
+
             // Setup different connection IDs
             _contextMock.SetupSequence(c => c.ConnectionId)
                 .Returns("client-1")
@@ -261,14 +261,27 @@ namespace Farm.Web.Api.Tests.Hubs
         /// </summary>
         private bool HasProperty<T>(object obj, string propertyName, T expectedValue)
         {
-            if (obj == null) return false;
-            
+            if (obj == null)
+            {
+                return false;
+            }
+
             var property = obj.GetType().GetProperty(propertyName);
-            if (property == null) return false;
+            if (property == null)
+            {
+                return false;
+            }
 
             var value = property.GetValue(obj);
-            if (value == null && expectedValue == null) return true;
-            if (value == null || expectedValue == null) return false;
+            if (value == null && expectedValue == null)
+            {
+                return true;
+            }
+
+            if (value == null || expectedValue == null)
+            {
+                return false;
+            }
 
             return value.Equals(expectedValue);
         }

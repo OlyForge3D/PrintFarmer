@@ -40,8 +40,6 @@ namespace Farm.Web.Api.Tests.SlicerServices
             _factory?.Dispose();
         }
 
-        private HttpClient CreateClient() => _factory.CreateClient();
-
         private class RegResponse
         {
             public Guid Id { get; set; }

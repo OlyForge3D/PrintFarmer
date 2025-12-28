@@ -1,4 +1,4 @@
-#pragma warning disable S1144 // Unused classes and properties reserved for future use
+﻿#pragma warning disable S1144 // Unused classes and properties reserved for future use
 
 using System.Net.WebSockets;
 using System.Text;
@@ -467,16 +467,26 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
                 if (tempProp.TryGetProperty("tool0", out var tool0) && tool0.ValueKind != JsonValueKind.Null)
                 {
                     if (tool0.TryGetProperty("actual", out var actual))
+                    {
                         hotendTemp = actual.GetDouble();
+                    }
+
                     if (tool0.TryGetProperty("target", out var target))
+                    {
                         hotendTarget = target.GetDouble();
+                    }
                 }
                 if (tempProp.TryGetProperty("bed", out var bed) && bed.ValueKind != JsonValueKind.Null)
                 {
                     if (bed.TryGetProperty("actual", out var actual))
+                    {
                         bedTemp = actual.GetDouble();
+                    }
+
                     if (bed.TryGetProperty("target", out var target))
+                    {
                         bedTarget = target.GetDouble();
+                    }
                 }
             }
 
@@ -505,7 +515,10 @@ public sealed class OctoPrintWebSocketAdapter : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            return;
+        }
 
         _disposed = true;
         _cts?.Cancel();

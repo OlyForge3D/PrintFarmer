@@ -1,4 +1,4 @@
-using AutoMapper;
+﻿using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 
@@ -30,7 +30,7 @@ public class LocationMappingProfile : Profile
             .ForMember(dest => dest.CreatedAt, opt => opt.MapFrom(src => src.CreatedAt))
             .ForMember(dest => dest.ModifiedAt, opt => opt.MapFrom(src => src.ModifiedAt))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.IsActive))
-            .ForMember(dest => dest.Printers, opt => opt.MapFrom(src => 
+            .ForMember(dest => dest.Printers, opt => opt.MapFrom(src =>
                 src.Printers.Select(p => new PrinterInfoDto
                 {
                     Name = p.Name,

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -267,9 +267,9 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task ScanNetworkAsync_WithSettings_ReturnResults()
         {
             // Arrange
-            var settings = new NetworkDiscoverySettings 
-            { 
-                DiscoverySubnets = new[] { "192.168.1.0/24" } 
+            var settings = new NetworkDiscoverySettings
+            {
+                DiscoverySubnets = new[] { "192.168.1.0/24" }
             };
 
             var discoveryResults = new List<SpoolmanDiscoveryResult>
@@ -299,9 +299,9 @@ namespace Farm.Web.Api.Tests.Controllers
         public async Task ScanNetworkAsync_WithException_ReturnsError()
         {
             // Arrange
-            var settings = new NetworkDiscoverySettings 
-            { 
-                DiscoverySubnets = new[] { "192.168.1.0/24" } 
+            var settings = new NetworkDiscoverySettings
+            {
+                DiscoverySubnets = new[] { "192.168.1.0/24" }
             };
 
             _settingsServiceMock

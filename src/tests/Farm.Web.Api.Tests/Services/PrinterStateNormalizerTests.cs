@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Printers;
+﻿using Farm.Infrastructure.Services.Printers;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services;

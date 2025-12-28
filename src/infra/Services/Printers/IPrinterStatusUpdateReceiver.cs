@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
@@ -41,7 +41,9 @@ namespace Farm.Infrastructure.Services.Printers
         public void ReceiveStatusUpdate(PrinterStatusDto status)
         {
             if (status == null)
+            {
                 return;
+            }
 
             _cache.UpdateStatus(status);
             _logger.LogDebug($"[StatusCache] Updated printer {status.Id}: IsOnline={status.IsOnline}, State={status.State}");
@@ -50,7 +52,9 @@ namespace Farm.Infrastructure.Services.Printers
         public void ReceiveStatusUpdates(IEnumerable<PrinterStatusDto> statuses)
         {
             if (statuses == null)
+            {
                 return;
+            }
 
             foreach (var status in statuses)
             {

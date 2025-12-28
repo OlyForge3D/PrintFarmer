@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Utility for normalizing printer state strings to PascalCase for consistent UI display.
@@ -12,7 +12,9 @@ public static class PrinterStateNormalizer
     public static string? NormalizeState(string? state)
     {
         if (string.IsNullOrEmpty(state))
+        {
             return state;
+        }
 
         // Convert to lowercase first, then capitalize first letter
         var lower = state.ToLowerInvariant();

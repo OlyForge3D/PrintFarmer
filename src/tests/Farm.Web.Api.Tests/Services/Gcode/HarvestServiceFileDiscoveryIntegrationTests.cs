@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Farm.Backend.Plugin.Core;
 using Farm.Backend.Plugin.Moonraker;
@@ -72,10 +72,10 @@ namespace Farm.Web.Api.Tests.Services.Gcode
             // Assert
             Assert.True(result, "Factory should successfully get file list client for Moonraker");
             Assert.NotNull(client);
-            
+
             // CRITICAL: The returned client MUST implement ISupportsFileList
             // This is what was failing in the harvest service
-            Assert.True(client is ISupportsFileList, 
+            Assert.True(client is ISupportsFileList,
                 $"Client returned from factory MUST implement ISupportsFileList interface. Got: {client?.GetType().FullName}");
 
             // Verify we can actually call the file list method

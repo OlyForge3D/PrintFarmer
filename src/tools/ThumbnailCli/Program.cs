@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using Farm.Web.Api.Services;
@@ -58,7 +58,7 @@ internal static class Program
             options.EnableGroundShadow = opts.EnableGroundShadow;
             options.TwoSided = opts.TwoSided;
             options.EnableAmbientOcclusion = opts.EnableAmbientOcclusion;
-            
+
             // Apply view mode (isometric or straight)
             if (!string.IsNullOrWhiteSpace(opts.ViewMode))
             {
@@ -73,7 +73,7 @@ internal static class Program
                     WriteViewModeMessage("Isometric");
                 }
             }
-            
+
             // Apply camera view
             if (!string.IsNullOrWhiteSpace(opts.View))
             {
@@ -108,9 +108,9 @@ internal static class Program
 
         int width = int.TryParse(GetValue(args, "--width", "-w"), out var w) ? w : 1024;
         int height = int.TryParse(GetValue(args, "--height", "-h"), out var h) ? h : 1024;
-        
+
         int? zoomPercent = int.TryParse(GetValue(args, "--zoom", "-z"), out var zv) ? zv : null;
-        
+
         string? view = GetValue(args, "--view", "-v")?.ToLowerInvariant();
         string? viewMode = GetValue(args, "--view-mode", "-vm")?.ToLowerInvariant();
 
@@ -128,7 +128,9 @@ internal static class Program
             foreach (var k in keys)
             {
                 if (string.Equals(a, k, StringComparison.OrdinalIgnoreCase))
+                {
                     return true;
+                }
             }
         }
         return false;
@@ -153,7 +155,10 @@ internal static class Program
                 if (string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
                 {
                     if (i + 1 < args.Count)
+                    {
                         return args[i + 1];
+                    }
+
                     return null;
                 }
             }

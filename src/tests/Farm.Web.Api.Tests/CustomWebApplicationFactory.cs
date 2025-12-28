@@ -3,17 +3,17 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.Authentication;
-using Farm.Infrastructure.Services.RateLimiting;
-using Farm.Web.Api.Services.Authentication;
 
 namespace Farm.Web.Api.Tests
 {
@@ -80,7 +80,7 @@ namespace Farm.Web.Api.Tests
         /// This should be used for testing endpoints that require [Authorize].
         /// </summary>
         public async Task<HttpClient> CreateAuthenticatedClientAsync(
-            string username = "test-admin", 
+            string username = "test-admin",
             string email = "test@example.com",
             string password = "TestPassword123!")
         {
@@ -116,7 +116,7 @@ namespace Farm.Web.Api.Tests
             {
                 var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
                 var result = await authService.AuthenticateAsync(username, password);
-                
+
                 var client = CreateClient();
                 if (result.Success && !string.IsNullOrEmpty(result.Token))
                 {
@@ -254,7 +254,7 @@ namespace Farm.Web.Api.Tests
                         context.Roles.Add(adminRole);
                         await context.SaveChangesAsync();
                     }
-                    
+
                     context.UserRoles.Add(new UserRole
                     {
                         UserId = user.Id,
@@ -312,7 +312,7 @@ namespace Farm.Web.Api.Tests
             using (var scope = Services.CreateAsyncScope())
             {
                 var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                
+
                 var existingWorker = await context.Workers.FirstOrDefaultAsync(w => w.ApiKey == workerKey);
                 if (existingWorker == null)
                 {

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Contracts.Printers;
+﻿using Farm.Infrastructure.Contracts.Printers;
 
 namespace Farm.Infrastructure.Services.Printers;
 

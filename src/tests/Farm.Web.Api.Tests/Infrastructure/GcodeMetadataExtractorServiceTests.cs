@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Gcode;
+﻿using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
 using FluentAssertions;
 using Moq;

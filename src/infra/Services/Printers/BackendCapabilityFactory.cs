@@ -1,4 +1,4 @@
-#pragma warning disable CA1851 // Multiple enumeration intentional for distinct operations
+﻿#pragma warning disable CA1851 // Multiple enumeration intentional for distinct operations
 
 using System;
 using System.Collections.Generic;
@@ -57,7 +57,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         _capabilitiesCache = DiscoverBackendCapabilities();
 
         _logger.LogInformation($"BackendCapabilityFactory initialized with capability mappings for {_capabilitiesCache.Count} backends");
-        
+
         if (_pluginRegistry != null)
         {
             var registeredPlugins = _pluginRegistry.GetAllPlugins().Count();
@@ -130,7 +130,9 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     {
         var plugin = _pluginRegistry?.GetPlugin(backendType);
         if (plugin == null)
+        {
             return BackendCapabilities.None;
+        }
 
         var capabilities = BackendCapabilities.None;
         var pluginCapabilities = plugin.GetCapabilities();
@@ -247,7 +249,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     {
         // History is supported by specific backends - only Moonraker and OctoPrint
         client = null;
-        
+
         if (backend == PrinterBackend.Moonraker || backend == PrinterBackend.OctoPrint)
         {
             try
@@ -260,7 +262,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                 return false;
             }
         }
-        
+
         return false;
     }
 
@@ -384,7 +386,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         out IBackendClient? client)
     {
         _logger.LogWarning($"[DIAGNOSTIC] TryGetClientWithCapability ENTRY: backend={backend}, requiredCapability={requiredCapability}");
-        
+
         client = null;
 
         // Check if this backend supports the requested capability
@@ -405,7 +407,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         try
         {
             client = _clientFactory.GetClient(backend);
-            
+
             // DIAGNOSTIC: Log the actual client type returned and its interfaces
             if (client != null)
             {
@@ -413,7 +415,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                 var clientFullName = clientType.FullName;
                 var interfaces = clientType.GetInterfaces().Select(i => i.Name).ToList();
                 var implementsRequiredInterface = false;
-                
+
                 // Check if client implements the specific interface for this capability
                 switch (requiredCapability)
                 {
@@ -448,7 +450,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
                         implementsRequiredInterface = client is ISupportsPrinterInformation;
                         break;
                 }
-                
+
                 _logger.LogWarning(
                     $"[DIAGNOSTIC] TryGetClientWithCapability({backend}, {requiredCapability}) => " +
                     $"Type: {clientFullName}, " +
@@ -459,7 +461,7 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             {
                 _logger.LogWarning($"[DIAGNOSTIC] TryGetClientWithCapability({backend}, {requiredCapability}) => client is NULL!");
             }
-            
+
             return true;
         }
         catch (Exception ex)

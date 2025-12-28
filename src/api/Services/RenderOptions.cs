@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
 
@@ -16,8 +16,8 @@ public sealed class RenderOptions
     public float OrthoSize { get; set; } = 1.65f;
 
     public Vector3 CameraPosition { get; set; } = new Vector3(1.75f, 1.75f, 1.35f);
-    public Vector3 CameraTarget   { get; set; } = new Vector3(0f, 0f, 0.55f);
-    public Vector3 CameraUp       { get; set; } = Vector3.UnitZ;
+    public Vector3 CameraTarget { get; set; } = new Vector3(0f, 0f, 0.55f);
+    public Vector3 CameraUp { get; set; } = Vector3.UnitZ;
 
     // Model vertical bounds (min/max Z after normalization) - updated after mesh loading
     public float ModelBoundsMinZ { get; set; } = 0f;
@@ -48,7 +48,7 @@ public sealed class RenderOptions
     /// Camera view presets: front, back, left, right, top, bottom
     /// Supports both isometric (diagonal) and straight (perpendicular) viewing angles.
     /// </summary>
-    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresetsIsometric = 
+    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresetsIsometric =
         new(StringComparer.OrdinalIgnoreCase)
     {
         // Diagonal isometric views (front/back)
@@ -64,7 +64,7 @@ public sealed class RenderOptions
         { "bottom", (new Vector3(0f, 0f, -1.5f), new Vector3(0f, 0f, 0.35f)) }
     };
 
-    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresetsStraight = 
+    private static readonly Dictionary<string, (Vector3 Position, Vector3 Target)> ViewPresetsStraight =
         new(StringComparer.OrdinalIgnoreCase)
     {
         // Straight-on perpendicular views
@@ -87,7 +87,7 @@ public sealed class RenderOptions
         CameraViewMode == ViewMode.Isometric ? ViewPresetsIsometric : ViewPresetsStraight;
 
     public Vector3 LightDirection { get; set; } = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
-    
+
     // View-space light direction (computed at render time from LightDirection and view matrix)
     // This ensures consistent lighting when normals are in view space
     public Vector3 ViewSpaceLightDirection { get; set; } = Vector3.Normalize(new Vector3(-0.6f, -0.5f, -1f));
@@ -129,10 +129,10 @@ public sealed class RenderOptions
     public float SpecularStrength { get; set; } = 0.08f;
     public float SpecularPower { get; set; } = 48f;
 
-    public bool EnableGroundShadow { get; set; } = true; 
-    public float GroundShadowOpacity { get; set; } = 0.08f; 
-    public int GroundShadowBlurRadiusPx { get; set; } = 10; 
-    public int GroundShadowOffsetXPx { get; set; } = 2; 
+    public bool EnableGroundShadow { get; set; } = true;
+    public float GroundShadowOpacity { get; set; } = 0.08f;
+    public int GroundShadowBlurRadiusPx { get; set; } = 10;
+    public int GroundShadowOffsetXPx { get; set; } = 2;
     public int GroundShadowOffsetYPx { get; set; } = 25;
 
     public bool AntiAlias2x { get; set; } = true;
@@ -177,19 +177,21 @@ public sealed class RenderOptions
     private bool ApplyCameraView(string viewName)
     {
         if (!ViewPresets.TryGetValue(viewName, out var preset))
+        {
             return false;
+        }
 
         var oldPos = CameraPosition;
         var oldTarget = CameraTarget;
         var oldUp = CameraUp;
-        
+
         CameraPosition = preset.Position;
-        
+
         // Calculate camera target Z dynamically based on model vertical center
         // For top/bottom views, use the preset Z (0.35 for optimal view)
         // For other views, use the model's vertical center plus an offset to center in frame
         float targetZ;
-        if (viewName.Equals("top", StringComparison.OrdinalIgnoreCase) || 
+        if (viewName.Equals("top", StringComparison.OrdinalIgnoreCase) ||
             viewName.Equals("bottom", StringComparison.OrdinalIgnoreCase))
         {
             targetZ = 0.35f;
@@ -200,7 +202,7 @@ public sealed class RenderOptions
             // Different offset logic for diagonal vs. pure side views
             float modelCenter = ModelVerticalCenter;
             float modelHeight = ModelBoundsMaxZ - ModelBoundsMinZ;
-            
+
             // Offset depends on view mode and direction
             float offset;
             if (CameraViewMode == ViewMode.Isometric)
@@ -211,7 +213,7 @@ public sealed class RenderOptions
             else
             {
                 // Straight views: side views (left/right) use smaller offset
-                if (viewName.Equals("left", StringComparison.OrdinalIgnoreCase) || 
+                if (viewName.Equals("left", StringComparison.OrdinalIgnoreCase) ||
                     viewName.Equals("right", StringComparison.OrdinalIgnoreCase))
                 {
                     offset = modelHeight * 0.15f;
@@ -222,18 +224,18 @@ public sealed class RenderOptions
                     offset = Math.Max(modelHeight * 0.25f, 0.06f);
                 }
             }
-            
+
             targetZ = modelCenter + offset;
         }
-        
+
         // Update target with calculated Z, preserving X and Y from preset
         CameraTarget = new Vector3(preset.Target.X, preset.Target.Y, targetZ);
-        
+
         // Compute the appropriate up vector based on view direction
         // This ensures top/bottom views don't have degenerate view matrices
         Vector3 viewDir = Vector3.Normalize(CameraTarget - CameraPosition);
         CameraUp = ComputeCameraUpVector(viewDir);
-        
+
         // Disable ground shadow for bottom view (looking up, shadow doesn't make sense)
         // Also disable ambient occlusion which darkens the view significantly
         if (viewName.Equals("bottom", StringComparison.OrdinalIgnoreCase))
@@ -252,13 +254,13 @@ public sealed class RenderOptions
             AmbientFactor = 0.30f;
             DiffuseFactor = 0.70f;
         }
-        
+
         Console.WriteLine($"[CAMERA] Changed view to '{viewName}':");
         Console.WriteLine($"  Position: {oldPos} → {CameraPosition}");
         Console.WriteLine($"  Target:   {oldTarget} → {CameraTarget}");
         Console.WriteLine($"  Up:       {oldUp} → {CameraUp}");
         Console.WriteLine($"  Model Z bounds: {ModelBoundsMinZ:F3} to {ModelBoundsMaxZ:F3}, center: {ModelVerticalCenter:F3}");
-        
+
         return true;
     }
 
@@ -272,13 +274,13 @@ public sealed class RenderOptions
         // If view direction is nearly parallel to +Z or -Z (top/bottom views),
         // use -Y as the up vector. Otherwise, use +Z (standard for all other views).
         float absZ = Math.Abs(viewDirection.Z);
-        
+
         // Threshold: if the view is pointing mostly in Z direction (> 0.9), use -Y as up
         if (absZ > 0.9f)
         {
             return -Vector3.UnitY;
         }
-        
+
         return Vector3.UnitZ;
     }
 
@@ -309,7 +311,7 @@ public sealed class NormalizedMesh
     public List<Vector3> Vertices { get; } = new();
     public List<Face> Faces { get; } = new();
     public float[] Ao { get; set; } = Array.Empty<float>();
-    
+
     public List<Vector3> Normals { get; } = new();
 }
 
@@ -351,11 +353,11 @@ public struct ClipVertex
 #pragma warning restore CA1051
 #pragma warning restore CA1815
 
-public static class VectorExtensions 
+public static class VectorExtensions
 {
-    public static Vector3 XYZ(this Vector4 v) 
+    public static Vector3 XYZ(this Vector4 v)
     {
-         return new Vector3(v.X, v.Y, v.Z);
+        return new Vector3(v.X, v.Y, v.Z);
     }
 }
 
@@ -383,18 +385,18 @@ public static class OrcaPreset
             UseOrthographic = true,
             OrthoSize = 0.69f,
 
-            CameraPosition      = new Vector3(-1.75f, -1.75f, 1.35f),
-            CameraTarget        = new Vector3(0f, 0f, 0.35f),
-            CameraUp            = Vector3.UnitZ,
+            CameraPosition = new Vector3(-1.75f, -1.75f, 1.35f),
+            CameraTarget = new Vector3(0f, 0f, 0.35f),
+            CameraUp = Vector3.UnitZ,
 
             // ------------------------------------------------------------
             // LIGHTING (soft, flat, Orca-style)
             // ------------------------------------------------------------
             LightDirection = Vector3.Normalize(new Vector3(-0.4f, -0.8f, -0.4f)),
-            
+
             // Orca base color (cool, desaturated green-blue)
             ModelBaseColor = new Rgba32(150, 210, 200),
-            
+
             // BACKGROUND (Orca gradient) - much darker
             BackgroundColor = new Rgba32(15, 16, 18),
 
@@ -416,13 +418,13 @@ public static class OrcaPreset
 
             AmbientFactor = 0.34f,   // was 0.30
             DiffuseFactor = 0.66f,   // was 0.70
-            DiffuseWrap   = 0.38f,   // was 0.32
+            DiffuseWrap = 0.38f,   // was 0.32
 
-            AOMin   = 0.78f,   // was 0.70
+            AOMin = 0.78f,   // was 0.70
             AOPower = 1.45f,   // was 1.25
-            
+
             SpecularStrength = 0.06f,
-            SpecularPower    = 56f,
+            SpecularPower = 56f,
 
             EnableGroundShadow = false
         };
@@ -442,8 +444,8 @@ public static class PrusaPreset
             OrthoSize = 1.25f,
 
             CameraPosition = new Vector3(1.65f, 1.65f, 1.45f),
-            CameraTarget   = new Vector3(0f, 0f, 0.35f),
-            CameraUp       = Vector3.UnitZ,
+            CameraTarget = new Vector3(0f, 0f, 0.35f),
+            CameraUp = Vector3.UnitZ,
 
             // ------------------------------------------------------------
             // LIGHTING (soft, warm, low-contrast)

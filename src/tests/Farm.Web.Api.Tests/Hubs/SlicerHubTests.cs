@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;

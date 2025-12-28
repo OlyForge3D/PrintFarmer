@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Tags;
@@ -419,7 +419,7 @@ public class TagServiceTests
             .ReturnsAsync((Model3D?)null);
 
         // Act & Assert
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => 
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             _service.AssignTagsToModelAsync(modelId, new[] { tagId }, CancellationToken.None));
     }
 
@@ -513,7 +513,7 @@ public class TagServiceTests
             .ReturnsAsync((Model3DTagMapping?)null);
 
         // Act & Assert
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => 
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
             _service.RemoveTagFromModelAsync(modelId, tagId, CancellationToken.None));
     }
 

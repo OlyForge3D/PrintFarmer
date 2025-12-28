@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Printers
@@ -91,7 +91,11 @@ namespace Farm.Infrastructure.Services.Printers
         {
             ArgumentNullException.ThrowIfNull(printer);
             ArgumentNullException.ThrowIfNull(circuitBreakerKey);
-            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
+            if (string.IsNullOrWhiteSpace(circuitBreakerKey))
+            {
+                throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
+            }
+
             ArgumentNullException.ThrowIfNull(operation);
             ArgumentNullException.ThrowIfNull(fallbackFactory);
 
@@ -139,7 +143,10 @@ namespace Farm.Infrastructure.Services.Printers
         public bool IsCircuitBreakerOpen(string circuitBreakerKey)
         {
             ArgumentNullException.ThrowIfNull(circuitBreakerKey);
-            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
+            if (string.IsNullOrWhiteSpace(circuitBreakerKey))
+            {
+                throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
+            }
 
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
             return breaker.State == CircuitState.Open;
@@ -148,7 +155,10 @@ namespace Farm.Infrastructure.Services.Printers
         public CircuitBreaker? GetCircuitBreakerState(string circuitBreakerKey)
         {
             ArgumentNullException.ThrowIfNull(circuitBreakerKey);
-            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
+            if (string.IsNullOrWhiteSpace(circuitBreakerKey))
+            {
+                throw new ArgumentException("Circuit breaker key cannot be empty", nameof(circuitBreakerKey));
+            }
 
             try
             {
@@ -162,7 +172,10 @@ namespace Farm.Infrastructure.Services.Printers
 
         public void ResetCircuitBreaker(string circuitBreakerKey)
         {
-            if (string.IsNullOrWhiteSpace(circuitBreakerKey)) throw new ArgumentNullException(nameof(circuitBreakerKey));
+            if (string.IsNullOrWhiteSpace(circuitBreakerKey))
+            {
+                throw new ArgumentNullException(nameof(circuitBreakerKey));
+            }
 
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
             // Reset by getting a fresh instance - depends on ICircuitBreakerService implementation

@@ -1,10 +1,10 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
+using FluentAssertions;
 using Moq;
 using Xunit;
-using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services.Printers
 {

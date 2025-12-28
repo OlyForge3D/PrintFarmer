@@ -1,4 +1,4 @@
-#pragma warning disable CS1587 // XML comment is not placed on a valid language element
+﻿#pragma warning disable CS1587 // XML comment is not placed on a valid language element
 
 using System;
 using System.Text.Json;
@@ -6,8 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Backend.Plugin.OctoPrint
 {
@@ -44,16 +44,16 @@ namespace Farm.Backend.Plugin.OctoPrint
             try
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{printer.Id}");
-                
+
                 // Retrieve both printer state and job status - now returns typed objects
                 OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
                     async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
-                
+
                 OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
                     async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
-                
+
                 // Create status DTO from typed objects
                 if (printerState != null && jobStatus != null)
                 {
@@ -104,15 +104,15 @@ namespace Farm.Backend.Plugin.OctoPrint
             try
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"octoprint-{printer.Id}");
-                
+
                 OctoPrintPrinterState? printerState = await breaker.ExecuteAsync(
                     async ct => await _client.GetPrinterStateAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
-                
+
                 OctoPrintJobStatus? jobStatus = await breaker.ExecuteAsync(
                     async ct => await _client.GetJobStatusAsync(printer.BackendUrl, printer.ApiKey ?? string.Empty),
                     ct);
-                
+
                 // Build PrinterDto from typed objects
                 if (printerState != null)
                 {

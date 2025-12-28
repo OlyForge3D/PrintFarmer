@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.OctoPrint;
+﻿namespace Farm.Backend.Plugin.OctoPrint;
 
 /// <summary>
 /// Represents OctoPrint printer status data.

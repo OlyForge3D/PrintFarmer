@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -51,22 +51,6 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
         try
         {
             return await work(scope);
-        }
-        finally
-        {
-            await scope.DisposeAsync();
-        }
-    }
-
-    /// <summary>
-    /// Helper to run async code within a properly disposed scope (void variant).
-    /// </summary>
-    private async Task RunInScopeAsync(Func<IServiceScope, Task> work)
-    {
-        var scope = _factory.Services.CreateAsyncScope();
-        try
-        {
-            await work(scope);
         }
         finally
         {

@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Normalization;
+﻿namespace Farm.Infrastructure.Normalization;
 
 /// <summary>
 /// Provides consistent normalization for catalog display names.

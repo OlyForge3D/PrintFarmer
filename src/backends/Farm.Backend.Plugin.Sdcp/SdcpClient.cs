@@ -7,8 +7,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Backend.Plugin.Sdcp;
 

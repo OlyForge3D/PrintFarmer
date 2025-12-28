@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -42,11 +42,11 @@ namespace Farm.Backend.Plugin.PrusaLink
             try
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{printer.Id}");
-                
+
                 PrusaCompositeStatus status = await breaker.ExecuteAsync(
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.ApiKey, ct),
                     ct);
-                
+
                 return new PrinterStatusDto(
                     Id: printer.Id,
                     IsOnline: status.IsOnline,
@@ -76,14 +76,16 @@ namespace Farm.Backend.Plugin.PrusaLink
             try
             {
                 CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"prusalink-{printer.Id}");
-                
+
                 PrusaCompositeStatus status = await breaker.ExecuteAsync(
                     async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.ApiKey, ct),
                     ct);
-                
+
                 if (status == null)
+                {
                     throw new InvalidOperationException($"Failed to retrieve status for printer {printer.Id}");
-                    
+                }
+
                 return await _client.CreatePrinterDtoAsync(printer, status, ct);
             }
             catch (Exception ex)

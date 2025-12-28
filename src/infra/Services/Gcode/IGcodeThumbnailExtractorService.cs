@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Gcode;
+﻿namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Service for extracting and saving thumbnails from G-code files.

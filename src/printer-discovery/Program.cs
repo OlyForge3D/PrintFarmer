@@ -1,8 +1,8 @@
-﻿using Farm.Infrastructure.Discovery;
-using Farm.Backend.Plugin.Moonraker;
-using Farm.Backend.Plugin.PrusaLink;
+﻿using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
+using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
+using Farm.Infrastructure.Discovery;
 using PrinterDiscovery.BackgroundServices;
 using PrinterDiscovery.Services;
 

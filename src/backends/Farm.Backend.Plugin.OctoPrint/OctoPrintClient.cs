@@ -49,12 +49,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 {
     private readonly HttpClient _httpClient = httpClient;
     private readonly ILogger<OctoPrintClient>? _logger = logger;
-    
+
     // Configuration
     private const int DefaultTimeoutSeconds = 30;
     private const int MaxRetryAttempts = 3;
     private const int RetryDelayMs = 1000;
-    
+
     // Keep HttpClient internal; callers should use IOctoPrintClient.SendAsync
     internal HttpClient HttpClient => _httpClient;
 
@@ -69,7 +69,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         {
             throw new ArgumentException("Base URL cannot be null or empty", nameof(baseUrl));
         }
-        
+
         return baseUrl.TrimEnd('/');
     }
 
@@ -131,7 +131,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         CancellationToken cancellationToken = default)
     {
         LogRequest(request);
-        
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
@@ -156,7 +156,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 // Transient error - retry
                 LogError($"Transient error on attempt {attemptNumber}, retrying in {RetryDelayMs}ms", ex);
                 await Task.Delay(RetryDelayMs * attemptNumber, cancellationToken); // Exponential backoff
-                
+
                 // Recreate request for retry (important: HttpRequestMessage can only be sent once)
                 request = CloneRequest(request);
             }
@@ -180,7 +180,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     private static HttpRequestMessage CloneRequest(HttpRequestMessage request)
     {
         var newRequest = new HttpRequestMessage(request.Method, request.RequestUri);
-        
+
         // Copy headers
         foreach (var header in request.Headers)
         {
@@ -204,7 +204,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/version");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request, timeoutSeconds: 10);
@@ -222,7 +222,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/printer");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -241,7 +241,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -265,7 +265,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         request.Headers.Add("X-Api-Key", apiKey);
         var payload = new { command = "select", print = true };
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -285,7 +285,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         request.Headers.Add("X-Api-Key", apiKey);
         var payload = new { command = "cancel" };
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -314,7 +314,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local?recursive=true");
             request.Headers.Add("X-Api-Key", apiKey);
             HttpResponseMessage response = await SendWithRetryAsync(request);
-            
+
             if (!response.IsSuccessStatusCode)
             {
                 return Array.Empty<string>();
@@ -323,7 +323,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             string jsonContent = await response.Content.ReadAsStringAsync();
             using JsonDocument doc = JsonDocument.Parse(jsonContent);
             JsonElement root = doc.RootElement;
-            
+
             List<string> files = new();
             if (root.TryGetProperty("files", out JsonElement filesArray))
             {
@@ -533,19 +533,24 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         // OctoPrint supports limit and start query parameters for pagination
         var queryParams = new List<string>();
         if (limit.HasValue)
+        {
             queryParams.Add($"limit={limit.Value}");
+        }
+
         if (start.HasValue)
+        {
             queryParams.Add($"start={start.Value}");
-        
+        }
+
         if (queryParams.Count > 0)
         {
             request.RequestUri = new Uri($"{baseUrl}/api/history?{string.Join("&", queryParams)}");
         }
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -564,7 +569,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -586,14 +591,16 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history?limit=0");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
             string content = await response.Content.ReadAsStringAsync();
             var historyList = ParseOctoPrintHistoryList(content);
             if (historyList == null)
+            {
                 return null;
+            }
 
             // Calculate totals from the job list
             double totalPrintTime = 0;
@@ -635,7 +642,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -673,12 +680,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/command");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         // Use JsonSerializer to properly escape special characters and newlines
         var payload = new { command = gcode };
         string json = JsonSerializer.Serialize(payload);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -699,11 +706,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         var homeCommand = new { command = "home", axes = new[] { "x", "y", "z" } };
         string json = JsonSerializer.Serialize(homeCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -724,11 +731,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         var homeCommand = new { command = "home", axes = new[] { "x", "y" } };
         string json = JsonSerializer.Serialize(homeCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -749,11 +756,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         var homeCommand = new { command = "home", axes = new[] { "z" } };
         string json = JsonSerializer.Serialize(homeCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -775,11 +782,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/bed");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         var bedCommand = new { command = "target", target = (int)bedTemp };
         string json = JsonSerializer.Serialize(bedCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -805,11 +812,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/tool");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         var toolCommand = new { command = "target", targets = new Dictionary<string, int> { { tool, (int)hotendTemp } } };
         string json = JsonSerializer.Serialize(toolCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -831,7 +838,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", apiKey);
         request.Content = new StringContent("{\"command\":\"pause\",\"action\":\"pause\"}", Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -850,7 +857,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", apiKey);
         request.Content = new StringContent("{\"command\":\"pause\",\"action\":\"resume\"}", Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -884,12 +891,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         // Build jog command with only provided axes
         var jogCommand = new { command = "jog", x = x ?? 0, y = y ?? 0, z = z ?? 0 };
         string json = JsonSerializer.Serialize(jogCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -914,7 +921,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/connection");
         request.Headers.Add("X-Api-Key", apiKey);
         request.Content = new StringContent("{\"command\":\"connect\"}", Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -939,7 +946,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/connection");
         request.Headers.Add("X-Api-Key", apiKey);
         request.Content = new StringContent("{\"command\":\"disconnect\"}", Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -963,7 +970,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/connection");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -990,7 +997,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         string cleanPath = path.TrimStart('/');
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local/{cleanPath}");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1018,15 +1025,15 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         // Clean paths
         string cleanSource = source.TrimStart('/');
         string cleanDestination = destination.TrimStart('/');
-        
+
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/files/local/{cleanSource}");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         // Build move command
         var moveCommand = new { command = "move", destination = cleanDestination };
         string json = JsonSerializer.Serialize(moveCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1052,10 +1059,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         // Clean path
         string cleanPath = path.TrimStart('/');
-        
+
         HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/files/local/{cleanPath}");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1082,20 +1089,20 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         // Clean path - use empty string for root, otherwise clean the path
         string cleanPath = string.IsNullOrWhiteSpace(path) ? "" : path.TrimStart('/');
-        
+
         // Build the full endpoint path
-        string endpoint = string.IsNullOrEmpty(cleanPath) 
-            ? $"{baseUrl}/api/files/local" 
+        string endpoint = string.IsNullOrEmpty(cleanPath)
+            ? $"{baseUrl}/api/files/local"
             : $"{baseUrl}/api/files/local/{cleanPath}";
-        
+
         HttpRequestMessage request = new(HttpMethod.Post, endpoint);
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         // Build makedir command
         var mkdirCommand = new { command = "makedir", foldername = folderName };
         string json = JsonSerializer.Serialize(mkdirCommand);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1126,27 +1133,27 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         string endpoint = path == null || string.IsNullOrWhiteSpace(path)
             ? $"{baseUrl}/api/files/local"
             : $"{baseUrl}/api/files/local/{path.TrimStart('/')}";
-        
+
         HttpRequestMessage request = new(HttpMethod.Post, endpoint);
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         // Build multipart form data
         var content = new MultipartFormDataContent();
-        
+
         // Add file content
         var fileStream = new MemoryStream(fileContent);
         var streamContent = new StreamContent(fileStream);
         streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         content.Add(streamContent, "file", fileName);
-        
+
         // Add print parameter if requested
         if (startPrint)
         {
             content.Add(new StringContent("true"), "print");
         }
-        
+
         request.Content = content;
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1173,7 +1180,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/settings");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1200,7 +1207,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/settings");
         request.Headers.Add("X-Api-Key", apiKey);
         request.Content = new StringContent(settingsJson, Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1227,7 +1234,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/restart");
         request.Headers.Add("X-Api-Key", apiKey);
         request.Content = new StringContent("", Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1252,7 +1259,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/system");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1279,7 +1286,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/{commandId}");
         request.Headers.Add("X-Api-Key", apiKey);
         request.Content = new StringContent("", Encoding.UTF8, "application/json");
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1306,7 +1313,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/version");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
@@ -1331,21 +1338,21 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         // Clean up file path - remove leading/trailing slashes
         filePath = filePath?.TrimStart('/').TrimEnd('/') ?? "";
-        
+
         HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/downloads/files/local/{filePath}");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         try
         {
             LogRequest(request);
             HttpResponseMessage response = await SendWithRetryAsync(request);
-            
+
             if (!response.IsSuccessStatusCode)
             {
                 LogError($"Download file failed with status {response.StatusCode}", null);
                 throw new HttpRequestException($"Download file failed: {response.StatusCode}");
             }
-            
+
             byte[] content = await response.Content.ReadAsByteArrayAsync();
             LogResponse(response);
             return content;
@@ -1370,18 +1377,18 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", apiKey);
-        
+
         // Create the select command
         var selectCommand = new { command = "select", file = filePath };
         string jsonContent = JsonSerializer.Serialize(selectCommand);
         request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-        
+
         try
         {
             LogRequest(request);
             HttpResponseMessage response = await SendWithRetryAsync(request);
             bool success = response.IsSuccessStatusCode;
-            
+
             if (!success)
             {
                 LogError($"Load file failed with status {response.StatusCode}", null);
@@ -1390,7 +1397,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 LogResponse(response);
             }
-            
+
             return success;
         }
         catch (Exception ex)
@@ -1631,10 +1638,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         {
             var url = $"{baseUrl.TrimEnd('/')}/api/files/local/{Uri.EscapeDataString(filePath)}";
             var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseContentRead, ct);
-            
+
             if (!response.IsSuccessStatusCode)
+            {
                 return null;
-            
+            }
+
             return await response.Content.ReadAsByteArrayAsync(ct);
         }
         catch
@@ -1656,7 +1665,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         {
             return await UploadFileAsync(baseUrl, apiKey ?? "", ms.ToArray(), fileName, null, false);
         }
-        
+
         using var memoryStream = new MemoryStream();
         await fileContent.CopyToAsync(memoryStream, ct);
         return await UploadFileAsync(baseUrl, apiKey ?? "", memoryStream.ToArray(), fileName, null, false);

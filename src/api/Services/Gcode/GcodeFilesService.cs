@@ -143,7 +143,7 @@ namespace Farm.Web.Api.Services.Gcode
                 }
 
                 string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
-                
+
                 // Convert thumbnail path to API URL if available
                 string? thumbnailUrl = null;
                 if (!string.IsNullOrEmpty(file.ThumbnailPath))
@@ -153,7 +153,7 @@ namespace Farm.Web.Api.Services.Gcode
                     string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
                     string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
                     string normalizedThumbnailPath = Path.GetFullPath(file.ThumbnailPath);
-                    
+
                     if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
                     {
                         // Extract relative path from storage directory
@@ -169,7 +169,7 @@ namespace Farm.Web.Api.Services.Gcode
                         thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(Path.GetFileName(file.ThumbnailPath))}";
                     }
                 }
-                
+
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
                     Name: file.OriginalFileName,
@@ -301,7 +301,7 @@ namespace Farm.Web.Api.Services.Gcode
             try
             {
                 _logger.LogInformation("FinalizeChunkedUploadAsync: Starting for {FileName}, received thumbnailPath={ThumbnailPath}", originalFileName, thumbnailPath ?? "(null)");
-                
+
                 if (!File.Exists(filePath))
                 {
                     _logger.LogWarning("Cannot finalize chunked upload: file not found at {FilePath}", filePath);
@@ -328,10 +328,10 @@ namespace Farm.Web.Api.Services.Gcode
 
                 // Generate GUID for file ID (used for all file names)
                 Guid fileId = Guid.NewGuid();
-                
+
                 // Normalize virtual directory path
                 string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
-                
+
                 // Get or create target folder
                 var targetFolder = await _modelService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
 
@@ -362,7 +362,7 @@ namespace Farm.Web.Api.Services.Gcode
                 // Move uploaded file to GUID-based name before saving to DB
                 string storageDir = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
                 string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
-                
+
                 if (filePath != finalFilePath && File.Exists(filePath))
                 {
                     File.Move(filePath, finalFilePath, overwrite: true);
@@ -726,7 +726,7 @@ namespace Farm.Web.Api.Services.Gcode
 
                 using StreamReader reader = new(filePath, Encoding.UTF8);
                 string gcodeContent = await reader.ReadToEndAsync(ct);
-                
+
                 if (string.IsNullOrWhiteSpace(gcodeContent))
                 {
                     return null;
@@ -792,14 +792,14 @@ namespace Farm.Web.Api.Services.Gcode
             // Extract metadata and thumbnail
             GcodeMetadataExtracted? metadata = await ExtractMetadataAsync(filePath, ct);
             _logger.LogInformation("CreateGcodeFileRecordAsync: Metadata extracted for {FileName}", originalFileName);
-            
+
             string? thumbnailPath = await ExtractThumbnailAsync(filePath, ct);
             _logger.LogInformation("CreateGcodeFileRecordAsync: Thumbnail path for {FileName} is: {ThumbnailPath}", originalFileName, thumbnailPath ?? "(null)");
 
             // Rename file to GUID-based name
             string storageDir = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
             string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
-            
+
             if (filePath != finalFilePath && File.Exists(filePath))
             {
                 File.Move(filePath, finalFilePath, overwrite: true);

@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services.Slicing;
+﻿using Farm.Web.Api.Services.Slicing;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.Slicing;
@@ -326,7 +326,7 @@ public class ProfileParsingServiceTests
         int filamentPos = result.MetadataJson.IndexOf("filamentMaterial");
         int layerPos = result.MetadataJson.IndexOf("layerHeight");
         int slicerPos = result.MetadataJson.IndexOf("slicerVersion");
-        
+
         Assert.True(filamentPos < layerPos);
         Assert.True(layerPos < slicerPos);
     }
@@ -378,7 +378,7 @@ public class ProfileParsingServiceTests
         int aPos = result.SanitizedRawJson.IndexOf("a_key");
         int mPos = result.SanitizedRawJson.IndexOf("m_key");
         int zPos = result.SanitizedRawJson.IndexOf("z_key");
-        
+
         Assert.True(aPos < mPos);
         Assert.True(mPos < zPos);
     }

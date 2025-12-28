@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;

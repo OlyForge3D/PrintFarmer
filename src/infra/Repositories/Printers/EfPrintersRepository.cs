@@ -128,7 +128,7 @@ public class EfPrintersRepository : IPrintersRepository
         // Extract IP address from ServerUrl (format: http://ip or http://hostname)
         // Strip http/https and port (if any) to get just the host
         string inputHost = serverUrl.Replace("http://", "").Replace("https://", "").Split(':')[0];
-        
+
         // Query only for the printer with matching IP - much more efficient than GetAllAsync + FirstOrDefault
         return await _db.Printers
             .AsNoTracking()

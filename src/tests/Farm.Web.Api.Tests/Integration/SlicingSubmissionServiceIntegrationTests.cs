@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -65,7 +65,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "_" + fileName);
-        
+
         // Create the actual file
         File.WriteAllText(filePath, "mock stl content");
 

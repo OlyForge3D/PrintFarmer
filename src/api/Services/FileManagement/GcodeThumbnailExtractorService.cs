@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
@@ -37,7 +37,7 @@ public class GcodeThumbnailExtractorService : IGcodeThumbnailExtractorService
             gcodeStream.Position = 0;
             using StreamReader reader = new(gcodeStream, System.Text.Encoding.UTF8, leaveOpen: true);
             string gcodeText = await reader.ReadToEndAsync(ct);
-            
+
             return await ExtractAndSaveThumbnailFromTextAsync(gcodeText, ct);
         }
         catch (Exception ex)

@@ -1,4 +1,4 @@
-using Farm.Web.Api.Services;
+﻿using Farm.Web.Api.Services;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services;
@@ -142,10 +142,10 @@ public class StartupStatusTests
     {
         var status = new StartupStatus();
         status.MarkInitializationStarted();
-        
+
         // Small delay to ensure measurable duration
         System.Threading.Thread.Sleep(10);
-        
+
         status.MarkReady();
 
         status.InitializationDuration.Should().NotBeNull();
@@ -174,14 +174,14 @@ public class StartupStatusTests
     {
         var status = new StartupStatus();
         // This shouldn't happen in practice, but the code handles it
-        
+
         // Manually set end before start (simulating edge case)
         status.MarkReady();
         var completedTime = status.InitializationCompletedUtc;
-        
+
         // Now if we could somehow set start after end, duration would be negative
         // In practice this shouldn't happen, but the code returns null in this case
-        if (status.InitializationStartedUtc.HasValue && completedTime.HasValue && 
+        if (status.InitializationStartedUtc.HasValue && completedTime.HasValue &&
             completedTime < status.InitializationStartedUtc)
         {
             status.InitializationDuration.Should().BeNull();

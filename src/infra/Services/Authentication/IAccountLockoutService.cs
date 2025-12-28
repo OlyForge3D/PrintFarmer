@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Authentication;
+﻿namespace Farm.Infrastructure.Services.Authentication;
 
 /// <summary>
 /// Service for managing account lockouts after failed login attempts

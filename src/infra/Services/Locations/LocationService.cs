@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -29,7 +29,7 @@ public class LocationService : ILocationService
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(mapper);
-        
+
         _repository = repository;
         _logger = logger;
         _mapper = mapper;
@@ -73,7 +73,9 @@ public class LocationService : ILocationService
     public async Task<Location?> FindByIdAsync(Guid id, CancellationToken ct)
     {
         if (id == Guid.Empty)
+        {
             throw new ArgumentException("Location ID cannot be empty", nameof(id));
+        }
 
         try
         {
@@ -92,7 +94,9 @@ public class LocationService : ILocationService
     public async Task<Location?> FindByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
+        {
             throw new ArgumentException("Location name cannot be empty", nameof(name));
+        }
 
         try
         {
@@ -111,7 +115,9 @@ public class LocationService : ILocationService
     public async Task<bool> ExistsByNameAsync(string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
+        {
             throw new ArgumentException("Location name cannot be empty", nameof(name));
+        }
 
         try
         {
@@ -132,7 +138,9 @@ public class LocationService : ILocationService
         ArgumentNullException.ThrowIfNull(dto);
 
         if (string.IsNullOrWhiteSpace(dto.Name))
+        {
             throw new ArgumentException("Location name is required", nameof(dto));
+        }
 
         try
         {
@@ -173,7 +181,9 @@ public class LocationService : ILocationService
     public async Task<LocationDto?> UpdateLocationAsync(Guid id, UpdateLocationDto dto, CancellationToken ct)
     {
         if (id == Guid.Empty)
+        {
             throw new ArgumentException("Location ID cannot be empty", nameof(id));
+        }
 
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -181,7 +191,9 @@ public class LocationService : ILocationService
         {
             var location = await FindByIdAsync(id, ct);
             if (location == null)
+            {
                 return null;
+            }
 
             // Check for name duplicate if name is being changed
             if (!string.IsNullOrWhiteSpace(dto.Name) && dto.Name.Trim() != location.Name)
@@ -194,10 +206,14 @@ public class LocationService : ILocationService
 
             // Update only provided fields
             if (!string.IsNullOrWhiteSpace(dto.Name))
+            {
                 location.Name = dto.Name.Trim();
+            }
 
             if (dto.Description != null)
+            {
                 location.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
+            }
 
             await _repository.UpdateAsync(location, ct);
             await _repository.SaveChangesAsync(ct);
@@ -219,13 +235,17 @@ public class LocationService : ILocationService
     public async Task<bool> DeleteLocationAsync(Guid id, CancellationToken ct)
     {
         if (id == Guid.Empty)
+        {
             throw new ArgumentException("Location ID cannot be empty", nameof(id));
+        }
 
         try
         {
             var location = await FindByIdAsync(id, ct);
             if (location == null)
+            {
                 return false;
+            }
 
             location.IsActive = false;
             location.ModifiedAt = DateTime.UtcNow;
@@ -267,13 +287,17 @@ public class LocationService : ILocationService
     public async Task<LocationDetailsDto?> GetLocationDetailsAsync(Guid id, CancellationToken ct)
     {
         if (id == Guid.Empty)
+        {
             throw new ArgumentException("Location ID cannot be empty", nameof(id));
+        }
 
         try
         {
             var location = await FindByIdAsync(id, ct);
             if (location == null)
+            {
                 return null;
+            }
 
             var printers = await GetPrintersInLocationAsync(id, ct);
 
@@ -295,7 +319,9 @@ public class LocationService : ILocationService
     public async Task<List<Printer>> GetPrintersInLocationAsync(Guid locationId, CancellationToken ct)
     {
         if (locationId == Guid.Empty)
+        {
             throw new ArgumentException("Location ID cannot be empty", nameof(locationId));
+        }
 
         try
         {
@@ -314,17 +340,23 @@ public class LocationService : ILocationService
     public async Task<bool> AssignPrinterToLocationAsync(Guid printerId, Guid locationId, CancellationToken ct)
     {
         if (printerId == Guid.Empty)
+        {
             throw new ArgumentException("Printer ID cannot be empty", nameof(printerId));
+        }
 
         if (locationId == Guid.Empty)
+        {
             throw new ArgumentException("Location ID cannot be empty", nameof(locationId));
+        }
 
         try
         {
             // Verify location exists
             var location = await FindByIdAsync(locationId, ct);
             if (location == null)
+            {
                 throw new KeyNotFoundException($"Location with ID {locationId} not found");
+            }
 
             // In a real implementation, we would update the printer entity
             // This requires access to the printer repository or context
@@ -346,7 +378,9 @@ public class LocationService : ILocationService
     public async Task<bool> RemovePrinterFromLocationAsync(Guid printerId, CancellationToken ct)
     {
         if (printerId == Guid.Empty)
+        {
             throw new ArgumentException("Printer ID cannot be empty", nameof(printerId));
+        }
 
         try
         {
@@ -370,13 +404,17 @@ public class LocationService : ILocationService
     public async Task UpdatePrinterCountAsync(Guid locationId, CancellationToken ct)
     {
         if (locationId == Guid.Empty)
+        {
             throw new ArgumentException("Location ID cannot be empty", nameof(locationId));
+        }
 
         try
         {
             var location = await FindByIdAsync(locationId, ct);
             if (location == null)
+            {
                 return;
+            }
 
             var count = await _repository.GetPrinterCountAsync(locationId, ct);
             location.PrinterCount = count;

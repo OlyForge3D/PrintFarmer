@@ -28,12 +28,12 @@ using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
-using StackExchange.Redis;
 using Farm.Web.Api.Services.Slicing.Abstractions;
 using Farm.Web.Api.Services.StorageManagement;
 using Farm.Web.Api.Services.Workers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using StackExchange.Redis;
 
 namespace Farm.Web.Api.Infrastructure;
 
@@ -374,13 +374,13 @@ public static class ServiceCollectionExtensions
     {
         // Register cache adapter that wraps API-specific ICatalogCache for Infrastructure use
         _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.Caching.ICatalogCacheProvider, Services.Catalog.CatalogCacheAdapter>();
-        
+
         // Register Infrastructure catalog service with cache abstraction
         _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.ICatalogService, Farm.Infrastructure.Services.Catalog.CatalogService>();
-        
+
         // Register API adapter that wraps Infrastructure service to work with request DTOs
         _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
-        
+
         _ = services.AddScoped<Farm.Infrastructure.Services.IDefaultCatalogService, Farm.Infrastructure.Services.DefaultCatalogService>();
         _ = services.AddScoped<Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
     }
@@ -453,10 +453,10 @@ public static class ServiceCollectionExtensions
             var serviceProvider = provider;
             var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
             var logger = provider.GetRequiredService<IUnifiedLoggingService>();
-            
+
             return new Farm.Infrastructure.Services.Printers.BackendClientFactory(serviceProvider, pluginRegistry, logger);
         });
-        
+
         // Register the backend capability factory for capability-aware client retrieval
         // This factory now integrates with the plugin registry for backend metadata
         // while maintaining backward compatibility with reflection-based detection
@@ -466,7 +466,7 @@ public static class ServiceCollectionExtensions
             var clientFactory = provider.GetRequiredService<Farm.Infrastructure.Services.Printers.IBackendClientFactory>();
             var logger = provider.GetRequiredService<IUnifiedLoggingService>();
             var pluginRegistry = provider.GetService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
-            
+
             return new Farm.Infrastructure.Services.Printers.BackendCapabilityFactory(clientFactory, logger, pluginRegistry);
         });
 
@@ -476,10 +476,10 @@ public static class ServiceCollectionExtensions
             var serviceProvider = provider;
             var pluginRegistry = provider.GetRequiredService<Farm.Backend.Plugin.Core.IBackendPluginRegistry>();
             var logger = provider.GetRequiredService<IUnifiedLoggingService>();
-            
+
             return new Farm.Infrastructure.Services.Printers.PrinterStatusClientFactory(serviceProvider, pluginRegistry, logger);
         });
-        
+
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
         var printerStatusCache = new Farm.Infrastructure.Services.Printers.PrinterStatusCache();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(printerStatusCache);
@@ -490,7 +490,7 @@ public static class ServiceCollectionExtensions
 
         // Register the printer status fallback service for timeout and circuit breaker management
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusFallbackService, Farm.Infrastructure.Services.Printers.PrinterStatusFallbackService>();
-        
+
         // Register the backend capabilities service for exposing plugin capabilities to the UI
         _ = services.AddScoped<Services.Printers.IPrinterBackendCapabilitiesService, Services.Printers.PrinterBackendCapabilitiesService>();
 
@@ -527,7 +527,7 @@ public static class ServiceCollectionExtensions
 
         // Harvest configuration and services
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
-        
+
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Services.Gcode.IGcodeLibraryService, Services.Gcode.GcodeLibraryService>();

@@ -1,4 +1,4 @@
-namespace Farm.Backend.Plugin.Moonraker;
+﻿namespace Farm.Backend.Plugin.Moonraker;
 
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Services.Printers;

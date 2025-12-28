@@ -847,7 +847,7 @@ public class PrintersController(
             p.OriginalServerUrl = resolveResp.NormalizedInputUrl;
             p.IpAddress = resolveResp.ResolvedIp;
         }
-        
+
         p.Notes = dto.Notes;
         p.ManufacturerId = manufacturerId;
         p.ModelId = modelId;
@@ -1608,7 +1608,7 @@ public class PrintersController(
             byte[] data;
             string contentType;
             string filename;
-            
+
             if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
             {
                 data = await _printersService.BuildExportJsonAsync(ids, ct);
@@ -1621,7 +1621,7 @@ public class PrintersController(
                 contentType = "text/csv";
                 filename = $"printers-export-{DateTime.UtcNow:yyyy-MM-dd-HHmm}.csv";
             }
-            
+
             Response.ContentType = contentType;
             Response.Headers["Content-Disposition"] = $"attachment; filename={filename}";
             await Response.Body.WriteAsync(data.AsMemory(0, data.Length), ct);
