@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591;S6960</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -69,9 +70,17 @@
     <ProjectReference Include="..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\Farm.Slicers.OrcaSlicer.v2_3_1.csproj" />
   </ItemGroup>
 
+
   <ItemGroup>
     <Compile Remove="Tests\**\*.cs" />
     <None Include="Tests\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Include native Lib3MF libraries for runtime loading -->
+    <None Include="runtimes/linux-x64/native/lib3mf.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

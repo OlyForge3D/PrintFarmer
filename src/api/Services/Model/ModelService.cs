@@ -415,7 +415,7 @@ namespace Farm.Web.Api.Services.Model
                     Id = modelId,
                     OriginalFileName = originalName,
                     DisplayName = Path.GetFileNameWithoutExtension(originalName),
-                    FileDirectory = Path.GetDirectoryName(finalFilePath) ?? string.Empty,
+                    FileDirectory = string.Empty,  // Root directory for all uploaded files - subdirectories handled via folder operations
                     FilePath = fileName,  // Store ONLY relative path (e.g., "uuid.stl"), not full absolute path
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,

@@ -252,6 +252,14 @@ public abstract class BasePreviewRenderer
     private Mesh LoadMesh(string inputPath, MeshLoadOptions? opts = null)
     {
         opts ??= new MeshLoadOptions();
+        
+        // Use Lib3MF for 3MF files, Assimp for others
+        string extension = System.IO.Path.GetExtension(inputPath).ToLowerInvariant();
+        if (extension == ".3mf")
+        {
+            return Load3MFMesh(inputPath);
+        }
+
         var ctx = new AssimpContext();
 
         var scene = ctx.ImportFile(inputPath,
@@ -325,6 +333,148 @@ public abstract class BasePreviewRenderer
         }
 
         return mesh;
+    }
+
+    /// <summary>
+    /// Loads a 3MF mesh using Lib3MF library
+    /// Falls back to Assimp if Lib3MF fails
+    /// </summary>
+    private Mesh Load3MFMesh(string inputPath)
+    {
+        try
+        {
+            // Use Lib3MF for better 3MF support
+            return LoadWith3MFLibrary(inputPath);
+        }
+        catch (Exception lib3mfEx)
+        {
+            // Fallback to Assimp if Lib3MF fails
+            try
+            {
+                var ctx = new AssimpContext();
+                var scene = ctx.ImportFile(inputPath,
+                    PostProcessSteps.Triangulate |
+                    PostProcessSteps.GenerateNormals |
+                    PostProcessSteps.JoinIdenticalVertices |
+                    PostProcessSteps.FlipUVs);
+
+                if (scene == null || !scene.HasMeshes)
+                    throw new InvalidOperationException("No mesh found in file.");
+
+                var mesh = new Mesh();
+                int vertexOffset = 0;
+
+                foreach (var aMesh in scene.Meshes)
+                {
+                    foreach (var v in aMesh.Vertices)
+                    {
+                        mesh.Vertices.Add(new Vector3(v.X, v.Y, v.Z));
+                    }
+
+                    foreach (var face in aMesh.Faces)
+                    {
+                        if (face.IndexCount >= 3)
+                        {
+                            mesh.Faces.Add(new Face
+                            {
+                                Indices = new[] 
+                                { 
+                                    face.Indices[0] + vertexOffset,
+                                    face.Indices[1] + vertexOffset,
+                                    face.Indices[2] + vertexOffset
+                                }
+                            });
+                        }
+                    }
+
+                    vertexOffset = mesh.Vertices.Count;
+                }
+
+                return mesh;
+            }
+            catch (Exception assimpEx)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to load 3MF file with both Lib3MF and Assimp. " +
+                    $"Lib3MF error: {lib3mfEx.Message}. " +
+                    $"Assimp error: {assimpEx.Message}", assimpEx);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Loads a 3MF file using the official Lib3MF C# wrapper
+    /// </summary>
+    private Mesh LoadWith3MFLibrary(string inputPath)
+    {
+        var mesh = new Mesh();
+        int vertexOffset = 0;
+
+        try
+        {
+            // Create a model
+            var model = Lib3MF.Wrapper.CreateModel();
+            
+            // Get a reader and load the file
+            var reader = model.QueryReader("3mf");
+            reader.ReadFromFile(inputPath);
+
+            // Get mesh objects from the model using iterator
+            var meshObjectIterator = model.GetMeshObjects();
+            
+            int meshCount = 0;
+            while (meshObjectIterator.MoveNext())
+            {
+                var meshObject = meshObjectIterator.GetCurrentMeshObject();
+                meshCount++;
+
+                // Get vertices
+                var vertexCount = meshObject.GetVertexCount();
+                for (UInt32 v = 0; v < vertexCount; v++)
+                {
+                    var vertex = meshObject.GetVertex(v);
+                    // sPosition uses Coordinates array [0]=X, [1]=Y, [2]=Z
+                    // Apply Z-up conversion to match Assimp's coordinate system
+                    mesh.Vertices.Add(new Vector3(
+                        vertex.Coordinates[0],
+                        vertex.Coordinates[2],
+                        -vertex.Coordinates[1]
+                    ));
+                }
+
+                // Get triangles
+                var triangleCount = meshObject.GetTriangleCount();
+                for (UInt32 t = 0; t < triangleCount; t++)
+                {
+                    var triangle = meshObject.GetTriangle(t);
+                    // sTriangle uses Indices array [0]=Index1, [1]=Index2, [2]=Index3
+                    mesh.Faces.Add(new Face
+                    {
+                        FaceIndex = mesh.Faces.Count,
+                        Indices = new[]
+                        {
+                            (int)triangle.Indices[0] + vertexOffset,
+                            (int)triangle.Indices[1] + vertexOffset,
+                            (int)triangle.Indices[2] + vertexOffset
+                        }
+                    });
+                }
+
+                vertexOffset = mesh.Vertices.Count;
+            }
+            
+            if (meshCount == 0)
+                throw new InvalidOperationException("No mesh objects found in 3MF file.");
+
+            if (mesh.Vertices.Count == 0)
+                throw new InvalidOperationException("Failed to extract vertices from 3MF file.");
+
+            return mesh;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to load 3MF file with Lib3MF: {ex.Message}", ex);
+        }
     }
 
     private Assimp.Node? FindNodeForMesh(Assimp.Node node, int meshIndex)

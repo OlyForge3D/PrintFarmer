@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronRightIcon, FolderIcon, DocumentIcon } from '@heroicons/react/24/outline';
+import { ChevronRightIcon, FolderIcon, DocumentIcon, FolderPlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { Button, Checkbox, Input, Select } from '@/components/ui';
 import { toast } from 'sonner';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { TreeView, type TreeNode } from './TreeView';
 
 export interface FileEntry {
   path: string;
@@ -65,6 +66,11 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
+  const [showNewFolderDialog, setShowNewFolderDialog] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'tree'>('tree'); // Default to tree view
   const queryClient = useQueryClient();
 
   const apiPath = getApiPath(endpoint);
@@ -121,13 +127,74 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
     },
   });
 
+  // Create folder mutation
+  const createFolderMutation = useMutation({
+    mutationFn: async (folderName: string) => {
+      // Send relative path without leading slash - backend will resolve it properly
+      const newFolderPath = currentPath === '/' ? folderName : `${currentPath}/${folderName}`;
+      console.log('[createFolderMutation] Creating folder at path:', newFolderPath);
+      const response = await fetch(`${baseUrl}${apiPath}/folder`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ path: newFolderPath }),
+      });
+      console.log('[createFolderMutation] Response status:', response.status);
+      if (!response.ok) throw new Error(`Failed to create folder`);
+      return response.json();
+    },
+    onSuccess: () => {
+      // Invalidate current path specifically to refresh the listing
+      console.log('[createFolderMutation] Invalidating query key:', [`${endpoint}-files`, currentPath]);
+      queryClient.invalidateQueries({ queryKey: [`${endpoint}-files`, currentPath] });
+      toast.success('Folder created successfully');
+      setShowNewFolderDialog(false);
+      setNewFolderName('');
+    },
+    onError: () => {
+      toast.error('Failed to create folder');
+    },
+  });
+
+  // Move files mutation
+  const moveFilesMutation = useMutation({
+    mutationFn: async ({ files, targetPath }: { files: string[]; targetPath: string }) => {
+      // Send relative path without leading slash - backend will resolve it properly
+      const normalizedTargetPath = targetPath.startsWith('/') ? targetPath.slice(1) : targetPath;
+      const response = await fetch(`${baseUrl}${apiPath}/move`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ filePaths: files, targetPath: normalizedTargetPath }),
+      });
+      if (!response.ok) throw new Error(`Failed to move files`);
+      return response.json();
+    },
+    onSuccess: () => {
+      // Invalidate current path to refresh the listing
+      queryClient.invalidateQueries({ queryKey: [`${endpoint}-files`, currentPath] });
+      setSelectedFiles([]);
+      toast.success('Files moved successfully');
+      setDragOverPath(null);
+    },
+    onError: () => {
+      toast.error('Failed to move files');
+      setDragOverPath(null);
+    },
+  });
+
   const files = fileData?.files || [];
   const directories = files.filter(f => f.isDirectory);
   const filesList = files.filter(f => !f.isDirectory);
 
-  const breadcrumbs = currentPath === '/' 
-    ? [{ path: '/', name: 'Root' }]
-    : [{ path: '/', name: 'Root' }, ...currentPath.split('/').filter(Boolean).map((segment, idx, arr) => ({
+  // Generate breadcrumbs - show actual folder structure
+  const breadcrumbs = currentPath === '/' || currentPath === ''
+    ? [{ path: '/', name: 'Models' }]
+    : [{ path: '/', name: 'Models' }, ...currentPath.split('/').filter(Boolean).map((segment, idx, arr) => ({
         path: '/' + arr.slice(0, idx + 1).join('/'),
         name: segment,
       }))];
@@ -164,6 +231,37 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
     }
   };
 
+  const handleCreateFolder = () => {
+    if (!newFolderName.trim()) {
+      toast.error('Folder name cannot be empty');
+      return;
+    }
+    createFolderMutation.mutate(newFolderName);
+  };
+
+  const handleDragOver = (e: React.DragEvent, dirPath: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(dirPath);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverPath(null);
+  };
+
+  const handleDropOnFolder = (e: React.DragEvent, dirPath: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+
+    if (selectedFiles.length === 0) {
+      toast.error('Please select files to move');
+      return;
+    }
+
+    moveFilesMutation.mutate({ files: selectedFiles, targetPath: dirPath });
+  };
+
   return (
     <div className="space-y-4">
       {/* Breadcrumb Navigation */}
@@ -185,7 +283,7 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
       </div>
 
       {/* Search and Controls */}
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 flex-wrap items-center">
         <Input
           type="text"
           placeholder="Search files..."
@@ -194,23 +292,99 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
             setSearchTerm(e.target.value);
             setPage(1);
           }}
-          className="flex-1 min-w-64"
+          className="flex-1 min-w-48"
         />
-        <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'name' | 'size' | 'date')}>
+        
+        {/* View Mode Toggle */}
+        <div className="flex gap-1 bg-pf-bg-1 border border-pf-border rounded p-1">
+          <Button
+            variant={viewMode === 'tree' ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setViewMode('tree')}
+            title="Tree view"
+            className="px-2"
+          >
+            <FolderIcon className="w-4 h-4" />
+          </Button>
+          <Button
+            variant={viewMode === 'table' ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setViewMode('table')}
+            title="Table view"
+            className="px-2"
+          >
+            <DocumentIcon className="w-4 h-4" />
+          </Button>
+        </div>
+
+        <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'name' | 'size' | 'date')} className="w-32">
           <option value="name">Name</option>
           <option value="size">Size</option>
           <option value="date">Date</option>
         </Select>
-        <Select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}>
+        <Select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')} className="w-32">
           <option value="asc">Ascending</option>
           <option value="desc">Descending</option>
         </Select>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setShowNewFolderDialog(true)}
+          title="Create new folder"
+        >
+          <FolderPlusIcon className="w-4 h-4 mr-1" />
+          New Folder
+        </Button>
         {selectedFiles.length > 0 && (
           <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleteMutation.isPending}>
             {deleteMutation.isPending ? 'Deleting...' : `Delete (${selectedFiles.length})`}
           </Button>
         )}
       </div>
+
+      {/* Drag and Drop Hint */}
+      {selectedFiles.length > 0 && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-pf-info bg-opacity-10 border border-pf-info rounded-lg text-sm text-pf-info">
+          <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zm-11-1a1 1 0 11-2 0 1 1 0 012 0z" clipRule="evenodd" />
+          </svg>
+          <span><strong>Tip:</strong> Drag selected files onto a folder to move them</span>
+        </div>
+      )}
+
+      {/* New Folder Dialog */}
+      {showNewFolderDialog && (
+        <div className="bg-pf-bg-2 border border-pf-border rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Folder name..."
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateFolder();
+                if (e.key === 'Escape') setShowNewFolderDialog(false);
+              }}
+              className="flex-1 px-3 py-2 border border-pf-border rounded-md text-sm bg-pf-bg-1 text-pf-text focus:outline-none focus:ring-1 focus:ring-pf-primary"
+              autoFocus
+            />
+            <Button
+              size="sm"
+              onClick={handleCreateFolder}
+              disabled={createFolderMutation.isPending || !newFolderName.trim()}
+            >
+              {createFolderMutation.isPending ? 'Creating...' : 'Create'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowNewFolderDialog(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* File List */}
       <div className="border border-pf-border rounded-lg overflow-hidden">
@@ -220,9 +394,34 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
           <div className="p-8 text-center text-pf-text-secondary">
             {searchTerm ? 'No files match your search' : 'This folder is empty'}
           </div>
+        ) : viewMode === 'tree' ? (
+          // Tree View
+          <div className="p-4">
+            <TreeView
+              nodes={files.map(f => ({
+                path: f.path,
+                name: f.name,
+                isDirectory: f.isDirectory,
+                size: f.size,
+                modifiedAt: f.modifiedAt,
+                thumbnailUrl: f.thumbnailUrl,
+              }))}
+              onSelect={(node) => {
+                if (!node.isDirectory) {
+                  onFileSelect?.(files.find(f => f.path === node.path) || (node as FileEntry));
+                }
+              }}
+              onNavigate={handleNavigate}
+              currentPath={currentPath}
+              selectedFiles={selectedFiles}
+              onSelectFile={handleSelectFile}
+              isLoading={isLoading}
+            />
+          </div>
         ) : (
+          // Table View
           <table className="w-full">
-            <thead className="bg-pf-bg-2 border-b border-pf-border">
+            <thead className="bg-pf-bg-2 border-b border-pf-border sticky top-0">
               <tr>
                 <th className="px-4 py-3 text-left w-8">
                   {filesList.length > 0 && (
@@ -241,13 +440,28 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
             <tbody className="divide-y divide-pf-border">
               {/* Directories First */}
               {directories.map((dir) => (
-                <tr key={dir.path} className="hover:bg-pf-bg-2 transition-colors">
+                <tr
+                  key={dir.path}
+                  className={`hover:bg-pf-bg-2 transition-colors ${
+                    selectedFiles.length > 0 ? 'cursor-move' : 'cursor-pointer'
+                  } ${
+                    dragOverPath === dir.path 
+                      ? 'bg-pf-primary bg-opacity-15 border-l-4 border-pf-primary' 
+                      : ''
+                  }`}
+                  draggable={false}
+                  onDragOver={(e) => handleDragOver(e, dir.path)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDropOnFolder(e, dir.path)}
+                >
                   <td className="px-4 py-3" />
                   <td
-                    className="px-4 py-3 cursor-pointer font-medium text-pf-link hover:text-pf-link-hover flex items-center gap-2"
+                    className="px-4 py-3 font-medium text-pf-link hover:text-pf-link-hover flex items-center gap-2"
                     onClick={() => handleNavigate(dir.path)}
                   >
-                    <FolderIcon className="w-5 h-5 flex-shrink-0" />
+                    <FolderIcon className={`w-5 h-5 flex-shrink-0 ${
+                      dragOverPath === dir.path ? 'text-pf-primary' : ''
+                    }`} />
                     {dir.name}
                   </td>
                   <td className="px-4 py-3 text-right text-pf-text-secondary">—</td>
@@ -260,7 +474,15 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
 
               {/* Files */}
               {filesList.map((file) => (
-                <tr key={file.path} className="hover:bg-pf-bg-2 transition-colors">
+                <tr 
+                  key={file.path} 
+                  className={`hover:bg-pf-bg-2 transition-colors ${
+                    selectedFiles.includes(file.path) ? 'bg-pf-primary bg-opacity-10' : ''
+                  }`}
+                  draggable={selectedFiles.includes(file.path) && selectedFiles.length > 0}
+                  onDragStart={() => setIsDragging(true)}
+                  onDragEnd={() => setIsDragging(false)}
+                >
                   <td className="px-4 py-3">
                     <Checkbox
                       checked={selectedFiles.includes(file.path)}
@@ -277,7 +499,7 @@ export const HierarchicalFileBrowser: React.FC<HierarchicalFileBrowserProps> = (
                     )}
                     <div>
                       <div className="font-medium text-pf-text-primary">{file.name}</div>
-                      <div className="text-xs text-pf-text-tertiary">{file.path}</div>
+                      <div className="text-xs text-pf-text-tertiary">{formatBytes(file.size)}</div>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right text-pf-text-secondary">{formatBytes(file.size)}</td>

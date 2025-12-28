@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
@@ -26,6 +27,13 @@ namespace Farm.Web.Api.Tests.Controllers
             Mock<IFileManagementService> mock = new Mock<IFileManagementService>(MockBehavior.Loose);
             _ = mock.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
             return mock;
+        }
+
+        private AppDbContext? CreateMockAppDbContext()
+        {
+            // Return null - the CreateFolderAsync method only uses _db if we actually call SaveChangesAsync
+            // and the try/catch will handle the null gracefully
+            return null!;
         }
 
         private Mock<Api.Services.Tags.ITagService> CreateMockTagService()
@@ -50,7 +58,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.ListModelsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.ListModelsAsync();
 
@@ -73,7 +81,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3DDto?)null);
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.GetModelAsync(Guid.NewGuid());
 
@@ -94,7 +102,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             FormFile fakeFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
 
@@ -119,7 +127,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -139,7 +147,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ThrowsAsync(new KeyNotFoundException());
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -159,7 +167,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelFilePathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -179,7 +187,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 
@@ -213,7 +221,7 @@ namespace Farm.Web.Api.Tests.Controllers
 
             ModelService modelService = new ModelService(mockRepo.Object, mockLogger.Object, configReal, testFs, mockFileManagement.Object);
 
-            ModelController controller = new ModelController(mockLogger.Object, modelService, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, modelService, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -238,7 +246,7 @@ namespace Farm.Web.Api.Tests.Controllers
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
 
             Mock<IModelRepository> mockModelRepo = CreateMockModelRepository();
-            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object);
+            ModelController controller = new ModelController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 

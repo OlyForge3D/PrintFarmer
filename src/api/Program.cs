@@ -6,6 +6,7 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Runtime.InteropServices;
 using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure;
@@ -47,6 +48,18 @@ using OpenTelemetry.Trace;
 // using Microsoft.Extensions.Caching.Memory; // removed unused
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// Register DLL import resolver for Lib3MF to handle cross-platform native library loading
+// Maps "lib3mf.dll" to platform-specific names: lib3mf.so (Linux), lib3mf.dylib (macOS), lib3mf.dll (Windows)
+NativeLibrary.SetDllImportResolver(typeof(Lib3MF.Internal.Lib3MFWrapper).Assembly, (name, assembly, searchPath) =>
+{
+    if (name != "lib3mf.dll") return IntPtr.Zero;
+    
+    string libName = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "lib3mf.so" :
+                     RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "lib3mf.dylib" : "lib3mf.dll";
+    
+    return NativeLibrary.TryLoad(libName, assembly, searchPath, out var handle) ? handle : IntPtr.Zero;
+});
 
 // Explicitly add environment variables with "PFARM__" prefix to configuration.
 // This allows settings like PFARM__Spoolman__BaseUrl to be recognized by the

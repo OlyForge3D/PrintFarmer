@@ -7,6 +7,7 @@ import { BulkTagAssignmentModal } from '@/components/modals/BulkTagAssignmentMod
 import { Button, Input, FileUpload } from '@/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
 import { HierarchicalFileBrowser, FileEntry } from '@/components/files/HierarchicalFileBrowser';
+import { ExplorerFileBrowser } from '@/components/files/ExplorerFileBrowser';
 // Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/utils/lazyWithPreload';
 import type { ModelViewerProps } from '@/components/3d/ModelViewer3D';
@@ -48,14 +49,13 @@ export const ModelsPage: React.FC = () => {
   const [dragOver, setDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [showUploadPanel, setShowUploadPanel] = useState(false);
-  const [showBrowser, setShowBrowser] = useState(false);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
   // Slicing now redirects to NewSliceJobPage instead of using modal
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'explorer'>('grid');
   const [showFiltersPanel, setShowFiltersPanel] = useState(true);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
 
@@ -400,16 +400,6 @@ export const ModelsPage: React.FC = () => {
           {/* Tools Section */}
           <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden p-4 space-y-2">
             <h4 className="text-xs font-semibold text-pf-text-tertiary uppercase tracking-wide">Tools</h4>
-            
-            <Button
-              onClick={() => setShowBrowser(!showBrowser)}
-              variant={showBrowser ? 'primary' : 'secondary'}
-              size="sm"
-              className="w-full justify-start"
-            >
-              <FolderIcon className="w-4 h-4 mr-2" />
-              {showBrowser ? 'Hide' : 'File'} Browser
-            </Button>
 
             <Button
               onClick={() => setShowBulkTagModal(true)}
@@ -464,54 +454,40 @@ export const ModelsPage: React.FC = () => {
                 >
                   <ListViewIcon className="w-4 h-4" />
                 </Button>
+                <Button
+                  onClick={() => setViewMode('explorer')}
+                  variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
+                  size="sm"
+                  title="Explorer view"
+                  className="px-2"
+                >
+                  <FolderIcon className="w-4 h-4" />
+                </Button>
               </div>
             </div>
           </div>
 
-          {/* File Browser */}
-          {showBrowser && (
-            <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-pf-text-primary">Browse by Folder</h3>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => setShowBrowser(false)}
-                  title="Close browser"
-                >
-                  <CloseIcon className="w-4 h-4" />
-                </Button>
-              </div>
-              <HierarchicalFileBrowser
-                endpoint="models"
-                initialPath="/"
-                showThumbnails={true}
-                onFileSelect={(file: FileEntry) => {
-                  if (!file.isDirectory) {
-                    navigate(`/models?view=browser&path=${encodeURIComponent(file.path)}`);
-                  }
-                }}
-                onFileDelete={() => {
-                  queryClient.invalidateQueries({ queryKey: ['models-search'] });
-                }}
-              />
+          {/* Explorer View */}
+          {viewMode === 'explorer' ? (
+            <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 h-96">
+              <ExplorerFileBrowser endpoint="models" />
             </div>
-          )}
-
-          {/* Models Display */}
-          {models.length === 0 ? (
-            <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
-              <CubeIcon className="w-12 h-12 text-pf-text-tertiary mx-auto mb-3 opacity-50" />
-              <p className="text-pf-text-secondary">No models found</p>
-              <p className="text-xs text-pf-text-tertiary mt-1">
-                {selectedTags.length > 0 ? 'Try adjusting your filters' : 'Upload your first model to get started'}
-              </p>
-            </div>
-          ) : viewMode === 'grid' ? (
-            // Grid View
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {models.map((model: Model) => (
-                <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group">
+          ) : (
+            <>
+              {/* Models Grid/List View */}
+              {models.length === 0 ? (
+                <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
+                  <CubeIcon className="w-12 h-12 text-pf-text-tertiary mx-auto mb-3 opacity-50" />
+                  <p className="text-pf-text-secondary">No models found</p>
+                  <p className="text-xs text-pf-text-tertiary mt-1">
+                    {selectedTags.length > 0 ? 'Try adjusting your filters' : 'Upload your first model to get started'}
+                  </p>
+                </div>
+              ) : viewMode === 'grid' ? (
+                // Grid View
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                  {models.map((model: Model) => (
+                    <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group">
                   {/* Model Preview */}
                   <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
                     {model.thumbnailUrl ? (
@@ -701,6 +677,8 @@ export const ModelsPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+              )}
+            </>
           )}
         </div>
       </div>

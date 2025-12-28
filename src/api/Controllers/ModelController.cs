@@ -2,6 +2,7 @@
 using System.Security.Cryptography;
 using System.Text; // Needed for Encoding when deriving secondary hash
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Security;
@@ -30,6 +31,7 @@ public class ModelController : ControllerBase
     private readonly IFileManagementService _fileManagementService;
     private readonly ITagService _tagService;
     private readonly IModelRepository _modelRepo;
+    private readonly AppDbContext? _db;
 
     public ModelController(
         IUnifiedLoggingService logger,
@@ -38,7 +40,8 @@ public class ModelController : ControllerBase
         Services.IO.IFileSystem fileSystem,
         IFileManagementService fileManagementService,
         ITagService tagService,
-        IModelRepository modelRepo)
+        IModelRepository modelRepo,
+        AppDbContext? db)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
@@ -46,6 +49,7 @@ public class ModelController : ControllerBase
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
         _modelRepo = modelRepo ?? throw new ArgumentNullException(nameof(modelRepo));
+        _db = db; // Allow null for testing
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
         // Ensure path is absolute - if relative, combine with current directory first
@@ -729,6 +733,290 @@ public class ModelController : ControllerBase
         {
             _logger.LogError($"Failed to search models: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to search models");
+        }
+    }
+
+    /// <summary>
+    /// Create a new folder in the models directory
+    /// </summary>
+    /// <param name="request">Create folder request with folder path</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Operation result</returns>
+    [HttpPost("folder")]
+    [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateFolderAsync([FromBody] CreateFolderRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.Path))
+            {
+                return BadRequest(new FolderOperationResultDto(false, "Folder path is required"));
+            }
+
+            // Normalize path - strip leading/trailing slashes for relative path
+            string relativePath = request.Path.Trim('/').Trim();
+            
+            _logger.LogDebug($"[CreateFolder] Input path: '{request.Path}' -> Relative: '{relativePath}', Models path: '{_modelsPath}'");
+
+            // Validate path for security - prevent directory traversal
+            string[] pathParts = string.IsNullOrEmpty(relativePath) ? Array.Empty<string>() : relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (pathParts.Length == 0)
+            {
+                return BadRequest(new FolderOperationResultDto(false, "Folder path cannot be empty. Please provide a folder name."));
+            }
+
+            foreach (var part in pathParts)
+            {
+                if (string.IsNullOrWhiteSpace(part))
+                {
+                    return BadRequest(new FolderOperationResultDto(false, $"Folder path contains empty segments. Path: '{relativePath}'"));
+                }
+                if (part.Contains("..") || part.Contains("\\") || part == ".")
+                {
+                    return BadRequest(new FolderOperationResultDto(false, $"Invalid folder name: '{part}' in path '{relativePath}'. Cannot use '.', '..', or backslashes."));
+                }
+            }
+
+            // Resolve full folder path - use relative path that doesn't start with /
+            string fullPath = ResolvePath(relativePath);
+            _logger.LogDebug($"[CreateFolder] Full path: '{fullPath}'");
+
+            // Check if folder already exists
+            if (_fileSystem.DirectoryExists(fullPath))
+            {
+                return Conflict(new FolderOperationResultDto(false, $"Folder already exists at: '{relativePath}'"));
+            }
+
+            // Verify parent directory exists
+            string? parentPath = Path.GetDirectoryName(fullPath);
+            _logger.LogDebug($"[CreateFolder] Parent path: '{parentPath}', Full path: '{fullPath}', Models base: '{_modelsPath}'");
+            
+            // Also check if models directory exists
+            bool modelsPathExists = _fileSystem.DirectoryExists(_modelsPath);
+            _logger.LogDebug($"[CreateFolder] Models path '{_modelsPath}' exists: {modelsPathExists}");
+            
+            if (string.IsNullOrEmpty(parentPath) || !_fileSystem.DirectoryExists(parentPath))
+            {
+                string diagnostic = $"Requested path: '{relativePath}', Resolved full path: '{fullPath}', Parent: '{parentPath}', Models base exists: {modelsPathExists}";
+                _logger.LogWarning($"[CreateFolder] Parent directory does not exist. {diagnostic}");
+                return BadRequest(new FolderOperationResultDto(false, $"Cannot create folder. Parent directory '{parentPath}' does not exist or models directory is not accessible. Details: {diagnostic}"));
+            }
+
+            // Create the folder
+            _fileSystem.CreateDirectory(fullPath);
+
+            // Track the folder in the database for proper hierarchy management
+            try
+            {
+                if (_db != null)
+                {
+                    var folder = new Farm.Infrastructure.Domain.Folder
+                    {
+                        Id = Guid.NewGuid(),
+                        Path = "/" + relativePath.Trim('/'), // Normalize to /FolderName format
+                        FolderType = "models",
+                        CreatedAt = DateTime.UtcNow,
+                        DeletedAt = null
+                    };
+                    
+                    _db.Folders.Add(folder);
+                    await _db.SaveChangesAsync();
+                    _logger.LogInformation($"[CreateFolder] Recorded folder in database: {folder.Path}");
+                }
+            }
+            catch (Exception dbEx)
+            {
+                _logger.LogError($"[CreateFolder] Failed to record folder in database: {dbEx.Message}. Physical folder was created but not tracked.");
+                // Don't fail the request - the physical folder exists, just not tracked yet
+            }
+
+            _logger.LogInformation($"[CreateFolder] Successfully created folder: {relativePath} at {fullPath}");
+            return CreatedAtAction(nameof(CreateFolderAsync), new FolderOperationResultDto(true, "Folder created successfully"));
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogError($"[CreateFolder] Invalid argument: {ex.Message}");
+            return BadRequest(new FolderOperationResultDto(false, $"Invalid path: {ex.Message}"));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError($"[CreateFolder] Access denied: {ex.Message}");
+            return StatusCode(StatusCodes.Status403Forbidden, new FolderOperationResultDto(false, "Access denied: insufficient permissions"));
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError($"[CreateFolder] IO error: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"I/O error: {ex.Message}"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"[CreateFolder] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to create folder: {ex.GetType().Name}"));
+        }
+    }
+
+    /// <summary>
+    /// Move files to a different folder
+    /// </summary>
+    /// <param name="request">Move request with file paths and target folder</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Operation result</returns>
+    [HttpPost("move")]
+    [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MoveFilesAsync([FromBody] MoveFilesRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (request == null || request.FilePaths == null || request.FilePaths.Count == 0)
+            {
+                return BadRequest(new FolderOperationResultDto(false, "At least one file path is required"));
+            }
+
+            if (string.IsNullOrWhiteSpace(request.TargetPath))
+            {
+                return BadRequest(new FolderOperationResultDto(false, "Target folder path is required"));
+            }
+
+            // Normalize target path - strip leading/trailing slashes for relative path
+            string targetRelativePath = request.TargetPath.Trim('/').Trim();
+            if (string.IsNullOrEmpty(targetRelativePath))
+            {
+                return BadRequest(new FolderOperationResultDto(false, "Target folder path cannot be empty"));
+            }
+            string fullTargetPath = ResolvePath(targetRelativePath);
+
+            _logger.LogDebug($"[MoveFiles] Target path normalized: '{request.TargetPath}' -> Full: '{fullTargetPath}'");
+
+            // Verify target folder exists
+            if (!_fileSystem.DirectoryExists(fullTargetPath))
+            {
+                _logger.LogWarning($"[MoveFiles] Target directory does not exist: '{fullTargetPath}'");
+                return NotFound(new FolderOperationResultDto(false, "Target folder does not exist"));
+            }
+
+            int movedCount = 0;
+            int failedCount = 0;
+            var failedFiles = new List<string>();
+
+            // Move each file
+            foreach (var filePath in request.FilePaths)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(filePath))
+                        continue;
+
+                    string fullSourcePath = ResolvePath(filePath);
+
+                    // Verify source exists
+                    if (!_fileSystem.FileExists(fullSourcePath))
+                    {
+                        _logger.LogWarning($"[MoveFiles] Source file not found: '{filePath}' (resolved: '{fullSourcePath}')");
+                        failedFiles.Add(filePath);
+                        failedCount++;
+                        continue;
+                    }
+
+                    // Extract filename from source path
+                    string fileName = Path.GetFileName(fullSourcePath);
+                    string fullDestPath = Path.Combine(fullTargetPath, fileName);
+
+                    // Check if destination already exists
+                    if (_fileSystem.FileExists(fullDestPath))
+                    {
+                        // Generate unique name
+                        string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                        string extension = Path.GetExtension(fileName);
+                        int counter = 1;
+                        while (_fileSystem.FileExists(Path.Combine(fullTargetPath, $"{nameWithoutExt}_{counter}{extension}")))
+                        {
+                            counter++;
+                        }
+                        fullDestPath = Path.Combine(fullTargetPath, $"{nameWithoutExt}_{counter}{extension}");
+                        _logger.LogDebug($"[MoveFiles] Destination exists, renamed to: '{Path.GetFileName(fullDestPath)}'");
+                    }
+
+                    // Move the file
+                    _fileSystem.MoveFile(fullSourcePath, fullDestPath, false);
+                    _logger.LogDebug($"[MoveFiles] File moved: '{filePath}' -> '{fullDestPath}'");
+
+                    // Update model file path in database if it exists
+                    var models = await _modelRepo.ListValidAsync(ct);
+                    var model = models.FirstOrDefault(m => m.FilePath == filePath);
+                    if (model != null)
+                    {
+                        // Update the relative path
+                        string relativePath = Path.GetRelativePath(_modelsPath, fullDestPath);
+                        model.FilePath = relativePath;
+                        await _modelRepo.UpdateAsync(model, ct);
+                        await _modelRepo.SaveChangesAsync(ct);
+                        _logger.LogDebug($"[MoveFiles] Updated model database: {model.Id} -> '{relativePath}'");
+                    }
+
+                    movedCount++;
+                }
+                catch (ArgumentException ex)
+                {
+                    _logger.LogWarning($"[MoveFiles] Invalid path for file {filePath}: {ex.Message}");
+                    failedFiles.Add(filePath);
+                    failedCount++;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _logger.LogWarning($"[MoveFiles] Access denied for file {filePath}: {ex.Message}");
+                    failedFiles.Add(filePath);
+                    failedCount++;
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning($"[MoveFiles] IO error for file {filePath}: {ex.Message}");
+                    failedFiles.Add(filePath);
+                    failedCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"[MoveFiles] Unexpected error for file {filePath}: {ex.GetType().Name}: {ex.Message}");
+                    failedFiles.Add(filePath);
+                    failedCount++;
+                }
+            }
+
+            string message = failedCount == 0 
+                ? $"Successfully moved {movedCount} file(s)"
+                : $"Moved {movedCount} file(s), failed to move {failedCount} file(s)";
+            
+            if (failedFiles.Count > 0)
+            {
+                message += $" - Failed: {string.Join(", ", failedFiles.Take(3))}";
+                if (failedFiles.Count > 3)
+                    message += $" and {failedFiles.Count - 3} more";
+            }
+
+            return Ok(new FolderOperationResultDto(failedCount == 0, message));
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogError($"[MoveFiles] Invalid argument: {ex.Message}");
+            return BadRequest(new FolderOperationResultDto(false, $"Invalid path: {ex.Message}"));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError($"[MoveFiles] Access denied: {ex.Message}");
+            return StatusCode(StatusCodes.Status403Forbidden, new FolderOperationResultDto(false, "Access denied: insufficient permissions"));
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError($"[MoveFiles] IO error: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"I/O error: {ex.Message}"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"[MoveFiles] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
         }
     }
 }

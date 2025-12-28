@@ -166,7 +166,39 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 }
             }
 
-            return directChildren.OrderBy(d => d).ToList();
+            // Also include folders from the Folder table that exist at this level
+            var foldersFolders = await _db.Folders
+                .Where(f => f.FolderType == "gcode" && !f.DeletedAt.HasValue)
+                .AsNoTracking()
+                .ToListAsync();
+
+            foreach (var folder in foldersFolders)
+            {
+                var folderSegments = folder.Path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+                
+                if (normalizedParent == "")
+                {
+                    // Looking for root-level folders
+                    if (folderSegments.Length == 1)
+                    {
+                        directChildren.Add(folderSegments[0]);
+                    }
+                }
+                else
+                {
+                    // Looking for nested folders - check if this folder's parent matches
+                    if (folderSegments.Length > 1)
+                    {
+                        string parentPath = string.Join("/", folderSegments.SkipLast(1));
+                        if (parentPath == normalizedParent)
+                        {
+                            directChildren.Add(folderSegments[^1]);
+                        }
+                    }
+                }
+            }
+
+            return directChildren.Distinct().OrderBy(d => d).ToList();
         }
 
         public async Task<List<GcodeFile>> ListFilesInDirectoryAsync(string directory, CancellationToken ct)

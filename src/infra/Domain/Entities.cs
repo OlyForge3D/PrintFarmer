@@ -896,6 +896,29 @@ public class Model3DTagMapping
     public Model3D? Model3D { get; set; }
     public Model3DTag? Tag { get; set; }
 }
+
+/// <summary>
+/// Represents a virtual folder for organizing 3D models and G-code files.
+/// Folders are created via the API and tracked in the database for proper hierarchy management.
+/// </summary>
+public class Folder
+{
+    public Guid Id { get; set; }
+    
+    /// <summary>
+    /// Virtual path of the folder (e.g., "/MyFolder" or "/Parent/Child")
+    /// </summary>
+    public required string Path { get; set; }
+    
+    /// <summary>
+    /// Folder type: "models" or "gcode"
+    /// </summary>
+    public required string FolderType { get; set; }
+    
+    public DateTime CreatedAt { get; set; }
+    public DateTime? DeletedAt { get; set; }
+}
+
 /// <summary>
 /// Queue item for G-code harvest operations. Decouples the API request from the background processing.
 /// Allows multiple harvest requests to be queued and processed sequentially or with priority.

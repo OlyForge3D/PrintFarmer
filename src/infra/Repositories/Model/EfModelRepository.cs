@@ -70,7 +70,7 @@ namespace Farm.Infrastructure.Repositories.Model
 
             string normalizedParent = parentDirectory.TrimEnd(Path.DirectorySeparatorChar);
 
-            // Get all unique subdirectories that are direct children of the parent
+            // Get all unique subdirectories that are direct children of the parent from database
             var subdirs = await _db.Models3D
                 .Where(m => m.IsValid && m.FileDirectory.StartsWith(normalizedParent))
                 .Select(m => m.FileDirectory)
@@ -106,7 +106,39 @@ namespace Farm.Infrastructure.Repositories.Model
                 }
             }
 
-            return directChildren.OrderBy(d => d).ToList();
+            // Also include folders from the Folder table that exist at this level
+            var foldersFolders = await _db.Folders
+                .Where(f => f.FolderType == "models" && !f.DeletedAt.HasValue)
+                .AsNoTracking()
+                .ToListAsync();
+
+            foreach (var folder in foldersFolders)
+            {
+                var folderSegments = folder.Path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+                
+                if (normalizedParent == "")
+                {
+                    // Looking for root-level folders
+                    if (folderSegments.Length == 1)
+                    {
+                        directChildren.Add(folderSegments[0]);
+                    }
+                }
+                else
+                {
+                    // Looking for nested folders - check if this folder's parent matches
+                    if (folderSegments.Length > 1)
+                    {
+                        string parentPath = string.Join("/", folderSegments.SkipLast(1));
+                        if (parentPath == normalizedParent)
+                        {
+                            directChildren.Add(folderSegments[^1]);
+                        }
+                    }
+                }
+            }
+
+            return directChildren.Distinct().OrderBy(d => d).ToList();
         }
 
         public async Task<int> CountValidAsync(CancellationToken ct)

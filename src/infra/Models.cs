@@ -1520,6 +1520,29 @@ public record DeleteModelsRequest(
 );
 
 /// <summary>
+/// Request to create a new folder in the models directory
+/// </summary>
+public record CreateFolderRequest(
+    [property: JsonPropertyName("path")] string Path
+);
+
+/// <summary>
+/// Request to move files to a different folder
+/// </summary>
+public record MoveFilesRequest(
+    [property: JsonPropertyName("filePaths")] IReadOnlyList<string> FilePaths,
+    [property: JsonPropertyName("targetPath")] string TargetPath
+);
+
+/// <summary>
+/// Response for folder operations
+/// </summary>
+public record FolderOperationResultDto(
+    [property: JsonPropertyName("success")] bool Success,
+    [property: JsonPropertyName("message")] string Message
+);
+
+/// <summary>
 /// Tag for organizing and categorizing 3D models
 /// </summary>
 public class Model3DTagDto
