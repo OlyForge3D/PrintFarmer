@@ -11,6 +11,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
+using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.Model;
 using FluentAssertions;
@@ -38,8 +39,8 @@ public class GcodeFilesServiceTests
         logger.Setup(x => x.LogInformation(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
         logger.Setup(x => x.LogWarning(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
 
-        var mockModelService = new Mock<IModelService>(MockBehavior.Loose);
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockModelService.Object);
+        var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -94,8 +95,8 @@ public class GcodeFilesServiceTests
         chunkedUpload.Setup(c => c.ExtractMetadataFromFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(metadata);
 
-        var mockModelService = new Mock<IModelService>(MockBehavior.Loose);
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockModelService.Object);
+        var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -180,7 +181,7 @@ public class GcodeFilesServiceTests
         };
 
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
-        repo.Setup(r => r.ListFilesInDirectoryAsync("jobs", It.IsAny<CancellationToken>())).ReturnsAsync(dbFiles);
+        repo.Setup(r => r.ListValidByDirectoryAsync("jobs", It.IsAny<CancellationToken>())).ReturnsAsync(dbFiles);
         repo.Setup(r => r.ListSubdirectoriesAsync("jobs", It.IsAny<CancellationToken>())).ReturnsAsync(new List<string> { "print-jobs", ".hidden" });
         repo.Setup(r => r.GetLatestHarvestOperationIdsByPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<Guid, Guid?> { { printerId, harvestId } });
@@ -190,9 +191,9 @@ public class GcodeFilesServiceTests
         storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
-        var modelService = new Mock<IModelService>(MockBehavior.Loose);
+        var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, modelService.Object);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object);
 
         // Act
         GcodeFileListResponse response = await service.ListAsync(

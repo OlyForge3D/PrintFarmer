@@ -291,6 +291,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(g => g.FileHash).IsRequired().HasMaxLength(64);
             _ = b.Property(g => g.FileSizeBytes).IsRequired();
             _ = b.Property(g => g.FilePath).IsRequired().HasMaxLength(512);
+            _ = b.Property(g => g.ThumbnailPath).HasMaxLength(512); // Path to thumbnail image
             _ = b.Property(g => g.SlicerName).HasMaxLength(128);
             _ = b.Property(g => g.SlicerVersion).HasMaxLength(64);
             _ = b.Property(g => g.RequiredMaterial).HasMaxLength(64);
@@ -313,6 +314,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
 
             // Foreign Keys - Use NoAction to avoid cascade conflicts in SQL Server
+            _ = b.HasOne(g => g.Folder)
+                .WithMany()
+                .HasForeignKey(g => g.FolderId)
+                .OnDelete(DeleteBehavior.SetNull);
             _ = b.HasOne(g => g.SourcePrinter)
                 .WithMany()
                 .HasForeignKey(g => g.SourcePrinterId)
@@ -329,6 +334,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // Indexes
             _ = b.HasIndex(g => g.FileHash).IsUnique();
             _ = b.HasIndex(g => g.UploadedAt);
+            _ = b.HasIndex(g => g.FolderId); // Index for virtual directory queries
             _ = b.HasIndex(g => g.RequiredNozzleDiameter);
             _ = b.HasIndex(g => g.RequiredMaterial);
             _ = b.HasIndex(g => g.TargetPrinterId);
@@ -623,11 +629,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(m => m.FileHash).IsRequired().HasMaxLength(64);
             _ = b.Property(m => m.FileFormat).HasConversion<int>();
             _ = b.Property(m => m.FileSizeBytes).IsRequired();
+            _ = b.Property(m => m.ThumbnailPath).HasMaxLength(512); // Path to thumbnail image
             _ = b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
             _ = b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
             _ = b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
 
-            // Foreign Key
+            // Foreign Keys
+            _ = b.HasOne(m => m.Folder)
+                .WithMany()
+                .HasForeignKey(m => m.FolderId)
+                .OnDelete(DeleteBehavior.SetNull);
             _ = b.HasOne(m => m.UploadedByUser)
                 .WithMany()
                 .HasForeignKey(m => m.UploadedByUserId)
@@ -642,6 +653,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // Indexes
             _ = b.HasIndex(m => m.FileHash).IsUnique();
             _ = b.HasIndex(m => m.UploadedAt);
+            _ = b.HasIndex(m => m.FolderId); // Index for virtual directory queries
             _ = b.HasIndex(m => m.FileFormat);
             _ = b.HasIndex(m => m.IsValid);
             _ = b.HasIndex(m => m.UploadedByUserId);

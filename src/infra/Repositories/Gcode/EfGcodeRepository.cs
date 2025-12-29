@@ -169,11 +169,17 @@ namespace Farm.Infrastructure.Repositories.Gcode
             return directChildren.Distinct().OrderBy(d => d).ToList();
         }
 
-        public async Task<List<GcodeFile>> ListFilesInDirectoryAsync(string directory, CancellationToken ct)
+        public async Task<List<GcodeFile>> ListValidByDirectoryAsync(string directory, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(directory))
             {
-                directory = string.Empty;
+                directory = "/";
+            }
+
+            // Normalize directory path: convert empty string to "/" for consistency
+            if (directory.Length == 0)
+            {
+                directory = "/";
             }
 
             // Get files by finding the folder with matching path

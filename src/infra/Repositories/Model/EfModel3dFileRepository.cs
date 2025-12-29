@@ -9,11 +9,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Model
 {
-    public class EfModelRepository : IModelRepository
+    public class EfModel3dFileRepository : IModel3dFileRepository
     {
         private readonly AppDbContext _db;
 
-        public EfModelRepository(AppDbContext db)
+        public EfModel3dFileRepository(AppDbContext db)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
         }
@@ -51,7 +51,13 @@ namespace Farm.Infrastructure.Repositories.Model
         {
             if (string.IsNullOrWhiteSpace(directory))
             {
-                directory = string.Empty;
+                directory = "/";
+            }
+
+            // Normalize directory path: convert empty string to "/" for consistency
+            if (directory.Length == 0)
+            {
+                directory = "/";
             }
 
             // Get valid models by finding the folder with the matching path, then getting all models in that folder

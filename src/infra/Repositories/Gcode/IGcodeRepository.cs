@@ -88,7 +88,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
         /// <param name="directory">The directory path to query (e.g., "gcode/models"); empty string for root</param>
         /// <param name="ct">Cancellation token for async operation</param>
         /// <returns>List of GcodeFile entities in the specified directory only</returns>
-        Task<List<GcodeFile>> ListFilesInDirectoryAsync(string directory, CancellationToken ct);
+        Task<List<GcodeFile>> ListValidByDirectoryAsync(string directory, CancellationToken ct);
 
         /// <summary>
         /// Retrieves the latest harvest operation ID associated with a specific printer.

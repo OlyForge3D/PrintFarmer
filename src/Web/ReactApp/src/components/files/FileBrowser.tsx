@@ -11,6 +11,9 @@ import {
 
 import { GcodeFile, GetGcodeFilesResponse, GcodeUploadSettings } from '@/types/api';
 import { Button, Checkbox, Input, Select } from '@/components/ui';
+import { GcodeUploadModal } from '@/components/modals/GcodeUploadModal';
+import { ExplorerFileBrowser } from '@/components/files/ExplorerFileBrowser';
+import { useViewModePreference } from '@/hooks/useViewModePreference';
 import styles from './FileBrowser.module.css';
 import { useAuth } from '@/contexts/AuthHooks';
 import { apiClient } from '@/services/api';
@@ -21,6 +24,7 @@ interface FileBrowserProps {
   harvestId?: string;
   printerId?: string;
   initialPath?: string;
+  isModal?: boolean;
 }
 
 interface UploadItem {
@@ -50,13 +54,15 @@ const formatBytes = (bytes: number): string => {
 export const FileBrowser: React.FC<FileBrowserProps> = ({
   harvestId,
   printerId,
-  initialPath = '/'
+  initialPath = '/',
+  isModal = false
 }) => {
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const { viewMode, setViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'date'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [searchTerm, setSearchTerm] = useState('');
@@ -326,13 +332,15 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['gcode-files'] });
+      // Also invalidate models list since gcode uploads may be associated with models
+      queryClient.invalidateQueries({ queryKey: ['models-search'] });
       abortAllRef.current = false; // reset global abort flag
       const parts: string[] = [];
       if (res.succeeded) parts.push(`${res.succeeded} ok`);
       if (res.failed) parts.push(`${res.failed} failed`);
       if (res.cancelled) parts.push(`${res.cancelled} cancelled`);
       toast.success(`Uploads: ${parts.join(', ') || 'none'}`);
-      setTimeout(() => setUploadQueue(q => q.filter(i => i.status === 'uploading')), 4000);
+      // Upload queue remains visible until user manually clears it
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : 'Upload failed';
@@ -391,7 +399,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   const breadcrumbs = currentPath.split('/').filter(Boolean);
 
   return (
-    <div className="space-y-4">
+    <div className={`flex flex-col ${isModal ? 'h-full' : 'space-y-4'}`}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -471,6 +479,16 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           {hasPermission('gcode_harvest', 'create') && (
             <Button
               type="button"
+              onClick={() => setShowUploadModal(true)}
+              variant="primary"
+              size="sm"
+            >
+              Upload Files
+            </Button>
+          )}
+          {hasPermission('gcode_harvest', 'create') && (
+            <Button
+              type="button"
               onClick={() => {
                 const name = prompt('New directory name');
                 if (name) mkdirMutation.mutate(name);
@@ -507,9 +525,18 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               onClick={() => setViewMode('grid')}
               variant={viewMode === 'grid' ? 'primary' : 'secondary'}
               size="sm"
-              className="rounded-l-none border-l border-pf-border"
+              className="border-l border-pf-border"
             >
               Grid
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setViewMode('explorer')}
+              variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
+              size="sm"
+              className="rounded-l-none border-l border-pf-border"
+            >
+              Explorer
             </Button>
           </div>
         </div>
@@ -550,283 +577,91 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           {sortOrder === 'asc' ? '↑' : '↓'}
         </Button>
       </div>
-      {/* Drag & drop + click upload area */}
-      {hasPermission('gcode_harvest', 'create') && (
-        <div className="space-y-2">
-          <div
-            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                const accepted = Array.from(e.dataTransfer.files).filter(f => /\.(gcode|bgcode)$/i.test(f.name));
-                if (accepted.length === 0) {
-                  toast.error('No valid .gcode or .bgcode files');
-                  return;
-                }
-                uploadMutation.mutate(accepted);
-              }
-            }}
-            className="border-2 border-dashed border-pf-border rounded p-6 text-center text-sm text-pf-text-secondary hover:border-pf-accent transition-colors cursor-pointer"
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.multiple = true;
-              input.accept = (settings?.allowedExtensions || ['.gcode','.bgcode']).join(',');
-              input.onchange = () => {
-                if (input.files) {
-                  const allowed = settings?.allowedExtensions || ['.gcode','.bgcode'];
-                  const re = new RegExp(`(${allowed.map(e => e.replace('.', '\\.')).join('|')})$`, 'i');
-                  const files = Array.from(input.files).filter(f => re.test(f.name));
-                  if (files.length > 0) uploadMutation.mutate(files);
-                }
-              };
-              input.click();
-            }}
-          >
-            {uploadMutation.isPending ? 'Uploading...' : `Click or drag & drop files (${(settings?.allowedExtensions || ['.gcode','.bgcode']).join(', ')})`}
-          </div>
-          <p className="text-xs text-pf-text-tertiary">Supports multi-file upload. New files will auto-rename on collision.</p>
-          {uploadQueue.length > 0 && (
-            <div className="space-y-1 border border-pf-border rounded p-2 bg-pf-bg-1">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-pf-text-secondary">Uploads</span>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      abortAllRef.current = true;
-                      currentXhrRef.current?.abort();
-                      setUploadQueue(q => q.map(it => {
-                        if (it.status === 'done' || it.status === 'error' || it.status === 'cancelled') return it;
-                        if (it.status === 'uploading') return { ...it, cancelRequested: true };
-                        // queued
-                        return { ...it, cancelRequested: true, status: 'cancelled' };
-                      }));
-                    }}
-                  >
-                    Cancel All
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setUploadQueue([])}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </div>
-              {uploadQueue.map(item => (
-                <div key={item.id} className="flex items-center gap-2 text-[11px]">
-                  <span className="w-40 truncate" title={item.file.name}>{item.file.name}</span>
-                  <div className={`flex-1 ${styles.progressBarContainer}`}>
-                    {(() => {
-                      const pct = Math.min(100, Math.max(0, item.progress));
-                      const even = Math.round(pct / 2) * 2; // snap to 2%
-                      const widthClass = (styles as Record<string, string>)[`w${even}`] || (styles as Record<string, string>).w100 || '';
-                      return (
-                        <div
-                          className={[
-                            styles.progressFill,
-                            widthClass,
-                            item.status === 'error' ? styles.progressError : '',
-                            item.status === 'cancelled' ? styles.progressCancelled : ''
-                          ].filter(Boolean).join(' ')}
-                        />
-                      );
-                    })()}
-                  </div>
-                  <span className="w-16 text-right">
-                    {item.status === 'uploading' ? `${item.progress}%` : item.status}
-                  </span>
-                  {item.status === 'error' && item.error && (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      size="sm"
-                      className="!p-0 !h-auto text-pf-warning hover:text-pf-warning-dark"
-                      title={item.error + ' - retry'}
-                      onClick={() => {
-                        // Reset and requeue as queued (will start on next mutate call or manual retry process)
-                        setUploadQueue(q => q.map(it => it.id === item.id ? { ...it, status: 'queued', error: undefined, progress: 0, cancelRequested: false } : it));
-                        // Kick off single-file upload by invoking mutation with just that file
-                        uploadMutation.mutate([item.file]);
-                      }}
-                    >
-                      Retry
-                    </Button>
-                  )}
-                  {item.isChunked && (item.status === 'uploading' || item.status === 'queued') && (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      size="sm"
-                      className="!p-0 !h-auto text-pf-text-tertiary hover:text-pf-warning"
-                      title={item.paused ? 'Resume upload' : 'Pause upload'}
-                      onClick={async () => {
-                        if (!item.uploadId) return;
-                        const apiBase = getApiBaseUrl();
-                        try {
-                          if (item.paused) {
-                            await fetch(`${apiBase}/gcode-files/chunk/${item.uploadId}/resume`, { method: 'POST', headers: getAuthHeaders() });
-                            item.paused = false;
-                          } else {
-                            await fetch(`${apiBase}/gcode-files/chunk/${item.uploadId}/pause`, { method: 'POST', headers: getAuthHeaders() });
-                            item.paused = true;
-                          }
-                          setUploadQueue(q => [...q]);
-                        } catch {
-                          // Ignore pause/resume errors
-                        }
-                      }}
-                    >
-                      {item.paused ? '▶' : 'II'}
-                    </Button>
-                  )}
-                  {(item.status === 'uploading' || item.status === 'queued') && (
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      size="sm"
-                      className="!p-0 !h-auto text-pf-text-tertiary hover:text-pf-error"
-                      title="Cancel upload"
-                      onClick={() => {
-                        setUploadQueue(q => q.map(it => it.id === item.id ? { ...it, cancelRequested: true } : it));
-                        if (item.status === 'uploading') {
-                          currentXhrRef.current?.abort();
-                        }
-                      }}
-                    >
-                      ✕
-                    </Button>
-                  )}
-                  {item.finalHash && (
-                    <span className="text-pf-text-tertiary" title={item.finalHash}>{item.finalHash.slice(0,8)}…</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {/* File listing */}
+      {/* Upload modal and file listing - scrollable container in modal mode */}
+      <GcodeUploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onFilesSelected={(files) => uploadMutation.mutate(files)}
+        harvestId={harvestId}
+        printerId={printerId}
+      />
+      <div className={`${isModal ? 'flex-1 overflow-y-auto' : ''}`}>
+      {/* Empty state - shown when no files and not in explorer view */}
       {isLoading ? (
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-16 bg-pf-bg-1 rounded animate-pulse" />
           ))}
         </div>
-  ) : files && files.files && files.files.length > 0 ? (
-        <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-pf-border bg-pf-bg-2">
-                <th className="px-4 py-3 text-left">
-                  <Checkbox
-                    title="Select all files"
-                    aria-label="Select all files"
-                    checked={selectedFiles.length === (files?.files?.length ?? 0) && (files?.files?.length ?? 0) > 0}
-                    onChange={handleSelectAll}
-                  />
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Thumbnail</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Name</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Size</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Modified</th>
-                <th className="px-4 py-3 text-right text-sm font-medium text-pf-text-primary">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-pf-border">
-              {files.files?.map((file: GcodeFile) => (
-                <tr key={file.path} className="hover:bg-pf-bg-2 transition-colors">
-                  <td className="px-4 py-3">
-                    <Checkbox
-                      checked={selectedFiles.includes(file.path)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedFiles(prev => [...prev, file.path]);
-                        } else {
-                          setSelectedFiles(prev => prev.filter(p => p !== file.path));
-                        }
-                      }}
-                      title={`Select ${file.name}`}
-                      aria-label={`Select ${file.name}`}
+      ) : files && files.files && files.files.length > 0 ? (
+        viewMode === 'explorer' ? (
+          // Explorer view - use dedicated tree-based file browser
+          <div className="bg-pf-bg-1 rounded-lg border border-pf-border h-full flex flex-col overflow-hidden">
+            <ExplorerFileBrowser endpoint="gcode" />
+          </div>
+        ) : viewMode === 'grid' ? (
+          // Grid view - card layout
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto">
+            {files.files?.map((file: GcodeFile) => (
+              <div
+                key={file.path}
+                className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group"
+              >
+                {/* Thumbnail */}
+                <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
+                  {!file.isDirectory && file.thumbnailPath ? (
+                    <img
+                      src={file.thumbnailPath}
+                      alt={file.name}
+                      className="w-full h-full object-contain group-hover:scale-105 transition-transform"
                     />
-                  </td>
-                  <td className="px-4 py-3">
-                    {!file.isDirectory && file.thumbnailPath ? (
-                      <img
-                        src={file.thumbnailPath}
-                        alt={file.name}
-                        className="w-12 h-12 rounded object-cover"
-                        onError={(e) => {
-                          e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
-                        }}
-                      />
-                    ) : (
-                      <div className="w-12 h-12 rounded bg-pf-bg-2 flex items-center justify-center">
-                        <DocumentIcon className="w-6 h-6 text-pf-text-tertiary" />
+                  ) : file.isDirectory ? (
+                    <FolderIcon className="w-12 h-12 text-pf-accent opacity-50" />
+                  ) : (
+                    <DocumentIcon className="w-12 h-12 text-pf-text-tertiary opacity-30" />
+                  )}
+                </div>
+
+                {/* File info */}
+                <div className="p-2.5 flex-1 flex flex-col">
+                  <h3 className="font-semibold text-pf-text-primary line-clamp-2 mb-1.5 text-sm">
+                    {file.name}
+                  </h3>
+
+                  {/* Metadata */}
+                  <div className="text-xs text-pf-text-secondary space-y-0.5 mb-2 flex-1">
+                    {!file.isDirectory && file.size && (
+                      <div className="flex justify-between gap-1">
+                        <span>Size:</span>
+                        <span className="font-medium text-right">{formatBytes(file.size)}</span>
                       </div>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div
-                      className="flex items-center space-x-3 cursor-pointer hover:text-pf-accent"
-                      onClick={() => {
-                        if (file.isDirectory) {
-                          setCurrentPath(file.path);
-                          setPage(1);
-                        }
-                      }}
-                    >
-                      {file.isDirectory ? (
-                        <FolderIcon className="w-5 h-5 text-pf-accent" />
-                      ) : (
-                        <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
-                      )}
-                      <div className="flex flex-col">
-                        <span className="text-pf-text-primary font-medium">{file.name}</span>
-                        <span className="text-xs text-pf-text-tertiary">{file.path}</span>
+                    {file.modifiedAt && (
+                      <div className="flex justify-between gap-1">
+                        <span>Modified:</span>
+                        <span className="font-medium text-right">
+                          {new Date(file.modifiedAt).toLocaleDateString()}
+                        </span>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                    {!file.isDirectory ? formatBytes(file.size) : '-'}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                    {file.modifiedAt ? new Date(file.modifiedAt).toLocaleDateString() : '-'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      {!file.isDirectory && (
-                        <>
-                          <Button
-                            onClick={() => downloadMutation.mutate(file.path)}
-                            disabled={downloadMutation.isPending}
-                            variant="secondary"
-                            size="sm"
-                            title="Download File"
-                          >
-                            <ArrowDownTrayIcon className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            onClick={() => {
-                              if (confirm(`Delete ${file.name}?`)) {
-                                deleteMutation.mutate([file.path]);
-                              }
-                            }}
-                            disabled={deleteMutation.isPending}
-                            variant="danger"
-                            size="sm"
-                            title="Delete File"
-                          >
-                            <TrashIcon className="w-4 h-4" />
-                          </Button>
-                        </>
-                      )}
-                      {file.isDirectory && (
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    {file.isDirectory ? (
+                      <>
+                        <Button
+                          onClick={() => {
+                            setCurrentPath(file.path);
+                            setPage(1);
+                          }}
+                          variant="primary"
+                          size="sm"
+                          className="flex-1"
+                          title="Open Folder"
+                        >
+                          <FolderIcon className="w-4 h-4" />
+                        </Button>
                         <Button
                           onClick={() => {
                             if (confirm(`Delete ${file.name}?`)) {
@@ -836,20 +671,179 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                           disabled={deleteMutation.isPending}
                           variant="danger"
                           size="sm"
+                          className="px-2"
                           title="Delete Folder"
                         >
                           <TrashIcon className="w-4 h-4" />
                         </Button>
-                      )}
-                    </div>
-                  </td>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          onClick={() => downloadMutation.mutate(file.path)}
+                          disabled={downloadMutation.isPending}
+                          variant="secondary"
+                          size="sm"
+                          className="flex-1"
+                          title="Download File"
+                        >
+                          <ArrowDownTrayIcon className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            if (confirm(`Delete ${file.name}?`)) {
+                              deleteMutation.mutate([file.path]);
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                          variant="danger"
+                          size="sm"
+                          className="px-2"
+                          title="Delete File"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          // List view (default)
+          <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-pf-border bg-pf-bg-2">
+                  <th className="px-4 py-3 text-left">
+                    <Checkbox
+                      title="Select all files"
+                      aria-label="Select all files"
+                      checked={selectedFiles.length === (files?.files?.length ?? 0) && (files?.files?.length ?? 0) > 0}
+                      onChange={handleSelectAll}
+                    />
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Thumbnail</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Name</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Size</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Modified</th>
+                  <th className="px-4 py-3 text-right text-sm font-medium text-pf-text-primary">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-pf-border">
+                {files.files?.map((file: GcodeFile) => (
+                  <tr key={file.path} className="hover:bg-pf-bg-2 transition-colors">
+                    <td className="px-4 py-3">
+                      <Checkbox
+                        checked={selectedFiles.includes(file.path)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedFiles(prev => [...prev, file.path]);
+                          } else {
+                            setSelectedFiles(prev => prev.filter(p => p !== file.path));
+                          }
+                        }}
+                        title={`Select ${file.name}`}
+                        aria-label={`Select ${file.name}`}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      {!file.isDirectory && file.thumbnailPath ? (
+                        <img
+                          src={file.thumbnailPath}
+                          alt={file.name}
+                          className="w-12 h-12 rounded object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
+                          }}
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded bg-pf-bg-2 flex items-center justify-center">
+                          <DocumentIcon className="w-6 h-6 text-pf-text-tertiary" />
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div
+                        className="flex items-center space-x-3 cursor-pointer hover:text-pf-accent"
+                        onClick={() => {
+                          if (file.isDirectory) {
+                            setCurrentPath(file.path);
+                            setPage(1);
+                          }
+                        }}
+                      >
+                        {file.isDirectory ? (
+                          <FolderIcon className="w-5 h-5 text-pf-accent" />
+                        ) : (
+                          <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
+                        )}
+                        <div className="flex flex-col">
+                          <span className="text-pf-text-primary font-medium">{file.name}</span>
+                          <span className="text-xs text-pf-text-tertiary">{file.path}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
+                      {!file.isDirectory ? formatBytes(file.size) : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
+                      {file.modifiedAt ? new Date(file.modifiedAt).toLocaleDateString() : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex justify-end gap-2">
+                        {!file.isDirectory && (
+                          <>
+                            <Button
+                              onClick={() => downloadMutation.mutate(file.path)}
+                              disabled={downloadMutation.isPending}
+                              variant="secondary"
+                              size="sm"
+                              title="Download File"
+                            >
+                              <ArrowDownTrayIcon className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                if (confirm(`Delete ${file.name}?`)) {
+                                  deleteMutation.mutate([file.path]);
+                                }
+                              }}
+                              disabled={deleteMutation.isPending}
+                              variant="danger"
+                              size="sm"
+                              title="Delete File"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </Button>
+                          </>
+                        )}
+                        {file.isDirectory && (
+                          <Button
+                            onClick={() => {
+                              if (confirm(`Delete ${file.name}?`)) {
+                                deleteMutation.mutate([file.path]);
+                              }
+                            }}
+                            disabled={deleteMutation.isPending}
+                            variant="danger"
+                            size="sm"
+                            title="Delete Folder"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
       ) : (
-  <div className="bg-pf-bg-0 rounded-lg shadow p-8 text-center text-pf-text-secondary">
+        <div className="bg-pf-bg-0 rounded-lg shadow p-8 text-center text-pf-text-secondary">
           {searchTerm ? 'No files match your search' : 'No files found'}
         </div>
       )}
@@ -929,6 +923,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

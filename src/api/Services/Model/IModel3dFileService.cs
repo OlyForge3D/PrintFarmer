@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Services.Model
     /// - Metadata extraction and thumbnail generation
     /// - File access and deletion
     /// </summary>
-    public interface IModelService
+    public interface IModel3dFileService
     {
         /// <summary>
         /// Retrieves all valid 3D models in a flat list.

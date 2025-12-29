@@ -24,6 +24,7 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.JobDispatch;
 using Farm.Web.Api.Services.SlicerServices;
@@ -227,6 +228,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileAuditRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileAuditRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Locations.ILocationRepository, Farm.Infrastructure.Repositories.Locations.EfLocationRepository>();
 
+        // Folder repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Folder.IFolderRepository, Farm.Infrastructure.Repositories.Folder.EfFolderRepository>();
+
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.IModelTagMappingRepository, Farm.Infrastructure.Repositories.Tags.EfModelTagMappingRepository>();
@@ -261,7 +265,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Gcode.IGcodeRepository, Farm.Infrastructure.Repositories.Gcode.EfGcodeRepository>();
 
         // Model repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Model.IModelRepository, Farm.Infrastructure.Repositories.Model.EfModelRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Model.IModel3dFileRepository, Farm.Infrastructure.Repositories.Model.EfModel3dFileRepository>();
 
         // Authentication audit repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Authentication.IAuthAuditLogRepository, Farm.Infrastructure.Repositories.Authentication.EfAuthAuditLogRepository>();
@@ -519,8 +523,11 @@ public static class ServiceCollectionExtensions
         // SystemLogs service
         _ = services.AddScoped<Services.SystemLogs.ISystemLogService, Services.SystemLogs.SystemLogService>();
 
+        // Folder management service (shared by model and gcode file services)
+        _ = services.AddScoped<IFolderManagementService, FolderManagementService>();
+
         // Model services
-        _ = services.AddScoped<Services.Model.IModelService, Services.Model.ModelService>();
+        _ = services.AddScoped<Services.Model.IModel3dFileService, Services.Model.Model3dFileService>();
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
         _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
         _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();

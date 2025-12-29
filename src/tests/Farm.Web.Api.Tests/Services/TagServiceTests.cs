@@ -14,7 +14,7 @@ public class TagServiceTests
 {
     private readonly Mock<ITagRepository> _tagRepository;
     private readonly Mock<IModelTagMappingRepository> _mappingRepository;
-    private readonly Mock<IModelRepository> _modelRepository;
+    private readonly Mock<IModel3dFileRepository> _modelRepository;
     private readonly Mock<IUnifiedLoggingService> _logger;
     private readonly TagService _service;
 
@@ -22,7 +22,7 @@ public class TagServiceTests
     {
         _tagRepository = new Mock<ITagRepository>();
         _mappingRepository = new Mock<IModelTagMappingRepository>();
-        _modelRepository = new Mock<IModelRepository>();
+        _modelRepository = new Mock<IModel3dFileRepository>();
         _logger = new Mock<IUnifiedLoggingService>();
 
         _service = new TagService(

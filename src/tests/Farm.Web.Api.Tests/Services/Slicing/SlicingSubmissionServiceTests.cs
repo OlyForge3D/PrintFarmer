@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Tests.Services.Slicing;
 /// </summary>
 public class SlicingSubmissionServiceTests : IDisposable
 {
-    private readonly Mock<IModelRepository> _mockModelRepository;
+    private readonly Mock<IModel3dFileRepository> _mockModelRepository;
     private readonly Mock<ISlicerFileStorage> _mockFileStorage;
     private readonly Mock<ISlicerOrchestrator> _mockOrchestrator;
     private readonly Mock<IHostEnvironment> _mockEnvironment;
@@ -33,7 +33,7 @@ public class SlicingSubmissionServiceTests : IDisposable
 
     public SlicingSubmissionServiceTests()
     {
-        _mockModelRepository = new Mock<IModelRepository>();
+        _mockModelRepository = new Mock<IModel3dFileRepository>();
         _mockFileStorage = new Mock<ISlicerFileStorage>();
         _mockOrchestrator = new Mock<ISlicerOrchestrator>();
         _mockEnvironment = new Mock<IHostEnvironment>();

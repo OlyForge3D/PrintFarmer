@@ -17,14 +17,14 @@ namespace Farm.Web.Api.Services.Slicing;
 /// </summary>
 public class SlicingSubmissionService : ISlicingSubmissionService
 {
-    private readonly IModelRepository _modelRepository;
+    private readonly IModel3dFileRepository _modelRepository;
     private readonly ISlicerFileStorage _fileStorage;
     private readonly ISlicerOrchestrator _orchestrator;
     private readonly IHostEnvironment _env;
     private readonly IUnifiedLoggingService _logger;
 
     public SlicingSubmissionService(
-        IModelRepository modelRepository,
+        IModel3dFileRepository modelRepository,
         ISlicerFileStorage fileStorage,
         ISlicerOrchestrator orchestrator,
         IHostEnvironment env,

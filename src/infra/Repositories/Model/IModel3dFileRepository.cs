@@ -10,7 +10,7 @@ namespace Farm.Infrastructure.Repositories.Model
     /// Repository interface for 3D model file persistence and retrieval.
     /// Provides database access for Model3D entities with support for hierarchical file organization.
     /// </summary>
-    public interface IModelRepository
+    public interface IModel3dFileRepository
     {
         /// <summary>
         /// Retrieves a single valid model by its unique identifier.

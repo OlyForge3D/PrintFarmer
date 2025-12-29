@@ -131,6 +131,38 @@ public class GcodeFilesController(
         }
     }
 
+    /// <summary>
+    /// Returns a hierarchical listing of G-code files and directories with IDs for efficient lookups.
+    /// This endpoint is used by the ExplorerFileBrowser component for tree-based navigation.
+    /// </summary>
+    [HttpGet("hierarchy")]
+    [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
+    public async Task<ActionResult<GcodeFileListResponse>> ListHierarchyAsync(
+        [FromQuery] string? path = "/",
+        [FromQuery] string? sortBy = "name",
+        [FromQuery] string? sortOrder = "asc",
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100
+    )
+    {
+        try
+        {
+            GcodeFileListResponse response = await gcodeFilesService.ListFilesWithHierarchyAsync(
+                path, sortBy, sortOrder, search, page, pageSize, HttpContext.RequestAborted);
+            return Ok(response);
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Error listing G-code hierarchy (path={path}): {ex.GetType().Name} - {ex.Message}\n{ex.StackTrace}");
+            return Problem($"Failed to retrieve files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
+        }
+    }
+
     // ---------------- Chunked Upload Endpoints ----------------
     [HttpPost("chunk/init")]
     [ProducesResponseType(typeof(ChunkInitResponse), 200)]
@@ -550,7 +582,7 @@ public class GcodeFilesController(
     [ProducesResponseType(typeof(GcodeFileEntryDto), 201)]
     [ProducesResponseType(400)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Path is rooted under validated library root; filename sanitized and revalidated with GetFullPath + StartsWith check.")]
-    public async Task<ActionResult<GcodeFileEntryDto>> UploadAsync([FromQuery] string? path = "/", [FromForm(Name = "file")] IFormFile? file = null)
+    public async Task<ActionResult<GcodeFileEntryDto>> UploadFileAsync([FromQuery] string? path = "/", [FromForm(Name = "file")] IFormFile? file = null)
     {
         if (file == null || file.Length == 0)
         {
@@ -574,7 +606,7 @@ public class GcodeFilesController(
 
         try
         {
-            GcodeFileEntryDto dto = await gcodeFilesService.UploadAsync(
+            GcodeFileEntryDto dto = await gcodeFilesService.UploadFileAsync(
                 path, file, uploadSettings, quotaService, HttpContext.RequestAborted);
             return Created($"/api/gcode-files?path={Uri.EscapeDataString(Path.GetDirectoryName(dto.Path) ?? "/")}", dto);
         }
@@ -599,7 +631,7 @@ public class GcodeFilesController(
     [ProducesResponseType(typeof(MultiUploadResponse), 201)]
     [ProducesResponseType(400)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Same safety guarantees as single upload; each filename sanitized and rooted under validated directory.")]
-    public async Task<ActionResult<MultiUploadResponse>> UploadMultipleAsync([FromQuery] string? path = "/", [FromForm(Name = "files")] IFormFileCollection? files = null)
+    public async Task<ActionResult<MultiUploadResponse>> UploadMultipleFilesAsync([FromQuery] string? path = "/", [FromForm(Name = "files")] IFormFileCollection? files = null)
     {
         if (files == null || files.Count == 0)
         {
@@ -608,7 +640,7 @@ public class GcodeFilesController(
 
         try
         {
-            MultiUploadResponse response = await gcodeFilesService.UploadMultipleAsync(
+            MultiUploadResponse response = await gcodeFilesService.UploadMultipleFilesAsync(
                 path, files, uploadSettings, quotaService, HttpContext.RequestAborted);
             return Created($"/api/gcode-files?path={Uri.EscapeDataString(path ?? "/")}", response);
         }
@@ -811,7 +843,9 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("modifiedAt")] DateTime ModifiedAt,
     [property: JsonPropertyName("isDirectory")] bool IsDirectory,
     [property: JsonPropertyName("harvestOperationId")] Guid? HarvestOperationId = null,
-    [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null
+    [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null,
+    [property: JsonPropertyName("gcodeFileId")] string? GcodeFileId = null,  // Include file ID for efficient lookups (GUID as string)
+    [property: JsonPropertyName("directoryId")] string? DirectoryId = null   // Include directory ID for efficient directory lookups (virtual path)
 );
 
 /// <summary>

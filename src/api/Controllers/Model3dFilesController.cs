@@ -22,25 +22,25 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
-public class ModelController : ControllerBase
+public class Model3dFilesController : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger;
-    private readonly IModelService _modelService;
+    private readonly IModel3dFileService _modelService;
     private readonly string _modelsPath;
     private readonly Services.IO.IFileSystem _fileSystem;
     private readonly IFileManagementService _fileManagementService;
     private readonly ITagService _tagService;
-    private readonly IModelRepository _modelRepo;
+    private readonly IModel3dFileRepository _modelRepo;
     private readonly AppDbContext? _db;
 
-    public ModelController(
+    public Model3dFilesController(
         IUnifiedLoggingService logger,
-        IModelService modelService,
+        IModel3dFileService modelService,
         IConfiguration configuration,
         Services.IO.IFileSystem fileSystem,
         IFileManagementService fileManagementService,
         ITagService tagService,
-        IModelRepository modelRepo,
+        IModel3dFileRepository modelRepo,
         AppDbContext? db)
     {
         _logger = logger;

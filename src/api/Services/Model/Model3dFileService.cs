@@ -11,6 +11,7 @@ using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
+using Farm.Web.Api.Services.FolderManagement;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,9 +19,9 @@ using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Services.Model
 {
-    public class ModelService : IModelService
+    public class Model3dFileService : IModel3dFileService
     {
-        private readonly IModelRepository _repository;
+        private readonly IModel3dFileRepository _repository;
         private readonly IUnifiedLoggingService _logger;
         private readonly string _modelsPath;
         private readonly IModelAnalysisService? _analysisService;
@@ -28,14 +29,16 @@ namespace Farm.Web.Api.Services.Model
         private readonly IFileManagementService _fileManagementService;
         private readonly IThumbnailGenerationService? _thumbnailService;
         private readonly AppDbContext _db;
+        private readonly IFolderManagementService _folderManagementService;
 
-        public ModelService(
-            IModelRepository repository,
+        public Model3dFileService(
+            IModel3dFileRepository repository,
             IUnifiedLoggingService logger,
             IConfiguration configuration,
             Farm.Web.Api.Services.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,
             AppDbContext db,
+            IFolderManagementService folderManagementService,
             IModelAnalysisService? analysisService = null,
             IThumbnailGenerationService? thumbnailService = null)
         {
@@ -46,6 +49,7 @@ namespace Farm.Web.Api.Services.Model
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
             _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
             _db = db ?? throw new ArgumentNullException(nameof(db));
+            _folderManagementService = folderManagementService ?? throw new ArgumentNullException(nameof(folderManagementService));
             ArgumentNullException.ThrowIfNull(configuration);
             _modelsPath = configuration["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
             if (!_fileSystem.DirectoryExists(_modelsPath))
@@ -98,7 +102,7 @@ namespace Farm.Web.Api.Services.Model
             string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
                 .Where(s => s != "." && s != "..")
                 .ToArray();
-            string requestedDir = segments.Length == 0 ? string.Empty : Path.Combine(segments);
+            string requestedDir = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
             string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
 
             // Get all files and subdirectories from database for this directory (pure DB approach)
@@ -536,31 +540,8 @@ namespace Farm.Web.Api.Services.Model
         /// </summary>
         public async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
-            // Normalize path
-            string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(Path.DirectorySeparatorChar, '/');
-
-            // Try to find existing folder
-            var existingFolder = await _db.Folders
-                .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, ct);
-
-            if (existingFolder != null)
-            {
-                return existingFolder;
-            }
-
-            // Create new folder
-            var newFolder = new Folder
-            {
-                Id = Guid.NewGuid(),
-                Path = normalizedPath,
-                FolderType = folderType,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            await _db.AddAsync(newFolder, ct);
-            await _db.SaveChangesAsync(ct);
-
-            return newFolder;
+            // Delegate to shared folder management service
+            return await _folderManagementService.GetOrCreateFolderAsync(directoryPath, folderType, ct);
         }
     }
 }

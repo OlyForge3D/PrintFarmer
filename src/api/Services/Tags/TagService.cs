@@ -16,13 +16,13 @@ namespace Farm.Web.Api.Services.Tags
     {
         private readonly ITagRepository _tagRepository;
         private readonly IModelTagMappingRepository _mappingRepository;
-        private readonly IModelRepository _modelRepository;
+        private readonly IModel3dFileRepository _modelRepository;
         private readonly IUnifiedLoggingService _logger;
 
         public TagService(
             ITagRepository tagRepository,
             IModelTagMappingRepository mappingRepository,
-            IModelRepository modelRepository,
+            IModel3dFileRepository modelRepository,
             IUnifiedLoggingService logger)
         {
             _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));

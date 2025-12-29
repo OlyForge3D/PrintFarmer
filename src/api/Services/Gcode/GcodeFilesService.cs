@@ -15,7 +15,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
-using Farm.Web.Api.Services.Model;
+using Farm.Web.Api.Services.FolderManagement;
 using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Gcode
@@ -27,7 +27,7 @@ namespace Farm.Web.Api.Services.Gcode
         private readonly IStoragePathService _storagePathService;
         private readonly IGcodeMetadataExtractorService _metadataExtractor;
         private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
-        private readonly IModelService _modelService;
+        private readonly IFolderManagementService _folderService;
 
         public GcodeFilesService(
             IGcodeRepository gcodeRepo,
@@ -35,14 +35,14 @@ namespace Farm.Web.Api.Services.Gcode
             IStoragePathService storagePathService,
             IGcodeMetadataExtractorService metadataExtractor,
             IGcodeThumbnailExtractorService thumbnailExtractor,
-            IModelService modelService)
+            IFolderManagementService folderService)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
             _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
             _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
-            _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
+            _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
         }
 
         public async Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct)
@@ -72,11 +72,11 @@ namespace Farm.Web.Api.Services.Gcode
             string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
                 .Where(s => s != "." && s != "..")
                 .ToArray();
-            string requestedDir = segments.Length == 0 ? string.Empty : Path.Combine(segments);
+            string requestedDir = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
             string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
 
             // Get all files and subdirectories from database for this directory (pure DB approach)
-            List<GcodeFile> dbFiles = await _gcodeRepo.ListFilesInDirectoryAsync(requestedDir, ct);
+            List<GcodeFile> dbFiles = await _gcodeRepo.ListValidByDirectoryAsync(requestedDir, ct);
             List<string> subdirectories = await _gcodeRepo.ListSubdirectoriesAsync(requestedDir, ct);
 
             // Build directory entries
@@ -215,7 +215,144 @@ namespace Farm.Web.Api.Services.Gcode
             return new GcodeFileListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
         }
 
-        public async Task<GcodeFileEntryDto> UploadAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
+        /// <summary>
+        /// List G-code files with hierarchy support, including directoryId and gcodeFileId for efficient lookups.
+        /// This is the hierarchical variant used by ExplorerFileBrowser and other tree-based navigation UIs.
+        /// </summary>
+        public async Task<GcodeFileListResponse> ListFilesWithHierarchyAsync(
+            string? path,
+            string? sortBy,
+            string? sortOrder,
+            string? search,
+            int page,
+            int pageSize,
+            CancellationToken ct)
+        {
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 1;
+            if (pageSize > 500) pageSize = 500;
+
+            // Parse virtual path to directory
+            string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
+            if (!vPath.StartsWith('/'))
+                vPath = "/" + vPath;
+
+            string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Where(s => s != "." && s != "..")
+                .ToArray();
+            string requestedDir = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
+            string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
+
+            // Get all files and subdirectories from database for this directory
+            List<GcodeFile> dbFiles = await _gcodeRepo.ListValidByDirectoryAsync(requestedDir, ct);
+            List<string> subdirectories = await _gcodeRepo.ListSubdirectoriesAsync(requestedDir, ct);
+
+            // Build directory entries with IDs
+            List<GcodeFileEntryDto> entries = new();
+
+            // Add directories with directoryId (virtual path)
+            foreach (string subdir in subdirectories)
+            {
+                if (subdir.StartsWith('.'))
+                    continue;
+
+                if (!IsMatch(subdir, search))
+                    continue;
+
+                string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
+                entries.Add(new GcodeFileEntryDto(
+                    Path: childVirtual,
+                    Name: subdir,
+                    Size: 0,
+                    ModifiedAt: DateTime.UtcNow,
+                    IsDirectory: true,
+                    HarvestOperationId: null,
+                    ThumbnailPath: null,
+                    GcodeFileId: null,
+                    DirectoryId: childVirtual  // Virtual path is the directory ID
+                ));
+            }
+
+            // Add files with gcodeFileId (GUID) and thumbnail URL
+            foreach (var file in dbFiles)
+            {
+                if (!IsMatch(file.OriginalFileName, search))
+                    continue;
+
+                string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
+
+                // Convert thumbnail path to API URL if available
+                string? thumbnailUrl = null;
+                if (!string.IsNullOrEmpty(file.ThumbnailPath))
+                {
+                    string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
+                    string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
+                    string normalizedThumbnailPath = Path.GetFullPath(file.ThumbnailPath);
+
+                    if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
+                    {
+                        string relativePath = normalizedThumbnailPath.Substring(normalizedStorageDir.Length)
+                            .TrimStart(Path.DirectorySeparatorChar, '/');
+                        relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
+                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(relativePath)}";
+                    }
+                    else
+                    {
+                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(Path.GetFileName(file.ThumbnailPath))}";
+                    }
+                }
+
+                entries.Add(new GcodeFileEntryDto(
+                    Path: childVirtual,
+                    Name: file.OriginalFileName,
+                    Size: file.FileSizeBytes,
+                    ModifiedAt: file.UploadedAt,
+                    IsDirectory: false,
+                    HarvestOperationId: null,
+                    ThumbnailPath: thumbnailUrl,
+                    GcodeFileId: file.Id.ToString(),  // GUID as string for file ID
+                    DirectoryId: null
+                ));
+            }
+
+            // Apply sorting
+            string normalizedSortBy = string.IsNullOrWhiteSpace(sortBy) ? "name" : sortBy.Trim();
+            string normalizedSortOrder = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
+            bool orderDesc = normalizedSortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase);
+
+            if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            else
+            {
+                entries = orderDesc
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+
+            // Apply pagination
+            int totalFiles = entries.Count(e => !e.IsDirectory);
+            long totalSize = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
+            int skip = (page - 1) * pageSize;
+            IReadOnlyList<GcodeFileEntryDto> pagedEntries = skip >= entries.Count
+                ? Array.Empty<GcodeFileEntryDto>()
+                : entries.Skip(skip).Take(pageSize).ToList();
+            int totalItems = entries.Count;
+            int totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
+
+            return new GcodeFileListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
+        }
+
+        public async Task<GcodeFileEntryDto> UploadFileAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             string ext = Path.GetExtension(file.FileName) ?? string.Empty;
             if (!uploadSettings.AllowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
@@ -333,7 +470,7 @@ namespace Farm.Web.Api.Services.Gcode
                 string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
 
                 // Get or create target folder
-                var targetFolder = await _modelService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
+                var targetFolder = await _folderService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
 
                 // Create database record
                 GcodeFile gcodeFile = new()
@@ -395,7 +532,7 @@ namespace Farm.Web.Api.Services.Gcode
             }
         }
 
-        public async Task<MultiUploadResponse> UploadMultipleAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
+        public async Task<MultiUploadResponse> UploadMultipleFilesAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             List<GcodeFileEntryDto> created = new();
             List<MultiUploadFailure> failed = new();
@@ -820,7 +957,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Get or create target folder
             string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
-            var targetFolder = await _modelService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
+            var targetFolder = await _folderService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
 
             // Create database record
             GcodeFile gcodeFile = new()

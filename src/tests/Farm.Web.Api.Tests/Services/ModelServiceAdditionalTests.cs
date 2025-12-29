@@ -12,6 +12,7 @@ using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
+using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -49,7 +50,7 @@ namespace Farm.Web.Api.Tests.Services
                 UploadedAt = DateTime.UtcNow
             };
 
-            Mock<IModelRepository> mockRepo = new Mock<IModelRepository>(MockBehavior.Strict);
+            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>(MockBehavior.Strict);
             _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(existing);
             _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
@@ -60,7 +61,7 @@ namespace Farm.Web.Api.Tests.Services
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
             Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
+            Model3dFileService service = new Model3dFileService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, new Mock<IFolderManagementService>(MockBehavior.Loose).Object);
 
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
@@ -77,7 +78,7 @@ namespace Farm.Web.Api.Tests.Services
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
-            Mock<IModelRepository> mockRepo = new Mock<IModelRepository>();
+            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>();
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
             // Setup ValidateModelExtension to throw for invalid extensions
@@ -93,7 +94,7 @@ namespace Farm.Web.Api.Tests.Services
                 });
 
             Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
+            Model3dFileService service = new Model3dFileService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, new Mock<IFolderManagementService>(MockBehavior.Loose).Object);
 
             IFormFile badFile = CreateFormFile("file", "x", "model.exe");
 
@@ -108,12 +109,12 @@ namespace Farm.Web.Api.Tests.Services
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
-            Mock<IModelRepository> mockRepo = new Mock<IModelRepository>();
+            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>();
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
             Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
+            Model3dFileService service = new Model3dFileService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, new Mock<IFolderManagementService>(MockBehavior.Loose).Object);
 
             IFormFile empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.stl");
 
@@ -126,7 +127,7 @@ namespace Farm.Web.Api.Tests.Services
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
-            Mock<IModelRepository> mockRepo = new Mock<IModelRepository>(MockBehavior.Strict);
+            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>(MockBehavior.Strict);
             _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
             _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
@@ -140,8 +141,9 @@ namespace Farm.Web.Api.Tests.Services
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
             Mock<Farm.Infrastructure.Data.AppDbContext> mockDb = new Mock<Farm.Infrastructure.Data.AppDbContext>(MockBehavior.Loose);
+            Mock<IFolderManagementService> mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, mockAnalysis.Object);
+            Model3dFileService service = new Model3dFileService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, mockFolderService.Object, mockAnalysis.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 
@@ -157,7 +159,7 @@ namespace Farm.Web.Api.Tests.Services
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
-            Mock<IModelRepository> mockRepo = new Mock<IModelRepository>(MockBehavior.Strict);
+            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>(MockBehavior.Strict);
             _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
             _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("db failure"));
@@ -168,8 +170,9 @@ namespace Farm.Web.Api.Tests.Services
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
             Mock<Farm.Infrastructure.Data.AppDbContext> mockDb = new Mock<Farm.Infrastructure.Data.AppDbContext>(MockBehavior.Loose);
+            Mock<IFolderManagementService> mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
 
-            ModelService service = new ModelService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object);
+            Model3dFileService service = new Model3dFileService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, mockFolderService.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 

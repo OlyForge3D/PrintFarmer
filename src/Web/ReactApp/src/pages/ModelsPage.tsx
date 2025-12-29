@@ -47,7 +47,7 @@ interface GCodeFile {
 
 export const ModelsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { viewMode, setViewMode } = useViewModePreference();
+  const { viewMode, setViewMode } = useViewModePreference('printfarmer-models-viewmode');
   const [dragOver, setDragOver] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
