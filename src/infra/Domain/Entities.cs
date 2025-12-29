@@ -300,7 +300,7 @@ public class GcodeFile
     public DateTime? LastHealthCheckDate { get; set; }
     public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
     public string? LastVerificationResult { get; set; } // JSON object with verification details
-    
+
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
 }
@@ -345,7 +345,7 @@ public class GcodeHarvestOperation
     public string[]? FileExtensions { get; set; } // JSON stored list of allowed extensions (without dot)
     public long? MinFileSizeBytes { get; set; }
     public string? DuplicateHandling { get; set; }
-    
+
     // Navigation property: Collection of discovered files in this operation
     // Cascade delete: If operation is deleted, discovered files are deleted (but GcodeFiles are protected by Restrict behavior)
     public ICollection<HarvestDiscoveredFile> DiscoveredFiles { get; set; } = new List<HarvestDiscoveredFile>();
@@ -801,7 +801,7 @@ public class HarvestDiscoveredFile
     public string? ExtractedSlicerName { get; set; }
     public string? ExtractedSlicerVersion { get; set; }
     public DateTime? ModifiedAt { get; set; }
-    
+
     // Navigation property to harvest file to gcode file mappings
     // Protected by Restrict delete behavior - prevents accidental deletion when cleaning up harvest operations
     public ICollection<HarvestFileGcodeFileMapping> GcodeFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();

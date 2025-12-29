@@ -158,6 +158,28 @@ namespace Farm.Infrastructure.Repositories.Catalog
                 _ = _db.Models.Remove(model);
             }
         }
+
+        /// <summary>
+        /// Finds a manufacturer by exact name match for import/lookup purposes (read-only, no creation).
+        /// Returns the Manufacturer entity if found, null otherwise.
+        /// </summary>
+        public async Task<Manufacturer?> FindManufacturerByNameAsync(string name, CancellationToken ct = default)
+        {
+            return await _db.Manufacturers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.Name == name, ct);
+        }
+
+        /// <summary>
+        /// Finds a printer model by exact name match within a specific manufacturer for import/lookup purposes (read-only, no creation).
+        /// Returns the PrinterModel entity if found, null otherwise.
+        /// </summary>
+        public async Task<PrinterModel?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct = default)
+        {
+            return await _db.Models
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.Name == name && m.ManufacturerId == manufacturerId, ct);
+        }
     }
 }
 

@@ -4,7 +4,6 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Importing.Services.Adapters;
 using Farm.Importing.Services.Import;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;

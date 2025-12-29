@@ -222,7 +222,7 @@ EOF
 The harvest service uses `IStoragePathService` to determine storage directories:
 
 ```csharp
-public partial class GcodeHarvestService(
+public class GcodeHarvestService(
     // ... other dependencies ...
     IStoragePathService storagePathService) : IGcodeHarvestService
 {

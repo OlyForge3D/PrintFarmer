@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Repositories.Catalog;
 
@@ -24,4 +25,6 @@ public interface ICatalogRepository
     Task UpdateModelFilamentTypesAsync(Guid modelId, IEnumerable<Guid> filamentTypeIds, CancellationToken ct = default);
     Task<Guid?> GetUnknownModelIdAsync(CancellationToken ct = default);
     Task RemoveModelAsync(Guid id, CancellationToken ct = default);
+    Task<Manufacturer?> FindManufacturerByNameAsync(string name, CancellationToken ct = default);
+    Task<PrinterModel?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct = default);
 }

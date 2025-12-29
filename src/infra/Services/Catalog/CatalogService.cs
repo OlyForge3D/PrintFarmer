@@ -20,6 +20,14 @@ public class CatalogService : ICatalogService
     private readonly ICatalogCacheProvider _cacheProvider;
     private readonly IUnifiedLoggingService _logger;
 
+    // Cache for unknown catalog IDs to avoid repeated database queries
+    private Guid? _cachedUnknownMfgId;
+    private Guid? _cachedUnknownModelId;
+
+    // Cache for name-based lookups to avoid repeated database queries during bulk operations
+    private Dictionary<string, ManufacturerDto?>? _manufacturerNameCache;
+    private Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>? _modelNameCache;
+
     public CatalogService(
         ICatalogRepository repo,
         INormalizationEventLogger normLogger,
@@ -321,5 +329,92 @@ public class CatalogService : ICatalogService
         }
 
         return false;
+    }
+
+    /// <summary>Finds a manufacturer by name with caching. Returns null if not found.</summary>
+    public async Task<ManufacturerDto?> FindManufacturerByNameAsync(string name, CancellationToken ct)
+    {
+        // Initialize cache on first use
+        if (_manufacturerNameCache == null)
+        {
+            _manufacturerNameCache = new Dictionary<string, ManufacturerDto?>();
+        }
+
+        // Check cache first
+        if (_manufacturerNameCache.TryGetValue(name, out var cached))
+        {
+            return cached;
+        }
+
+        // Query database if not in cache
+        Manufacturer? entity = await _repo.FindManufacturerByNameAsync(name, ct);
+        ManufacturerDto? result = entity != null ? new ManufacturerDto(entity.Id, entity.Name) : null;
+
+        // Store in cache (including nulls to avoid repeated queries for non-existent entries)
+        _manufacturerNameCache[name] = result;
+
+        return result;
+    }
+
+    /// <summary>Finds a printer model by name and manufacturer ID with caching. Returns null if not found.</summary>
+    public async Task<PrinterModelDto?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct)
+    {
+        // Initialize cache on first use
+        if (_modelNameCache == null)
+        {
+            _modelNameCache = new Dictionary<(Guid ManufacturerId, string ModelName), PrinterModelDto?>();
+        }
+
+        var cacheKey = (manufacturerId, name);
+
+        // Check cache first
+        if (_modelNameCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        // Query database if not in cache
+        PrinterModel? entity = await _repo.FindModelByNameAsync(name, manufacturerId, ct);
+        PrinterModelDto? result = entity != null ? new PrinterModelDto(
+            entity.Id,
+            entity.Name,
+            entity.ManufacturerId,
+            entity.MotionType.HasValue ? (MotionType)entity.MotionType.Value : (MotionType?)null,
+            entity.MaxX,
+            entity.MaxY,
+            entity.MaxZ,
+            entity.DefaultBackend.HasValue ? (PrinterBackend)entity.DefaultBackend.Value : (PrinterBackend?)null,
+            Array.Empty<string>()) : null;
+
+        // Store in cache (including nulls to avoid repeated queries for non-existent entries)
+        _modelNameCache[cacheKey] = result;
+
+        return result;
+    }
+
+    /// <summary>Gets the default (Unknown) manufacturer and model IDs with caching.</summary>
+    public async Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync(CancellationToken ct)
+    {
+        // Return cached values if available
+        if (_cachedUnknownMfgId.HasValue && _cachedUnknownModelId.HasValue)
+        {
+            return (_cachedUnknownMfgId.Value, _cachedUnknownModelId.Value);
+        }
+
+        Guid? unknownMfgId = _cachedUnknownMfgId ?? await _repo.GetUnknownManufacturerIdAsync(ct);
+        if (!unknownMfgId.HasValue)
+        {
+            throw new InvalidOperationException("Unknown manufacturer not found. Ensure database seeding has been completed.");
+        }
+        _cachedUnknownMfgId = unknownMfgId;
+
+        Guid? unknownModelId = _cachedUnknownModelId ?? await _repo.GetUnknownModelIdAsync(ct);
+        if (!unknownModelId.HasValue)
+        {
+            throw new InvalidOperationException("Unknown model not found. Ensure database seeding has been completed.");
+        }
+        _cachedUnknownModelId = unknownModelId;
+
+        return (unknownMfgId.Value, unknownModelId.Value);
     }
 }

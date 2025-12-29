@@ -34,7 +34,6 @@ namespace Farm.Infrastructure.Services.Printers
         private readonly IBackendClientFactory _backendFactory;
         private readonly IBackendCapabilityFactory _capabilityFactory;
         private readonly ICircuitBreakerService _circuitBreaker;
-        private readonly IDefaultCatalogService _defaultCatalog;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly Farm.Infrastructure.Telemetry.IUnifiedLoggingService _logger;
         private readonly AutoMapper.IMapper _mapper;
@@ -50,7 +49,6 @@ namespace Farm.Infrastructure.Services.Printers
             IBackendClientFactory backendFactory,
             IBackendCapabilityFactory capabilityFactory,
             ICircuitBreakerService circuitBreaker,
-            IDefaultCatalogService defaultCatalog,
             Catalog.ICatalogService catalogService,
             IHttpClientFactory httpClientFactory,
             Farm.Infrastructure.Telemetry.IUnifiedLoggingService logger,
@@ -66,7 +64,6 @@ namespace Farm.Infrastructure.Services.Printers
             _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
             _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
             _circuitBreaker = circuitBreaker ?? throw new ArgumentNullException(nameof(circuitBreaker));
-            _defaultCatalog = defaultCatalog ?? throw new ArgumentNullException(nameof(defaultCatalog));
             _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
             _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -854,57 +851,61 @@ namespace Farm.Infrastructure.Services.Printers
                 throw new InvalidOperationException($"A printer already exists at this address: {duplicate.Name}");
             }
 
-            // resolve or create manufacturer/model
+            // resolve manufacturer/model - use Unknown if not found
+            // NOTE: We use CatalogService for all catalog lookups, which provides caching
+            // to avoid repeated database queries during bulk operations like CSV import.
+            // We don't create new manufacturers/models - if not found, we default to "Unknown" instead.
             Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
             if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
             {
                 string name = dto.NewManufacturerName!.Trim();
-                // CreateManufacturerAsync now returns existing manufacturer if it already exists (no exception thrown)
-                ManufacturerDto created = await _catalogService.CreateManufacturerAsync(name, ct);
-                manufacturerId = created.Id;
-                _logger.LogInformation($"Resolved manufacturer '{name}' to ID {manufacturerId}");
+                // Try to find existing manufacturer from catalog service (with caching), but don't create - use Unknown if not found
+                ManufacturerDto? existingMfg = await _catalogService.FindManufacturerByNameAsync(name, ct);
+                if (existingMfg != null)
+                {
+                    manufacturerId = existingMfg.Id;
+                    _logger.LogInformation($"[Import] Found existing manufacturer '{name}' with ID {manufacturerId}");
+                }
+                else
+                {
+                    _logger.LogInformation($"[Import] Manufacturer '{name}' not found - will use Unknown manufacturer");
+                    // Fall through to default catalog logic below
+                }
             }
 
             Guid modelId = dto.ModelId ?? Guid.Empty;
             if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
             {
                 string mname = dto.NewModelName!.Trim();
-                CreateModelRequest createReq = new CreateModelRequest(
-                    ManufacturerId: manufacturerId,
-                    Name: mname,
-                    Type: null,
-                    MaxX: null,
-                    MaxY: null,
-                    MaxZ: null,
-                    DefaultBackend: null,
-                    SupportedFilamentTypeIds: null);
-                // CreateModelAsync now returns existing model if it already exists (no exception thrown)
-                PrinterModelDto createdModel = await _catalogService.CreateModelAsync(
-                    createReq.ManufacturerId,
-                    createReq.Name,
-                    createReq.Type,
-                    createReq.MaxX,
-                    createReq.MaxY,
-                    createReq.MaxZ,
-                    createReq.DefaultBackend,
-                    createReq.SupportedFilamentTypeIds,
-                    createReq.DefaultNozzleDiameter,
-                    ct);
-                modelId = createdModel.Id;
-                _logger.LogInformation($"Resolved model '{mname}' to ID {modelId}");
+                // Try to find existing model from catalog service (with caching), but don't create - use Unknown if not found
+                PrinterModelDto? existingModel = await _catalogService.FindModelByNameAsync(mname, manufacturerId, ct);
+                if (existingModel != null)
+                {
+                    modelId = existingModel.Id;
+                    _logger.LogInformation($"[Import] Found existing model '{mname}' with ID {modelId}");
+                }
+                else
+                {
+                    _logger.LogInformation($"[Import] Model '{mname}' not found - will use Unknown model");
+                    // Fall through to default catalog logic below
+                }
             }
 
+            // Use Unknown manufacturer/model as fallback
             if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
             {
-                (Guid defaultManufacturerId, Guid defaultModelId) = await _defaultCatalog.GetDefaultCatalogIdsAsync();
+                var (unknownMfgId, unknownModelId) = await _catalogService.GetDefaultCatalogIdsAsync(ct);
+
                 if (manufacturerId == Guid.Empty)
                 {
-                    manufacturerId = defaultManufacturerId;
+                    manufacturerId = unknownMfgId;
+                    _logger.LogInformation($"[Import] Using Unknown manufacturer (ID {manufacturerId})");
                 }
 
                 if (modelId == Guid.Empty)
                 {
-                    modelId = defaultModelId;
+                    modelId = unknownModelId;
+                    _logger.LogInformation($"[Import] Using Unknown model (ID {modelId})");
                 }
             }
 
@@ -1812,19 +1813,22 @@ namespace Farm.Infrastructure.Services.Printers
 
                     // Attempt background camera discovery for successfully imported printers
                     // This is done as fire-and-forget to avoid blocking the import response
-                    // Camera discovery may take time (network calls to printer APIs)
+                    // Attempt background camera discovery for successfully imported printers
+                    // This is done as part of the import to avoid DbContext conflicts during bulk imports
                     if (createdPrinterId.HasValue && status == "Success")
                     {
                         Printer? createdPrinter = await FindByIdAsync(createdPrinterId.Value, ct);
                         if (createdPrinter != null && string.IsNullOrEmpty(createdPrinter.CameraStreamUrl) && string.IsNullOrEmpty(createdPrinter.CameraSnapshotUrl))
                         {
-                            // Clear DbContext before starting background task to avoid conflicts
-                            _repo.DetachAllEntities();
-                            // Fire off background camera discovery - it will complete asynchronously
-                            // NOTE: This does NOT block the import response; cameras may populate after import completes
-#pragma warning disable CS4014  // Intentionally not awaiting
-                            AttemptBackgroundCameraDiscoveryAsync(createdPrinter);
-#pragma warning restore CS4014
+                            // Await camera discovery to ensure all database updates complete before returning
+                            try
+                            {
+                                await AttemptBackgroundCameraDiscoveryAsync(createdPrinter);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, $"[BulkCreate] Camera discovery failed for {createdPrinter.Name}, continuing without cameras");
+                            }
                         }
                     }
                 }
@@ -1871,9 +1875,7 @@ namespace Farm.Infrastructure.Services.Printers
                 }
                 finally
                 {
-                    // Clear DbContext tracking to prevent "second operation" errors in next iteration
-                    // This ensures a clean slate for each printer in the loop
-                    _repo.DetachAllEntities();
+                    // DbContext is automatically managed by Entity Framework
                 }
             }
 

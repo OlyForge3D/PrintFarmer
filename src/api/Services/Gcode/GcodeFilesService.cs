@@ -228,14 +228,27 @@ namespace Farm.Web.Api.Services.Gcode
             int pageSize,
             CancellationToken ct)
         {
-            if (page < 1) page = 1;
-            if (pageSize < 1) pageSize = 1;
-            if (pageSize > 500) pageSize = 500;
+            if (page < 1)
+            {
+                page = 1;
+            }
+
+            if (pageSize < 1)
+            {
+                pageSize = 1;
+            }
+
+            if (pageSize > 500)
+            {
+                pageSize = 500;
+            }
 
             // Parse virtual path to directory
             string? vPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
             if (!vPath.StartsWith('/'))
+            {
                 vPath = "/" + vPath;
+            }
 
             string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
                 .Where(s => s != "." && s != "..")
@@ -254,10 +267,14 @@ namespace Farm.Web.Api.Services.Gcode
             foreach (string subdir in subdirectories)
             {
                 if (subdir.StartsWith('.'))
+                {
                     continue;
+                }
 
                 if (!IsMatch(subdir, search))
+                {
                     continue;
+                }
 
                 string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
                 entries.Add(new GcodeFileEntryDto(
@@ -277,7 +294,9 @@ namespace Farm.Web.Api.Services.Gcode
             foreach (var file in dbFiles)
             {
                 if (!IsMatch(file.OriginalFileName, search))
+                {
                     continue;
+                }
 
                 string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
 

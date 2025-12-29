@@ -22,7 +22,9 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
+#pragma warning disable S101 // 3d is a standard acronym
 public class Model3dFilesController : ControllerBase
+#pragma warning restore S101
 {
     private readonly IUnifiedLoggingService _logger;
     private readonly IModel3dFileService _modelService;

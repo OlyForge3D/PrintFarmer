@@ -349,7 +349,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             _ = b.HasKey(m => m.Id);
             _ = b.Property(m => m.CreatedAt).IsRequired();
-            
+
             // Foreign key to HarvestDiscoveredFile
             // Use Restrict (not Cascade) to prevent accidental deletion of mappings when cleaning up harvest operations
             // This protects GcodeFile records from being orphaned if someone deletes the harvest operation
@@ -357,14 +357,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(h => h.GcodeFileMappings)
                 .HasForeignKey(m => m.HarvestDiscoveredFileId)
                 .OnDelete(DeleteBehavior.Restrict);
-            
+
             // Foreign key to GcodeFile
             // Use NoAction to absolutely prevent cascade deletion of library files from harvest operations
             _ = b.HasOne<GcodeFile>()
                 .WithMany(g => g.HarvestFileMappings)
                 .HasForeignKey(m => m.GcodeFileId)
                 .OnDelete(DeleteBehavior.NoAction);
-            
+
             // Indexes for common queries
             _ = b.HasIndex(m => m.HarvestDiscoveredFileId);
             _ = b.HasIndex(m => m.GcodeFileId);
@@ -446,7 +446,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(f => f.DiscoveredAt).IsRequired();
             _ = b.Property(f => f.StartedAt);
             _ = b.Property(f => f.CompletedAt);
-            
+
             // Foreign Key: HarvestOperation → HarvestDiscoveredFile (one-to-many)
             // Cascade delete is appropriate here - if a harvest operation is deleted, the discovered files should be too
             // However, the mappings to GcodeFile are protected separately by Restrict delete behavior
@@ -454,7 +454,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(h => h.DiscoveredFiles)
                 .HasForeignKey(f => f.HarvestOperationId)
                 .OnDelete(DeleteBehavior.Cascade);
-            
+
             _ = b.HasIndex(f => f.HarvestOperationId);
         });
         _ = modelBuilder.Entity<User>(b =>

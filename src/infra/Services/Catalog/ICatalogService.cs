@@ -52,4 +52,13 @@ public interface ICatalogService
 
     /// <summary>Deletes a printer model.</summary>
     Task DeleteModelAsync(Guid id, CancellationToken ct);
+
+    /// <summary>Finds a manufacturer by name. Returns null if not found.</summary>
+    Task<ManufacturerDto?> FindManufacturerByNameAsync(string name, CancellationToken ct);
+
+    /// <summary>Finds a printer model by name and manufacturer ID. Returns null if not found.</summary>
+    Task<PrinterModelDto?> FindModelByNameAsync(string name, Guid manufacturerId, CancellationToken ct);
+
+    /// <summary>Gets the default (Unknown) manufacturer and model IDs.</summary>
+    Task<(Guid ManufacturerId, Guid ModelId)> GetDefaultCatalogIdsAsync(CancellationToken ct);
 }

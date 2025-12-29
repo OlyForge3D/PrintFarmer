@@ -189,7 +189,7 @@ public class GcodeHarvestController(
         try
         {
             GcodeHarvestResultDto result = await _harvestService.ImportSelectedFilesAsync(request, ct);
-            
+
             // If there were failures, log them for debugging but still return the result
             if (result.FailedFileIds?.Length > 0)
             {
@@ -197,7 +197,7 @@ public class GcodeHarvestController(
                     $"Import operation {request.HarvestOperationId} completed with {result.FailedFileIds.Length} failures. " +
                     $"Imported: {result.ImportedFiles}, Skipped: {result.SkippedFileIds?.Length ?? 0}, Failed: {result.FailedFileIds.Length}");
             }
-            
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -208,11 +208,11 @@ public class GcodeHarvestController(
             {
                 _logger.LogErrorWithSource(ex.InnerException, "Inner exception details");
             }
-            
+
             // Return a result object with error information instead of throwing 500
             var errorResult = new GcodeHarvestResultDto(
-                request.HarvestOperationId, 
-                false, 
+                request.HarvestOperationId,
+                false,
                 $"Import operation failed: {ex.Message}",
                 0, // discoveredFiles
                 0, // importedFiles
@@ -224,7 +224,7 @@ public class GcodeHarvestController(
                     { "_inner_exception", ex.InnerException?.Message ?? "No inner exception" }
                 }
             };
-            
+
             return StatusCode(StatusCodes.Status200OK, errorResult);
         }
     }

@@ -11,7 +11,6 @@ using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
-using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;

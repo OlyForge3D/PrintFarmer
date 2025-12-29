@@ -367,7 +367,6 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddScoped<Importing.Services.Import.IImportParserService, Importing.Services.Import.ImportParserService>();
         _ = services.AddScoped<Importing.Services.Import.IImportProcessorService, Importing.Services.Import.ImportProcessorService>();
-        _ = services.AddScoped<Importing.Services.Adapters.IDefaultCatalogAdapter, Services.Adapters.DefaultCatalogAdapter>();
     }
 
     #endregion
@@ -385,7 +384,6 @@ public static class ServiceCollectionExtensions
         // Register API adapter that wraps Infrastructure service to work with request DTOs
         _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
 
-        _ = services.AddScoped<Farm.Infrastructure.Services.IDefaultCatalogService, Farm.Infrastructure.Services.DefaultCatalogService>();
         _ = services.AddScoped<Services.Filament.IFilamentTypeService, Services.Filament.FilamentTypeService>();
     }
 

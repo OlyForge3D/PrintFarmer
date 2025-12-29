@@ -19,7 +19,9 @@ using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Services.Model
 {
+    #pragma warning disable S101 // 3d is a standard acronym
     public class Model3dFileService : IModel3dFileService
+    #pragma warning restore S101
     {
         private readonly IModel3dFileRepository _repository;
         private readonly IUnifiedLoggingService _logger;

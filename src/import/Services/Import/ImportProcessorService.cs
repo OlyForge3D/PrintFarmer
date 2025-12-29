@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Importing.Services.Adapters;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
@@ -17,14 +16,12 @@ public class ImportProcessorService : IImportProcessorService
     private readonly IPrintersRepository _printersRepo;
     private readonly ICatalogRepository _catalogRepo;
     private readonly FluentValidation.IValidator<CreatePrinterDto> _validator;
-    private readonly IDefaultCatalogAdapter _defaultCatalog;
 
-    public ImportProcessorService(IPrintersRepository printersRepo, ICatalogRepository catalogRepo, FluentValidation.IValidator<CreatePrinterDto> validator, IDefaultCatalogAdapter defaultCatalog)
+    public ImportProcessorService(IPrintersRepository printersRepo, ICatalogRepository catalogRepo, FluentValidation.IValidator<CreatePrinterDto> validator)
     {
         _printersRepo = printersRepo;
         _catalogRepo = catalogRepo;
         _validator = validator;
-        _defaultCatalog = defaultCatalog;
     }
 
     public async Task<List<(string Name, string Status, Guid? Id, string? Reason)>> ProcessAsync(CreatePrinterDto[] dtos, string duplicateHandling, CancellationToken ct)
@@ -192,15 +189,17 @@ public class ImportProcessorService : IImportProcessorService
 
         if (manufacturerId == Guid.Empty || modelId == Guid.Empty)
         {
-            (Guid defMan, Guid defModel) = await _defaultCatalog.GetDefaultCatalogIdsAsync();
-            if (manufacturerId == Guid.Empty)
+            Guid? defMan = await _catalogRepo.GetUnknownManufacturerIdAsync(ct);
+            Guid? defModel = await _catalogRepo.GetUnknownModelIdAsync(ct);
+
+            if (manufacturerId == Guid.Empty && defMan.HasValue)
             {
-                manufacturerId = defMan;
+                manufacturerId = defMan.Value;
             }
 
-            if (modelId == Guid.Empty)
+            if (modelId == Guid.Empty && defModel.HasValue)
             {
-                modelId = defModel;
+                modelId = defModel.Value;
             }
         }
 
