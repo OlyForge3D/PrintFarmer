@@ -300,6 +300,9 @@ public class GcodeFile
     public DateTime? LastHealthCheckDate { get; set; }
     public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
     public string? LastVerificationResult { get; set; } // JSON object with verification details
+    
+    // Navigation property to harvest file mappings
+    public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
 }
 
 public enum GcodeSource
@@ -342,6 +345,10 @@ public class GcodeHarvestOperation
     public string[]? FileExtensions { get; set; } // JSON stored list of allowed extensions (without dot)
     public long? MinFileSizeBytes { get; set; }
     public string? DuplicateHandling { get; set; }
+    
+    // Navigation property: Collection of discovered files in this operation
+    // Cascade delete: If operation is deleted, discovered files are deleted (but GcodeFiles are protected by Restrict behavior)
+    public ICollection<HarvestDiscoveredFile> DiscoveredFiles { get; set; } = new List<HarvestDiscoveredFile>();
 }
 
 public enum GcodeHarvestStatus
@@ -393,6 +400,21 @@ public class DiscoveredGcodeFile
     public string? ExtractedMaterial { get; set; }
     public string? ExtractedLayerHeight { get; set; }
     public string? ExtractedInfill { get; set; }
+    
+    // Navigation property to mapping when this harvest file is imported
+    public ICollection<HarvestFileGcodeFileMapping> GcodeFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
+}
+
+// Mapping table linking harvest files to the gcode files created from them
+// Preserves harvest metadata (slicer, material, nozzle, etc) separate from the library file
+public class HarvestFileGcodeFileMapping
+{
+    public Guid Id { get; set; }
+    public Guid HarvestDiscoveredFileId { get; set; }
+    public DiscoveredGcodeFile HarvestDiscoveredFile { get; set; } = null!;
+    public Guid GcodeFileId { get; set; }
+    public GcodeFile GcodeFile { get; set; } = null!;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 // 3D Model Management System
@@ -786,6 +808,7 @@ public class HarvestDiscoveredFile
     [Key]
     public Guid Id { get; set; }
     public Guid HarvestOperationId { get; set; }
+    public GcodeHarvestOperation? HarvestOperation { get; set; } // Navigation property to parent operation
     public string FilePath { get; set; } = string.Empty; // Path on printer
     public string FileName { get; set; } = string.Empty;
     public long Size { get; set; }
@@ -804,6 +827,10 @@ public class HarvestDiscoveredFile
     public string? ExtractedSlicerName { get; set; }
     public string? ExtractedSlicerVersion { get; set; }
     public DateTime? ModifiedAt { get; set; }
+    
+    // Navigation property to harvest file to gcode file mappings
+    // Protected by Restrict delete behavior - prevents accidental deletion when cleaning up harvest operations
+    public ICollection<HarvestFileGcodeFileMapping> GcodeFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
 }
 
 public enum HarvestFileStatus

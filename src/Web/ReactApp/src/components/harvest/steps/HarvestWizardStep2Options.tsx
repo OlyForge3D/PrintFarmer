@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, forwardRef, useImperativeHandle } from 'react';
 import type { HarvestOptions } from '../HarvestWizard';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { Button } from '@/components/ui/Button';
 
 interface HarvestWizardStep2OptionsProps {
   options: HarvestOptions;
@@ -10,13 +9,29 @@ interface HarvestWizardStep2OptionsProps {
   onStartDiscovery?: () => void;
 }
 
-export function HarvestWizardStep2Options({
-  options,
-  onComplete,
-  onStartDiscovery,
-}: HarvestWizardStep2OptionsProps) {
+export interface HarvestWizardStep2OptionsRef {
+  validateAndStart: () => void;
+}
+
+export const HarvestWizardStep2Options = forwardRef<
+  HarvestWizardStep2OptionsRef,
+  HarvestWizardStep2OptionsProps
+>(({ options, onComplete, onStartDiscovery }: HarvestWizardStep2OptionsProps, ref) => {
   const [localOptions, setLocalOptions] = useState<HarvestOptions>(options);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useImperativeHandle(ref, () => ({
+    validateAndStart: () => {
+      const newErrors = validateStep2Options(localOptions);
+      setErrors(newErrors);
+
+      if (Object.keys(newErrors).length === 0) {
+        // Start discovery before moving to next step
+        onStartDiscovery?.();
+        onComplete(localOptions);
+      }
+    },
+  }));
 
   const handleMaxFileSizeChange = (value: string) => {
     const num = parseInt(value, 10);
@@ -67,38 +82,6 @@ export function HarvestWizardStep2Options({
       ...prev,
       duplicateHandling: value as 'skip' | 'replace' | 'keep',
     }));
-  };
-
-  const validateAndSubmit = () => {
-    const newErrors: Record<string, string> = {};
-
-    if (localOptions.maxFileSizeBytes <= 0) {
-      newErrors.maxFileSize = 'Maximum file size must be greater than 0';
-    }
-
-    if (localOptions.minFileSizeBytes < 0) {
-      newErrors.minFileSize = 'Minimum file size cannot be negative';
-    }
-
-    if (
-      localOptions.minFileSizeBytes &&
-      localOptions.maxFileSizeBytes &&
-      localOptions.minFileSizeBytes > localOptions.maxFileSizeBytes
-    ) {
-      newErrors.fileSize = 'Minimum size cannot be greater than maximum size';
-    }
-
-    if (!localOptions.fileExtensions || localOptions.fileExtensions.length === 0) {
-      newErrors.fileExtensions = 'At least one file extension is required';
-    }
-
-    setErrors(newErrors);
-
-    if (Object.keys(newErrors).length === 0) {
-      // Start discovery before moving to next step
-      onStartDiscovery?.();
-      onComplete(localOptions);
-    }
   };
 
   const maxFileSizeMB = localOptions.maxFileSizeBytes / (1024 * 1024);
@@ -218,15 +201,34 @@ export function HarvestWizardStep2Options({
           <li>• Duplicates: {localOptions.duplicateHandling}</li>
         </ul>
       </div>
-
-      <Button
-        variant="primary"
-        size="md"
-        onClick={validateAndSubmit}
-        className="w-full"
-      >
-        Continue with These Settings
-      </Button>
     </div>
   );
+});
+
+HarvestWizardStep2Options.displayName = 'HarvestWizardStep2Options';
+
+export function validateStep2Options(localOptions: HarvestOptions): Record<string, string> {
+  const newErrors: Record<string, string> = {};
+
+  if (localOptions.maxFileSizeBytes <= 0) {
+    newErrors.maxFileSize = 'Maximum file size must be greater than 0';
+  }
+
+  if (localOptions.minFileSizeBytes < 0) {
+    newErrors.minFileSize = 'Minimum file size cannot be negative';
+  }
+
+  if (
+    localOptions.minFileSizeBytes &&
+    localOptions.maxFileSizeBytes &&
+    localOptions.minFileSizeBytes > localOptions.maxFileSizeBytes
+  ) {
+    newErrors.fileSize = 'Minimum size cannot be greater than maximum size';
+  }
+
+  if (!localOptions.fileExtensions || localOptions.fileExtensions.length === 0) {
+    newErrors.fileExtensions = 'At least one file extension is required';
+  }
+
+  return newErrors;
 }

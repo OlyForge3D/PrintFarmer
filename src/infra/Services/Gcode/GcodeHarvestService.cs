@@ -691,38 +691,60 @@ public partial class GcodeHarvestService(
 
         _logger.LogInformationWithSource($"Received {request.FileIds.Length} file IDs to import: {string.Join(", ", request.FileIds)}");
 
-        HarvestDiscoveredFile[] selectedFiles = await _harvestRepo.GetDiscoveredFilesByIdsAsync(request.FileIds.ToList(), ct);
+        // Load only IDs initially - don't load entities in main context
+        // Each file will be loaded fresh within its own scoped context
+        List<Guid> fileIdsToImport = request.FileIds.ToList();
 
-        _logger.LogInformationWithSource($"Retrieved {selectedFiles.Length} files from database");
+        _logger.LogInformationWithSource($"Processing {fileIdsToImport.Count} selected files sequentially");
 
         List<string> importedFileIds = new();
         List<string> skippedFileIds = new();
         List<string> failedFileIds = new();
         Dictionary<string, string> errorDetails = new();
 
-        // Apply concurrency limiting using semaphore based on configuration
-        int maxConcurrent = _harvestSettings.MaxConcurrentImports;
-        _logger.LogInformationWithSource($"Using max concurrent imports: {maxConcurrent}");
-        using SemaphoreSlim semaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
-
-        // Create import tasks for all selected files with concurrency limiting
-        List<Task> importTasks = selectedFiles.Select(async discoveredFile =>
+        // Process files sequentially to avoid concurrency issues with DbContext
+        // and to ensure harvest operation state is consistent
+        // Each file is loaded FRESH within its own scoped context to avoid cross-context FK violations
+        foreach (Guid fileId in fileIdsToImport)
         {
-            // Acquire a semaphore slot (respects max concurrency)
-            await semaphore.WaitAsync(ct);
+            _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Starting import iteration for fileId={fileId}");
             try
             {
-                if (discoveredFile.AlreadyInLibrary)
+                // Create a new scope for this import to get fresh DbContext
+                // Each file is processed one at a time sequentially in its own context
+                await using AsyncServiceScope scopedServices = _serviceScopeFactory.CreateAsyncScope();
+                IGcodeRepository scopedGcodeRepo = scopedServices.ServiceProvider.GetRequiredService<IGcodeRepository>();
+                IHarvestRepository scopedHarvestRepo = scopedServices.ServiceProvider.GetRequiredService<IHarvestRepository>();
+
+                // CRITICAL: Load discovered file FRESH within this scoped context
+                // This ensures the entity belongs to this context's DbContext
+                // and all FK constraints will be satisfied when we create mappings
+                HarvestDiscoveredFile? discoveredFile = await scopedHarvestRepo.GetDiscoveredFileByIdAsync(fileId, operation.Id, ct);
+                if (discoveredFile == null)
                 {
-                    skippedFileIds.Add(discoveredFile.Id.ToString());
-                    return;
+                    _logger.LogWarning($"Discovered file {fileId} not found in operation {operation.Id}");
+                    failedFileIds.Add(fileId.ToString());
+                    errorDetails[fileId.ToString()] = "File not found in harvest operation";
+                    continue;
                 }
 
-                // Mark as in progress and send update
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Loaded discovered file: {discoveredFile.FileName}, Status={discoveredFile.Status}");
+
+                if (discoveredFile.AlreadyInLibrary)
+                {
+                    _logger.LogInformationWithSource($"File {discoveredFile.FileName} already in library, skipping");
+                    skippedFileIds.Add(discoveredFile.Id.ToString());
+                    continue;
+                }
+
+                // Mark as in progress and send update (now using scoped entity)
                 discoveredFile.Status = HarvestFileStatus.InProgress;
                 discoveredFile.StartedAt = DateTime.UtcNow;
-                await _harvestRepo.SaveChangesAsync(ct);
+                await scopedHarvestRepo.SaveChangesAsync(ct);
+                
+                _logger.LogInformationWithSource($"[IMPORT-LIFECYCLE] Updated status to InProgress for {discoveredFile.FileName}, saved to DB");
                 await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Sent harvestfileupdated event for {discoveredFile.FileName}");
 
                 // Get storage directory from centralized storage service (supports Docker and K8s)
                 string storageDir = _storagePathService.GetGcodeStorageDirectory();
@@ -737,11 +759,11 @@ public partial class GcodeHarvestService(
                     discoveredFile.Status = HarvestFileStatus.Failed;
                     discoveredFile.Error = "Printer information not available for download";
                     discoveredFile.CompletedAt = DateTime.UtcNow;
-                    await _harvestRepo.SaveChangesAsync(ct);
+                    await scopedHarvestRepo.SaveChangesAsync(ct);
                     await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
                     failedFileIds.Add(discoveredFile.Id.ToString());
                     errorDetails[discoveredFile.Id.ToString()] = "Printer information not available";
-                    return;
+                    continue;
                 }
 
                 PrinterBackend backend = (PrinterBackend)operation.Printer.Backend;
@@ -749,15 +771,18 @@ public partial class GcodeHarvestService(
 
                 if (gcodeContent == null)
                 {
+                    _logger.LogWarning($"[IMPORT-LIFECYCLE] Download returned null for {discoveredFile.FileName}");
                     discoveredFile.Status = HarvestFileStatus.Failed;
                     discoveredFile.Error = $"Failed to download {discoveredFile.FileName}";
                     discoveredFile.CompletedAt = DateTime.UtcNow;
-                    await _harvestRepo.SaveChangesAsync(ct);
+                    await scopedHarvestRepo.SaveChangesAsync(ct);
                     await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
                     failedFileIds.Add(discoveredFile.Id.ToString());
                     errorDetails[discoveredFile.Id.ToString()] = $"Failed to download {discoveredFile.FileName}";
-                    return;
+                    continue;
                 }
+
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Successfully downloaded {discoveredFile.FileName}, size={gcodeContent.Length} bytes");
 
                 // Save to local storage
                 await using (FileStream fileStream = File.Create(filePath))
@@ -787,12 +812,25 @@ public partial class GcodeHarvestService(
                         }
                     }
                 }
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved file to disk: {filePath}");
 
-                // Mark as complete and send update
-                discoveredFile.Status = HarvestFileStatus.Complete;
-                discoveredFile.CompletedAt = DateTime.UtcNow;
-                await _harvestRepo.SaveChangesAsync(ct);
-                await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
+                // CRITICAL: Calculate file hash for deduplication
+                // This MUST be done after download/save so we hash actual file content
+                // Not doing this causes all files to have empty hash → duplicate constraint violations
+                string fileHash = "";
+                try
+                {
+                    gcodeContent.Position = 0;
+                    fileHash = await CalculateFileHashAsync(gcodeContent, ct);
+                    discoveredFile.FileHash = fileHash;
+                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Calculated file hash for {discoveredFile.FileName}: {fileHash}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to calculate hash for {FileName}, using empty hash (will not deduplicate)", discoveredFile.FileName);
+                    discoveredFile.FileHash = "";
+                    fileHash = "";
+                }
 
                 // Extract metadata from gcode as fallback for incomplete API data
                 GcodeMetadataExtracted? extractedMetadata = null;
@@ -805,6 +843,26 @@ public partial class GcodeHarvestService(
                         using StreamReader reader = new(gcodeContent, Encoding.UTF8, leaveOpen: true);
                         string gcodeText = await reader.ReadToEndAsync(ct);
                         extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
+
+                        // Save extracted metadata back to discovered file so UI can display it immediately
+                        if (extractedMetadata != null)
+                        {
+                            // Only overwrite if discovered file doesn't already have the value from API
+                            if (!discoveredFile.ExtractedNozzleDiameter.HasValue && extractedMetadata.NozzleDiameter.HasValue)
+                                discoveredFile.ExtractedNozzleDiameter = extractedMetadata.NozzleDiameter;
+                            if (string.IsNullOrEmpty(discoveredFile.ExtractedMaterial) && !string.IsNullOrEmpty(extractedMetadata.Material))
+                                discoveredFile.ExtractedMaterial = extractedMetadata.Material;
+                            if (!discoveredFile.ExtractedPrintTime.HasValue && extractedMetadata.EstimatedPrintTimeMinutes.HasValue)
+                                discoveredFile.ExtractedPrintTime = extractedMetadata.EstimatedPrintTimeMinutes;
+                            if (!discoveredFile.ExtractedFilamentLength.HasValue && extractedMetadata.FilamentLengthMm.HasValue)
+                                discoveredFile.ExtractedFilamentLength = extractedMetadata.FilamentLengthMm;
+                            if (string.IsNullOrEmpty(discoveredFile.ExtractedSlicerName) && !string.IsNullOrEmpty(extractedMetadata.SlicerName))
+                                discoveredFile.ExtractedSlicerName = extractedMetadata.SlicerName;
+                            if (string.IsNullOrEmpty(discoveredFile.ExtractedSlicerVersion) && !string.IsNullOrEmpty(extractedMetadata.SlicerVersion))
+                                discoveredFile.ExtractedSlicerVersion = extractedMetadata.SlicerVersion;
+                            
+                            _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Updated discovered file metadata: nozzle={discoveredFile.ExtractedNozzleDiameter}, material={discoveredFile.ExtractedMaterial}, slicer={discoveredFile.ExtractedSlicerName}");
+                        }
 
                         // Extract and save thumbnail if present using shared service
                         if (extractedMetadata?.ThumbnailData != null && extractedMetadata.ThumbnailData.Length > 0)
@@ -829,106 +887,165 @@ public partial class GcodeHarvestService(
                     }
                 }
 
-                // Get or create target folder for this gcode file
-                string fileDirectory = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
-                var targetFolder = await GetOrCreateFolderAsync(fileDirectory, "gcode", ct);
-
-                // Create library entry
-                // Note: We use TargetModelId instead of SourcePrinterId so the file is usable on ANY printer
-                // of the same model, not just the one it was harvested from
-                GcodeFile gcodeFile = new()
+                // Check if a file with this hash already exists in the library
+                // If it does, reuse it instead of creating a duplicate
+                GcodeFile? existingFile = null;
+                if (!string.IsNullOrEmpty(discoveredFile.FileHash))
                 {
-                    Id = Guid.NewGuid(),
-                    OriginalFileName = discoveredFile.FileName,
-                    DisplayName = Path.GetFileNameWithoutExtension(discoveredFile.FileName),
-                    FolderId = targetFolder.Id,
-                    FilePath = filePath,
-                    FileSizeBytes = discoveredFile.Size,
-                    FileHash = discoveredFile.FileHash ?? "",
-                    UploadedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    Source = GcodeSource.Harvested,
-                    SourcePrinterId = operation.PrinterId, // Keep for reference/audit trail
-                    OriginalPrinterPath = discoveredFile.FilePath,
-                    LastSeenOnPrinter = DateTime.UtcNow,
-                    TargetModelId = operation.Printer?.ModelId, // Make available to all printers of this model
-                    RequiredNozzleDiameter = discoveredFile.ExtractedNozzleDiameter ?? extractedMetadata?.NozzleDiameter,
-                    RequiredMaterial = discoveredFile.ExtractedMaterial ?? extractedMetadata?.Material,
-                    EstimatedPrintTimeMinutes = discoveredFile.ExtractedPrintTime ?? extractedMetadata?.EstimatedPrintTimeMinutes,
-                    EstimatedFilamentLengthMm = discoveredFile.ExtractedFilamentLength ?? extractedMetadata?.FilamentLengthMm,
-                    SlicerName = discoveredFile.ExtractedSlicerName ?? extractedMetadata?.SlicerName,
-                    SlicerVersion = discoveredFile.ExtractedSlicerVersion ?? extractedMetadata?.SlicerVersion,
-                    ThumbnailPath = thumbnailPath, // Save extracted thumbnail path if available
-                    Tags = request.DefaultTags != null ? JsonSerializer.Serialize(request.DefaultTags) : null
-                };
+                    existingFile = await scopedGcodeRepo.FindByHashAsync(discoveredFile.FileHash, ct);
+                    if (existingFile != null)
+                    {
+                        _logger.LogInformationWithSource($"[IMPORT-LIFECYCLE] Found existing GcodeFile with same hash: {existingFile.Id} ({existingFile.DisplayName})");
+                    }
+                }
 
-                _logger.LogDebugWithSource($"Adding GcodeFile: Id={gcodeFile.Id}, FileName={gcodeFile.OriginalFileName}, FolderId={gcodeFile.FolderId}, TargetModelId={gcodeFile.TargetModelId}, CreatedAt={gcodeFile.CreatedAt}");
+                GcodeFile gcodeFile;
+                if (existingFile != null)
+                {
+                    // Reuse the existing file - no need to create a new one
+                    gcodeFile = existingFile;
+                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Reusing existing GcodeFile for duplicate content: Id={gcodeFile.Id}");
+                }
+                else
+                {
+                    // Get or create target folder for this gcode file
+                    string fileDirectory = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
+                    var targetFolder = await GetOrCreateFolderAsync(fileDirectory, "gcode", scopedServices, ct);
+                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Got or created folder: {targetFolder.Path}, Id={targetFolder.Id}");
 
-                await _gcodeRepo.AddAsync(gcodeFile, ct);
+                    // Create library entry
+                    // Note: We use TargetModelId instead of SourcePrinterId so the file is usable on ANY printer
+                    // of the same model, not just the one it was harvested from
+                    gcodeFile = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        OriginalFileName = discoveredFile.FileName,
+                        DisplayName = Path.GetFileNameWithoutExtension(discoveredFile.FileName),
+                        FolderId = targetFolder.Id,
+                        FilePath = filePath,
+                        FileSizeBytes = discoveredFile.Size,
+                        FileHash = discoveredFile.FileHash ?? "",
+                        UploadedAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                        Source = GcodeSource.Harvested,
+                        SourcePrinterId = operation.PrinterId, // Keep for reference/audit trail
+                        OriginalPrinterPath = discoveredFile.FilePath,
+                        LastSeenOnPrinter = DateTime.UtcNow,
+                        TargetModelId = operation.Printer?.ModelId, // Make available to all printers of this model
+                        RequiredNozzleDiameter = discoveredFile.ExtractedNozzleDiameter ?? extractedMetadata?.NozzleDiameter,
+                        RequiredMaterial = discoveredFile.ExtractedMaterial ?? extractedMetadata?.Material,
+                        EstimatedPrintTimeMinutes = discoveredFile.ExtractedPrintTime ?? extractedMetadata?.EstimatedPrintTimeMinutes,
+                        EstimatedFilamentLengthMm = discoveredFile.ExtractedFilamentLength ?? extractedMetadata?.FilamentLengthMm,
+                        SlicerName = discoveredFile.ExtractedSlicerName ?? extractedMetadata?.SlicerName,
+                        SlicerVersion = discoveredFile.ExtractedSlicerVersion ?? extractedMetadata?.SlicerVersion,
+                        ThumbnailPath = thumbnailPath, // Save extracted thumbnail path if available
+                        Tags = request.DefaultTags != null ? JsonSerializer.Serialize(request.DefaultTags) : null
+                    };
+
+                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created GcodeFile object: Id={gcodeFile.Id}, FolderId={targetFolder.Id}, TargetModelId={gcodeFile.TargetModelId}");
+
+                    // Add the gcode file to the database
+                    await scopedGcodeRepo.AddAsync(gcodeFile, ct);
+                    await scopedGcodeRepo.SaveChangesAsync(ct);
+                    
+                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved GcodeFile to database: {gcodeFile.Id}");
+                }
+                
+                // discoveredFile is already in the scoped context (loaded at start of iteration)
+                // Mark as complete
+                discoveredFile.Status = HarvestFileStatus.Complete;
+                discoveredFile.CompletedAt = DateTime.UtcNow;
+                
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Marked discoveredFile status as Complete");
+                
+                // Create mapping between discovered file and imported gcode file
+                // Both entities are in the same scoped context, so FK constraints are satisfied
+                await scopedHarvestRepo.CreateFileImportMappingAsync(discoveredFile.Id, gcodeFile.Id, ct);
+                
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created file import mapping: discoveredFileId={discoveredFile.Id} -> gcodeFileId={gcodeFile.Id}");
+                
+                // Save mapping and discovered file status update
+                await scopedHarvestRepo.SaveChangesAsync(ct);
+                
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved mapping and status update to database");
+                
+                // Broadcast completion update
+                await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
+                
+                _logger.LogInformationWithSource($"✅ [IMPORT-LIFECYCLE] Successfully imported file: {discoveredFile.FileName} -> {gcodeFile.Id}");
+                
                 importedFileIds.Add(discoveredFile.Id.ToString());
 
-                // Increment the operation's FilesAdded counter (only when successfully imported to library)
+                // Increment the operation's FilesAdded counter (now thread-safe since sequential)
                 operation.FilesAdded++;
             }
             catch (Exception ex)
             {
-                discoveredFile.Status = HarvestFileStatus.Failed;
-                discoveredFile.Error = $"Failed to import {discoveredFile.FileName}: {ex.Message}";
-                discoveredFile.CompletedAt = DateTime.UtcNow;
-                await _harvestRepo.SaveChangesAsync(ct);
-                await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
-                _logger.LogError(ex, "Failed to import file {FileName}", discoveredFile.FileName);
-                failedFileIds.Add(discoveredFile.Id.ToString());
-                errorDetails[discoveredFile.Id.ToString()] = $"Failed to import {discoveredFile.FileName}: {ex.Message}";
+                _logger.LogError(ex, $"❌ [IMPORT-LIFECYCLE] EXCEPTION in import for file {fileId}: {ex.GetType().Name} - {ex.Message}");
+                _logger.LogDebug($"[IMPORT-LIFECYCLE] Exception stack: {ex.StackTrace}");
+                
+                // Save the failed status update in a fresh scoped context
+                await using (AsyncServiceScope errorScope = _serviceScopeFactory.CreateAsyncScope())
+                {
+                    IHarvestRepository errorHarvestRepo = errorScope.ServiceProvider.GetRequiredService<IHarvestRepository>();
+                    
+                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Loading discovered file in error scope: {fileId}");
+                    
+                    // Reload the discovered file to update its status
+                    HarvestDiscoveredFile? dbFile = await errorHarvestRepo.GetDiscoveredFileByIdAsync(fileId, operation.Id, ct);
+                    if (dbFile != null)
+                    {
+                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Found discovered file in error scope: {dbFile.FileName}, current status={dbFile.Status}");
+                        
+                        dbFile.Status = HarvestFileStatus.Failed;
+                        dbFile.Error = $"Failed to import {dbFile.FileName}: {ex.Message}";
+                        dbFile.CompletedAt = DateTime.UtcNow;
+                        
+                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Updated status to Failed, saving...");
+                        
+                        await errorHarvestRepo.SaveChangesAsync(ct);
+                        
+                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved failed status, broadcasting event...");
+                        
+                        // Send failure event to UI
+                        await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(dbFile), ct);
+                        
+                        failedFileIds.Add(fileId.ToString());
+                        errorDetails[fileId.ToString()] = $"Failed to import {dbFile.FileName}: {ex.Message}";
+                        
+                        _logger.LogWarning($"[IMPORT-LIFECYCLE] Marked file as Failed and sent event: {dbFile.FileName}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"❌ [IMPORT-LIFECYCLE] Could not find discovered file {fileId} to mark as failed");
+                        failedFileIds.Add(fileId.ToString());
+                        errorDetails[fileId.ToString()] = "Failed to import (file not found)";
+                    }
+                }
             }
-            finally
-            {
-                // Release the semaphore slot so another file can begin importing
-                _ = semaphore.Release();
-            }
-        }).ToList();
+        }
 
-        // Wait for all import tasks to complete
         try
         {
-            await Task.WhenAll(importTasks);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during concurrent file imports");
-            // Individual errors already handled in task catch blocks
-        }
-
-        try
-        {
-            _logger.LogInformationWithSource($"Saving {importedFileIds.Count} harvest operations to database");
+            _logger.LogInformationWithSource($"Saving harvest operation with {importedFileIds.Count} files added to database");
             await _harvestRepo.SaveChangesAsync(ct);
-            _logger.LogInformationWithSource($"Harvest operations saved successfully");
+            _logger.LogInformationWithSource($"Harvest operation saved successfully");
         }
         catch (Exception ex)
         {
-            _logger.LogErrorWithSource(ex, $"Error saving harvest operations: {ex.Message} | Inner: {ex.InnerException?.Message}");
-            throw;
-        }
-
-        try
-        {
-            _logger.LogInformationWithSource($"Saving {importedFileIds.Count} gcode files to database");
-            await _gcodeRepo.SaveChangesAsync(ct);
-            _logger.LogInformationWithSource($"Gcode files saved successfully");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogErrorWithSource(ex, $"Error saving gcode files: {ex.Message} | Inner: {ex.InnerException?.Message}");
-            throw;
+            _logger.LogErrorWithSource(ex, $"Error saving harvest operation: {ex.Message} | Inner: {ex.InnerException?.Message}");
+            // Don't throw - we want to return partial results to the client
+            // Add this error to the general errors list
+            if (errorDetails == null) errorDetails = new Dictionary<string, string>();
+            errorDetails["_operation"] = $"Failed to save harvest operation metadata: {ex.Message}";
         }
 
         GcodeHarvestResultDto result = new GcodeHarvestResultDto(
             request.HarvestOperationId,
             true,
             $"Imported {importedFileIds.Count} files",
-            selectedFiles.Length,
+            fileIdsToImport.Count,
             importedFileIds.Count,
             failedFileIds.Count > 0 ? failedFileIds.ToArray() : null)
         {
@@ -1168,7 +1285,8 @@ public partial class GcodeHarvestService(
             file.ExtractedNozzleDiameter,
             file.ExtractedMaterial,
             null, // ExtractedLayerHeight (not available)
-            null  // ExtractedInfill (not available)
+            null, // ExtractedInfill (not available)
+            file.Status // Status enum - for UI display
         );
     }
 
@@ -1232,9 +1350,9 @@ public partial class GcodeHarvestService(
     /// <summary>
     /// Gets or creates a Folder entity for the given directory path and type
     /// </summary>
-    private async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
+    private async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, AsyncServiceScope scope, CancellationToken ct)
     {
-        using var scope = _serviceScopeFactory.CreateScope();
+        // Use the provided scoped AppDbContext to maintain consistency within the same transaction
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // Normalize path
@@ -1249,7 +1367,7 @@ public partial class GcodeHarvestService(
             return existingFolder;
         }
 
-        // Create new folder
+        // Create new folder in the same context
         var newFolder = new Folder
         {
             Id = Guid.NewGuid(),

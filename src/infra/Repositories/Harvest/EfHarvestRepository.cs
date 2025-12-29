@@ -217,6 +217,22 @@ public class EfHarvestRepository : IHarvestRepository
         _db.HarvestDiscoveredFiles.RemoveRange(files);
     }
 
+    // Harvest file mapping operations
+    public async Task CreateFileImportMappingAsync(Guid harvestDiscoveredFileId, Guid gcodeFileId, CancellationToken ct = default)
+    {
+        HarvestFileGcodeFileMapping mapping = new()
+        {
+            Id = Guid.NewGuid(),
+            HarvestDiscoveredFileId = harvestDiscoveredFileId,
+            GcodeFileId = gcodeFileId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _ = await _db.HarvestFileGcodeFileMappings.AddAsync(mapping, ct);
+        // Do NOT save here - let the caller save when all changes are ready
+        // This prevents transaction issues with concurrent imports
+    }
+
     // Combined operations
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {

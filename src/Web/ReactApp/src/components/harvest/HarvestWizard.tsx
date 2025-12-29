@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Printer, GcodeHarvestOperation } from '@/types/api';
 import { HarvestWizardStep1Selection } from './steps/HarvestWizardStep1Selection';
-import { HarvestWizardStep2Options } from './steps/HarvestWizardStep2Options';
+import { HarvestWizardStep2Options, validateStep2Options, HarvestWizardStep2OptionsRef } from './steps/HarvestWizardStep2Options';
 import { HarvestWizardStep3FileSelection } from './steps/HarvestWizardStep3FileSelection';
-import { HarvestWizardStep4Progress } from './steps/HarvestWizardStep4Progress';
+import { HarvestOperationDetails } from './HarvestOperationDetails';
 import { apiClient } from '@/services/api';
 import { signalRService } from '@/services/harvest-signalr';
 import { Button } from '@/components/ui/Button';
@@ -45,8 +45,7 @@ interface HarvestWizardProps {
  * Multi-step harvest wizard
  * Step 1: Select printer
  * Step 2: Configure harvest options
- * Step 3: Display discovered files, allow selection
- * Step 4: Show import progress with real-time updates
+ * Step 3: Display discovered files, allow selection and start import with real-time progress
  */
 export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardProps) {
   const [step, setStep] = useState(1);
@@ -72,6 +71,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
   const pendingFilesRef = useRef<HarvestDiscoveredFile[]>([]);
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const discoveryStartedRef = useRef(false);
+  const step2OptionsRef = useRef<HarvestWizardStep2OptionsRef | null>(null);
 
   // Batch file updates for better performance (batches updates every 100ms)
   const flushPendingFiles = useCallback(() => {
@@ -221,7 +221,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
   }, [state.selectedPrinterId, state.options, queueFileForBatch, flushPendingFiles]);
 
   const handleStep3Complete = (selectedFileIds: string[]) => {
-    // Store selected file details for Step 4 display
+    // Store selected file details
     const selectedFiles = state.discoveredFiles.filter(f => selectedFileIds.includes(f.id));
     setState(prev => ({ 
       ...prev, 
@@ -229,8 +229,6 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
       selectedFileIds: new Set(selectedFileIds),
     }));
     
-    // Move to Step 4 with selected files
-    setStep(4);
     // Begin import with selected files
     handleImport(selectedFileIds);
   };
@@ -278,6 +276,10 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
     }
   };
 
+  const handleStart = () => {
+    step2OptionsRef.current?.validateAndStart();
+  };
+
   const handleCancel = () => {
     onClose();
   };
@@ -297,12 +299,8 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
       subtitle: 'Configure discovery parameters',
     },
     {
-      title: 'Select Files',
-      subtitle: 'Choose which files to import',
-    },
-    {
-      title: 'Import Progress',
-      subtitle: 'Importing selected files',
+      title: 'Import Files',
+      subtitle: 'Select files and monitor import progress',
     },
   ];
 
@@ -318,7 +316,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
         </div>
         {/* Progress indicator */}
         <div className="flex gap-1">
-          {[1, 2, 3, 4].map(s => (
+          {[1, 2, 3].map(s => (
             <div
               key={s}
               className={`h-1 flex-1 rounded ${
@@ -345,25 +343,35 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
         )}
         {step === 2 && (
           <HarvestWizardStep2Options
+            ref={step2OptionsRef}
             options={state.options}
             onComplete={handleStep2Complete}
             onStartDiscovery={handleStartDiscovery}
           />
         )}
         {step === 3 && (
-          <HarvestWizardStep3FileSelection
-            files={state.discoveredFiles}
-            isDiscovering={state.isDiscovering}
-            onComplete={handleStep3Complete}
-          />
-        )}
-        {step === 4 && (
-          <HarvestWizardStep4Progress
-            totalFiles={state.selectedFileIds.size}
-            selectedFiles={state.selectedFiles}
-            operationId={state.operationId || undefined}
-            onCompleted={handleCompleted}
-            onCancel={() => setStep(3)}
+          // Show harvest operation details with file selection and import progress
+          <HarvestOperationDetails
+            operation={{
+              id: state.operationId,
+              printerId: state.selectedPrinterId || '',
+              printerName: printers.find(p => p.id === state.selectedPrinterId)?.name || 'Unknown',
+              status: 'Importing' as any,
+              filesFound: state.discoveredFiles.length,
+              filesProcessed: 0,
+              filesAdded: 0,
+              filesSkipped: 0,
+              filesErrored: 0,
+              duplicatesSkipped: 0,
+              totalSizeBytes: state.discoveredFiles.reduce((sum, f) => sum + f.size, 0),
+              startedAt: new Date().toISOString(),
+              completedAt: undefined,
+              error: undefined,
+            } as GcodeHarvestOperation}
+            onClose={handleCompleted}
+            inline={true}
+            hideCloseButton={true}
+            className="min-h-96"
           />
         )}
       </div>
@@ -374,22 +382,42 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
           variant="secondary"
           size="md"
           onClick={handleBack}
-          disabled={step === 1 || step === 4}
+          disabled={step === 1 || step === 3}
           className="min-w-24"
         >
           Back
         </Button>
         <div className="text-sm text-pf-text-secondary">
-          Step {step} of 4
+          Step {step} of 3
         </div>
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={handleCancel}
-          className="min-w-24"
-        >
-          Cancel
-        </Button>
+        {step === 3 ? (
+          <Button
+            variant="primary"
+            size="md"
+            onClick={handleCompleted}
+            className="min-w-24"
+          >
+            Finish
+          </Button>
+        ) : step === 2 ? (
+          <Button
+            variant="primary"
+            size="md"
+            onClick={handleStart}
+            className="min-w-24"
+          >
+            Start
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={handleCancel}
+            className="min-w-24"
+          >
+            Cancel
+          </Button>
+        )}
       </div>
     </div>
   );

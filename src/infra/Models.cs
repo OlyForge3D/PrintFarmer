@@ -2,6 +2,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Annotations;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 
@@ -1320,7 +1321,8 @@ public record DiscoveredGcodeFileDto(
     double? ExtractedNozzleDiameter = null,
     string? ExtractedMaterial = null,
     string? ExtractedLayerHeight = null,
-    string? ExtractedInfill = null);
+    string? ExtractedInfill = null,
+    HarvestFileStatus? Status = null);
 
 /// <summary>
 /// Generic paged result wrapper

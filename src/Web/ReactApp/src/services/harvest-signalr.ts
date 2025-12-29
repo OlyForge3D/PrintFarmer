@@ -53,6 +53,26 @@ export type HarvestFileDiscoveredEvent = {
 };
 type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 
+// Harvest file updated event type (includes status and error information)
+export type HarvestFileUpdatedEvent = {
+  id: string;
+  operationId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  status: string;
+  error?: string;
+  completedAt?: string;
+  thumbnailUrl?: string;
+  extractedSlicerName?: string;
+  extractedSlicerVersion?: string;
+  extractedMaterial?: string;
+  extractedNozzleDiameter?: number;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+};
+type HarvestFileUpdatedCallback = (evt: HarvestFileUpdatedEvent) => void;
+
 // Harvest discovery restart event type
 export type HarvestDiscoveryRestartedEvent = {
   operationId: string;
@@ -69,9 +89,30 @@ export type HarvestDiscoveryCompleteEvent = {
 };
 type HarvestDiscoveryCompleteCallback = (evt: HarvestDiscoveryCompleteEvent) => void;
 
+// Harvest file updated event type (includes status and error information)
+export type HarvestFileUpdatedEvent = {
+  id: string;
+  operationId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  status: string;
+  error?: string;
+  completedAt?: string;
+  thumbnailUrl?: string;
+  extractedSlicerName?: string;
+  extractedSlicerVersion?: string;
+  extractedMaterial?: string;
+  extractedNozzleDiameter?: number;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+};
+type HarvestFileUpdatedCallback = (evt: HarvestFileUpdatedEvent) => void;
+
 export class SignalRService {
   private connection: HubConnection | null = null;
   private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
+  private harvestFileUpdatedCallbacks: HarvestFileUpdatedCallback[] = [];
   private harvestOperationProgressCallbacks: HarvestOperationProgressCallback[] = [];
   private harvestOperationCompletedCallbacks: HarvestOperationCompletedCallback[] = [];
   private harvestDiscoveryRestartedCallbacks: HarvestDiscoveryRestartedCallback[] = [];
@@ -85,7 +126,13 @@ export class SignalRService {
   // Event handlers
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
   private harvestUpdateCallbacks: HarvestUpdateCallback[] = [];
+  private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
+  private harvestFileUpdatedCallbacks: HarvestFileUpdatedCallback[] = [];
   private harvestFileProgressCallbacks: HarvestFileProgressCallback[] = [];
+  private harvestOperationProgressCallbacks: HarvestOperationProgressCallback[] = [];
+  private harvestOperationCompletedCallbacks: HarvestOperationCompletedCallback[] = [];
+  private harvestDiscoveryRestartedCallbacks: HarvestDiscoveryRestartedCallback[] = [];
+  private harvestDiscoveryCompleteCallbacks: HarvestDiscoveryCompleteCallback[] = [];
   private jobQueueUpdateCallbacks: JobQueueUpdateCallback[] = [];
   private connectionStateCallbacks: ConnectionStateCallback[] = [];
 
@@ -168,6 +215,17 @@ export class SignalRService {
     };
   }
 
+  // ============ Harvest File Updated Event Subscription ============
+  onHarvestFileUpdated(callback: HarvestFileUpdatedCallback): () => void {
+    this.harvestFileUpdatedCallbacks.push(callback);
+    return () => {
+      const index = this.harvestFileUpdatedCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.harvestFileUpdatedCallbacks.splice(index, 1);
+      }
+    };
+  }
+
   // ============ Harvest Operation Progress Event Subscription ============
   onHarvestOperationProgress(callback: HarvestOperationProgressCallback): () => void {
     this.harvestOperationProgressCallbacks.push(callback);
@@ -225,7 +283,15 @@ export class SignalRService {
         }
       });
     });
-
+    this.connection.on('harvestfileupdated', (evt: HarvestFileUpdatedEvent) => {
+      this.harvestFileUpdatedCallbacks.forEach(callback => {
+        try {
+          callback(evt);
+        } catch (error) {
+          console.error('Error in harvestfileupdated callback:', error);
+        }
+      });
+    });
     this.connection.onclose((error) => {
       if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
         console.warn('SignalR connection closed', error);

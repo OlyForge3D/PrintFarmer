@@ -11,10 +11,9 @@ interface HarvestOperationDetailsProps {
   inline?: boolean; // If true, render as inline panel instead of modal
   className?: string; // Allow custom styling for inline use
   hideCloseButton?: boolean;
-  perFileProgress?: Record<string, import('@/services/harvest-signalr').HarvestFileProgress>;
 }
 
-export function HarvestOperationDetails({ operation, onClose, inline = false, className = '', hideCloseButton = false, perFileProgress = {} }: HarvestOperationDetailsProps) {
+export function HarvestOperationDetails({ operation, onClose, inline = false, className = '', hideCloseButton = false }: HarvestOperationDetailsProps) {
   // Duration calculation
   const started = new Date(operation.startedAt);
   const completed = operation.completedAt ? new Date(operation.completedAt) : null;
@@ -169,31 +168,28 @@ export function HarvestOperationDetails({ operation, onClose, inline = false, cl
         </div>
       )}
 
-      {Object.keys(perFileProgress).length > 0 && (
-        <div className="mb-3 flex-shrink-0">
-          <div className="text-md font-semibold text-pf-primary mb-1">Per-File Progress</div>
-          <div className="max-h-48 overflow-y-auto border border-pf-border rounded bg-pf-surface">
-            <table className="w-full text-xs">
-              <thead>
-                <tr>
-                  <th className="px-2 py-1 text-left">File Name</th>
-                  <th className="px-2 py-1 text-left">Progress</th>
-                  <th className="px-2 py-1 text-left">Bytes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.values(perFileProgress).map(f => (
-                  <tr key={f.fileName}>
-                    <td className="px-2 py-1">{f.fileName}</td>
-                    <td className="px-2 py-1">{f.percent}%</td>
-                    <td className="px-2 py-1">{f.bytesCopied} / {f.totalBytes}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {/* Footer Buttons - Only shown in standalone mode (not in wizard) */}
+      {!hideCloseButton && onClose && (
+        <div className="mt-4 flex-shrink-0 flex justify-end gap-2">
+          {!isCompleted && !isFailed && !isCancelled && (
+            <button
+              onClick={onClose}
+              disabled={false}
+              className="px-4 py-2 bg-pf-success hover:bg-pf-success-dark border border-pf-success-border rounded text-pf-success-text text-sm font-medium transition-colors"
+            >
+              Finished
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            disabled={false}
+            className="px-4 py-2 bg-pf-bg-3 hover:bg-pf-bg-4 border border-pf-border rounded text-pf-text-primary text-sm font-medium transition-colors"
+          >
+            Close
+          </button>
         </div>
       )}
+
       <div className="mb-2 flex-shrink-0">
         <div className="text-md font-semibold text-pf-primary mb-1">Discovered Files</div>
         <div className="text-xs text-pf-muted mb-2">
