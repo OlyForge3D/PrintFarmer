@@ -377,33 +377,7 @@ public enum HarvestErrorPhase
 }
 
 // Discovered G-code files during harvest (before adding to library)
-public class DiscoveredGcodeFile
-{
-    public Guid Id { get; set; }
-    public Guid HarvestOperationId { get; set; }
-    public GcodeHarvestOperation HarvestOperation { get; set; } = null!;
-    public string PrinterPath { get; set; } = string.Empty;
-    public string FileName { get; set; } = string.Empty;
-    public long FileSizeBytes { get; set; }
-    public DateTime? ModifiedAt { get; set; }
-    public string? FileHash { get; set; } // Calculated if downloaded
-    public bool IsSelected { get; set; } // User selection for import
-    public bool AlreadyInLibrary { get; set; }
-    public Guid? ExistingLibraryFileId { get; set; }
-    public bool ProcessingFailed { get; set; }
-    public string? ErrorMessage { get; set; }
-    public string? ExtractedSlicerName { get; set; }
-    public string? ExtractedSlicerVersion { get; set; }
-    public double? ExtractedPrintTime { get; set; }
-    public double? ExtractedFilamentLength { get; set; }
-    public double? ExtractedNozzleDiameter { get; set; }
-    public string? ExtractedMaterial { get; set; }
-    public string? ExtractedLayerHeight { get; set; }
-    public string? ExtractedInfill { get; set; }
-    
-    // Navigation property to mapping when this harvest file is imported
-    public ICollection<HarvestFileGcodeFileMapping> GcodeFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
-}
+
 
 // Mapping table linking harvest files to the gcode files created from them
 // Preserves harvest metadata (slicer, material, nozzle, etc) separate from the library file
@@ -411,7 +385,7 @@ public class HarvestFileGcodeFileMapping
 {
     public Guid Id { get; set; }
     public Guid HarvestDiscoveredFileId { get; set; }
-    public DiscoveredGcodeFile HarvestDiscoveredFile { get; set; } = null!;
+    public HarvestDiscoveredFile HarvestDiscoveredFile { get; set; } = null!;
     public Guid GcodeFileId { get; set; }
     public GcodeFile GcodeFile { get; set; } = null!;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

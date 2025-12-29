@@ -952,23 +952,27 @@ public partial class GcodeHarvestService(
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved GcodeFile to database: {gcodeFile.Id}");
                 }
                 
-                // discoveredFile is already in the scoped context (loaded at start of iteration)
-                // Mark as complete
+                // Mark as complete - must be saved BEFORE creating the mapping
                 discoveredFile.Status = HarvestFileStatus.Complete;
                 discoveredFile.CompletedAt = DateTime.UtcNow;
                 
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Marked discoveredFile status as Complete");
                 
-                // Create mapping between discovered file and imported gcode file
-                // Both entities are in the same scoped context, so FK constraints are satisfied
+                // CRITICAL: Save the discovered file status BEFORE creating the mapping
+                // This ensures the entity is properly saved before EF tries to validate the FK constraint
+                await scopedHarvestRepo.SaveChangesAsync(ct);
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved discovered file status");
+                
+                // Now create mapping between discovered file and imported gcode file
+                // At this point both files are committed to the database
                 await scopedHarvestRepo.CreateFileImportMappingAsync(discoveredFile.Id, gcodeFile.Id, ct);
                 
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created file import mapping: discoveredFileId={discoveredFile.Id} -> gcodeFileId={gcodeFile.Id}");
                 
-                // Save mapping and discovered file status update
+                // Save the mapping
                 await scopedHarvestRepo.SaveChangesAsync(ct);
                 
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved mapping and status update to database");
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved mapping to database");
                 
                 // Broadcast completion update
                 await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
@@ -985,6 +989,29 @@ public partial class GcodeHarvestService(
                 _logger.LogError(ex, $"❌ [IMPORT-LIFECYCLE] EXCEPTION in import for file {fileId}: {ex.GetType().Name} - {ex.Message}");
                 _logger.LogDebug($"[IMPORT-LIFECYCLE] Exception stack: {ex.StackTrace}");
                 
+                // Extract the actual database error message if available
+                string errorMessage = ex.Message;
+                if (ex is DbUpdateException dbEx && dbEx.InnerException != null)
+                {
+                    // For database errors, try to extract the real error message
+                    var innerEx = dbEx.InnerException;
+                    
+                    // Try to get PostgresException details (Npgsql)
+                    var sqlStateProperty = innerEx.GetType().GetProperty("SqlState");
+                    var messageTextProperty = innerEx.GetType().GetProperty("MessageText");
+                    
+                    if (sqlStateProperty?.GetValue(innerEx) is string sqlState && 
+                        messageTextProperty?.GetValue(innerEx) is string messageText)
+                    {
+                        errorMessage = $"Database constraint violation: {messageText} (SQL State: {sqlState})";
+                        _logger.LogError($"[IMPORT-LIFECYCLE] PostgreSQL Error Detail: {errorMessage}");
+                    }
+                    else
+                    {
+                        errorMessage = $"Database error: {innerEx.Message}";
+                    }
+                }
+                
                 // Save the failed status update in a fresh scoped context
                 await using (AsyncServiceScope errorScope = _serviceScopeFactory.CreateAsyncScope())
                 {
@@ -999,7 +1026,7 @@ public partial class GcodeHarvestService(
                         _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Found discovered file in error scope: {dbFile.FileName}, current status={dbFile.Status}");
                         
                         dbFile.Status = HarvestFileStatus.Failed;
-                        dbFile.Error = $"Failed to import {dbFile.FileName}: {ex.Message}";
+                        dbFile.Error = $"Failed to import {dbFile.FileName}: {errorMessage}";
                         dbFile.CompletedAt = DateTime.UtcNow;
                         
                         _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Updated status to Failed, saving...");
@@ -1012,7 +1039,7 @@ public partial class GcodeHarvestService(
                         await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(dbFile), ct);
                         
                         failedFileIds.Add(fileId.ToString());
-                        errorDetails[fileId.ToString()] = $"Failed to import {dbFile.FileName}: {ex.Message}";
+                        errorDetails[fileId.ToString()] = $"Failed to import {dbFile.FileName}: {errorMessage}";
                         
                         _logger.LogWarning($"[IMPORT-LIFECYCLE] Marked file as Failed and sent event: {dbFile.FileName}");
                     }
