@@ -4,7 +4,7 @@
  */
 
 import { WorkerResponse } from '@/types/worker';
-import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
+import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 
 export interface WorkerJobResponse {
   jobId: string;

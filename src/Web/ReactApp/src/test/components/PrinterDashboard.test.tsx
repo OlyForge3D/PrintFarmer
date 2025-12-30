@@ -4,10 +4,10 @@ import { render } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { TestRouter } from '@/test/utils/TestRouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PrinterDashboard } from '@/components/PrinterDashboard';
+import { PrinterDashboard } from '@/features/printers/components/PrinterDashboard';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthProvider } from '@/common/contexts/AuthContext';
 
 // Mock the API hooks
 vi.mock('@/hooks/useApi', async () => ({

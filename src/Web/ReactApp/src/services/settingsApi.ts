@@ -1,6 +1,6 @@
 import axios from 'axios';
-import type { SettingMetadata } from '../components/SettingsPagelet';
-import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
+import type { SettingMetadata } from '@/components/SettingsPagelet';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
 const api = axios.create({
   baseURL: getApiBaseUrl(),

@@ -13,7 +13,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { UploadIcon, CheckIcon, FileJsonIcon, AlertCircleIcon, ArrowLeftIcon, ArrowRightIcon } from '@/components/icons/MdiIcons';
+import { UploadIcon, CheckIcon, FileJsonIcon, AlertCircleIcon, ArrowLeftIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { useMutation } from '@tanstack/react-query';
 import { orcaProfilesService } from '../services/orcaProfilesService';
 import { OrcaBundlePreview } from '../types/orcaProfiles';

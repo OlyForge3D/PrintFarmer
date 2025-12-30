@@ -4,7 +4,7 @@ import { screen, fireEvent } from '@testing-library/dom';
 import { act } from '@testing-library/react';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useTheme } from '@/contexts/ThemeHooks';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import { ThemeToggle } from '@/common/components/ThemeToggle';
 
 // Mock localStorage
 const localStorageMock = {

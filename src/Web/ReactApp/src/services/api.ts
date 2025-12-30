@@ -1,6 +1,6 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
-import { getApiBaseUrl } from "@/utils/apiUrlHelpers";
+import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import {
   ApiError,
   PrintJobStatusDto,

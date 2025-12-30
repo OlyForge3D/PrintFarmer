@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { act } from '@testing-library/react';
 import { NewSliceJobPage } from '../../pages/NewSliceJobPage';
-import { TestRouter } from '../utils/TestRouter';
-import { AuthProvider } from '../../contexts/AuthContext';
+import { TestRouter } from '@/common/utils/TestRouter';
+import { AuthProvider } from '@/contexts/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Mock SignalR

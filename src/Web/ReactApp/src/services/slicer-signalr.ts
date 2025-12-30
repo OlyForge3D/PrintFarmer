@@ -5,7 +5,7 @@ import {
   LogLevel,
 } from "@microsoft/signalr";
 import { apiClient } from "@/services/api";
-import { getHubUrl } from "@/utils/apiUrlHelpers";
+import { getHubUrl } from "@/common/utils/apiUrlHelpers";
 
 // Slicer progress update event
 export interface SlicingProgressUpdate {

@@ -1,53 +1,64 @@
-import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { Layout } from '@/components/Layout';
-import { ObservabilityDashboard } from '@/components/ObservabilityDashboard';
-import { PrinterDashboard } from '@/components/PrinterDashboard';
-import { SetupWizard } from '@/components/SetupWizard';
-import { FileHealthDashboard } from '@/components/admin/file-health/FileHealthDashboard';
-import { AuthProvider } from '@/contexts/AuthContext';
+// Common components
+import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
+import { ErrorBoundary } from '@/common/components/ErrorBoundary';
+import { Layout } from '@/common/components/Layout';
+import { ObservabilityDashboard } from '@/common/components/ObservabilityDashboard';
+import { PrinterDashboard } from '@/features/printers/components/PrinterDashboard';
+import { SetupWizard } from '@/features/auth/components/SetupWizard';
+import { FileHealthDashboard } from '@/features/gcode/components/file-health/FileHealthDashboard';
+
+// Contexts & Providers
+import { AuthProvider } from '@/common/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
-import { useUnifiedLogging } from '@/hooks/useUnifiedLogging';
-import { CatalogPage } from '@/pages/CatalogPage';
-import { FilesPage } from '@/pages/FilesPage';
-import { HarvestPage } from '@/pages/HarvestPage';
-import { HarvestHistoryPage } from '@/pages/HarvestHistoryPage';
-import { ModelsPage } from '@/pages/ModelsPage';
-import { ModelDetailPage } from '@/pages/ModelDetailPage';
-import { TagAdminPage } from '@/pages/TagAdminPage';
-import { PrintersPage } from '@/pages/PrintersPage';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { SlicerDryRunPage } from '@/pages/SlicerDryRunPage';
-import { SlicerJobStatusPage } from '@/pages/SlicerJobStatusPage';
-import PrintersAdminPage from '@/pages/admin/PrintersAdminPage';
-import SlicersAdminPage from '@/pages/admin/SlicersAdminPage';
-import LocationManagementAdminPage from '@/pages/admin/LocationManagementAdminPage';
-import LogsPage from './pages/logs/LogsPage';
-import { SlicerSettingsPage } from '@/pages/SlicerSettingsPage';
-import { SpoolsPage } from '@/pages/SpoolsPage';
-import { UserManagementPage } from '@/pages/UserManagementPage';
-import WorkerManagementPage from '@/pages/WorkerManagementPage';
-import JobQueueDashboardPage from '@/pages/JobQueueDashboardPage';
-import NewSliceJobPage from '@/pages/NewSliceJobPage';
-import SlicerProfilesPage from '@/pages/SlicerProfilesPage';
-import ImportOfficialProfilesPage from '@/pages/ImportOfficialProfilesPage';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+
+// Hooks & Utils
+import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
+import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+
+// Services
+import { assetService } from '@/services/assetService';
+import { printerSignalRService } from '@/services/printer-signalr';
+
+// Feature Pages
+import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
+import { SpoolsPage } from '@/features/catalog/pages/SpoolsPage';
+import { FilesPage } from '@/features/gcode/pages/FilesPage';
+import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
+import { HarvestHistoryPage } from '@/features/gcode/pages/HarvestHistoryPage';
+import { GcodeLibrary } from '@/features/gcode/pages/GcodeLibrary';
+import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
+import { ModelDetailPage } from '@/features/models3d/pages/ModelDetailPage';
+import { PrintersPage } from '@/features/printers/pages/PrintersPage';
+import PrintersAdminPage from '@/features/printers/pages/admin/PrintersAdminPage';
+import NewSliceJobPage from '@/features/slicer/pages/NewSliceJobPage';
+import SlicerProfilesPage from '@/features/slicer/pages/SlicerProfilesPage';
+import ImportOfficialProfilesPage from '@/features/slicer/pages/ImportOfficialProfilesPage';
+import { SlicerDryRunPage } from '@/features/slicer/pages/SlicerDryRunPage';
+import { SlicerJobStatusPage } from '@/features/slicer/pages/SlicerJobStatusPage';
+import { SlicerSettingsPage } from '@/features/slicer/pages/SlicerSettingsPage';
+import WorkerManagementPage from '@/features/slicer/pages/WorkerManagementPage';
+import SlicersAdminPage from '@/features/slicer/pages/admin/SlicersAdminPage';
+import JobQueueDashboardPage from '@/features/queue/pages/JobQueueDashboardPage';
+import LoginPage from '@/features/auth/pages/LoginPage';
+import ForgotPasswordPage from '@/features/auth/pages/ForgotPasswordPage';
+import ResetPasswordPage from '@/features/auth/pages/ResetPasswordPage';
+import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
+import RegistrationPendingPage from '@/features/auth/pages/RegistrationPendingPage';
+import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
+import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
+import LocationManagementAdminPage from '@/features/admin/pages/LocationManagementAdminPage';
+import LogsPage from '@/features/admin/pages/LogsPage';
+
+// External packages
 import { OrcaImportWizard } from '@farm/slicers-orcaslicer-v2_3_1';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes, Navigate, useLocation } from 'react-router-dom';
-import RegistrationPendingPage from '@/pages/RegistrationPendingPage';
-import { HarvestedFilesLibrary } from './pages/HarvestedFilesLibrary';
 import { Toaster } from 'sonner';
-import LoginPage from './pages/LoginPage';
-import ForgotPasswordPage from './pages/ForgotPasswordPage';
-import ResetPasswordPage from './pages/ResetPasswordPage';
-import { ConfirmEmailPage } from './pages/ConfirmEmailPage';
-import { useAuth } from '@/contexts/AuthHooks';
-import { getApiBaseUrl, getAuthHeaders } from '@/utils/apiUrlHelpers';
-import { assetService } from '@/services/assetService';
-import { printerSignalRService } from '@/services/printer-signalr';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
 
@@ -115,7 +126,7 @@ function AuthenticatedAppRoutes() {
         <Route path="harvest/*">
           <Route index element={<HarvestPage />} />
           <Route path="history" element={<HarvestHistoryPage />} />
-          <Route path="library" element={<HarvestedFilesLibrary />} />
+          <Route path="library" element={<GcodeLibrary />} />
         </Route>
         <Route path="files" element={<FilesPage />} />
         <Route path="catalog" element={<CatalogPage />} />

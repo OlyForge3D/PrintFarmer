@@ -1,5 +1,5 @@
 // Service for importing official slicer profiles for registered printers
-import { getApiBaseUrl } from "@/utils/apiUrlHelpers";
+import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import { SlicerProfileListItem } from "./slicerProfilesService";
 
 export interface BulkProfileImportRequest {

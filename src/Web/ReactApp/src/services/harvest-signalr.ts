@@ -6,7 +6,7 @@ import {
 } from '@microsoft/signalr';
 import { HarvestUpdateDto, JobQueueUpdateDto, PrinterStatusUpdate } from '@/types/api';
 import { apiClient } from '@/services/api';
-import { getHubUrl } from '@/utils/apiUrlHelpers';
+import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;

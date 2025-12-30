@@ -1,7 +1,7 @@
 // Service for interacting with slicer profile API endpoints (Phase 6)
 // Provides list, import, export, and set-default operations.
 
-import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
 // Base interface for all profile types
 export interface IProfileListItem {

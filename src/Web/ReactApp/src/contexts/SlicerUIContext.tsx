@@ -1,6 +1,6 @@
 import React, { ReactNode, useEffect, useMemo } from 'react';
-import { SlicerUIRegistry, type ISlicerUIRegistry } from '../services/slicer-registry/SlicerUIRegistry';
-import { registerAllSlicerUI } from '../services/slicer-registry/registerSlicerUI';
+import { SlicerUIRegistry, type ISlicerUIRegistry } from '@/services/slicer-registry/SlicerUIRegistry';
+import { registerAllSlicerUI } from '@/services/slicer-registry/registerSlicerUI';
 import { SlicerUIContext } from './SlicerUIContextValue';
 
 /**

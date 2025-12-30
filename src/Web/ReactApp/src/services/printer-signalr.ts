@@ -12,7 +12,7 @@ import {
   DiscoveryCompletedDto,
 } from "@/types/api";
 import { apiClient } from "@/services/api";
-import { getHubUrl } from "@/utils/apiUrlHelpers";
+import { getHubUrl } from "@/common/utils/apiUrlHelpers";
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;

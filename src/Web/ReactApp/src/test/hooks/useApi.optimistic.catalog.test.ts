@@ -4,9 +4,9 @@ import { waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { queryKeys, useCancelJob, useCreateManufacturer, useCreateModel, useDeleteJob, useQueuePrintJob } from '../../hooks/useApi';
-import { apiClient } from '../../services/api';
-import { JobQueuePrintJob, JobQueueStatus, PrinterModelDto } from '../../types/api';
+import { queryKeys, useCancelJob, useCreateManufacturer, useCreateModel, useDeleteJob, useQueuePrintJob } from '@/common/hooks/useApi';
+import { apiClient } from '@/services/api';
+import { JobQueuePrintJob, JobQueueStatus, PrinterModelDto } from '@/types/api';
 
 function createClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });

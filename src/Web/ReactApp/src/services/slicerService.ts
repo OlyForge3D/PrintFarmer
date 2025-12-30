@@ -1,5 +1,5 @@
 // Slicer service interfaces and types
-import { getApiBaseUrl } from '@/utils/apiUrlHelpers';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 
 export interface SliceRequest {
   modelFile: File;

@@ -376,11 +376,67 @@ All events use **camelCase JSON** for TypeScript compatibility:
 - Unit and integration tests
 
 ### Frontend (React)
-- Component composition
+- **Feature-based architecture** - Components organized by domain (gcode, printers, models3d, slicer, etc.)
+- Component composition and reusability
 - Custom hooks for logic sharing
 - TypeScript for type safety
 - React Testing Library for tests
 - Error boundaries for resilience
+
+#### Frontend Directory Structure
+
+```
+src/Web/ReactApp/src/
+├── features/                    # Feature-based organization
+│   ├── gcode/                   # G-code library and management
+│   │   ├── pages/               # GcodeLibrary, FilesPage
+│   │   ├── components/          # FileBrowser, harvest components
+│   │   └── hooks/               # Feature-specific hooks
+│   ├── models3d/                # 3D model viewing
+│   │   ├── pages/               # ModelsPage, Models3DViewerPage
+│   │   ├── components/3d/       # ModelViewer3D, GCodeViewer3D
+│   │   └── hooks/               # useStlUpload, etc.
+│   ├── printers/                # Printer management
+│   │   ├── pages/               # PrintersPage, PrintersAdminPage
+│   │   ├── components/          # Printer cards, discovery, modals
+│   │   └── hooks/               # Printer-specific hooks
+│   ├── slicer/                  # Slicing operations
+│   │   ├── pages/               # NewSliceJobPage, SliceJobsPage
+│   │   ├── components/          # Job components, profile selector
+│   │   └── hooks/               # Slicer-specific hooks
+│   ├── queue/                   # Print job queue
+│   │   ├── pages/               # QueuePage
+│   │   └── components/          # Queue components
+│   ├── catalog/                 # Manufacturer and materials
+│   │   ├── pages/               # CatalogPage, SpoolsPage
+│   │   └── components/          # Filament, location, tag components
+│   ├── auth/                    # Authentication
+│   │   ├── pages/               # LoginPage, ProfilePage
+│   │   ├── components/          # Auth forms, setup wizard
+│   │   └── hooks/               # useAuth
+│   └── admin/                   # Admin tools
+│       ├── pages/               # AdminPage, LogsPage, SettingsPage
+│       └── components/          # Admin components
+├── common/                      # Shared across features
+│   ├── components/              # Reusable UI components
+│   │   ├── ui/                  # Button, Input, Select, etc.
+│   │   ├── nav/                 # Navigation components
+│   │   ├── modals/              # Modal dialogs
+│   │   ├── skeletons/           # Loading skeletons
+│   │   └── icons/               # Icon components
+│   ├── hooks/                   # Shared hooks (useApi, useSignalR)
+│   ├── contexts/                # React contexts (AuthContext)
+│   └── utils/                   # Utility functions
+├── services/                    # API clients and services
+├── types/                       # TypeScript type definitions
+└── App.tsx                      # Main application entry
+```
+
+**Design Principles:**
+- Features are self-contained with clear boundaries
+- Common components are shared via `common/` directory
+- Import paths use `@/features/*` and `@/common/*` aliases
+- Each feature can have its own pages, components, and hooks
 
 ## Deployment Architecture
 

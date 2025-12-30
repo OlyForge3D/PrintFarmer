@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import { HarvestOperationCard } from '@/components/harvest/HarvestOperationCard';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthProvider } from '@/common/contexts/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const queryClient = new QueryClient();
