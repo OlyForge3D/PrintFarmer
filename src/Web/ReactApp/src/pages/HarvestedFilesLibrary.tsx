@@ -15,18 +15,34 @@ export const HarvestedFilesLibrary: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    apiClient.getGcodeFilesWithFilter({
-      source: 1, // 1 = Harvest (see GcodeSource enum)
-      search: search || undefined,
-      sortBy,
-      sortOrder
-    })
-      .then(res => {
-        setFiles(res.files);
+    apiClient.queryGcodeLibrary(search || undefined)
+      .then(allFiles => {
+        // Filter for harvested files only (source = 1)
+        const harvestedFiles = allFiles.filter(f => f.source === 1);
+        
+        // Apply sorting
+        const sorted = [...harvestedFiles].sort((a, b) => {
+          if (sortBy === 'name') {
+            const aName = a.displayName || a.originalFileName || '';
+            const bName = b.displayName || b.originalFileName || '';
+            return sortOrder === 'asc' 
+              ? aName.localeCompare(bName)
+              : bName.localeCompare(aName);
+          } else if (sortBy === 'size') {
+            return sortOrder === 'asc'
+              ? a.fileSizeBytes - b.fileSizeBytes
+              : b.fileSizeBytes - a.fileSizeBytes;
+          } else { // date
+            const aDate = new Date(a.uploadedAt).getTime();
+            const bDate = new Date(b.uploadedAt).getTime();
+            return sortOrder === 'asc' ? aDate - bDate : bDate - aDate;
+          }
+        });
+        
+        setFiles(sorted);
         setError(null);
       })
-      .catch(e => setError(e.message || 'Failed to load files'))
-        .catch((e: Error) => setError(e.message || 'Failed to load files'))
+      .catch((e: Error) => setError(e.message || 'Failed to load files'))
       .finally(() => setLoading(false));
   }, [search, sortBy, sortOrder]);
 
@@ -87,9 +103,9 @@ export const HarvestedFilesLibrary: React.FC = () => {
           <tbody>
             {files.map(file => (
               <tr key={file.id}>
-                <td className="p-2 border">{file.name || file.displayName || file.originalFileName}</td>
-                <td className="p-2 border">{((file.size ?? file.fileSizeBytes) / 1024).toFixed(1)} KB</td>
-                <td className="p-2 border">{new Date(file.modifiedAt ?? file.uploadedAt).toLocaleString()}</td>
+                <td className="p-2 border">{file.displayName || file.originalFileName}</td>
+                <td className="p-2 border">{(file.fileSizeBytes / 1024).toFixed(1)} KB</td>
+                <td className="p-2 border">{new Date(file.uploadedAt).toLocaleString()}</td>
                 <td className="p-2 border">{file.sourcePrinterName || file.sourcePrinterId || '-'}</td>
               </tr>
             ))}

@@ -1,13 +1,11 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -22,13 +20,11 @@ public class UsersController(
     Services.Users.IUsersService usersService,
     IAuthenticationService authService,
     ITokenRevocationService tokenRevocationService,
-    AppDbContext dbContext,
     IUnifiedLoggingService logger) : ControllerBase
 {
     private readonly Services.Users.IUsersService _users = usersService;
     private readonly IAuthenticationService _authService = authService;
     private readonly ITokenRevocationService _tokenRevocation = tokenRevocationService;
-    private readonly AppDbContext _db = dbContext;
     private readonly IUnifiedLoggingService _logger = logger;
 
     /// <summary>
@@ -201,8 +197,8 @@ public class UsersController(
         }
 
         // Verify user exists
-        bool userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
-        if (!userExists)
+        UserDto? existingUser = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+        if (existingUser == null)
         {
             return NotFound(new { error = $"User {userId} not found" });
         }
@@ -238,8 +234,8 @@ public class UsersController(
         CancellationToken ct)
     {
         // Verify user exists
-        bool userExists = await _db.Users.AnyAsync(u => u.Id == userId, ct);
-        if (!userExists)
+        UserDto? existingUser = await _authService.GetUserWithRolesAndPermissionsAsync(userId);
+        if (existingUser == null)
         {
             return NotFound(new { error = $"User {userId} not found" });
         }

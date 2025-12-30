@@ -4,8 +4,8 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Slicing;
@@ -24,7 +24,7 @@ public class ProfilesController(
     IProcessProfileRepository processProfileRepo,
     IMachineProfileRepository machineProfileRepo,
     IFilamentProfileRepository filamentProfileRepo,
-    IPrintersRepository printersRepo,
+    IUnitOfWork unitOfWork,
     IWorkerRepository workerRepository) : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger = logger;
@@ -32,7 +32,7 @@ public class ProfilesController(
     private readonly IProcessProfileRepository _processProfileRepo = processProfileRepo;
     private readonly IMachineProfileRepository _machineProfileRepo = machineProfileRepo;
     private readonly IFilamentProfileRepository _filamentProfileRepo = filamentProfileRepo;
-    private readonly IPrintersRepository _printersRepo = printersRepo;
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
     private readonly IWorkerRepository _workerRepository = workerRepository;
 
     [HttpPost("import")]
@@ -838,7 +838,7 @@ public class ProfilesController(
             }
 
             // Get all printers in the system and extract unique nozzle sizes
-            List<Printer> allPrinters = await _printersRepo.GetAllAsync(ct);
+            List<Printer> allPrinters = await _unitOfWork.Printers.GetAllAsync(ct);
             HashSet<double> systemNozzleSizes = allPrinters
                 .Where(p => p.Model?.DefaultNozzleDiameter.HasValue ?? false)
                 .Select(p => p.Model!.DefaultNozzleDiameter!.Value)
@@ -1131,7 +1131,7 @@ public class ProfilesController(
         CancellationToken ct)
     {
         // Verify printer exists using repository
-        Printer? printer = await _printersRepo.FindByIdAsync(printerId, ct);
+        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");
@@ -1177,7 +1177,7 @@ public class ProfilesController(
         }
 
         // Verify printer exists using repository
-        Printer? printer = await _printersRepo.FindByIdAsync(printerId, ct);
+        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");
@@ -1271,7 +1271,7 @@ public class ProfilesController(
         }
 
         // Verify printer exists using repository
-        Printer? printer = await _printersRepo.FindByIdAsync(printerId, ct);
+        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
         if (printer is null)
         {
             return NotFound($"Printer with ID {printerId} not found");

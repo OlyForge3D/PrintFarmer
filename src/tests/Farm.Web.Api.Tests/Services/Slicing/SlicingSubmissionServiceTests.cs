@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Slicing;
@@ -23,7 +24,8 @@ namespace Farm.Web.Api.Tests.Services.Slicing;
 /// </summary>
 public class SlicingSubmissionServiceTests : IDisposable
 {
-    private readonly Mock<IModel3dFileRepository> _mockModelRepository;
+    private readonly Mock<IUnitOfWork> _mockUnitOfWork;
+    private readonly Mock<IModel3DFileRepository> _mockModel3dRepository;
     private readonly Mock<ISlicerFileStorage> _mockFileStorage;
     private readonly Mock<ISlicerOrchestrator> _mockOrchestrator;
     private readonly Mock<IHostEnvironment> _mockEnvironment;
@@ -33,7 +35,9 @@ public class SlicingSubmissionServiceTests : IDisposable
 
     public SlicingSubmissionServiceTests()
     {
-        _mockModelRepository = new Mock<IModel3dFileRepository>();
+        _mockUnitOfWork = new Mock<IUnitOfWork>();
+        _mockModel3dRepository = new Mock<IModel3DFileRepository>();
+        _mockUnitOfWork.Setup(u => u.Model3dFiles).Returns(_mockModel3dRepository.Object);
         _mockFileStorage = new Mock<ISlicerFileStorage>();
         _mockOrchestrator = new Mock<ISlicerOrchestrator>();
         _mockEnvironment = new Mock<IHostEnvironment>();
@@ -42,7 +46,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         _mockEnvironment.Setup(e => e.EnvironmentName).Returns("Production");
 
         _service = new SlicingSubmissionService(
-            _mockModelRepository.Object,
+            _mockUnitOfWork.Object,
             _mockFileStorage.Object,
             _mockOrchestrator.Object,
             _mockEnvironment.Object,
@@ -70,7 +74,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
             new SlicingSubmissionService(null!, _mockFileStorage.Object, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object)
         );
-        Assert.Equal("modelRepository", ex.ParamName);
+        Assert.Equal("unitOfWork", ex.ParamName);
     }
 
     [Fact]
@@ -78,7 +82,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockModelRepository.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object)
+            new SlicingSubmissionService(_mockUnitOfWork.Object, null!, _mockOrchestrator.Object, _mockEnvironment.Object, _mockLogger.Object)
         );
         Assert.Equal("fileStorage", ex.ParamName);
     }
@@ -88,7 +92,7 @@ public class SlicingSubmissionServiceTests : IDisposable
     {
         // Act & Assert
         ArgumentNullException ex = Assert.Throws<ArgumentNullException>(() =>
-            new SlicingSubmissionService(_mockModelRepository.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _mockLogger.Object)
+            new SlicingSubmissionService(_mockUnitOfWork.Object, _mockFileStorage.Object, null!, _mockEnvironment.Object, _mockLogger.Object)
         );
         Assert.Equal("orchestrator", ex.ParamName);
     }
@@ -371,8 +375,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid printerId = Guid.NewGuid();
         Guid userId = Guid.NewGuid();
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
 
         _mockFileStorage
@@ -404,8 +408,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid modelId = Guid.NewGuid();
         SlicerProfileDto profile = CreateTestProfile();
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Model3D?)null);
 
         // Act
@@ -433,8 +437,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         };
         SlicerProfileDto profile = CreateTestProfile();
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
 
         // Act
@@ -465,8 +469,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid userId = Guid.NewGuid();
         string capturedKey = string.Empty;
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
 
         _mockFileStorage
@@ -510,8 +514,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         };
         SlicerProfileDto profile = CreateTestProfile();
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
 
         _mockFileStorage
@@ -546,8 +550,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid userId = Guid.NewGuid();
         bool repositoryCalled = false;
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .Callback<Guid, CancellationToken>((id, ct) => repositoryCalled = true)
             .ReturnsAsync(model);
 
@@ -590,8 +594,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid userId = Guid.NewGuid();
         long streamLength = 0;
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
 
         _mockFileStorage
@@ -637,8 +641,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid jobId = Guid.NewGuid();
         const string uploadedUrl = "http://storage.local/testing-model.stl";
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
 
         _mockFileStorage
@@ -688,8 +692,8 @@ public class SlicingSubmissionServiceTests : IDisposable
         };
         SlicerProfileDto profile = CreateTestProfile();
 
-        _mockModelRepository
-            .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+                _mockModel3dRepository
+        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
 
         _mockFileStorage

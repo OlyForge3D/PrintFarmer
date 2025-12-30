@@ -21,6 +21,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
@@ -29,7 +30,7 @@ namespace Farm.Infrastructure.Services.Printers
 {
     public class PrintersService : IPrintersService
     {
-        private readonly Farm.Infrastructure.Repositories.Printers.IPrintersRepository _repo;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly Catalog.ICatalogService _catalogService;
         private readonly IBackendClientFactory _backendFactory;
         private readonly IBackendCapabilityFactory _capabilityFactory;
@@ -45,7 +46,7 @@ namespace Farm.Infrastructure.Services.Printers
         private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService;
 
         public PrintersService(
-            Farm.Infrastructure.Repositories.Printers.IPrintersRepository repo,
+            IUnitOfWork unitOfWork,
             IBackendClientFactory backendFactory,
             IBackendCapabilityFactory capabilityFactory,
             ICircuitBreakerService circuitBreaker,
@@ -60,7 +61,7 @@ namespace Farm.Infrastructure.Services.Printers
             Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
             Farm.Infrastructure.Services.Locations.ILocationService locationService)
         {
-            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
             _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
             _circuitBreaker = circuitBreaker ?? throw new ArgumentNullException(nameof(circuitBreaker));
@@ -230,37 +231,37 @@ namespace Farm.Infrastructure.Services.Printers
 
         public async Task<List<Printer>> GetAllAsync(CancellationToken ct)
         {
-            return await _repo.GetAllAsync(ct);
+            return await _unitOfWork.Printers.GetAllAsync(ct);
         }
 
         public async Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct)
         {
-            return await _repo.GetAllWithIncludesAsync(ct);
+            return await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
         }
 
         public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct)
         {
-            return await _repo.FindByIdAsync(id, ct);
+            return await _unitOfWork.Printers.FindByIdAsync(id, ct);
         }
 
         public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct)
         {
-            return await _repo.FindByIdWithIncludesAsync(id, ct);
+            return await _unitOfWork.Printers.FindByIdWithIncludesAsync(id, ct);
         }
 
         public async Task AddAsync(Printer p, CancellationToken ct)
         {
-            await _repo.AddAsync(p, ct);
+            await _unitOfWork.Printers.AddAsync(p, ct);
         }
 
         public async Task RemoveAsync(Printer p, CancellationToken ct)
         {
-            await _repo.RemoveAsync(p, ct);
+            await _unitOfWork.Printers.RemoveAsync(p, ct);
         }
 
         public async Task SaveChangesAsync(CancellationToken ct)
         {
-            await _repo.SaveChangesAsync(ct);
+            await _unitOfWork.SaveChangesAsync(ct);
         }
 
         // DEPRECATED: PrinterCapabilities methods removed - hardware specs now on Printer entity
@@ -268,7 +269,7 @@ namespace Farm.Infrastructure.Services.Printers
         // ----- Orchestration methods -----
         public async Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct)
         {
-            List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
+            List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
 
             // Use coordinator to execute status retrieval in parallel with per-printer timeout
             PrinterDto?[] dtos = await _coordinator.ExecuteParallelWithTimeoutAsync<PrinterDto>(
@@ -338,7 +339,7 @@ namespace Farm.Infrastructure.Services.Printers
 #pragma warning disable CS8603 // Possible null reference return - PrinterStatusDto constructor returns non-nullable
         public async Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct)
         {
-            Printer? p = await _repo.FindByIdAsync(id, ct);
+            Printer? p = await _unitOfWork.Printers.FindByIdAsync(id, ct);
             if (p is null)
             {
                 throw new KeyNotFoundException();
@@ -371,7 +372,7 @@ namespace Farm.Infrastructure.Services.Printers
 
         public async Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct)
         {
-            Printer? p = await _repo.FindByIdWithIncludesAsync(id, ct);
+            Printer? p = await _unitOfWork.Printers.FindByIdWithIncludesAsync(id, ct);
             if (p is null)
             {
                 throw new KeyNotFoundException();
@@ -386,7 +387,7 @@ namespace Farm.Infrastructure.Services.Printers
 
         public async Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
         {
-            List<Printer> items = await _repo.GetAllAsync(ct);
+            List<Printer> items = await _unitOfWork.Printers.GetAllAsync(ct);
             PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
             {
                 string? streamUrl = null;
@@ -423,12 +424,12 @@ namespace Farm.Infrastructure.Services.Printers
 
         public async Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct)
         {
-            return await _repo.GetPrintersForExportAsync(ids, ct);
+            return await _unitOfWork.Printers.GetPrintersForExportAsync(ids, ct);
         }
 
         public async Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct)
         {
-            return await _repo.ExistsByNameOrServerUrlAsync(name, serverUrl, ct);
+            return await _unitOfWork.Printers.ExistsByNameOrServerUrlAsync(name, serverUrl, ct);
         }
 
         /// <summary>
@@ -438,12 +439,12 @@ namespace Farm.Infrastructure.Services.Printers
         public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
         {
             // Use the repository's efficient direct database query instead of loading all printers
-            return await _repo.FindByIpAddressAsync(serverUrl, ct);
+            return await _unitOfWork.Printers.FindByIpAddressAsync(serverUrl, ct);
         }
 
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
-            List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
+            List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
             var dtos = new List<PrinterFastDto>();
 
             foreach (var p in items)
@@ -507,7 +508,7 @@ namespace Farm.Infrastructure.Services.Printers
 
         public async Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct)
         {
-            List<Printer> items = await _repo.GetAllWithIncludesAsync(ct);
+            List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
             var dtos = new List<CompletePrinterDto>();
             var cachedStatuses = _statusCache.GetAllStatuses();
 

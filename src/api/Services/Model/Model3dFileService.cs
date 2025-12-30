@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
@@ -19,38 +19,33 @@ using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Services.Model
 {
-    #pragma warning disable S101 // 3d is a standard acronym
-    public class Model3dFileService : IModel3dFileService
-    #pragma warning restore S101
+    public class Model3DFileService : IModel3DFileService
     {
-        private readonly IModel3dFileRepository _repository;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly IUnifiedLoggingService _logger;
         private readonly string _modelsPath;
         private readonly IModelAnalysisService? _analysisService;
         private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
         private readonly IFileManagementService _fileManagementService;
         private readonly IThumbnailGenerationService? _thumbnailService;
-        private readonly AppDbContext _db;
         private readonly IFolderManagementService _folderManagementService;
 
-        public Model3dFileService(
-            IModel3dFileRepository repository,
+        public Model3DFileService(
+            IUnitOfWork unitOfWork,
             IUnifiedLoggingService logger,
             IConfiguration configuration,
             Farm.Web.Api.Services.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,
-            AppDbContext db,
             IFolderManagementService folderManagementService,
             IModelAnalysisService? analysisService = null,
             IThumbnailGenerationService? thumbnailService = null)
         {
-            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _analysisService = analysisService;
             _thumbnailService = thumbnailService;
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
             _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-            _db = db ?? throw new ArgumentNullException(nameof(db));
             _folderManagementService = folderManagementService ?? throw new ArgumentNullException(nameof(folderManagementService));
             ArgumentNullException.ThrowIfNull(configuration);
             _modelsPath = configuration["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
@@ -62,7 +57,7 @@ namespace Farm.Web.Api.Services.Model
 
         public async Task<IReadOnlyList<Model3DDto>> ListModelsAsync(CancellationToken ct)
         {
-            IReadOnlyList<Model3D> models = await _repository.ListValidAsync(ct);
+            IReadOnlyList<Model3D> models = await _unitOfWork.Model3dFiles.ListValidAsync(ct);
 
             return models.Select(m => new Model3DDto
             {
@@ -108,8 +103,8 @@ namespace Farm.Web.Api.Services.Model
             string? virtualPathNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
 
             // Get all files and subdirectories from database for this directory (pure DB approach)
-            List<Model3D> dbFiles = await _repository.ListValidByDirectoryAsync(requestedDir, ct);
-            List<string> subdirectories = await _repository.ListSubdirectoriesAsync(requestedDir, ct);
+            List<Model3D> dbFiles = await _unitOfWork.Model3dFiles.ListValidByDirectoryAsync(requestedDir, ct);
+            List<string> subdirectories = await _unitOfWork.Model3dFiles.ListSubdirectoriesAsync(requestedDir, ct);
 
             // Build directory entries
             List<Model3DEntryDto> entries = new();
@@ -211,7 +206,7 @@ namespace Farm.Web.Api.Services.Model
 
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _repository.GetByIdAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
             if (model == null)
             {
                 return null;
@@ -232,19 +227,19 @@ namespace Farm.Web.Api.Services.Model
 
         public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _repository.GetByIdAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
             return model?.FilePath;
         }
 
         public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _repository.GetByIdAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
             return model?.ThumbnailPath;
         }
 
         public async Task DeleteModelAsync(Guid id, CancellationToken ct)
         {
-            Model3D? model = await _repository.GetByIdAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
             if (model == null)
             {
                 throw new KeyNotFoundException("Model not found");
@@ -262,8 +257,8 @@ namespace Farm.Web.Api.Services.Model
                     System.IO.File.Delete(model.ThumbnailPath);
                 }
 
-                await _repository.RemoveAsync(model, ct);
-                await _repository.SaveChangesAsync(ct);
+                await _unitOfWork.Model3dFiles.RemoveAsync(model, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
                 _logger.LogInformation($"Model deleted: {id}");
             }
             catch (Exception ex)
@@ -384,7 +379,7 @@ namespace Farm.Web.Api.Services.Model
                 catch { }
 
                 // Step 3: Check for duplicates
-                Model3D? existingModel = await _repository.GetByHashAsync(fileHash, ct);
+                Model3D? existingModel = await _unitOfWork.Model3dFiles.GetByHashAsync(fileHash, ct);
                 string baseName = Path.GetFileNameWithoutExtension(originalName);
                 if (existingModel != null)
                 {
@@ -444,8 +439,8 @@ namespace Farm.Web.Api.Services.Model
                     TriangleCount = analysis?.TriangleCount
                 };
 
-                await _repository.AddAsync(model, ct);
-                await _repository.SaveChangesAsync(ct);
+                await _unitOfWork.Model3dFiles.AddAsync(model, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
 
                 // Step 5: Move temp file to final location (only after DB commit succeeds)
                 try
@@ -491,7 +486,7 @@ namespace Farm.Web.Api.Services.Model
                             {
                                 // Update model with ONLY relative path (e.g., "uuid_thumb.png"), not full absolute path
                                 model.ThumbnailPath = thumbnailFileName;
-                                await _repository.SaveChangesAsync(ct);
+                                await _unitOfWork.SaveChangesAsync(ct);
 
                                 _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
                             }

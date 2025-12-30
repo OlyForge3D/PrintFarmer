@@ -51,18 +51,28 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Register DLL import resolver for Lib3MF to handle cross-platform native library loading
 // Maps "lib3mf.dll" to platform-specific names: lib3mf.so (Linux), lib3mf.dylib (macOS), lib3mf.dll (Windows)
-NativeLibrary.SetDllImportResolver(typeof(Lib3MF.Internal.Lib3MFWrapper).Assembly, (name, assembly, searchPath) =>
+// The assembly resolver can only be set once per AppDomain, so we attempt and catch if already set
+try
 {
-    if (name != "lib3mf.dll")
+    NativeLibrary.SetDllImportResolver(typeof(Lib3MF.Internal.Lib3MFWrapper).Assembly, (name, assembly, searchPath) =>
     {
-        return IntPtr.Zero;
-    }
+        if (name != "lib3mf.dll")
+        {
+            return IntPtr.Zero;
+        }
 
-    string libName = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "lib3mf.so" :
-                     RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "lib3mf.dylib" : "lib3mf.dll";
+        string libName = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "lib3mf.so" :
+                         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "lib3mf.dylib" : "lib3mf.dll";
 
-    return NativeLibrary.TryLoad(libName, assembly, searchPath, out var handle) ? handle : IntPtr.Zero;
-});
+        return NativeLibrary.TryLoad(libName, assembly, searchPath, out var handle) ? handle : IntPtr.Zero;
+    });
+}
+catch (InvalidOperationException)
+{
+    // Resolver already set from a previous Program.cs invocation in the same AppDomain
+    // This is expected behavior in integration tests where multiple app instances are created
+    // The previously-set resolver will handle all library loading for this assembly
+}
 
 // Explicitly add environment variables with "PFARM__" prefix to configuration.
 // This allows settings like PFARM__Spoolman__BaseUrl to be recognized by the

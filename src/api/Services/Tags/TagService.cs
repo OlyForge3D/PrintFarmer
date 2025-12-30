@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
@@ -16,18 +16,18 @@ namespace Farm.Web.Api.Services.Tags
     {
         private readonly ITagRepository _tagRepository;
         private readonly IModelTagMappingRepository _mappingRepository;
-        private readonly IModel3dFileRepository _modelRepository;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly IUnifiedLoggingService _logger;
 
         public TagService(
             ITagRepository tagRepository,
             IModelTagMappingRepository mappingRepository,
-            IModel3dFileRepository modelRepository,
+            IUnitOfWork unitOfWork,
             IUnifiedLoggingService logger)
         {
             _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
             _mappingRepository = mappingRepository ?? throw new ArgumentNullException(nameof(mappingRepository));
-            _modelRepository = modelRepository ?? throw new ArgumentNullException(nameof(modelRepository));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -218,7 +218,7 @@ namespace Farm.Web.Api.Services.Tags
                 _logger.LogInformation($"Assigning {tagIdList.Count} tags to model {modelId}");
 
                 // Verify model exists
-                Model3D? model = await _modelRepository.GetByIdAsync(modelId, ct);
+                Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
                 if (model == null)
                 {
                     _logger.LogError($"Model {modelId} not found");

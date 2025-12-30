@@ -15,9 +15,7 @@ namespace Farm.Web.Api.Services.Model
     /// - Metadata extraction and thumbnail generation
     /// - File access and deletion
     /// </summary>
-    #pragma warning disable S101 // 3d is a standard acronym
-    public interface IModel3dFileService
-    #pragma warning restore S101
+    public interface IModel3DFileService
     {
         /// <summary>
         /// Retrieves all valid 3D models in a flat list.

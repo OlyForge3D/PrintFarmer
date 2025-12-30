@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,7 @@ namespace Farm.Web.Api.Tests.Services;
 public class HarvestCompletionServiceTests
 {
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
+    private readonly Mock<IUnitOfWork> _unitOfWorkMock;
     private readonly Mock<IHarvestRepository> _harvestRepoMock;
     private readonly MockServiceProvider _mockServiceProvider;
     private readonly HarvestCompletionService _service;
@@ -19,11 +21,13 @@ public class HarvestCompletionServiceTests
     {
         _loggerMock = new Mock<IUnifiedLoggingService>();
         _harvestRepoMock = new Mock<IHarvestRepository>();
+        _unitOfWorkMock = new Mock<IUnitOfWork>();
+        _unitOfWorkMock.Setup(u => u.HarvestOperations).Returns(_harvestRepoMock.Object);
 
         // Create a mock service scope that returns our mock service provider
         var serviceScopeMock = new Mock<IServiceScope>();
         serviceScopeMock.Setup(s => s.ServiceProvider)
-            .Returns(new MockServiceProvider(_harvestRepoMock.Object));
+            .Returns(new MockServiceProvider(_unitOfWorkMock.Object));
         serviceScopeMock.Setup(s => s.Dispose());
 
         var asyncDisposableMock = serviceScopeMock.As<IAsyncDisposable>();
@@ -31,27 +35,27 @@ public class HarvestCompletionServiceTests
             .Returns(new ValueTask());
 
         // Create a real IServiceProvider wrapper that handles CreateAsyncScope
-        _mockServiceProvider = new MockServiceProvider(_harvestRepoMock.Object, serviceScopeMock.Object);
+        _mockServiceProvider = new MockServiceProvider(_unitOfWorkMock.Object, serviceScopeMock.Object);
 
         _service = new HarvestCompletionService(_mockServiceProvider, _loggerMock.Object);
     }
 
     private class MockServiceProvider : IServiceProvider
     {
-        private readonly IHarvestRepository _harvestRepo;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly IServiceScope? _scope;
 
-        public MockServiceProvider(IHarvestRepository harvestRepo, IServiceScope? scope = null)
+        public MockServiceProvider(IUnitOfWork unitOfWork, IServiceScope? scope = null)
         {
-            _harvestRepo = harvestRepo;
+            _unitOfWork = unitOfWork;
             _scope = scope;
         }
 
         public object? GetService(Type serviceType)
         {
-            if (serviceType == typeof(IHarvestRepository))
+            if (serviceType == typeof(IUnitOfWork))
             {
-                return _harvestRepo;
+                return _unitOfWork;
             }
             // Return a mock scope factory that returns our scope
             if (serviceType == typeof(IServiceScopeFactory))
@@ -241,7 +245,7 @@ public class HarvestCompletionServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        await _service.ProcessOperationsAsync(_harvestRepoMock.Object, CancellationToken.None);
+        await _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None);
 
         // Assert
         Assert.Equal(GcodeHarvestStatus.Completed, op1.Status);

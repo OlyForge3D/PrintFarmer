@@ -1,7 +1,8 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Tags;
+using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,8 @@ public class TagServiceTests
 {
     private readonly Mock<ITagRepository> _tagRepository;
     private readonly Mock<IModelTagMappingRepository> _mappingRepository;
-    private readonly Mock<IModel3dFileRepository> _modelRepository;
+    private readonly Mock<IUnitOfWork> _unitOfWork;
+    private readonly Mock<IModel3DFileRepository> _model3dRepository;
     private readonly Mock<IUnifiedLoggingService> _logger;
     private readonly TagService _service;
 
@@ -22,13 +24,15 @@ public class TagServiceTests
     {
         _tagRepository = new Mock<ITagRepository>();
         _mappingRepository = new Mock<IModelTagMappingRepository>();
-        _modelRepository = new Mock<IModel3dFileRepository>();
+        _unitOfWork = new Mock<IUnitOfWork>();
+        _model3dRepository = new Mock<IModel3DFileRepository>();
+        _unitOfWork.Setup(u => u.Model3dFiles).Returns(_model3dRepository.Object);
         _logger = new Mock<IUnifiedLoggingService>();
 
         _service = new TagService(
             _tagRepository.Object,
             _mappingRepository.Object,
-            _modelRepository.Object,
+            _unitOfWork.Object,
             _logger.Object);
     }
 
@@ -388,7 +392,7 @@ public class TagServiceTests
         var tag1 = new Model3DTag { Id = tagId1, Name = "Support" };
         var tag2 = new Model3DTag { Id = tagId2, Name = "Detail" };
 
-        _modelRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+        _model3dRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
         _mappingRepository.Setup(r => r.RemoveByModelIdAsync(modelId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -415,7 +419,7 @@ public class TagServiceTests
         var modelId = Guid.NewGuid();
         var tagId = Guid.NewGuid();
 
-        _modelRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+        _model3dRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Model3D?)null);
 
         // Act & Assert
@@ -434,7 +438,7 @@ public class TagServiceTests
         var model = new Model3D { Id = modelId, DisplayName = "Test Model", OriginalFileName = "test.stl", FilePath = "/models/test.stl" };
         var validTag = new Model3DTag { Id = validTagId, Name = "Support" };
 
-        _modelRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+        _model3dRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
         _mappingRepository.Setup(r => r.RemoveByModelIdAsync(modelId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -461,7 +465,7 @@ public class TagServiceTests
         var modelId = Guid.NewGuid();
         var model = new Model3D { Id = modelId, DisplayName = "Test Model", OriginalFileName = "test.stl", FilePath = "/models/test.stl" };
 
-        _modelRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+        _model3dRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
         _mappingRepository.Setup(r => r.RemoveByModelIdAsync(modelId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -591,7 +595,7 @@ public class TagServiceTests
         var model2 = new Model3D { Id = modelId2, DisplayName = "Model2", OriginalFileName = "model2.stl", FilePath = "/models/model2.stl" };
         var tag = new Model3DTag { Id = tagId, Name = "Support" };
 
-        _modelRepository.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _model3dRepository.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid id, CancellationToken ct) => id == modelId1 ? model1 : (id == modelId2 ? model2 : null));
 
         _mappingRepository.Setup(r => r.RemoveByModelIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -620,7 +624,7 @@ public class TagServiceTests
         await _service.BulkAssignTagsAsync(Array.Empty<Guid>(), new[] { Guid.NewGuid() }, CancellationToken.None);
 
         // Assert
-        _modelRepository.Verify(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _model3dRepository.Verify(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion

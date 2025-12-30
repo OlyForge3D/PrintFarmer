@@ -7,13 +7,13 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Model;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -29,13 +29,28 @@ namespace Farm.Web.Api.Tests.Services
             return new FormFile(ms, 0, ms.Length, name, fileName);
         }
 
+        private static Mock<IFolderManagementService> CreateFolderServiceMock()
+        {
+            var folder = new Folder
+            {
+                Id = Guid.NewGuid(),
+                Path = "/",
+                FolderType = "models"
+            };
+
+            var mock = new Mock<IFolderManagementService>(MockBehavior.Strict);
+            _ = mock.Setup(f => f.GetOrCreateFolderAsync("/", "models", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(folder);
+            return mock;
+        }
+
         [Fact]
         public async Task UploadModelAsync_HappyPath_CreatesEntity()
         {
             IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
-            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>(MockBehavior.Strict);
+            Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
             // For happy path: repository returns no existing model for the hash and will accept AddAsync
             _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Model3D?)null);
@@ -46,10 +61,14 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
             _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
-            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
-            Mock<IFolderManagementService> mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+            Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
 
-            Model3dFileService service = new Model3dFileService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, mockFolderService.Object);
+            // Wrap the repository in a UnitOfWork mock
+            Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
+            mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
+            mockUoW.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object);
 
             IFormFile file = CreateFormFile("file", "dummy-content", "model.stl");
 
@@ -87,7 +106,7 @@ namespace Farm.Web.Api.Tests.Services
                 UpdatedAt = DateTime.UtcNow
             };
 
-            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>(MockBehavior.Strict);
+            Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
             // For duplicate scenario: GetByHashAsync returns existing model for any hash
             _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existing);
@@ -101,10 +120,14 @@ namespace Farm.Web.Api.Tests.Services
             _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
                 .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
 
-            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
-            Mock<IFolderManagementService> mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+            Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
 
-            Model3dFileService service = new Model3dFileService(mockRepo.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockDb.Object, mockFolderService.Object);
+            // Wrap the repository in a UnitOfWork mock
+            Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
+            mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
+            mockUoW.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object);
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
             Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);

@@ -36,7 +36,7 @@ public interface IHarvestRepository
     Task DeleteDiscoveredFilesByOperationAsync(Guid operationId, CancellationToken ct = default);
 
     // Harvest file mapping operations
-    Task CreateFileImportMappingAsync(Guid harvestDiscoveredFileId, Guid gcodeFileId, CancellationToken ct = default);
+    Task CreateFileImportMappingAsync(HarvestDiscoveredFile discoveredFile, GcodeFile gcodeFile, CancellationToken ct = default);
 
     // Combined operations
     Task SaveChangesAsync(CancellationToken ct = default);

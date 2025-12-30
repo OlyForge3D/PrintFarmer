@@ -5,8 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
@@ -30,27 +30,28 @@ namespace Farm.Web.Api.Tests.Controllers
             return mock;
         }
 
-        private AppDbContext? CreateMockAppDbContext()
-        {
-            // Return null - the CreateFolderAsync method only uses _db if we actually call SaveChangesAsync
-            // and the try/catch will handle the null gracefully
-            return null!;
-        }
-
         private Mock<Api.Services.Tags.ITagService> CreateMockTagService()
         {
             return new Mock<Api.Services.Tags.ITagService>(MockBehavior.Loose);
         }
 
-        private Mock<IModel3dFileRepository> CreateMockModelRepository()
+        private Mock<IUnitOfWork> CreateMockUnitOfWork()
         {
-            return new Mock<IModel3dFileRepository>(MockBehavior.Loose);
+            var mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
+            var mockModel3dRepo = new Mock<IModel3DFileRepository>(MockBehavior.Loose);
+            mockUoW.Setup(u => u.Model3dFiles).Returns(mockModel3dRepo.Object);
+            return mockUoW;
+        }
+
+        private Mock<IFolderManagementService> CreateMockFolderService()
+        {
+            return new Mock<IFolderManagementService>(MockBehavior.Loose);
         }
 
         [Fact]
         public async Task ListModelsAsync_DelegatesToService()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
@@ -58,8 +59,8 @@ namespace Farm.Web.Api.Tests.Controllers
             List<Model3DDto> expected = new List<Model3DDto> { new Model3DDto { Id = Guid.NewGuid(), Name = "TestModel" } };
             _ = mockService.Setup(s => s.ListModelsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.ListModelsAsync();
 
@@ -73,7 +74,7 @@ namespace Farm.Web.Api.Tests.Controllers
         [Fact]
         public async Task GetModelAsync_DelegatesToService_ReturnsNotFoundWhenNull()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
@@ -81,8 +82,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             _ = mockService.Setup(s => s.GetModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3DDto?)null);
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.GetModelAsync(Guid.NewGuid());
 
@@ -93,7 +94,7 @@ namespace Farm.Web.Api.Tests.Controllers
         [Fact]
         public async Task UploadModelAsync_DelegatesToService_ReturnsCreated()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
@@ -102,8 +103,8 @@ namespace Farm.Web.Api.Tests.Controllers
             Model3DUploadResultDto uploadResult = new Model3DUploadResultDto { Id = Guid.NewGuid(), FileName = "model.stl", FileType = "stl" };
             _ = mockService.Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             FormFile fakeFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
 
@@ -119,7 +120,7 @@ namespace Farm.Web.Api.Tests.Controllers
         [Fact]
         public async Task DeleteModelAsync_DelegatesToService_ReturnsNoContent()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
@@ -127,8 +128,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -139,7 +140,7 @@ namespace Farm.Web.Api.Tests.Controllers
         [Fact]
         public async Task DeleteModelAsync_DelegatesToService_ReturnsNotFoundOnMissing()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
@@ -147,8 +148,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             _ = mockService.Setup(s => s.DeleteModelAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ThrowsAsync(new KeyNotFoundException());
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.DeleteModelAsync(Guid.NewGuid());
 
@@ -159,7 +160,7 @@ namespace Farm.Web.Api.Tests.Controllers
         [Fact]
         public async Task GetModelFileAsync_NoPath_ReturnsNotFound()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
@@ -167,8 +168,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             _ = mockService.Setup(s => s.GetModelFilePathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -179,7 +180,7 @@ namespace Farm.Web.Api.Tests.Controllers
         [Fact]
         public async Task GetModelThumbnailAsync_NoThumb_ReturnsNotFound()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
@@ -187,8 +188,8 @@ namespace Farm.Web.Api.Tests.Controllers
 
             _ = mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, mockConfig.Object, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 
@@ -207,12 +208,12 @@ namespace Farm.Web.Api.Tests.Controllers
 
             string tmpFile = Path.Combine(modelPath, $"model-{Guid.NewGuid()}.stl");
 
-            Mock<IModel3dFileRepository> mockRepo = new Mock<IModel3dFileRepository>(MockBehavior.Strict);
+            Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
             _ = mockRepo.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new Farm.Infrastructure.Domain.Model3D
             {
                 Id = Guid.NewGuid(),
                 OriginalFileName = "orig.stl",
-                FilePath = tmpFile,
+                FilePath = Path.GetFileName(tmpFile),
                 IsValid = true,
                 UploadedAt = DateTime.UtcNow
             });
@@ -220,13 +221,15 @@ namespace Farm.Web.Api.Tests.Controllers
             TestFileSystem testFs = TestFileSystemFactory.WithFile(tmpFile, Encoding.UTF8.GetBytes("content"));
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
 
-            Mock<AppDbContext> mockDb = new Mock<AppDbContext>(MockBehavior.Loose);
-
             Mock<IFolderManagementService> mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
 
-            Farm.Web.Api.Services.Model.IModel3dFileService modelService = new Farm.Web.Api.Services.Model.Model3dFileService(mockRepo.Object, mockLogger.Object, configReal, testFs, mockFileManagement.Object, mockDb.Object, mockFolderService.Object);
+            // Wrap the repository in a UnitOfWork mock
+            Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
+            mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
 
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, modelService, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockRepo.Object, CreateMockAppDbContext());
+            Farm.Web.Api.Services.Model.IModel3DFileService modelService = new Farm.Web.Api.Services.Model.Model3DFileService(mockUoW.Object, mockLogger.Object, configReal, testFs, mockFileManagement.Object, mockFolderService.Object);
+
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, modelService, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.GetModelFileAsync(Guid.NewGuid());
 
@@ -238,20 +241,20 @@ namespace Farm.Web.Api.Tests.Controllers
         [Fact]
         public async Task GetModelThumbnailAsync_ReturnsPhysicalFile()
         {
-            Mock<IModel3dFileService> mockService = new Mock<IModel3dFileService>(MockBehavior.Strict);
+            Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>();
 
             string modelPath = Path.Combine(Directory.GetCurrentDirectory(), "models");
             IConfigurationRoot configReal = new ConfigurationBuilder().AddInMemoryCollection(new[] { new KeyValuePair<string, string?>("ModelStorage:Path", modelPath) }).Build();
 
             string tmpFileThumb = Path.Combine(modelPath, $"thumb-{Guid.NewGuid()}.png");
-            _ = mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(tmpFileThumb);
+            _ = mockService.Setup(s => s.GetModelThumbnailPathAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(Path.GetFileName(tmpFileThumb));
 
             TestFileSystem testFs = TestFileSystemFactory.WithThumbnail(tmpFileThumb, Encoding.UTF8.GetBytes("pngcontent"));
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
 
-            Mock<IModel3dFileRepository> mockModelRepo = CreateMockModelRepository();
-            Model3dFilesController controller = new Model3dFilesController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockModelRepo.Object, CreateMockAppDbContext());
+            Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
+            Model3DFilesController controller = new Model3DFilesController(mockLogger.Object, mockService.Object, configReal, testFs, mockFileManagement.Object, CreateMockTagService().Object, mockUoW.Object, CreateMockFolderService().Object);
 
             IActionResult result = await controller.GetModelThumbnailAsync(Guid.NewGuid());
 

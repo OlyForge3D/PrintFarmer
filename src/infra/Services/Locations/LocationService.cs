@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using AutoMapper;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Locations;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Infrastructure.Services.Locations;
@@ -17,20 +17,20 @@ namespace Farm.Infrastructure.Services.Locations;
 /// </summary>
 public class LocationService : ILocationService
 {
-    private readonly ILocationRepository _repository;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IUnifiedLoggingService _logger;
     private readonly IMapper _mapper;
 
     public LocationService(
-        ILocationRepository repository,
+        IUnitOfWork unitOfWork,
         IUnifiedLoggingService logger,
         IMapper mapper)
     {
-        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(mapper);
 
-        _repository = repository;
+        _unitOfWork = unitOfWork;
         _logger = logger;
         _mapper = mapper;
     }
@@ -42,7 +42,7 @@ public class LocationService : ILocationService
     {
         try
         {
-            return await _repository.GetAllAsync(ct);
+            return await _unitOfWork.Locations.GetAllAsync(ct);
         }
         catch (Exception ex)
         {
@@ -58,7 +58,7 @@ public class LocationService : ILocationService
     {
         try
         {
-            return await _repository.GetAllWithInactiveAsync(ct);
+            return await _unitOfWork.Locations.GetAllWithInactiveAsync(ct);
         }
         catch (Exception ex)
         {
@@ -79,7 +79,7 @@ public class LocationService : ILocationService
 
         try
         {
-            return await _repository.FindByIdAsync(id, ct);
+            return await _unitOfWork.Locations.FindByIdAsync(id, ct);
         }
         catch (Exception ex)
         {
@@ -100,7 +100,7 @@ public class LocationService : ILocationService
 
         try
         {
-            return await _repository.FindByNameAsync(name, ct);
+            return await _unitOfWork.Locations.FindByNameAsync(name, ct);
         }
         catch (Exception ex)
         {
@@ -121,7 +121,7 @@ public class LocationService : ILocationService
 
         try
         {
-            return await _repository.ExistsByNameAsync(name, ct);
+            return await _unitOfWork.Locations.ExistsByNameAsync(name, ct);
         }
         catch (Exception ex)
         {
@@ -161,8 +161,8 @@ public class LocationService : ILocationService
                 ModifiedAt = DateTime.UtcNow
             };
 
-            await _repository.AddAsync(location, ct);
-            await _repository.SaveChangesAsync(ct);
+            await _unitOfWork.Locations.AddAsync(location, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
 
             _logger.LogInformation($"Location '{location.Name}' created successfully");
 
@@ -215,8 +215,8 @@ public class LocationService : ILocationService
                 location.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
             }
 
-            await _repository.UpdateAsync(location, ct);
-            await _repository.SaveChangesAsync(ct);
+            await _unitOfWork.Locations.UpdateAsync(location, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
 
             _logger.LogInformation($"Location '{location.Name}' updated successfully");
 
@@ -250,8 +250,8 @@ public class LocationService : ILocationService
             location.IsActive = false;
             location.ModifiedAt = DateTime.UtcNow;
 
-            await _repository.UpdateAsync(location, ct);
-            await _repository.SaveChangesAsync(ct);
+            await _unitOfWork.Locations.UpdateAsync(location, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
 
             _logger.LogInformation($"Location '{location.Name}' deleted (soft delete)");
 
@@ -325,7 +325,7 @@ public class LocationService : ILocationService
 
         try
         {
-            return await _repository.GetPrintersInLocationAsync(locationId, ct);
+            return await _unitOfWork.Locations.GetPrintersInLocationAsync(locationId, ct);
         }
         catch (Exception ex)
         {
@@ -416,11 +416,11 @@ public class LocationService : ILocationService
                 return;
             }
 
-            var count = await _repository.GetPrinterCountAsync(locationId, ct);
+            var count = await _unitOfWork.Locations.GetPrinterCountAsync(locationId, ct);
             location.PrinterCount = count;
 
-            await _repository.UpdateAsync(location, ct);
-            await _repository.SaveChangesAsync(ct);
+            await _unitOfWork.Locations.UpdateAsync(location, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
 
             _logger.LogInformation($"Updated printer count for location '{location.Name}': {count}");
         }
@@ -438,7 +438,7 @@ public class LocationService : ILocationService
     {
         try
         {
-            await _repository.SaveChangesAsync(ct);
+            await _unitOfWork.SaveChangesAsync(ct);
         }
         catch (Exception ex)
         {

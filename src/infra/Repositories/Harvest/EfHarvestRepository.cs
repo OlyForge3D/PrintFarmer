@@ -218,13 +218,15 @@ public class EfHarvestRepository : IHarvestRepository
     }
 
     // Harvest file mapping operations
-    public async Task CreateFileImportMappingAsync(Guid harvestDiscoveredFileId, Guid gcodeFileId, CancellationToken ct = default)
+    public async Task CreateFileImportMappingAsync(HarvestDiscoveredFile discoveredFile, GcodeFile gcodeFile, CancellationToken ct = default)
     {
         HarvestFileGcodeFileMapping mapping = new()
         {
             Id = Guid.NewGuid(),
-            HarvestDiscoveredFileId = harvestDiscoveredFileId,
-            GcodeFileId = gcodeFileId,
+            HarvestDiscoveredFile = discoveredFile,
+            HarvestDiscoveredFileId = discoveredFile.Id,
+            GcodeFile = gcodeFile,
+            GcodeFileId = gcodeFile.Id,
             CreatedAt = DateTime.UtcNow
         };
 

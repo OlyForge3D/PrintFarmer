@@ -7,7 +7,7 @@ namespace Farm.Web.Api.Services.FolderManagement
     /// <summary>
     /// Service for managing folder entities in the database.
     /// Provides shared folder creation and retrieval functionality used by multiple file management services.
-    /// This prevents cross-service dependencies between GcodeFilesService and Model3dFileService.
+    /// This prevents cross-service dependencies between GcodeFilesService and Model3DFileService.
     /// </summary>
     public interface IFolderManagementService
     {

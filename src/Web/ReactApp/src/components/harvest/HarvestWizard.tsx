@@ -140,7 +140,6 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
 
   const handleStep2Complete = (options: HarvestWizardState['options']) => {
     setState(prev => ({ ...prev, options }));
-    setStep(3);
   };
 
   const handleStartDiscovery = useCallback(async () => {
@@ -172,7 +171,10 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
         throw new Error('Harvest operation was queued but operation ID could not be retrieved. The background service may be busy.');
       }
       
+
       setState(prev => ({ ...prev, operationId }));
+
+      setStep(3);
 
       // Join SignalR group for this discovery operation
       await signalRService.connect();

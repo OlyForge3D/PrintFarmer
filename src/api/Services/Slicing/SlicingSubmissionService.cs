@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Slicing;
 using Microsoft.AspNetCore.Hosting;
@@ -17,20 +17,20 @@ namespace Farm.Web.Api.Services.Slicing;
 /// </summary>
 public class SlicingSubmissionService : ISlicingSubmissionService
 {
-    private readonly IModel3dFileRepository _modelRepository;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ISlicerFileStorage _fileStorage;
     private readonly ISlicerOrchestrator _orchestrator;
     private readonly IHostEnvironment _env;
     private readonly IUnifiedLoggingService _logger;
 
     public SlicingSubmissionService(
-        IModel3dFileRepository modelRepository,
+        IUnitOfWork unitOfWork,
         ISlicerFileStorage fileStorage,
         ISlicerOrchestrator orchestrator,
         IHostEnvironment env,
         IUnifiedLoggingService logger)
     {
-        _modelRepository = modelRepository ?? throw new ArgumentNullException(nameof(modelRepository));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _env = env ?? throw new ArgumentNullException(nameof(env));
@@ -132,7 +132,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
         try
         {
             // Get model from repository
-            Model3D? model = await _modelRepository.GetByIdAsync(modelId, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
             if (model == null)
             {
                 return new SlicingSubmissionResult(false, Error: $"Model with ID {modelId} not found");

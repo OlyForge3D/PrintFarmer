@@ -4,12 +4,13 @@ using System.Text; // Needed for Encoding when deriving secondary hash
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
+using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Model;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Mvc;
@@ -22,36 +23,34 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
-#pragma warning disable S101 // 3d is a standard acronym
-public class Model3dFilesController : ControllerBase
-#pragma warning restore S101
+public class Model3DFilesController : ControllerBase
 {
     private readonly IUnifiedLoggingService _logger;
-    private readonly IModel3dFileService _modelService;
+    private readonly IModel3DFileService _modelService;
     private readonly string _modelsPath;
     private readonly Services.IO.IFileSystem _fileSystem;
     private readonly IFileManagementService _fileManagementService;
     private readonly ITagService _tagService;
-    private readonly IModel3dFileRepository _modelRepo;
-    private readonly AppDbContext? _db;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IFolderManagementService _folderService;
 
-    public Model3dFilesController(
+    public Model3DFilesController(
         IUnifiedLoggingService logger,
-        IModel3dFileService modelService,
+        IModel3DFileService modelService,
         IConfiguration configuration,
         Services.IO.IFileSystem fileSystem,
         IFileManagementService fileManagementService,
         ITagService tagService,
-        IModel3dFileRepository modelRepo,
-        AppDbContext? db)
+        IUnitOfWork unitOfWork,
+        IFolderManagementService folderService)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
-        _modelRepo = modelRepo ?? throw new ArgumentNullException(nameof(modelRepo));
-        _db = db; // Allow null for testing
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
         // Ensure path is absolute - if relative, combine with current directory first
@@ -239,7 +238,7 @@ public class Model3dFilesController : ControllerBase
     {
         try
         {
-            Model3D? model = await _modelRepo.GetByIdWithTagsAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdWithTagsAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
@@ -422,7 +421,7 @@ public class Model3dFilesController : ControllerBase
                 try
                 {
                     // Find model by path and delete
-                    var model = await _modelRepo.ListValidAsync(ct);
+                    var model = await _unitOfWork.Model3dFiles.ListValidAsync(ct);
                     var matchingModel = model.FirstOrDefault(m => m.FilePath == path);
                     if (matchingModel != null)
                     {
@@ -459,7 +458,7 @@ public class Model3dFilesController : ControllerBase
     {
         try
         {
-            Model3D? model = await _modelRepo.GetByIdAsync(id, ct);
+            Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
             if (model == null)
             {
                 return NotFound();
@@ -470,8 +469,8 @@ public class Model3dFilesController : ControllerBase
                 model.DisplayName = dto.Name.Trim();
             }
 
-            await _modelRepo.UpdateAsync(model, ct);
-            await _modelRepo.SaveChangesAsync(ct);
+            await _unitOfWork.Model3dFiles.UpdateAsync(model, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
             return NoContent();
         }
         catch (Exception ex)
@@ -708,9 +707,9 @@ public class Model3dFilesController : ControllerBase
             }
 
             int skip = (request.Page - 1) * request.PageSize;
-            int totalCount = await _modelRepo.CountValidAsync(ct);
+            int totalCount = await _unitOfWork.Model3dFiles.CountValidAsync(ct);
 
-            IReadOnlyList<Model3D> models = await _modelRepo.SearchAsync(
+            IReadOnlyList<Model3D> models = await _unitOfWork.Model3dFiles.SearchAsync(
                 request.Query,
                 request.TagIds,
                 request.SortBy ?? "uploadedAt",
@@ -830,21 +829,9 @@ public class Model3dFilesController : ControllerBase
             // Track the folder in the database for proper hierarchy management
             try
             {
-                if (_db != null)
-                {
-                    var folder = new Farm.Infrastructure.Domain.Folder
-                    {
-                        Id = Guid.NewGuid(),
-                        Path = "/" + relativePath.Trim('/'), // Normalize to /FolderName format
-                        FolderType = "models",
-                        CreatedAt = DateTime.UtcNow,
-                        DeletedAt = null
-                    };
-
-                    _db.Folders.Add(folder);
-                    await _db.SaveChangesAsync();
-                    _logger.LogInformation($"[CreateFolder] Recorded folder in database: {folder.Path}");
-                }
+                string folderPath = "/" + relativePath.Trim('/');
+                Folder folder = await _folderService.GetOrCreateFolderAsync(folderPath, "models", ct);
+                _logger.LogInformation($"[CreateFolder] Recorded folder in database: {folder.Path}");
             }
             catch (Exception dbEx)
             {
@@ -931,7 +918,7 @@ public class Model3dFilesController : ControllerBase
                     }
 
                     // Query the database by primary key (GUID) - O(1) lookup
-                    var targetModel = await _modelRepo.GetByIdAsync(modelId, ct);
+                    var targetModel = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
 
                     if (targetModel == null)
                     {
@@ -946,8 +933,8 @@ public class Model3dFilesController : ControllerBase
 
                     // Update the folder reference (not physical files - those stay where they are)
                     targetModel.FolderId = targetFolder.Id;
-                    await _modelRepo.UpdateAsync(targetModel, ct);
-                    await _modelRepo.SaveChangesAsync(ct);
+                    await _unitOfWork.Model3dFiles.UpdateAsync(targetModel, ct);
+                    await _unitOfWork.SaveChangesAsync(ct);
 
                     _logger.LogDebug($"[MoveModels] Updated model folder: {targetModel.Id} ({targetModel.OriginalFileName}) -> '{targetDirectoryPath}'");
 

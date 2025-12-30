@@ -13,6 +13,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Resilience;
 using Farm.Infrastructure.Services.Gcode;
@@ -32,58 +33,17 @@ namespace Farm.Infrastructure.Services.Gcode;
 /// Service for harvesting G-code files from registered printers
 /// </summary>
 public class GcodeHarvestService(
-    IHarvestRepository harvestRepo,
-    IPrintersRepository printersRepo,
+    IUnitOfWork unitOfWork,
     IUnifiedLoggingService logger,
     IServiceScopeFactory serviceScopeFactory,
     IGcodeMetadataExtractorService metadataExtractor,
     IStoragePathService storagePathService,
     IGcodeThumbnailExtractorService thumbnailExtractor,
-    IOptions<GcodeHarvestSettings> harvestOptions,
     IBackendCapabilityFactory capabilityFactory,
     IHarvestEventBroadcaster harvestEventBroadcaster) : IGcodeHarvestService
 {
-    public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
-    {
-        // Find the discovered file
-        HarvestDiscoveredFile? file = await _harvestRepo.GetDiscoveredFileByIdAsync(fileId, operationId, ct);
-        if (file == null)
-        {
-            return false;
-        }
 
-        // Mark as skipped
-        file.Status = HarvestFileStatus.Skipped;
-        file.Error = "Skipped by user";
-        await _harvestRepo.SaveChangesAsync(ct);
-
-        // Send file update to SignalR clients
-        await _harvestEventBroadcaster.BroadcastToGroupAsync(operationId, "harvestfileupdated", MapToDto(file), ct);
-
-        return true;
-    }
-
-    public async Task<bool> RetryDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
-    {
-        // Find the discovered file
-        HarvestDiscoveredFile? file = await _harvestRepo.GetDiscoveredFileByIdAsync(fileId, operationId, ct);
-        if (file == null)
-        {
-            return false;
-        }
-
-        // Clear error and mark as pending
-        file.Status = HarvestFileStatus.Pending;
-        file.Error = null;
-        await _harvestRepo.SaveChangesAsync(ct);
-
-        // Send file update to SignalR clients
-        await _harvestEventBroadcaster.BroadcastToGroupAsync(operationId, "harvestfileupdated", MapToDto(file), ct);
-
-        return true;
-    }
-    private readonly IHarvestRepository _harvestRepo = harvestRepo;
-    private readonly IPrintersRepository _printersRepo = printersRepo;
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly ConcurrentDictionary<Guid, Task> _activeTasks = new();
@@ -99,11 +59,53 @@ public class GcodeHarvestService(
     private static readonly Regex PrusaSlicerVersionRegex = new(@"PrusaSlicer (\S+)", RegexOptions.Compiled);
     private static readonly Regex CuraVersionRegex = new(@"Cura_SteamEngine (\S+)", RegexOptions.Compiled);
 
+    public async Task<bool> SkipDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
+    {
+        // Find the discovered file
+        HarvestDiscoveredFile? file = await _unitOfWork.HarvestOperations.GetDiscoveredFileByIdAsync(fileId, operationId, ct);
+        if (file == null)
+        {
+            return false;
+        }
+
+        // Mark as skipped
+        file.Status = HarvestFileStatus.Skipped;
+        file.Error = "Skipped by user";
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        // Send file update to SignalR clients
+        await _harvestEventBroadcaster.BroadcastToGroupAsync(operationId, "harvestfileupdated", MapToDto(file), ct);
+
+        return true;
+    }
+
+    public async Task<bool> RetryDiscoveredFileAsync(Guid operationId, Guid fileId, CancellationToken ct = default)
+    {
+        // Find the discovered file
+        HarvestDiscoveredFile? file = await _unitOfWork.HarvestOperations.GetDiscoveredFileByIdAsync(fileId, operationId, ct);
+        if (file == null)
+        {
+            return false;
+        }
+
+        // Clear error and mark as pending
+        file.Status = HarvestFileStatus.Pending;
+        file.Error = null;
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        // Send file update to SignalR clients
+        await _harvestEventBroadcaster.BroadcastToGroupAsync(operationId, "harvestfileupdated", MapToDto(file), ct);
+
+        return true;
+    }
+
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
     {
-        _logger.LogInformation($"🔥 StartHarvestAsync CALLED for printer ID: {(request?.PrinterId ?? Guid.Empty)}");
         ArgumentNullException.ThrowIfNull(request);
-        Printer? printer = await _printersRepo.FindByIdAsync(request.PrinterId, ct);
+
+        _logger.LogInformation($"🔥 StartHarvestAsync CALLED for printer ID: {request.PrinterId}");
+        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(request.PrinterId, ct);
+        
         _logger.LogInformation($"🔍 Found printer: {(printer?.Name ?? "NULL")} (ID: {(printer?.Id ?? Guid.Empty)})");
         if (printer == null)
         {
@@ -122,7 +124,7 @@ public class GcodeHarvestService(
         _logger.LogWarning($"[DIAGNOSTIC] SUCCESS: Backend {backend} DOES support file listing capability, proceeding with harvest");
 
         // Check if there's already an active harvest operation for this printer
-        GcodeHarvestOperation? existingOperation = await _harvestRepo.GetActiveOperationForPrinterAsync(request.PrinterId, ct);
+        GcodeHarvestOperation? existingOperation = await _unitOfWork.HarvestOperations.GetActiveOperationForPrinterAsync(request.PrinterId, ct);
 
         if (existingOperation != null)
         {
@@ -149,8 +151,8 @@ public class GcodeHarvestService(
             TotalBytesProcessed = 0
         };
 
-        await _harvestRepo.AddOperationAsync(operation, ct);
-        await _harvestRepo.SaveChangesAsync(ct);
+        await _unitOfWork.HarvestOperations.AddOperationAsync(operation, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
 
         _logger.LogInformation($"Starting file discovery for operation {operation.Id} on printer {printer.Name}");
 
@@ -177,16 +179,19 @@ public class GcodeHarvestService(
                 _logger.LogError($"✅ Background harvest task COMPLETED successfully for operation {operation.Id}");
             }
             catch (Exception ex)
-            {
-                await Console.Error.WriteLineAsync($"[HARVEST] Background harvest FAILED for op {operation.Id}: {ex.Message}");
-                _logger.LogError(ex, $"❌ Background harvest task FAILED for operation {operation.Id}: {ex.Message}");
+                {
+                    await Console.Error.WriteLineAsync($"[HARVEST] Background harvest FAILED for op {operation.Id}: {ex.Message}");
+                    _logger.LogError(ex, $"❌ Background harvest task FAILED for operation {operation.Id}: {ex.Message}");
 
-                // Update the operation status to failed with detailed error info
-                await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
-                IHarvestRepository scopedHarvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
+                    // Update the operation status to failed with detailed error info
+                    await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
+                    IUnitOfWork scopedUnitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    IHarvestRepository scopedHarvestRepo = scopedUnitOfWork.HarvestOperations;
+                
                 // CRITICAL: Must use GetOperationByIdTrackedAsync (with tracking) not GetOperationByIdAsync (AsNoTracking)
                 // We need to modify the operation, so it MUST be tracked by EF Core
                 GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operation.Id);
+                
                 if (dbOperation != null)
                 {
                     HarvestErrorHelper.SetOperationError(
@@ -194,6 +199,7 @@ public class GcodeHarvestService(
                         ex,
                         nameof(HarvestErrorPhase.Discovery),
                         failedResource: printerBackendUrl);
+                    
                     await scopedHarvestRepo.SaveChangesAsync();
                     _logger.LogError($"💾 Updated operation {operation.Id} status to Failed in database");
                 }
@@ -222,9 +228,10 @@ public class GcodeHarvestService(
     private async Task DiscoverAndQueueFilesAsync(GcodeHarvestOperation operation, Guid _printerId, string printerName, string printerBackendUrl, string printerApiKey, PrinterBackend printerBackend)
     {
         await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
-        IHarvestRepository scopedHarvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
-        IBackendClientFactory scopedBackendFactory = scope.ServiceProvider.GetRequiredService<IBackendClientFactory>();
-        IBackendCapabilityFactory scopedCapabilityFactory = scope.ServiceProvider.GetRequiredService<IBackendCapabilityFactory>();
+            IUnitOfWork scopedUnitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            IHarvestRepository scopedHarvestRepo = scopedUnitOfWork.HarvestOperations;
+            IBackendClientFactory scopedBackendFactory = scope.ServiceProvider.GetRequiredService<IBackendClientFactory>();
+            IBackendCapabilityFactory scopedCapabilityFactory = scope.ServiceProvider.GetRequiredService<IBackendCapabilityFactory>();
         // Use _logger instead of scoped logger for background tasks to ensure logs are flushed
 
         try
@@ -234,6 +241,7 @@ public class GcodeHarvestService(
 
             // Get file list from printer using capability-based abstraction
             PrinterBackend backend = printerBackend;
+
             _logger.LogInformation($"Calling file discovery for backend {backend} on printer {printerName} at {printerBackendUrl}");
             _logger.LogError($"[DIAGNOSTIC-HARVEST] Backend determined: {backend}");
 
@@ -242,6 +250,7 @@ public class GcodeHarvestService(
             {
                 // Check if the backend supports file listing using capability factory
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] Checking if backend {backend} supports file listing...");
+                
                 if (scopedCapabilityFactory.TryGetFileListClient(backend, out var fileListClient) &&
                     fileListClient is ISupportsFileList fileListCapability)
                 {
@@ -365,6 +374,7 @@ public class GcodeHarvestService(
             _logger.LogError($"[DIAGNOSTIC-HARVEST] ABOUT TO CALL GetOperationByIdTrackedAsync");
             GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operation.Id);
             _logger.LogError($"[DIAGNOSTIC-HARVEST] RETURNED FROM GetOperationByIdTrackedAsync: dbOperation is {(dbOperation == null ? "NULL" : "NOT NULL")}");
+            
             if (dbOperation != null)
             {
                 _logger.LogError($"[DIAGNOSTIC-HARVEST] BEFORE UPDATE: FilesFound={dbOperation.FilesFound}");
@@ -512,6 +522,45 @@ public class GcodeHarvestService(
         ms.Seek(0, SeekOrigin.Begin);
         return await Task.FromResult(ms);
     }
+
+    /// <summary>
+    /// Download thumbnail from a URL and save it locally.
+    /// Returns the local file path of the saved thumbnail, or null if download fails.
+    /// </summary>
+    private async Task<string?> DownloadThumbnailFromUrlAsync(string thumbnailUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            using HttpClient httpClient = new();
+            httpClient.Timeout = TimeSpan.FromSeconds(30);
+            
+            byte[] thumbnailBytes = await httpClient.GetByteArrayAsync(thumbnailUrl, ct);
+            
+            if (thumbnailBytes == null || thumbnailBytes.Length == 0)
+            {
+                _logger.LogWarning("Downloaded thumbnail from {Url} but received empty data", thumbnailUrl);
+                return null;
+            }
+
+            // Save to same directory as gcode files with _thumb.png suffix
+            string thumbnailDir = _storagePathService.GetThumbnailDirectory();
+            Directory.CreateDirectory(thumbnailDir);
+
+            string thumbnailFileName = $"{Guid.NewGuid()}_thumb.png";
+            string thumbnailPath = Path.Combine(thumbnailDir, thumbnailFileName);
+
+            await File.WriteAllBytesAsync(thumbnailPath, thumbnailBytes, ct);
+            _logger.LogInformation("Downloaded and saved thumbnail from {Url} to {Path}", thumbnailUrl, thumbnailPath);
+
+            return thumbnailPath;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to download thumbnail from {Url}", thumbnailUrl);
+            return null;
+        }
+    }
+    
     public async Task<GcodeMetadataDto> ExtractMetadataAsync(Stream gcodeStream, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(gcodeStream);
@@ -628,7 +677,7 @@ public class GcodeHarvestService(
 
     public async Task<GcodeHarvestOperationDto?> GetHarvestOperationAsync(Guid operationId, CancellationToken ct = default)
     {
-        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationWithPrinterAsync(operationId, ct);
+        GcodeHarvestOperation? operation = await _unitOfWork.HarvestOperations.GetOperationWithPrinterAsync(operationId, ct);
 
         return operation == null ? null : MapToDto(operation);
     }
@@ -638,7 +687,7 @@ public class GcodeHarvestService(
         _logger.LogInformation($"Getting discovered files for operation {operationId}");
 
         // Verify the operation exists
-        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationByIdAsync(operationId, ct);
+        GcodeHarvestOperation? operation = await _unitOfWork.HarvestOperations.GetOperationByIdAsync(operationId, ct);
         if (operation == null)
         {
             _logger.LogWarning($"GetDiscoveredFilesAsync: Operation {operationId} not found");
@@ -648,7 +697,7 @@ public class GcodeHarvestService(
         _logger.LogInformation($"Found operation {operationId} with status {operation.Status}, files found: {operation.FilesFound}");
 
         // Get files with explicit logging
-        List<HarvestDiscoveredFile> files = await _harvestRepo.GetDiscoveredFilesAsync(operationId, ct);
+        List<HarvestDiscoveredFile> files = await _unitOfWork.HarvestOperations.GetDiscoveredFilesAsync(operationId, ct);
 
         _logger.LogInformation($"Found {files.Count} discovered files for operation {operationId}");
 
@@ -670,8 +719,8 @@ public class GcodeHarvestService(
             pageSize = 500; // guardrail
         }
 
-        List<HarvestDiscoveredFile> files = await _harvestRepo.GetDiscoveredFilesPagedAsync(operationId, page, pageSize, search, ct);
-        int total = await _harvestRepo.GetDiscoveredFilesCountAsync(operationId, ct);
+        List<HarvestDiscoveredFile> files = await _unitOfWork.HarvestOperations.GetDiscoveredFilesPagedAsync(operationId, page, pageSize, search, ct);
+        int total = await _unitOfWork.HarvestOperations.GetDiscoveredFilesCountAsync(operationId, ct);
         int totalPages = (int)Math.Ceiling(total / (double)pageSize);
         if (totalPages == 0)
         {
@@ -693,7 +742,7 @@ public class GcodeHarvestService(
     public async Task<GcodeHarvestResultDto> ImportSelectedFilesAsync(ImportSelectedGcodeFilesDto request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationWithPrinterAsync(request.HarvestOperationId, ct);
+        GcodeHarvestOperation? operation = await _unitOfWork.HarvestOperations.GetOperationWithPrinterAsync(request.HarvestOperationId, ct);
 
         if (operation == null)
         {
@@ -724,8 +773,9 @@ public class GcodeHarvestService(
                 // Create a new scope for this import to get fresh DbContext
                 // Each file is processed one at a time sequentially in its own context
                 await using AsyncServiceScope scopedServices = _serviceScopeFactory.CreateAsyncScope();
-                IGcodeRepository scopedGcodeRepo = scopedServices.ServiceProvider.GetRequiredService<IGcodeRepository>();
-                IHarvestRepository scopedHarvestRepo = scopedServices.ServiceProvider.GetRequiredService<IHarvestRepository>();
+                IUnitOfWork scopedUnitOfWork = scopedServices.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                IHarvestRepository scopedHarvestRepo = scopedUnitOfWork.HarvestOperations;
+                IGcodeRepository scopedGcodeRepo = scopedUnitOfWork.GcodeFiles;
 
                 // CRITICAL: Load discovered file FRESH within this scoped context
                 // This ensures the entity belongs to this context's DbContext
@@ -760,8 +810,9 @@ public class GcodeHarvestService(
                 // Get storage directory from centralized storage service (supports Docker and K8s)
                 string storageDir = _storagePathService.GetGcodeStorageDirectory();
                 _ = Directory.CreateDirectory(storageDir);
-                // Generate unique filename
-                string fileName = $"{Guid.NewGuid()}_{discoveredFile.FileName}";
+                // Generate unique filename using pure GUID (consistent with 3D model file storage)
+                string extension = Path.GetExtension(discoveredFile.FileName);
+                string fileName = $"{Guid.NewGuid()}{extension}";
                 string filePath = Path.Combine(storageDir, fileName);
 
                 // Download file from printer
@@ -892,17 +943,41 @@ public class GcodeHarvestService(
                             _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Updated discovered file metadata: nozzle={discoveredFile.ExtractedNozzleDiameter}, material={discoveredFile.ExtractedMaterial}, slicer={discoveredFile.ExtractedSlicerName}");
                         }
 
-                        // Extract and save thumbnail if present using shared service
-                        if (extractedMetadata?.ThumbnailData != null && extractedMetadata.ThumbnailData.Length > 0)
+                        // Download thumbnail from printer API if available (preferred over extraction)
+                        if (!string.IsNullOrEmpty(discoveredFile.ThumbnailUrl))
                         {
                             try
                             {
-                                gcodeContent.Position = 0;
-                                thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(gcodeContent, ct);
+                                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Downloading thumbnail from API: {discoveredFile.ThumbnailUrl}");
+                                thumbnailPath = await DownloadThumbnailFromUrlAsync(discoveredFile.ThumbnailUrl, ct);
+                                if (thumbnailPath != null)
+                                {
+                                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Successfully downloaded thumbnail from API to: {thumbnailPath}");
+                                }
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Failed to extract thumbnail for {FileName}", discoveredFile.FileName);
+                                _logger.LogWarning(ex, "Failed to download thumbnail from API for {FileName}, will try extraction", discoveredFile.FileName);
+                                thumbnailPath = null;
+                            }
+                        }
+
+                        // Fall back to extracting thumbnail from gcode content if not downloaded from API
+                        if (thumbnailPath == null && extractedMetadata?.ThumbnailData != null && extractedMetadata.ThumbnailData.Length > 0)
+                        {
+                            try
+                            {
+                                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Extracting thumbnail from gcode content for {discoveredFile.FileName}");
+                                gcodeContent.Position = 0;
+                                thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(gcodeContent, ct);
+                                if (thumbnailPath != null)
+                                {
+                                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Successfully extracted thumbnail to: {thumbnailPath}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to extract thumbnail from gcode for {FileName}", discoveredFile.FileName);
                                 // Continue anyway - thumbnail is optional
                                 thumbnailPath = null;
                             }
@@ -936,9 +1011,9 @@ public class GcodeHarvestService(
                 }
                 else
                 {
-                    // Get or create target folder for this gcode file
-                    string fileDirectory = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
-                    var targetFolder = await GetOrCreateFolderAsync(fileDirectory, "gcode", scopedServices, ct);
+                    // Get or create root folder for gcode files (use "/" as root, not the physical path)
+                    // This ensures folder paths are relative and don't include "/app" prefix
+                    var targetFolder = await GetOrCreateFolderAsync("/", "gcode", scopedServices, ct);
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Got or created folder: {targetFolder.Path}, Id={targetFolder.Id}");
 
                     // Create library entry
@@ -976,31 +1051,26 @@ public class GcodeHarvestService(
                     // Add the gcode file to the database
                     await scopedGcodeRepo.AddAsync(gcodeFile, ct);
                     await scopedGcodeRepo.SaveChangesAsync(ct);
-
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved GcodeFile to database: {gcodeFile.Id}");
                 }
 
-                // Mark as complete - must be saved BEFORE creating the mapping
-                discoveredFile.Status = HarvestFileStatus.Complete;
-                discoveredFile.CompletedAt = DateTime.UtcNow;
-
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Marked discoveredFile status as Complete");
-
-                // CRITICAL: Save the discovered file status BEFORE creating the mapping
-                // This ensures the entity is properly saved before EF tries to validate the FK constraint
-                await scopedHarvestRepo.SaveChangesAsync(ct);
-                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved discovered file status");
-
                 // Now create mapping between discovered file and imported gcode file
                 // At this point both files are committed to the database
-                await scopedHarvestRepo.CreateFileImportMappingAsync(discoveredFile.Id, gcodeFile.Id, ct);
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Preparing to create mapping for discoveredFile={discoveredFile.Id} -> gcodeFile={gcodeFile.Id}");
+                await scopedHarvestRepo.CreateFileImportMappingAsync(discoveredFile, gcodeFile, ct);
 
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created file import mapping: discoveredFileId={discoveredFile.Id} -> gcodeFileId={gcodeFile.Id}");
 
                 // Save the mapping
                 await scopedHarvestRepo.SaveChangesAsync(ct);
-
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved mapping to database");
+
+                // Mark as complete now that the mapping was persisted
+                discoveredFile.Status = HarvestFileStatus.Complete;
+                discoveredFile.CompletedAt = DateTime.UtcNow;
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Marked discoveredFile status as Complete");
+                await scopedHarvestRepo.SaveChangesAsync(ct);
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved discovered file status: {discoveredFile.Id}, Status={discoveredFile.Status}");
 
                 // Broadcast completion update
                 await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
@@ -1043,7 +1113,8 @@ public class GcodeHarvestService(
                 // Save the failed status update in a fresh scoped context
                 await using (AsyncServiceScope errorScope = _serviceScopeFactory.CreateAsyncScope())
                 {
-                    IHarvestRepository errorHarvestRepo = errorScope.ServiceProvider.GetRequiredService<IHarvestRepository>();
+                    IUnitOfWork errorUnitOfWork = errorScope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                    IHarvestRepository errorHarvestRepo = errorUnitOfWork.HarvestOperations;
 
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Loading discovered file in error scope: {fileId}");
 
@@ -1084,7 +1155,7 @@ public class GcodeHarvestService(
         try
         {
             _logger.LogInformationWithSource($"Saving harvest operation with {importedFileIds.Count} files added to database");
-            await _harvestRepo.SaveChangesAsync(ct);
+            await _unitOfWork.SaveChangesAsync(ct);
             _logger.LogInformationWithSource($"Harvest operation saved successfully");
         }
         catch (Exception ex)
@@ -1119,7 +1190,7 @@ public class GcodeHarvestService(
     public async Task<bool> CancelHarvestAsync(Guid operationId, CancellationToken ct = default)
     {
         // Use tracked version so changes will be persisted
-        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationByIdTrackedAsync(operationId, ct);
+        GcodeHarvestOperation? operation = await _unitOfWork.HarvestOperations.GetOperationByIdTrackedAsync(operationId, ct);
 
         if (operation == null || operation.Status != GcodeHarvestStatus.Running)
         {
@@ -1128,7 +1199,7 @@ public class GcodeHarvestService(
 
         operation.Status = GcodeHarvestStatus.Cancelled;
         operation.CompletedAt = DateTime.UtcNow;
-        await _harvestRepo.SaveChangesAsync(ct);
+        await _unitOfWork.SaveChangesAsync(ct);
 
         // Log the cancellation for tracking purposes
         _logger.LogInformation($"Harvest operation {operationId} was cancelled");
@@ -1151,7 +1222,7 @@ public class GcodeHarvestService(
     public async Task<bool> RestartDiscoveryAsync(Guid operationId, CancellationToken ct = default)
     {
         // Get the operation with tracking enabled
-        GcodeHarvestOperation? operation = await _harvestRepo.GetOperationByIdTrackedAsync(operationId, ct);
+        GcodeHarvestOperation? operation = await _unitOfWork.HarvestOperations.GetOperationByIdTrackedAsync(operationId, ct);
 
         if (operation == null || operation.Status != GcodeHarvestStatus.Running)
         {
@@ -1159,7 +1230,7 @@ public class GcodeHarvestService(
         }
 
         // Get the printer to verify it exists and get its details
-        Printer? printer = await _printersRepo.FindByIdAsync(operation.PrinterId, ct);
+        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(operation.PrinterId, ct);
         if (printer == null)
         {
             _logger.LogError($"Printer {operation.PrinterId} for harvest operation {operationId} not found");
@@ -1169,7 +1240,7 @@ public class GcodeHarvestService(
         _logger.LogInformation($"Restarting file discovery for operation {operationId} on printer {printer.Name}");
 
         // Clear discovered files to restart fresh
-        await _harvestRepo.DeleteDiscoveredFilesByOperationAsync(operationId, ct);
+        await _unitOfWork.HarvestOperations.DeleteDiscoveredFilesByOperationAsync(operationId, ct);
 
         // Reset operation statistics
         operation.FilesFound = 0;
@@ -1179,7 +1250,7 @@ public class GcodeHarvestService(
         operation.TotalBytesProcessed = 0;
 
         // Save changes
-        await _harvestRepo.SaveChangesAsync(ct);
+        await _unitOfWork.SaveChangesAsync(ct);
 
         _logger.LogInformation($"Cleared discovered files for operation {operationId}, restarting discovery");
 
@@ -1213,7 +1284,8 @@ public class GcodeHarvestService(
 
                 // Update the operation status to failed with detailed error info
                 await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
-                IHarvestRepository scopedHarvestRepo = scope.ServiceProvider.GetRequiredService<IHarvestRepository>();
+                IUnitOfWork scopedUnitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+                IHarvestRepository scopedHarvestRepo = scopedUnitOfWork.HarvestOperations;
                 GcodeHarvestOperation? dbOperation = await scopedHarvestRepo.GetOperationByIdTrackedAsync(operationId);
                 if (dbOperation != null)
                 {
@@ -1243,21 +1315,21 @@ public class GcodeHarvestService(
 
     public async Task<GcodeHarvestOperationDto?> GetActiveHarvestAsync(Guid printerId, CancellationToken ct = default)
     {
-        GcodeHarvestOperation? operation = await _harvestRepo.GetActiveOperationForPrinterAsync(printerId, ct);
+        GcodeHarvestOperation? operation = await _unitOfWork.HarvestOperations.GetActiveOperationForPrinterAsync(printerId, ct);
 
         return operation == null ? null : MapToDto(operation);
     }
 
     public async Task<GcodeHarvestOperationDto[]> GetRecentHarvestsAsync(Guid printerId, int count = 10, CancellationToken ct = default)
     {
-        List<GcodeHarvestOperation> operations = await _harvestRepo.GetRecentOperationsForPrinterAsync(printerId, count, ct);
+        List<GcodeHarvestOperation> operations = await _unitOfWork.HarvestOperations.GetRecentOperationsForPrinterAsync(printerId, count, ct);
 
         return operations.Select(MapToDto).ToArray();
     }
 
     public async Task<GcodeHarvestOperationDto[]> GetActiveHarvestsAsync(CancellationToken ct = default)
     {
-        List<GcodeHarvestOperation> operations = await _harvestRepo.GetActiveOperationsAsync(ct);
+        List<GcodeHarvestOperation> operations = await _unitOfWork.HarvestOperations.GetActiveOperationsAsync(ct);
 
         return operations.Select(MapToDto).ToArray();
     }
@@ -1270,7 +1342,7 @@ public class GcodeHarvestService(
             statusEnum = parsedStatus;
         }
 
-        List<GcodeHarvestOperation> operations = await _harvestRepo.GetOperationsAsync(printerId, statusEnum, limit, offset, ct);
+        List<GcodeHarvestOperation> operations = await _unitOfWork.HarvestOperations.GetOperationsAsync(printerId, statusEnum, limit, offset, ct);
 
         return operations.Select(MapToDto).ToArray();
     }

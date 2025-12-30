@@ -115,7 +115,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         // Act
         var result = await service.ListModelsAsync(CancellationToken.None);
@@ -130,7 +130,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model = await CreateTestModelAsync("specific-model", "specific.stl");
 
@@ -149,7 +149,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model1 = await CreateTestModelAsync("multi-model-1", "multi1.stl");
         var model2 = await CreateTestModelAsync("multi-model-2", "multi2.stl");
@@ -167,7 +167,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model1 = await CreateTestModelAsync("ordered-1", "ordered1.stl");
         await Task.Delay(10); // Small delay to ensure different timestamps
@@ -190,7 +190,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model = await CreateTestModelAsync("test-model", "test.stl");
 
@@ -209,7 +209,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
@@ -225,7 +225,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model = await CreateTestModelAsync("metadata-test", "metadata.stl");
 
@@ -248,7 +248,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model = await CreateTestModelAsync("file-path-test", "filepath.stl");
 
@@ -266,7 +266,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
@@ -286,7 +286,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model = await CreateTestModelAsync("no-thumbnail", "nothumbnail.stl");
 
@@ -302,7 +302,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
@@ -322,7 +322,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var model = await CreateTestModelAsync("to-delete", "todelete.stl");
@@ -341,7 +341,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var nonExistentId = Guid.NewGuid();
 
@@ -355,7 +355,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model = await CreateTestModelAsync("will-delete", "delete.stl");
 
@@ -380,7 +380,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var model1 = await CreateTestModelAsync("hier-model-1", "hier1.stl");
         var model2 = await CreateTestModelAsync("hier-model-2", "hier2.stl");
@@ -406,7 +406,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         for (int i = 0; i < 25; i++)
         {
@@ -433,7 +433,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var modelZ = await CreateTestModelAsync("z-model", "z.stl");
         var modelA = await CreateTestModelAsync("a-model", "a.stl");
@@ -459,7 +459,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         await CreateTestModelAsync("searchable-model", "searchable.stl");
         await CreateTestModelAsync("other-model", "other.stl");
@@ -484,7 +484,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         for (int i = 0; i < 15; i++)
         {
@@ -517,7 +517,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var formFile = CreateMockFormFile("upload-test.stl");
 
@@ -535,7 +535,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var formFile = CreateMockFormFile("model.stl");
 
@@ -551,7 +551,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var formFile = CreateMockFormFile("model.obj");
 
@@ -567,7 +567,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var formFile = CreateMockFormFile("model.3mf");
 
@@ -583,8 +583,8 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IModel3dFileRepository>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        var repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
 
         // Create a minimal valid 3MF file (ZIP-based format with XML manifest)
         // 3MF files are essentially ZIP archives containing XML and model data
@@ -620,7 +620,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var file1 = CreateMockFormFile("model1.stl");
         var file2 = CreateMockFormFile("model2.stl");
@@ -638,7 +638,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var expectedFileName = "my-custom-model.stl";
         var formFile = CreateMockFormFile(expectedFileName);
@@ -656,7 +656,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         // Create a larger mock file (5MB)
         var largeContent = string.Concat(Enumerable.Repeat("x", 5 * 1024 * 1024));
@@ -674,7 +674,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var specialFileName = "model-with-special-chars_#@!.stl";
         var formFile = CreateMockFormFile(specialFileName);
@@ -695,7 +695,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var initialList = await service.ListModelsAsync(CancellationToken.None);
         var initialCount = initialList.Count;
@@ -717,7 +717,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var fileName = "integration-test-model.stl";
         var uploadResult = await service.UploadModelAsync(
@@ -738,7 +738,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
         var uploadResult = await service.UploadModelAsync(
             CreateMockFormFile("to-delete.stl"),
@@ -757,7 +757,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
         var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
         var uploadResult = await service.UploadModelAsync(
@@ -781,8 +781,8 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IModel3dFileService>();
-        var repository = scope.ServiceProvider.GetRequiredService<IModel3dFileRepository>();
+        var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+        var repository = scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
 
         // Create a valid STL file for upload
         var stlContent = "solid test\n" +

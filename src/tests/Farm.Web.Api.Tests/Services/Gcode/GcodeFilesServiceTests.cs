@@ -23,6 +23,19 @@ namespace Farm.Web.Api.Tests.Services.Gcode;
 
 public class GcodeFilesServiceTests
 {
+    private static Mock<IFolderManagementService> CreateFolderServiceMock(string expectedPath)
+    {
+        var folder = new Folder
+        {
+            Id = Guid.NewGuid(),
+            Path = expectedPath,
+            FolderType = "gcode"
+        };
+
+        var mock = new Mock<IFolderManagementService>(MockBehavior.Strict);
+        mock.Setup(f => f.GetOrCreateFolderAsync(expectedPath, "gcode", It.IsAny<CancellationToken>())).ReturnsAsync(folder);
+        return mock;
+    }
     [Fact]
     public async Task FinalizeChunkedUploadAsync_ReturnsNullWhenFileMissingAndLogsWarning()
     {
@@ -95,7 +108,7 @@ public class GcodeFilesServiceTests
         chunkedUpload.Setup(c => c.ExtractMetadataFromFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(metadata);
 
-        var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+        var mockFolderService = CreateFolderServiceMock("prints/models");
         var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object);
 
         // Act
@@ -181,8 +194,8 @@ public class GcodeFilesServiceTests
         };
 
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
-        repo.Setup(r => r.ListValidByDirectoryAsync("jobs", It.IsAny<CancellationToken>())).ReturnsAsync(dbFiles);
-        repo.Setup(r => r.ListSubdirectoriesAsync("jobs", It.IsAny<CancellationToken>())).ReturnsAsync(new List<string> { "print-jobs", ".hidden" });
+        repo.Setup(r => r.ListValidByDirectoryAsync("/jobs", It.IsAny<CancellationToken>())).ReturnsAsync(dbFiles);
+        repo.Setup(r => r.ListSubdirectoriesAsync("/jobs", It.IsAny<CancellationToken>())).ReturnsAsync(new List<string> { "print-jobs", ".hidden" });
         repo.Setup(r => r.GetLatestHarvestOperationIdsByPrintersAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Dictionary<Guid, Guid?> { { printerId, harvestId } });
 

@@ -2,7 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Folder;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 
 namespace Farm.Web.Api.Services.FolderManagement
 {
@@ -12,11 +12,11 @@ namespace Farm.Web.Api.Services.FolderManagement
     /// </summary>
     public class FolderManagementService : IFolderManagementService
     {
-        private readonly IFolderRepository _folderRepository;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public FolderManagementService(IFolderRepository folderRepository)
+        public FolderManagementService(IUnitOfWork unitOfWork)
         {
-            _folderRepository = folderRepository ?? throw new ArgumentNullException(nameof(folderRepository));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         }
 
         /// <summary>
@@ -24,7 +24,7 @@ namespace Farm.Web.Api.Services.FolderManagement
         /// </summary>
         public async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
-            return await _folderRepository.GetOrCreateFolderAsync(directoryPath, folderType, ct);
+            return await _unitOfWork.Folders.GetOrCreateFolderAsync(directoryPath, folderType, ct);
         }
     }
 }

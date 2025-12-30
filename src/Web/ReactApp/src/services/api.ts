@@ -791,6 +791,24 @@ export class ApiClient {
     await this.client.delete(`/gcode-files/${id}`);
   }
 
+  async queryGcodeLibrary(
+    search?: string,
+    material?: string,
+    nozzleDiameter?: number,
+    targetPrinterId?: string
+  ): Promise<GcodeFile[]> {
+    const params: Record<string, unknown> = {};
+    if (search) params.search = search;
+    if (material) params.material = material;
+    if (nozzleDiameter) params.nozzleDiameter = nozzleDiameter;
+    if (targetPrinterId) params.targetPrinterId = targetPrinterId;
+
+    const response = await this.client.get<GcodeFile[]>("/gcode-library", {
+      params,
+    });
+    return response.data;
+  }
+
   // ============ G-code harvest operations ============
 
   async startHarvestOperation(

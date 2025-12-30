@@ -218,18 +218,30 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterRepositories(IServiceCollection services)
     {
-        // Core repositories
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Printers.IPrintersRepository, Farm.Infrastructure.Repositories.Printers.EfPrintersRepository>();
+        // Core repositories (non-coordinated)
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Harvest.IHarvestRepository, Farm.Infrastructure.Repositories.Harvest.EfHarvestRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileConsistencyRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileConsistencyRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.FileConsistency.IFileAuditRepository, Farm.Infrastructure.Repositories.FileConsistency.EfFileAuditRepository>();
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Locations.ILocationRepository, Farm.Infrastructure.Repositories.Locations.EfLocationRepository>();
 
-        // Folder repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Folder.IFolderRepository, Farm.Infrastructure.Repositories.Folder.EfFolderRepository>();
+        // Unit of Work pattern: coordinates access to 6 repositories with a shared DbContext
+        // This prevents FK constraint violations and ensures atomic transactions across coordinated operations:
+        // - Gcode + Harvest: Harvest operations reference gcode files
+        // - Gcode + Folders: Gcode files organized in folder hierarchy
+        // - Harvest + Printers: Harvest operations tied to specific printers
+        // - Model3dFiles + Folders: 3D models organized in folder hierarchy
+        // - Locations + Printers: Printers located at specific facilities
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork, Farm.Infrastructure.Repositories.UnitOfWork.UnitOfWork>();
+
+        // Individual repository registrations (for backward compatibility with existing code)
+        // These are resolved through IUnitOfWork for coordinated operations
+        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().GcodeFiles);
+        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().HarvestOperations);
+        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Printers);
+        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Folders);
+        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Model3dFiles);
+        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Locations);
 
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
@@ -263,9 +275,6 @@ public static class ServiceCollectionExtensions
 
         // Gcode repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Gcode.IGcodeRepository, Farm.Infrastructure.Repositories.Gcode.EfGcodeRepository>();
-
-        // Model repository
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.Model.IModel3dFileRepository, Farm.Infrastructure.Repositories.Model.EfModel3dFileRepository>();
 
         // Authentication audit repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Authentication.IAuthAuditLogRepository, Farm.Infrastructure.Repositories.Authentication.EfAuthAuditLogRepository>();
@@ -525,7 +534,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<IFolderManagementService, FolderManagementService>();
 
         // Model services
-        _ = services.AddScoped<Services.Model.IModel3dFileService, Services.Model.Model3dFileService>();
+        _ = services.AddScoped<Services.Model.IModel3DFileService, Services.Model.Model3DFileService>();
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
         _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
         _ = services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();

@@ -194,7 +194,8 @@ public sealed class MoonrakerSubscriptionService(
         // The scope lifetime matches the query and is disposed immediately after.
 #pragma warning disable IDISP013 // Await in using
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-        IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+        IPrintersRepository printersRepo = unitOfWork.Printers;
 
         // Only subscribe to ENABLED Moonraker-backed printers
         // Note: Only Moonraker supports real-time WebSocket subscriptions
@@ -227,8 +228,8 @@ public sealed class MoonrakerSubscriptionService(
 
                 // Find the printer to trigger fallback
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-                IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-                Printer? printer = await printersRepo.FindByIdAsync(printerId, ct);
+                var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+                Printer? printer = await unitOfWork.Printers.FindByIdAsync(printerId, ct);
 
                 if (printer != null)
                 {
@@ -422,8 +423,8 @@ public sealed class MoonrakerSubscriptionService(
         try
         {
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-            IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-            Printer? current = await printersRepo.FindByIdAsync(printerId, ct);
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+            Printer? current = await unitOfWork.Printers.FindByIdAsync(printerId, ct);
 
             if (current is null)
             {

@@ -87,10 +87,6 @@ public sealed class PrusaLinkPollingService(
     public void Dispose()
     {
         _cts?.Dispose();
-        foreach (var loop in _pollingLoops.Values)
-        {
-            loop?.Dispose();
-        }
         _pollingLoops.Clear();
     }
 
@@ -292,8 +288,8 @@ public sealed class PrusaLinkPollingService(
     private async Task<List<Guid>> GetPrusaLinkPrinterIdsAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-        var printers = await repo.GetByBackendAsync(PrinterBackend.PrusaLink, ct);
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+        var printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.PrusaLink, ct);
         return printers.Select(p => p.Id).ToList();
     }
 
@@ -303,7 +299,7 @@ public sealed class PrusaLinkPollingService(
     private async Task<Printer?> GetPrinterAsync(Guid printerId, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-        return await repo.FindByIdAsync(printerId, ct);
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
+        return await unitOfWork.Printers.FindByIdAsync(printerId, ct);
     }
 }

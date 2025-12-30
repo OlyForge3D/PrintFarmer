@@ -6,20 +6,20 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Catalog;
-using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using FluentValidation.Results;
 
 namespace Farm.Importing.Services.Import;
 
 public class ImportProcessorService : IImportProcessorService
 {
-    private readonly IPrintersRepository _printersRepo;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ICatalogRepository _catalogRepo;
     private readonly FluentValidation.IValidator<CreatePrinterDto> _validator;
 
-    public ImportProcessorService(IPrintersRepository printersRepo, ICatalogRepository catalogRepo, FluentValidation.IValidator<CreatePrinterDto> validator)
+    public ImportProcessorService(IUnitOfWork unitOfWork, ICatalogRepository catalogRepo, FluentValidation.IValidator<CreatePrinterDto> validator)
     {
-        _printersRepo = printersRepo;
+        _unitOfWork = unitOfWork;
         _catalogRepo = catalogRepo;
         _validator = validator;
     }
@@ -40,7 +40,7 @@ public class ImportProcessorService : IImportProcessorService
                 }
 
                 // Check for duplicates using repository
-                bool exists = await _printersRepo.ExistsByNameOrServerUrlAsync(dto.Name ?? string.Empty, dto.ServerUrl ?? string.Empty, ct);
+                bool exists = await _unitOfWork.Printers.ExistsByNameOrServerUrlAsync(dto.Name ?? string.Empty, dto.ServerUrl ?? string.Empty, ct);
                 if (exists)
                 {
                     if (duplicateHandling.Equals("skip", StringComparison.OrdinalIgnoreCase))
@@ -56,7 +56,7 @@ public class ImportProcessorService : IImportProcessorService
                     else if (duplicateHandling.Equals("update", StringComparison.OrdinalIgnoreCase))
                     {
                         // Find existing printer to update
-                        var allPrinters = await _printersRepo.GetAllAsync(ct);
+                        var allPrinters = await _unitOfWork.Printers.GetAllAsync(ct);
                         var existing = allPrinters.FirstOrDefault(p => p.Name == dto.Name || p.ServerUrl == dto.ServerUrl);
                         if (existing != null)
                         {
@@ -66,7 +66,7 @@ public class ImportProcessorService : IImportProcessorService
                             existing.OriginalServerUrl = dto.OriginalServerUrl ?? existing.OriginalServerUrl;
                             existing.DateAcquired = dto.DateAcquired ?? existing.DateAcquired;
                             existing.Backend = (int)dto.Backend;
-                            await _printersRepo.SaveChangesAsync(ct);
+                            await _unitOfWork.SaveChangesAsync(ct);
                             results.Add((dto.Name ?? string.Empty, "Imported", existing.Id, "Updated"));
                             continue;
                         }
@@ -236,7 +236,7 @@ public class ImportProcessorService : IImportProcessorService
             IsAvailable = true
         };
 
-        await _printersRepo.AddAsync(p, ct);
+        await _unitOfWork.Printers.AddAsync(p, ct);
 
         // Create default toolhead for the imported printer
         var defaultToolhead = new Farm.Infrastructure.Domain.Toolhead

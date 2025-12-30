@@ -6,15 +6,14 @@ namespace Farm.Infrastructure.Repositories.Folder;
 
 /// <summary>
 /// Entity Framework implementation of IFolderRepository
-/// Uses IDbContextFactory for better testability and multi-operation scenarios
 /// </summary>
 public class EfFolderRepository : IFolderRepository
 {
-    private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
+    private readonly AppDbContext _db;
 
-    public EfFolderRepository(IDbContextFactory<AppDbContext> dbContextFactory)
+    public EfFolderRepository(AppDbContext db)
     {
-        _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
+        _db = db ?? throw new ArgumentNullException(nameof(db));
     }
 
     /// <summary>
@@ -25,10 +24,8 @@ public class EfFolderRepository : IFolderRepository
         // Normalize path
         string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(System.IO.Path.DirectorySeparatorChar, '/');
 
-        using var context = _dbContextFactory.CreateDbContext();
-
         // Try to find existing folder
-        var existingFolder = await context.Folders
+        var existingFolder = await _db.Folders
             .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, cancellationToken);
 
         if (existingFolder != null)
@@ -45,8 +42,8 @@ public class EfFolderRepository : IFolderRepository
             CreatedAt = DateTime.UtcNow
         };
 
-        context.Add(newFolder);
-        await context.SaveChangesAsync(cancellationToken);
+        _db.Add(newFolder);
+        await _db.SaveChangesAsync(cancellationToken);
 
         return newFolder;
     }
@@ -58,9 +55,7 @@ public class EfFolderRepository : IFolderRepository
     {
         string normalizedPath = string.IsNullOrWhiteSpace(path) ? "/" : path.TrimEnd(System.IO.Path.DirectorySeparatorChar, '/');
 
-        using var context = _dbContextFactory.CreateDbContext();
-
-        return await context.Folders
+        return await _db.Folders
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, cancellationToken);
     }
@@ -70,7 +65,6 @@ public class EfFolderRepository : IFolderRepository
     /// </summary>
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        using var context = _dbContextFactory.CreateDbContext();
-        await context.SaveChangesAsync(cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
     }
 }
