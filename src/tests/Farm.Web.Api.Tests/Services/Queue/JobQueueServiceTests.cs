@@ -256,7 +256,7 @@ public class JobQueueServiceTests
     public async Task AddJobToQueueAsync_WithNoAvailablePrinters_ReturnsNull()
     {
         // Arrange
-        var gcodeFile = new GcodeFile { Id = Guid.NewGuid(), DisplayName = "test.gcode" };
+        var gcodeFile = new GcodeFile { Id = Guid.NewGuid(), FileName = "test.gcode" };
         var request = new QueuePrintJobDto
         {
             GcodeFileId = gcodeFile.Id,
@@ -284,7 +284,7 @@ public class JobQueueServiceTests
         var gcodeFile = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            DisplayName = "test.gcode",
+            FileName = "test.gcode",
             EstimatedPrintTimeMinutes = 120,
             EstimatedFilamentWeightG = 25.5
         };
@@ -335,7 +335,7 @@ public class JobQueueServiceTests
     {
         // Arrange
         var printerId = Guid.NewGuid();
-        var gcodeFile = new GcodeFile { Id = Guid.NewGuid(), DisplayName = "urgent.gcode" };
+        var gcodeFile = new GcodeFile { Id = Guid.NewGuid(), FileName = "urgent.gcode" };
         var printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
         var request = new QueuePrintJobDto
         {

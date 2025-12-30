@@ -62,13 +62,12 @@ namespace Farm.Web.Api.Services.Model
             return models.Select(m => new Model3DDto
             {
                 Id = m.Id,
-                Name = m.DisplayName,
-                FileName = m.OriginalFileName,
+                FileName = m.FileName,
                 FileSize = m.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
                 UploadedAt = m.UploadedAt,
                 Url = $"/api/3d-models/{m.Id}/file",
-                ThumbnailUrl = m.ThumbnailPath != null ? $"/api/3d-models/{m.Id}/thumbnail" : null
+                ThumbnailUrl = m.ThumbnailFileName != null ? $"/api/3d-models/{m.Id}/thumbnail" : null
             }).ToList();
         }
 
@@ -124,7 +123,7 @@ namespace Farm.Web.Api.Services.Model
                 string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
                 entries.Add(new Model3DEntryDto(
                     Path: childVirtual,
-                    Name: subdir,
+                    FileName: subdir,
                     Size: 0,
                     ModifiedAt: DateTime.UtcNow,
                     IsDirectory: true,
@@ -135,19 +134,19 @@ namespace Farm.Web.Api.Services.Model
             // Add files from database
             foreach (var file in dbFiles)
             {
-                if (!IsMatch(file.OriginalFileName, search))
+                if (!IsMatch(file.FileName, search))
                 {
                     continue;
                 }
 
-                string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
+                string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
                 entries.Add(new Model3DEntryDto(
                     Path: childVirtual,
-                    Name: file.OriginalFileName,
+                    FileName: file.FileName,
                     Size: file.FileSizeBytes,
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
-                    ThumbnailUrl: file.ThumbnailPath != null ? $"/api/3d-models/{file.Id}/thumbnail" : null,
+                    ThumbnailUrl: file.ThumbnailFileName != null ? $"/api/3d-models/{file.Id}/thumbnail" : null,
                     ModelId: file.Id.ToString()  // Include model GUID for efficient lookups
                 ));
             }
@@ -160,20 +159,20 @@ namespace Farm.Web.Api.Services.Model
             if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
 
             int totalFiles = entries.Count(e => !e.IsDirectory);
@@ -215,13 +214,12 @@ namespace Farm.Web.Api.Services.Model
             return new Model3DDto
             {
                 Id = model.Id,
-                Name = model.DisplayName,
-                FileName = model.OriginalFileName,
+                FileName = model.FileName,
                 FileSize = model.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
                 Url = $"/api/3d-models/{model.Id}/file",
-                ThumbnailUrl = model.ThumbnailPath != null ? $"/api/3d-models/{model.Id}/thumbnail" : null
+                ThumbnailUrl = model.ThumbnailFileName != null ? $"/api/3d-models/{model.Id}/thumbnail" : null
             };
         }
 
@@ -234,7 +232,11 @@ namespace Farm.Web.Api.Services.Model
         public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
-            return model?.ThumbnailPath;
+            if (model?.ThumbnailFileName == null)
+            {
+                return null;
+            }
+            return Path.Combine(model.FilePath, model.ThumbnailFileName);
         }
 
         public async Task DeleteModelAsync(Guid id, CancellationToken ct)
@@ -247,14 +249,19 @@ namespace Farm.Web.Api.Services.Model
 
             try
             {
-                if (_fileManagementService.IsSafePath(model.FilePath, _modelsPath) && System.IO.File.Exists(model.FilePath))
+                string fullModelPath = Path.Combine(model.FilePath, model.FileName);
+                if (_fileManagementService.IsSafePath(fullModelPath, _modelsPath) && System.IO.File.Exists(fullModelPath))
                 {
-                    System.IO.File.Delete(model.FilePath);
+                    System.IO.File.Delete(fullModelPath);
                 }
 
-                if (model.ThumbnailPath != null && System.IO.File.Exists(model.ThumbnailPath))
+                if (model.ThumbnailFileName != null)
                 {
-                    System.IO.File.Delete(model.ThumbnailPath);
+                    string fullThumbnailPath = Path.Combine(model.FilePath, model.ThumbnailFileName);
+                    if (System.IO.File.Exists(fullThumbnailPath))
+                    {
+                        System.IO.File.Delete(fullThumbnailPath);
+                    }
                 }
 
                 await _unitOfWork.Model3dFiles.RemoveAsync(model, ct);
@@ -383,8 +390,8 @@ namespace Farm.Web.Api.Services.Model
                 string baseName = Path.GetFileNameWithoutExtension(originalName);
                 if (existingModel != null)
                 {
-                    string existingBaseName = Path.GetFileNameWithoutExtension(existingModel.OriginalFileName);
-                    string existingExt = Path.GetExtension(existingModel.OriginalFileName);
+                    string existingBaseName = Path.GetFileNameWithoutExtension(existingModel.FileName);
+                    string existingExt = Path.GetExtension(existingModel.FileName);
                     bool isSameExtension = string.Equals(existingExt, fileExtension, StringComparison.OrdinalIgnoreCase);
                     bool bothDuplicatePrefix = existingBaseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase)
                         && baseName.StartsWith("duplicate", StringComparison.OrdinalIgnoreCase);
@@ -402,8 +409,7 @@ namespace Farm.Web.Api.Services.Model
                         return new Model3DUploadResultDto
                         {
                             Id = existingModel.Id,
-                            Name = existingModel.DisplayName,
-                            FileName = existingModel.OriginalFileName,
+                            FileName = existingModel.FileName,
                             FileSize = existingModel.FileSizeBytes,
                             FileType = _fileManagementService.GetModelFileFormatString(existingModel.FileFormat),
                             UploadedAt = existingModel.UploadedAt,
@@ -422,10 +428,9 @@ namespace Farm.Web.Api.Services.Model
                 Model3D model = new()
                 {
                     Id = modelId,
-                    OriginalFileName = originalName,
-                    DisplayName = Path.GetFileNameWithoutExtension(originalName),
+                    FileName = fileName,
                     FolderId = rootFolder.Id,  // Root folder for uploaded files
-                    FilePath = fileName,  // Store ONLY relative path (e.g., "uuid.stl"), not full absolute path
+                    FilePath = _modelsPath,  // Store directory path
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
                     FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
@@ -484,8 +489,8 @@ namespace Farm.Web.Api.Services.Model
 
                             if (thumbSuccess)
                             {
-                                // Update model with ONLY relative path (e.g., "uuid_thumb.png"), not full absolute path
-                                model.ThumbnailPath = thumbnailFileName;
+                                // Update model with ONLY relative filename (e.g., "uuid_thumb.png")
+                                model.ThumbnailFileName = thumbnailFileName;
                                 await _unitOfWork.SaveChangesAsync(ct);
 
                                 _logger.LogInformation($"Thumbnail generated successfully for model {modelId}");
@@ -502,8 +507,7 @@ namespace Farm.Web.Api.Services.Model
                 return new Model3DUploadResultDto
                 {
                     Id = modelId,
-                    Name = model.DisplayName,
-                    FileName = originalName,
+                    FileName = model.FileName,
                     FileSize = modelFile.Length,
                     FileType = fileExtension.TrimStart('.'),
                     UploadedAt = model.UploadedAt,

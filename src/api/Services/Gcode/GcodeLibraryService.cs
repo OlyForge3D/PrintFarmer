@@ -89,9 +89,8 @@ namespace Farm.Web.Api.Services.Gcode
             GcodeFile gcodeFile = new()
             {
                 Id = Guid.NewGuid(),
-                OriginalFileName = file.FileName,
-                DisplayName = string.IsNullOrEmpty(metadata.DisplayName) ? Path.GetFileNameWithoutExtension(file.FileName) : metadata.DisplayName,
-                FilePath = filePathFull,
+                FileName = string.IsNullOrEmpty(metadata.FileName) ? file.FileName : metadata.FileName,
+                FilePath = libraryRootFull, // Store directory path
                 FileSizeBytes = file.Length,
                 FileHash = hash,
                 UploadedAt = DateTime.UtcNow,
@@ -128,9 +127,9 @@ namespace Farm.Web.Api.Services.Gcode
                 throw new KeyNotFoundException();
             }
 
-            if (!string.IsNullOrEmpty(request.DisplayName))
+            if (!string.IsNullOrEmpty(request.FileName))
             {
-                file.DisplayName = request.DisplayName;
+                file.FileName = request.FileName;
             }
 
             if (request.Description != null)
@@ -193,16 +192,19 @@ namespace Farm.Web.Api.Services.Gcode
             // Delete physical
             try
             {
-                if (!string.IsNullOrEmpty(file.FilePath))
+                string fullFilePath = Path.Combine(file.FilePath, file.FileName);
+                if (!string.IsNullOrEmpty(fullFilePath) && System.IO.File.Exists(fullFilePath))
                 {
-                    if (System.IO.File.Exists(file.FilePath))
-                    {
-                        System.IO.File.Delete(file.FilePath);
-                    }
+                    System.IO.File.Delete(fullFilePath);
                 }
-                if (!string.IsNullOrEmpty(file.ThumbnailPath) && System.IO.File.Exists(file.ThumbnailPath))
+
+                if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                 {
-                    System.IO.File.Delete(file.ThumbnailPath);
+                    string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+                    if (System.IO.File.Exists(fullThumbnailPath))
+                    {
+                        System.IO.File.Delete(fullThumbnailPath);
+                    }
                 }
             }
             catch (Exception ex)
@@ -236,14 +238,36 @@ namespace Farm.Web.Api.Services.Gcode
             return await System.IO.File.ReadAllBytesAsync(file.FilePath, ct);
         }
 
-        private static GcodeFileDto MapToDto(GcodeFile file)
+        private GcodeFileDto MapToDto(GcodeFile file)
         {
+            // Convert thumbnail path to API URL if available
+            string? thumbnailUrl = null;
+            if (!string.IsNullOrEmpty(file.ThumbnailFileName))
+            {
+                string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+                string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
+                string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
+                string normalizedThumbnailPath = Path.GetFullPath(fullThumbnailPath);
+
+                if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
+                {
+                    string relativePath = normalizedThumbnailPath.Substring(normalizedStorageDir.Length)
+                        .TrimStart(Path.DirectorySeparatorChar, '/');
+                    relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
+                    thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(relativePath)}";
+                }
+                else
+                {
+                    thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(file.ThumbnailFileName)}";
+                }
+            }
+
             return new GcodeFileDto(
                 Id: file.Id,
-                OriginalFileName: file.OriginalFileName,
-                DisplayName: file.DisplayName,
-                FileSizeBytes: file.FileSizeBytes,
+                FileName: file.FileName,
+                FileSize: file.FileSizeBytes,
                 UploadedAt: file.UploadedAt,
+                ThumbnailUrl: thumbnailUrl,
                 Source: (GcodeSourceDto)(int)file.Source,
                 SourcePrinterId: file.SourcePrinterId,
                 SourcePrinterName: file.SourcePrinter?.Name,
@@ -266,7 +290,7 @@ namespace Farm.Web.Api.Services.Gcode
                 TargetModelName: file.TargetModel?.Name,
                 SlicerName: file.SlicerName,
                 SlicerVersion: file.SlicerVersion,
-                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailPath)
+                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailFileName)
             );
         }
     }

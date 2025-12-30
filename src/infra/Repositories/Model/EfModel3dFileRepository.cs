@@ -169,7 +169,7 @@ namespace Farm.Infrastructure.Repositories.Model
             {
                 string searchTerm = query.ToLowerInvariant();
                 queryable = queryable.Where(m =>
-                    m.DisplayName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    m.FileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
                     (m.Description != null && m.Description.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)));
             }
 
@@ -185,7 +185,7 @@ namespace Farm.Infrastructure.Repositories.Model
             // Sorting
             queryable = (sortBy?.ToLower()) switch
             {
-                "name" => descending ? queryable.OrderByDescending(m => m.DisplayName) : queryable.OrderBy(m => m.DisplayName),
+                "name" => descending ? queryable.OrderByDescending(m => m.FileName) : queryable.OrderBy(m => m.FileName),
                 "size" => descending ? queryable.OrderByDescending(m => m.FileSizeBytes) : queryable.OrderBy(m => m.FileSizeBytes),
                 _ => descending ? queryable.OrderByDescending(m => m.UploadedAt) : queryable.OrderBy(m => m.UploadedAt)
             };

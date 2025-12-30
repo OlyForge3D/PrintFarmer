@@ -838,7 +838,7 @@ public record GcodeUploadSettingsResponse(
 /// <summary>DTO describing a single file or directory entry in the virtual G-code library listing.</summary>
 public record GcodeFileEntryDto(
     [property: JsonPropertyName("path")] string Path,
-    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("fileName")] string FileName,
     [property: JsonPropertyName("size")] long Size,
     [property: JsonPropertyName("modifiedAt")] DateTime ModifiedAt,
     [property: JsonPropertyName("isDirectory")] bool IsDirectory,

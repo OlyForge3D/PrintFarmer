@@ -1,19 +1,92 @@
 
+import { useEffect, useState } from 'react';
 import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import { IndexedFilesList } from './IndexedFilesList';
 import { getHarvestErrorInfo, getPhaseDisplay } from '@/common/utils/harvestErrorHelper';
 import { ErrorIcon } from './ErrorIcon';
 import { Button } from '@/common/components/ui/Button';
+import { apiClient } from '@/services/api';
+import { signalRService } from '@/services/harvest-signalr';
 
 interface HarvestOperationDetailsProps {
-  operation: GcodeHarvestOperation;
+  operation?: GcodeHarvestOperation; // Optional - can be provided or fetched
+  operationId?: string; // If provided without operation, will fetch from API
   onClose?: () => void;
   inline?: boolean; // If true, render as inline panel instead of modal
   className?: string; // Allow custom styling for inline use
   hideCloseButton?: boolean;
 }
 
-export function HarvestOperationDetails({ operation, onClose, inline = false, className = '', hideCloseButton = false }: HarvestOperationDetailsProps) {
+export function HarvestOperationDetails({ operation: initialOperation, operationId: propOperationId, onClose, inline = false, className = '', hideCloseButton = false }: HarvestOperationDetailsProps) {
+  const [operation, setOperation] = useState<GcodeHarvestOperation | null>(initialOperation || null);
+  const [loading, setLoading] = useState(!initialOperation);
+
+  const operationId = operation?.id || propOperationId;
+
+  // Fetch operation from API if only operationId is provided
+  useEffect(() => {
+    if (!initialOperation && propOperationId) {
+      setLoading(true);
+      apiClient.getHarvestOperation(propOperationId)
+        .then(op => {
+          setOperation(op);
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error('Failed to fetch harvest operation:', err);
+          setLoading(false);
+        });
+    }
+  }, [initialOperation, propOperationId]);
+
+  // Subscribe to operation updates via SignalR
+  useEffect(() => {
+    if (!operationId) return;
+
+    // Subscribe to operation progress updates
+    const unsubProgress = signalRService.onHarvestOperationProgress((progress) => {
+      if (progress.operationId === operationId) {
+        setOperation(prev => prev ? {
+          ...prev,
+          filesFound: progress.filesFound,
+          filesAdded: progress.filesAdded,
+          filesSkipped: progress.filesSkipped,
+          filesErrored: progress.filesErrored,
+        } : null);
+      }
+    });
+
+    // Subscribe to operation completion
+    const unsubComplete = signalRService.onHarvestOperationCompleted((evt) => {
+      if (evt.operationId === operationId) {
+        setOperation(prev => prev ? {
+          ...prev,
+          status: evt.status as any,
+          filesAdded: evt.filesAdded,
+          filesSkipped: evt.filesSkipped,
+          filesErrored: evt.filesErrored,
+          completedAt: evt.completedAt,
+        } : null);
+      }
+    });
+
+    signalRService.connect().then(() => {
+      signalRService.joinHarvestGroup(operationId);
+    });
+
+    return () => {
+      unsubProgress();
+      unsubComplete();
+    };
+  }, [operationId]);
+
+  if (loading || !operation) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-pf-text-secondary">Loading operation details...</div>
+      </div>
+    );
+  }
   // Duration calculation
   const started = new Date(operation.startedAt);
   const completed = operation.completedAt ? new Date(operation.completedAt) : null;

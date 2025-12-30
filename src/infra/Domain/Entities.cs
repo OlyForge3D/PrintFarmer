@@ -256,11 +256,11 @@ public class SpoolmanConfig
 public class GcodeFile
 {
     public Guid Id { get; set; }
-    public string OriginalFileName { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
     public Guid? FolderId { get; set; } // Foreign key to Folder entity
     public Folder? Folder { get; set; } // Navigation property to Folder
-    public string FilePath { get; set; } = string.Empty; // Physical path on disk (full path)
+    public string FilePath { get; set; } = string.Empty; // Directory path where file is stored
+    public string? ThumbnailFileName { get; set; } // Just the thumbnail filename (stored in same directory as file)
     public long FileSizeBytes { get; set; }
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public DateTime UploadedAt { get; set; }
@@ -287,7 +287,6 @@ public class GcodeFile
     public string? SlicerName { get; set; } // e.g., "PrusaSlicer", "Cura"
     public string? SlicerVersion { get; set; }
     public string? SlicerSettings { get; set; } // JSON dump of key settings
-    public string? ThumbnailPath { get; set; } // Path to thumbnail image
     public double? LayerHeight { get; set; }
     public double? InfillPercentage { get; set; }
     public double[]? PrintTemperatures { get; set; } // JSON field
@@ -395,11 +394,11 @@ public class HarvestFileGcodeFileMapping
 public class Model3D
 {
     public Guid Id { get; set; }
-    public string OriginalFileName { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
     public Guid? FolderId { get; set; } // Foreign key to Folder entity
     public Folder? Folder { get; set; } // Navigation property to Folder
-    public string FilePath { get; set; } = string.Empty; // Physical path on disk
+    public string FilePath { get; set; } = string.Empty; // Directory path where file is stored
+    public string? ThumbnailFileName { get; set; } // Just the thumbnail filename (stored in same directory as file)
     public long FileSizeBytes { get; set; }
     public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public ModelFileFormat FileFormat { get; set; }
@@ -411,7 +410,6 @@ public class Model3D
     public int? TriangleCount { get; set; }
     public bool IsValid { get; set; } = true;
     public string? ValidationErrors { get; set; } // JSON array of validation issues
-    public string? ThumbnailPath { get; set; } // Path to thumbnail image
     public Guid? UploadedByUserId { get; set; }
     public User? UploadedByUser { get; set; }
     public DateTime CreatedAt { get; set; }

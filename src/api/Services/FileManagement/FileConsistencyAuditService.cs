@@ -217,15 +217,16 @@ public class FileConsistencyAuditService : BackgroundService
                 }
 
                 // Check thumbnail if exists
-                if (!string.IsNullOrEmpty(model.ThumbnailPath))
+                if (!string.IsNullOrEmpty(model.ThumbnailFileName))
                 {
-                    if (!fileManagementService.IsSafePath(model.ThumbnailPath, _modelsPath))
+                    string fullThumbnailPath = Path.Combine(model.FilePath, model.ThumbnailFileName);
+                    if (!fileManagementService.IsSafePath(fullThumbnailPath, _modelsPath))
                     {
-                        _logger.LogWarning($"Model {model.Id}: Thumbnail unsafe path - {model.ThumbnailPath}");
+                        _logger.LogWarning($"Model {model.Id}: Thumbnail unsafe path - {fullThumbnailPath}");
                     }
-                    else if (!File.Exists(model.ThumbnailPath))
+                    else if (!File.Exists(fullThumbnailPath))
                     {
-                        _logger.LogWarning($"Model {model.Id}: Thumbnail missing - {model.ThumbnailPath}");
+                        _logger.LogWarning($"Model {model.Id}: Thumbnail missing - {fullThumbnailPath}");
                     }
                 }
             }

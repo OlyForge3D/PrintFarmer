@@ -284,8 +284,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         Model3D model = new Model3D
         {
             Id = Guid.NewGuid(),
-            OriginalFileName = fileName,
-            DisplayName = fileName,
+            FileName = fileName,
             FilePath = Path.Combine(_modelStoragePath, fileName),
             FileHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLower(),
             FileSizeBytes = 2048,
@@ -308,8 +307,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         GcodeFile gcode = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            OriginalFileName = fileName,
-            DisplayName = fileName,
+            FileName = fileName,
             FilePath = filePath,
             FileHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLower(),
             FileSizeBytes = 4096,

@@ -304,25 +304,10 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
             onStartDiscovery={handleStartDiscovery}
           />
         )}
-        {step === 3 && (
+        {step === 3 && state.operationId && (
           // Show harvest operation details with file selection and import progress
           <HarvestOperationDetails
-            operation={{
-              id: state.operationId,
-              printerId: state.selectedPrinterId || '',
-              printerName: printers.find(p => p.id === state.selectedPrinterId)?.name || 'Unknown',
-              status: 'Importing' as GcodeHarvestOperation['status'],
-              filesFound: state.discoveredFiles.length,
-              filesProcessed: 0,
-              filesAdded: 0,
-              filesSkipped: 0,
-              filesErrored: 0,
-              duplicatesSkipped: 0,
-              totalSizeBytes: state.discoveredFiles.reduce((sum, f) => sum + f.size, 0),
-              startedAt: new Date().toISOString(),
-              completedAt: undefined,
-              error: undefined,
-            } as GcodeHarvestOperation}
+            operationId={state.operationId}
             onClose={handleCompleted}
             inline={true}
             hideCloseButton={true}

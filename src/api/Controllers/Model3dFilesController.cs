@@ -247,13 +247,12 @@ public class Model3DFilesController : ControllerBase
             Model3DDto dto = new Model3DDto
             {
                 Id = model.Id,
-                Name = model.DisplayName,
-                FileName = model.OriginalFileName,
+                FileName = model.FileName,
                 FileSize = model.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
                 Url = $"/api/3d-models/{model.Id}/file",
-                ThumbnailUrl = model.ThumbnailPath != null ? $"/api/3d-models/{model.Id}/thumbnail" : null,
+                ThumbnailUrl = model.ThumbnailFileName != null ? $"/api/3d-models/{model.Id}/thumbnail" : null,
                 Description = model.Description,
                 DimensionX = model.DimensionX,
                 DimensionY = model.DimensionY,
@@ -466,7 +465,7 @@ public class Model3DFilesController : ControllerBase
 
             if (!string.IsNullOrWhiteSpace(dto.Name))
             {
-                model.DisplayName = dto.Name.Trim();
+                model.FileName = dto.Name.Trim();
             }
 
             await _unitOfWork.Model3dFiles.UpdateAsync(model, ct);
@@ -721,13 +720,12 @@ public class Model3DFilesController : ControllerBase
             List<Model3DDto> modelDtos = models.Select(m => new Model3DDto
             {
                 Id = m.Id,
-                Name = m.DisplayName,
-                FileName = m.OriginalFileName,
+                FileName = m.FileName,
                 FileSize = m.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
                 UploadedAt = m.UploadedAt,
                 Url = $"/api/3d-models/{m.Id}/file",
-                ThumbnailUrl = m.ThumbnailPath != null ? $"/api/3d-models/{m.Id}/thumbnail" : null,
+                ThumbnailUrl = m.ThumbnailFileName != null ? $"/api/3d-models/{m.Id}/thumbnail" : null,
                 Tags = m.TagMappings.Select(tm => new Model3DTagDto
                 {
                     Id = tm.Tag!.Id,
@@ -936,7 +934,7 @@ public class Model3DFilesController : ControllerBase
                     await _unitOfWork.Model3dFiles.UpdateAsync(targetModel, ct);
                     await _unitOfWork.SaveChangesAsync(ct);
 
-                    _logger.LogDebug($"[MoveModels] Updated model folder: {targetModel.Id} ({targetModel.OriginalFileName}) -> '{targetDirectoryPath}'");
+                    _logger.LogDebug($"[MoveModels] Updated model folder: {targetModel.Id} ({targetModel.FileName}) -> '{targetDirectoryPath}'");
 
                     movedCount++;
                 }

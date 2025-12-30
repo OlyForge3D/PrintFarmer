@@ -60,7 +60,7 @@ public class BackendClientFactory : IBackendClientFactory
 
                 if (typeForDi == null)
                 {
-                    _logger.LogDebug($"Plugin {plugin.DisplayName} has no client interface type or client type, skipping.");
+                    _logger.LogDebug($"Plugin {plugin.BackendType} has no client interface type or client type, skipping.");
                     continue;
                 }
 
@@ -73,7 +73,7 @@ public class BackendClientFactory : IBackendClientFactory
 
                     if (backendAttr == null)
                     {
-                        _logger.LogWarning($"Plugin {plugin.DisplayName} assembly is missing BackendPluginAttribute, skipping.");
+                        _logger.LogWarning($"Plugin {plugin.BackendType} assembly is missing BackendPluginAttribute, skipping.");
                         continue;
                     }
 
@@ -82,7 +82,7 @@ public class BackendClientFactory : IBackendClientFactory
                     // Check for duplicate BackendId
                     if (_clientTypeMap.ContainsKey(backendId))
                     {
-                        _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.DisplayName} has BackendId={backendAttr.BackendId} but it's already registered. This will cause incorrect backend routing.");
+                        _logger.LogError($"DUPLICATE BackendId detected! Plugin {plugin.BackendType} has BackendId={backendAttr.BackendId} but it's already registered. This will cause incorrect backend routing.");
                         duplicateIds.Add(backendAttr.BackendId);
                         continue;
                     }
@@ -91,11 +91,11 @@ public class BackendClientFactory : IBackendClientFactory
                     // Plugins register services by interface (e.g., IMoonrakerClient), not implementation
                     _clientTypeMap[backendId] = typeForDi;
                     discoveredCount++;
-                    _logger.LogInformation($"✓ Registered backend client type: {plugin.DisplayName} (BackendId={backendAttr.BackendId}, InterfaceType={typeForDi.Name})");
+                    _logger.LogInformation($"✓ Registered backend client type: {plugin.BackendType} (BackendId={backendAttr.BackendId}, InterfaceType={typeForDi.Name})");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to discover client type for plugin {plugin.DisplayName}: {ex.Message}");
+                    _logger.LogWarning($"Failed to discover client type for plugin {plugin.BackendType}: {ex.Message}");
                 }
             }
 

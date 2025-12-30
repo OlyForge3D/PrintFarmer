@@ -228,9 +228,8 @@ public class PrintJobBuilder
         GcodeFile gcodeFile = _gcodeFile ?? new GcodeFile
         {
             Id = _gcodeFileId,
-            OriginalFileName = "Test.gcode",
-            DisplayName = "Test.gcode",
-            FilePath = "/tmp/Test.gcode",
+            FileName = "Test.gcode",
+            FilePath = "/tmp",
             FileSizeBytes = 0,
             FileHash = string.Empty,
             UploadedAt = _createdAt,

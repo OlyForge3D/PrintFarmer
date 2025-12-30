@@ -12,6 +12,7 @@ import {
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
+  GcodeLibraryFile,
   GcodeHarvestOperation,
   GetGcodeFilesResponse,
   HealthStatus,
@@ -796,14 +797,14 @@ export class ApiClient {
     material?: string,
     nozzleDiameter?: number,
     targetPrinterId?: string
-  ): Promise<GcodeFile[]> {
+  ): Promise<GcodeLibraryFile[]> {
     const params: Record<string, unknown> = {};
     if (search) params.search = search;
     if (material) params.material = material;
     if (nozzleDiameter) params.nozzleDiameter = nozzleDiameter;
     if (targetPrinterId) params.targetPrinterId = targetPrinterId;
 
-    const response = await this.client.get<GcodeFile[]>("/gcode-library", {
+    const response = await this.client.get<GcodeLibraryFile[]>("/gcode-library", {
       params,
     });
     return response.data;

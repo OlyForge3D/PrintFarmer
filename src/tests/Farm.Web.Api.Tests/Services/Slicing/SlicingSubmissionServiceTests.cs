@@ -366,8 +366,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Test Model",
-            OriginalFileName = "test-model.stl",
+            FileName = "test-model.stl",
             FilePath = tempFile,
             UploadedByUserId = Guid.NewGuid()
         };
@@ -430,8 +429,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Test Model",
-            OriginalFileName = "missing.stl",
+            FileName = "missing.stl",
             FilePath = "/nonexistent/path/missing.stl",
             UploadedByUserId = Guid.NewGuid()
         };
@@ -459,8 +457,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Test Model",
-            OriginalFileName = "model.stl",
+            FileName = "model.stl",
             FilePath = tempFile,
             UploadedByUserId = Guid.NewGuid()
         };
@@ -507,8 +504,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Test Model",
-            OriginalFileName = "model.stl",
+            FileName = "model.stl",
             FilePath = tempFile,
             UploadedByUserId = Guid.NewGuid()
         };
@@ -540,8 +536,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Test Model",
-            OriginalFileName = "model.stl",
+            FileName = "model.stl",
             FilePath = tempFile,
             UploadedByUserId = Guid.NewGuid()
         };
@@ -584,8 +579,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Actual Model",
-            OriginalFileName = "actual-model.stl",
+            FileName = "actual-model.stl",
             FilePath = tempFile,
             UploadedByUserId = Guid.NewGuid()
         };
@@ -630,8 +624,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Testing Model",
-            OriginalFileName = "testing-model.stl",
+            FileName = "testing-model.stl",
             FilePath = tempFile,
             UploadedByUserId = Guid.NewGuid()
         };
@@ -685,8 +678,7 @@ public class SlicingSubmissionServiceTests : IDisposable
         Model3D model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Invalid Engine Model",
-            OriginalFileName = "invalid-engine.stl",
+            FileName = "invalid-engine.stl",
             FilePath = tempFile,
             UploadedByUserId = Guid.NewGuid()
         };

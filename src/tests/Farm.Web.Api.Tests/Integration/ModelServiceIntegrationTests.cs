@@ -71,8 +71,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
-            OriginalFileName = originalFileName,
-            DisplayName = displayName,
+            FileName = displayName,
             FilePath = filePath,
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),
@@ -140,7 +139,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert - Verify created model is in the list (may contain other test data)
         result.Should().Contain(m => m.Id == model.Id);
         var foundModel = result.First(m => m.Id == model.Id);
-        foundModel.Name.Should().Be("specific-model");
+        foundModel.FileName.Should().Be("specific-model");
         foundModel.FileName.Should().Be("specific.stl");
     }
 
@@ -200,7 +199,6 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert
         result.Should().NotBeNull();
         result!.Id.Should().Be(model.Id);
-        result.Name.Should().Be("test-model");
         result.FileName.Should().Be("test.stl");
     }
 
@@ -236,7 +234,6 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         result.Should().NotBeNull();
         result!.Id.Should().Be(model.Id);
         result.FileName.Should().Be("metadata.stl");
-        result.Name.Should().Be("metadata-test");
     }
 
     #endregion
@@ -815,7 +812,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // 2. Thumbnail generation failed but error was silently caught
         // 3. File path validation (IsSafePath) rejected the thumbnail path
         // 4. Assimp failed to load the model file
-        uploadedModel!.ThumbnailPath.Should().NotBeNullOrEmpty(
+        uploadedModel!.ThumbnailFileName.Should().NotBeNullOrEmpty(
             "Thumbnail should be generated for uploaded STL model. " +
             "If this fails, check: " +
             "(1) IThumbnailGenerationService is registered in DI, " +
@@ -824,12 +821,12 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
             "(4) File system permissions allow writing thumbnail");
 
         // Verify the thumbnail file actually exists on disk
-        if (!string.IsNullOrEmpty(uploadedModel.ThumbnailPath))
+        if (!string.IsNullOrEmpty(uploadedModel.ThumbnailFileName))
         {
             // Database now stores only relative paths, so resolve to absolute before checking
             var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
             string modelsPath = config["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
-            string absoluteThumbnailPath = Path.Combine(modelsPath, uploadedModel.ThumbnailPath);
+            string absoluteThumbnailPath = Path.Combine(modelsPath, uploadedModel.ThumbnailFileName);
             File.Exists(absoluteThumbnailPath).Should().BeTrue(
                 $"Thumbnail file should exist at {absoluteThumbnailPath}");
         }

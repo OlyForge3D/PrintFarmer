@@ -114,7 +114,7 @@ public class FileConsistencyController(
             allIssues.AddRange(missingModel3DFiles.Select(m => new FileIssueDto
             {
                 FileId = m.Id,
-                FileName = m.DisplayName,
+                FileName = m.FileName,
                 FilePath = m.FilePath,
                 FileType = "Model3D",
                 IssueType = "Missing",
@@ -125,7 +125,7 @@ public class FileConsistencyController(
             allIssues.AddRange(corruptedModel3DFiles.Select(m => new FileIssueDto
             {
                 FileId = m.Id,
-                FileName = m.DisplayName,
+                FileName = m.FileName,
                 FilePath = m.FilePath,
                 FileType = "Model3D",
                 IssueType = "Corrupted",
@@ -136,7 +136,7 @@ public class FileConsistencyController(
             allIssues.AddRange(missingGcodeFiles.Select(g => new FileIssueDto
             {
                 FileId = g.Id,
-                FileName = g.DisplayName,
+                FileName = g.FileName,
                 FilePath = g.FilePath,
                 FileType = "GCode",
                 IssueType = "Missing",
@@ -147,7 +147,7 @@ public class FileConsistencyController(
             allIssues.AddRange(corruptedGcodeFiles.Select(g => new FileIssueDto
             {
                 FileId = g.Id,
-                FileName = g.DisplayName,
+                FileName = g.FileName,
                 FilePath = g.FilePath,
                 FileType = "GCode",
                 IssueType = "Corrupted",
@@ -188,7 +188,7 @@ public class FileConsistencyController(
         FileHealthDetailDto dto = new FileHealthDetailDto
         {
             FileId = model.Id,
-            FileName = model.DisplayName,
+            FileName = model.FileName,
             FilePath = model.FilePath,
             FileType = "Model3D",
             FileSize = model.FileSizeBytes,
@@ -218,7 +218,7 @@ public class FileConsistencyController(
         FileHealthDetailDto dto = new FileHealthDetailDto
         {
             FileId = gcode.Id,
-            FileName = gcode.DisplayName,
+            FileName = gcode.FileName,
             FilePath = gcode.FilePath,
             FileType = "GcodeFile",
             FileSize = gcode.FileSizeBytes,

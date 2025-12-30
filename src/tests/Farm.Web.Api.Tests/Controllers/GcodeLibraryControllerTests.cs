@@ -32,7 +32,7 @@ public class GcodeLibraryControllerTests
         // Arrange
         var files = new List<GcodeFileDto>
         {
-            new GcodeFileDto(Id: Guid.NewGuid(), OriginalFileName: "test.gcode", DisplayName: "Test File", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow)
+            new GcodeFileDto(Id: Guid.NewGuid(), FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow)
         };
         _gcodeServiceMock
             .Setup(s => s.QueryLibraryAsync(null, null, null, null, It.IsAny<CancellationToken>()))
@@ -52,7 +52,7 @@ public class GcodeLibraryControllerTests
         // Arrange
         var files = new List<GcodeFileDto>
         {
-            new GcodeFileDto(Id: Guid.NewGuid(), OriginalFileName: "pla_print.gcode", DisplayName: "PLA Print", FileSizeBytes: 2048, UploadedAt: DateTime.UtcNow)
+            new GcodeFileDto(Id: Guid.NewGuid(), FileName: "pla_print.gcode", FileSize: 2048, UploadedAt: DateTime.UtcNow)
         };
         _gcodeServiceMock
             .Setup(s => s.QueryLibraryAsync("pla", "PLA", 0.4, null, It.IsAny<CancellationToken>()))
@@ -87,7 +87,7 @@ public class GcodeLibraryControllerTests
     {
         // Arrange
         var fileId = Guid.NewGuid();
-        var file = new GcodeFileDto(Id: fileId, OriginalFileName: "test.gcode", DisplayName: "Test", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow);
+        var file = new GcodeFileDto(Id: fileId, FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow);
         _gcodeServiceMock
             .Setup(s => s.GetFileAsync(fileId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(file);
@@ -125,8 +125,8 @@ public class GcodeLibraryControllerTests
         fileMock.Setup(f => f.FileName).Returns("test.gcode");
         fileMock.Setup(f => f.Length).Returns(1024);
 
-        var metadata = new CreateGcodeFileDto { DisplayName = "Test File" };
-        var created = new GcodeFileDto(Id: Guid.NewGuid(), OriginalFileName: "test.gcode", DisplayName: "Test File", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow);
+        var metadata = new CreateGcodeFileDto { FileName = "Test File" };
+        var created = new GcodeFileDto(Id: Guid.NewGuid(), FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow);
 
         _gcodeServiceMock
             .Setup(s => s.UploadFileAsync(fileMock.Object, metadata, It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -160,7 +160,7 @@ public class GcodeLibraryControllerTests
     public async Task UploadFileAsync_WithNullFile_ReturnsBadRequest()
     {
         // Arrange
-        var metadata = new CreateGcodeFileDto { DisplayName = "Test" };
+        var metadata = new CreateGcodeFileDto { FileName = "Test" };
 
         // Act
         var result = await _controller.UploadFileAsync(null!, metadata);
@@ -177,7 +177,7 @@ public class GcodeLibraryControllerTests
         var fileMock = new Mock<IFormFile>();
         fileMock.Setup(f => f.FileName).Returns("test.txt");
         fileMock.Setup(f => f.Length).Returns(1024);
-        var metadata = new CreateGcodeFileDto { DisplayName = "Test" };
+        var metadata = new CreateGcodeFileDto { FileName = "Test" };
 
         // Act
         var result = await _controller.UploadFileAsync(fileMock.Object, metadata);
@@ -194,7 +194,7 @@ public class GcodeLibraryControllerTests
         var fileMock = new Mock<IFormFile>();
         fileMock.Setup(f => f.FileName).Returns("test.gcode");
         fileMock.Setup(f => f.Length).Returns(1024);
-        var metadata = new CreateGcodeFileDto { DisplayName = "Test" };
+        var metadata = new CreateGcodeFileDto { FileName = "Test" };
 
         _gcodeServiceMock
             .Setup(s => s.UploadFileAsync(fileMock.Object, metadata, It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -213,8 +213,8 @@ public class GcodeLibraryControllerTests
     {
         // Arrange
         var fileId = Guid.NewGuid();
-        var request = new UpdateGcodeFileDto(DisplayName: "Updated Name");
-        var updated = new GcodeFileDto(Id: fileId, OriginalFileName: "test.gcode", DisplayName: "Updated Name", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow);
+        var request = new UpdateGcodeFileDto(FileName: "Updated Name");
+        var updated = new GcodeFileDto(Id: fileId, FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow);
 
         _gcodeServiceMock
             .Setup(s => s.UpdateFileAsync(fileId, request, It.IsAny<CancellationToken>()))
@@ -277,7 +277,7 @@ public class GcodeLibraryControllerTests
     {
         // Arrange
         var fileId = Guid.NewGuid();
-        var file = new GcodeFileDto(Id: fileId, OriginalFileName: "test.gcode", DisplayName: "Test", FileSizeBytes: 1024, UploadedAt: DateTime.UtcNow);
+        var file = new GcodeFileDto(Id: fileId, FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow);
         var fileBytes = new byte[] { 1, 2, 3, 4 };
 
         _gcodeServiceMock

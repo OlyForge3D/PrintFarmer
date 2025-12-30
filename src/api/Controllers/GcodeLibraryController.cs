@@ -188,7 +188,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeLibraryService gcodeSer
                 return NotFound("Physical file not found on disk");
             }
 
-            return File(bytes, "application/octet-stream", dto.OriginalFileName);
+            return File(bytes, "application/octet-stream", dto.FileName);
         }
         catch (Exception ex)
         {

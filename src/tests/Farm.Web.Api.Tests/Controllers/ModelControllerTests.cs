@@ -56,7 +56,7 @@ namespace Farm.Web.Api.Tests.Controllers
             Mock<IFileManagementService> mockFileManagement = CreateMockFileManagementService();
             Mock<IConfiguration> mockConfig = new Mock<IConfiguration>();
             _ = mockConfig.Setup(c => c[It.IsAny<string>()]).Returns((string?)null);
-            List<Model3DDto> expected = new List<Model3DDto> { new Model3DDto { Id = Guid.NewGuid(), Name = "TestModel" } };
+            List<Model3DDto> expected = new List<Model3DDto> { new Model3DDto { Id = Guid.NewGuid(), FileName = "TestModel" } };
             _ = mockService.Setup(s => s.ListModelsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             Mock<IUnitOfWork> mockUoW = CreateMockUnitOfWork();
@@ -212,7 +212,7 @@ namespace Farm.Web.Api.Tests.Controllers
             _ = mockRepo.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new Farm.Infrastructure.Domain.Model3D
             {
                 Id = Guid.NewGuid(),
-                OriginalFileName = "orig.stl",
+                FileName = "orig.stl",
                 FilePath = Path.GetFileName(tmpFile),
                 IsValid = true,
                 UploadedAt = DateTime.UtcNow

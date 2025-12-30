@@ -72,8 +72,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
-            OriginalFileName = fileName,
-            DisplayName = fileName,
+            FileName = fileName,
             FilePath = filePath,
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),
@@ -362,8 +361,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
-            OriginalFileName = "missing-file.stl",
-            DisplayName = "missing-file.stl",
+            FileName = "missing-file.stl",
             FilePath = nonExistentPath,
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),

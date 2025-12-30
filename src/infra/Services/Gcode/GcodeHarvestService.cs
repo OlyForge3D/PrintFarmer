@@ -998,7 +998,7 @@ public class GcodeHarvestService(
                     existingFile = await scopedGcodeRepo.FindByHashAsync(discoveredFile.FileHash, ct);
                     if (existingFile != null)
                     {
-                        _logger.LogInformationWithSource($"[IMPORT-LIFECYCLE] Found existing GcodeFile with same hash: {existingFile.Id} ({existingFile.DisplayName})");
+                        _logger.LogInformationWithSource($"[IMPORT-LIFECYCLE] Found existing GcodeFile with same hash: {existingFile.Id} ({existingFile.FileName})");
                     }
                 }
 
@@ -1022,8 +1022,7 @@ public class GcodeHarvestService(
                     gcodeFile = new()
                     {
                         Id = Guid.NewGuid(),
-                        OriginalFileName = discoveredFile.FileName,
-                        DisplayName = Path.GetFileNameWithoutExtension(discoveredFile.FileName),
+                        FileName = discoveredFile.FileName,
                         FolderId = targetFolder.Id,
                         FilePath = filePath,
                         FileSizeBytes = discoveredFile.Size,
@@ -1042,7 +1041,7 @@ public class GcodeHarvestService(
                         EstimatedFilamentLengthMm = discoveredFile.ExtractedFilamentLength ?? extractedMetadata?.FilamentLengthMm,
                         SlicerName = discoveredFile.ExtractedSlicerName ?? extractedMetadata?.SlicerName,
                         SlicerVersion = discoveredFile.ExtractedSlicerVersion ?? extractedMetadata?.SlicerVersion,
-                        ThumbnailPath = thumbnailPath, // Save extracted thumbnail path if available
+                        ThumbnailFileName = thumbnailPath, // This should be JUST The filename, not file path + filename.
                         Tags = request.DefaultTags != null ? JsonSerializer.Serialize(request.DefaultTags) : null
                     };
 

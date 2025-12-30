@@ -124,7 +124,7 @@ public class GcodeFilesServiceTests
         result.Should().NotBeNull();
         added.Should().NotBeNull();
         added!.Id.Should().NotBeEmpty();
-        added.DisplayName.Should().Be("cool-model");
+        added.FileName.Should().Be("cool-model");
         added.SlicerName.Should().Be("TestSlicer");
         added.SlicerVersion.Should().Be("1.0");
         added.RequiredNozzleDiameter.Should().Be(0.4);
@@ -139,7 +139,7 @@ public class GcodeFilesServiceTests
         File.Exists(sourcePath).Should().BeFalse();
 
         string expectedThumb = Path.Combine(storageDir, added.Id + "_thumb.png");
-        added.ThumbnailPath.Should().Be(expectedThumb);
+        added.ThumbnailFileName.Should().Be(expectedThumb);
         File.Exists(expectedThumb).Should().BeTrue();
 
         using FileStream fs = File.OpenRead(added.FilePath);
@@ -170,26 +170,24 @@ public class GcodeFilesServiceTests
             new()
             {
                 Id = Guid.NewGuid(),
-                OriginalFileName = "model1.gcode",
-                DisplayName = "model1",
+                FileName = "model1",
                 FolderId = folderJob.Id,
                 FilePath = Path.Combine(storageDir, "jobs", "model1.gcode"),
                 FileSizeBytes = 1024,
                 UploadedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 SourcePrinterId = printerId,
-                ThumbnailPath = thumbPath
+                ThumbnailFileName = thumbPath
             },
             new()
             {
                 Id = Guid.NewGuid(),
-                OriginalFileName = "other.gcode",
-                DisplayName = "other",
+                FileName = "other",
                 FolderId = folderJob.Id,
                 FilePath = Path.Combine(storageDir, "jobs", "other.gcode"),
                 FileSizeBytes = 2048,
                 UploadedAt = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
                 SourcePrinterId = Guid.NewGuid(),
-                ThumbnailPath = Path.Combine(storageDir, "thumbs", "other.png")
+                ThumbnailFileName = Path.Combine(storageDir, "thumbs", "other.png")
             }
         };
 
@@ -227,12 +225,12 @@ public class GcodeFilesServiceTests
 
         GcodeFileEntryDto directoryEntry = response.Files[0];
         directoryEntry.IsDirectory.Should().BeTrue();
-        directoryEntry.Name.Should().Be("print-jobs");
+        directoryEntry.FileName.Should().Be("print-jobs");
         directoryEntry.Path.Should().Be("/jobs/print-jobs");
 
         GcodeFileEntryDto fileEntry = response.Files[1];
         fileEntry.IsDirectory.Should().BeFalse();
-        fileEntry.Name.Should().Be("model1.gcode");
+        fileEntry.FileName.Should().Be("model1.gcode");
         fileEntry.Path.Should().Be("/jobs/model1.gcode");
         fileEntry.HarvestOperationId.Should().Be(harvestId);
         fileEntry.ThumbnailPath.Should().Be("/api/gcode-files/download?path=thumbs%2Fmodel1.png");

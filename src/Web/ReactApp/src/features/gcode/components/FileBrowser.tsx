@@ -103,7 +103,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     const serializable = uploadQueue.map(u => ({
       id: u.id,
       fileName: u.file.name,
-      fileSize: u.file.size,
+      fileSize: u.file.fileSize,
       fileType: u.file.type,
       progress: u.progress,
       status: u.status,
@@ -136,11 +136,18 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
       // At root path, show all files from library instead of empty folder
       if (currentPath === '/' && !harvestId && !printerId) {
         const libraryFiles = await apiClient.queryGcodeLibrary(searchTerm);
+        // Map library files to file browser structure (minimal transformation - just add missing fields)
+        const files: GcodeFile[] = libraryFiles.map(f => ({
+          ...f,
+          path: `/${f.fileName}`,
+          isDirectory: false,
+          harvestOperationId: undefined
+        }));
         // Calculate total size for library files
-        const totalSize = libraryFiles.reduce((sum, f) => sum + (f.fileSizeBytes || 0), 0);
+        const totalSize = libraryFiles.reduce((sum, f) => sum + (f.fileSize || 0), 0);
         return {
-          files: libraryFiles,
-          totalFiles: libraryFiles.length,
+          files,
+          totalFiles: files.length,
           totalSize,
           currentPath: '/',
           parentPath: null,
@@ -194,7 +201,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               'Content-Type': 'application/json',
               ...getAuthHeaders()
             },
-            body: JSON.stringify({ fileName: item.file.name, size: item.file.size, path: currentPath })
+            body: JSON.stringify({ fileName: item.file.name, size: item.file.fileSize, path: currentPath })
           });
           if (!initResp.ok) {
             throw new Error((await initResp.text()) || 'Chunk init failed');
@@ -215,7 +222,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               const st = await stResp.json();
               offset = st.uploadedBytes || 0;
               item.uploadedBytes = offset;
-              item.progress = Math.round((offset / item.file.size) * 100);
+              item.progress = Math.round((offset / item.file.fileSize) * 100);
               item.paused = !!st.paused;
               if (st.completed) {
                 item.status = 'done';
@@ -229,7 +236,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             // Ignore status check errors
           }
         }
-        while (offset < item.file.size) {
+        while (offset < item.file.fileSize) {
           if (item.cancelRequested) {
             // cancel on server
             try { fetch(`${apiBase}/gcode-files/chunk/${uploadId}`, { method: 'DELETE', headers: getAuthHeaders() }); } catch {
@@ -238,7 +245,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             throw new Error('Cancelled');
           }
           if (item.paused) { await new Promise(r => setTimeout(r, 250)); continue; }
-          const slice = item.file.slice(offset, Math.min(offset + CHUNK_SIZE, item.file.size));
+          const slice = item.file.slice(offset, Math.min(offset + CHUNK_SIZE, item.file.fileSize));
           const putResp = await fetch(`${apiBase}/gcode-files/chunk/${uploadId}?offset=${offset}`, {
             method: 'PUT',
             headers: { 
@@ -264,7 +271,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           const statusJson = await putResp.json().catch(() => null) as { isComplete?: boolean; finalHash?: string; paused?: boolean; completed?: boolean } | null;
           offset += slice.size;
           item.uploadedBytes = offset;
-          item.progress = Math.round((offset / item.file.size) * 100);
+          item.progress = Math.round((offset / item.file.fileSize) * 100);
           item.paused = !!statusJson?.paused;
           setUploadQueue(q => [...q]);
           if (statusJson?.completed) {
@@ -288,7 +295,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   item.status = 'uploading';
         setUploadQueue(q => [...q]);
         try {
-          if (item.file.size >= CHUNK_THRESHOLD) {
+          if (item.file.fileSize >= CHUNK_THRESHOLD) {
             await chunkUpload(item);
             item.progress = 100;
           } else {
@@ -329,7 +336,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           } else {
             item.status = 'done';
             if (item.finalHash) {
-              toast.success(`${item.file.name} uploaded (hash ${item.finalHash.slice(0,8)}…)`);
+              toast.success(`${item.file.fileName} uploaded (hash ${item.finalHash.slice(0,8)}…)`);
             }
             results.succeeded++;
           }
@@ -464,7 +471,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               type="button"
               onClick={async () => {
                 // Bulk hash compare: compute & group by hash to find duplicates
-                const candidatePaths = files?.files?.filter(f => selectedFiles.includes(f.path) && !f.isDirectory && /\.(gcode|bgcode)$/i.test(f.name)).map(f => f.path) || [];
+                const candidatePaths = files?.files?.filter(f => selectedFiles.includes(f.path) && !f.isDirectory && /\.(gcode|bgcode)$/i.test(f.fileName)).map(f => f.path) || [];
                 if (candidatePaths.length < 2) { toast.info('Select at least two files'); return; }
                 try {
                   // Prefetch all hashes
@@ -604,20 +611,19 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         printerId={printerId}
       />
       <div className={`${isModal ? 'flex-1 overflow-y-auto' : ''}`}>
-      {/* Empty state - shown when no files and not in explorer view */}
-      {isLoading ? (
+      {/* Explorer view is always shown - it manages its own state and API calls */}
+      {viewMode === 'explorer' ? (
+        <div className="bg-pf-bg-1 rounded-lg border border-pf-border h-full flex flex-col overflow-hidden">
+          <ExplorerFileBrowser endpoint="gcode" />
+        </div>
+      ) : isLoading ? (
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-16 bg-pf-bg-1 rounded animate-pulse" />
           ))}
         </div>
       ) : files && files.files && files.files.length > 0 ? (
-        viewMode === 'explorer' ? (
-          // Explorer view - use dedicated tree-based file browser
-          <div className="bg-pf-bg-1 rounded-lg border border-pf-border h-full flex flex-col overflow-hidden">
-            <ExplorerFileBrowser endpoint="gcode" />
-          </div>
-        ) : viewMode === 'grid' ? (
+        viewMode === 'grid' ? (
           // Grid view - card layout
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto">
             {files.files?.map((file: GcodeFile) => (
@@ -627,10 +633,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               >
                 {/* Thumbnail */}
                 <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
-                  {!file.isDirectory && file.thumbnailPath ? (
+                  {!file.isDirectory && file.thumbnailUrl ? (
                     <img
-                      src={file.thumbnailPath}
-                      alt={file.name}
+                      src={file.thumbnailUrl}
+                      alt={file.fileName}
                       className="w-full h-full object-contain group-hover:scale-105 transition-transform"
                     />
                   ) : file.isDirectory ? (
@@ -643,22 +649,22 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 {/* File info */}
                 <div className="p-2.5 flex-1 flex flex-col">
                   <h3 className="font-semibold text-pf-text-primary line-clamp-2 mb-1.5 text-sm">
-                    {file.name}
+                    {file.fileName}
                   </h3>
 
                   {/* Metadata */}
                   <div className="text-xs text-pf-text-secondary space-y-0.5 mb-2 flex-1">
-                    {!file.isDirectory && file.size && (
+                    {!file.isDirectory && file.fileSize && (
                       <div className="flex justify-between gap-1">
                         <span>Size:</span>
-                        <span className="font-medium text-right">{formatBytes(file.size)}</span>
+                        <span className="font-medium text-right">{formatBytes(file.fileSize)}</span>
                       </div>
                     )}
-                    {file.modifiedAt && (
+                    {file.uploadedAt && (
                       <div className="flex justify-between gap-1">
                         <span>Modified:</span>
                         <span className="font-medium text-right">
-                          {new Date(file.modifiedAt).toLocaleDateString()}
+                          {new Date(file.uploadedAt).toLocaleDateString()}
                         </span>
                       </div>
                     )}
@@ -682,7 +688,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                         </Button>
                         <Button
                           onClick={() => {
-                            if (confirm(`Delete ${file.name}?`)) {
+                            if (confirm(`Delete ${file.fileName}?`)) {
                               deleteMutation.mutate([file.path]);
                             }
                           }}
@@ -709,7 +715,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                         </Button>
                         <Button
                           onClick={() => {
-                            if (confirm(`Delete ${file.name}?`)) {
+                            if (confirm(`Delete ${file.fileName}?`)) {
                               deleteMutation.mutate([file.path]);
                             }
                           }}
@@ -762,15 +768,15 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             setSelectedFiles(prev => prev.filter(p => p !== file.path));
                           }
                         }}
-                        title={`Select ${file.name}`}
-                        aria-label={`Select ${file.name}`}
+                        title={`Select ${file.fileName}`}
+                        aria-label={`Select ${file.fileName}`}
                       />
                     </td>
                     <td className="px-4 py-3">
-                      {!file.isDirectory && file.thumbnailPath ? (
+                      {!file.isDirectory && file.thumbnailUrl ? (
                         <img
-                          src={file.thumbnailPath}
-                          alt={file.name}
+                          src={file.thumbnailUrl}
+                          alt={file.fileName}
                           className="w-12 h-12 rounded object-cover"
                           onError={(e) => {
                             e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
@@ -798,16 +804,16 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                           <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
                         )}
                         <div className="flex flex-col">
-                          <span className="text-pf-text-primary font-medium">{file.name}</span>
+                          <span className="text-pf-text-primary font-medium">{file.fileName}</span>
                           <span className="text-xs text-pf-text-tertiary">{file.path}</span>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {!file.isDirectory ? formatBytes(file.size) : '-'}
+                      {!file.isDirectory ? formatBytes(file.fileSize) : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {file.modifiedAt ? new Date(file.modifiedAt).toLocaleDateString() : '-'}
+                      {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : '-'}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
@@ -824,7 +830,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             </Button>
                             <Button
                               onClick={() => {
-                                if (confirm(`Delete ${file.name}?`)) {
+                                if (confirm(`Delete ${file.fileName}?`)) {
                                   deleteMutation.mutate([file.path]);
                                 }
                               }}
@@ -840,7 +846,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                         {file.isDirectory && (
                           <Button
                             onClick={() => {
-                              if (confirm(`Delete ${file.name}?`)) {
+                              if (confirm(`Delete ${file.fileName}?`)) {
                                 deleteMutation.mutate([file.path]);
                               }
                             }}

@@ -59,7 +59,7 @@ namespace Farm.Web.Api.Tests.Services
             Model3D existing = new Model3D
             {
                 Id = Guid.NewGuid(),
-                OriginalFileName = "othername.stl",
+                FileName = "othername.stl",
                 FileHash = contentHash,
                 FileFormat = Farm.Infrastructure.Domain.ModelFileFormat.STL,
                 IsValid = true,

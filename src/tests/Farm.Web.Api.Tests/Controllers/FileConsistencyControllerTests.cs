@@ -120,7 +120,7 @@ public class FileConsistencyControllerTests
             new Model3D
             {
                 Id = Guid.NewGuid(),
-                DisplayName = "Missing Model",
+                FileName = "Missing Model",
                 FilePath = "/path/to/missing.stl",
                 HealthStatus = FileHealthStatus.Missing,
                 LastHealthCheckDate = DateTime.UtcNow
@@ -131,7 +131,7 @@ public class FileConsistencyControllerTests
             new GcodeFile
             {
                 Id = Guid.NewGuid(),
-                DisplayName = "Corrupted Gcode",
+                FileName = "Corrupted Gcode",
                 FilePath = "/path/to/corrupted.gcode",
                 HealthStatus = FileHealthStatus.Corrupted,
                 LastHealthCheckDate = DateTime.UtcNow
@@ -181,7 +181,7 @@ public class FileConsistencyControllerTests
         var model = new Model3D
         {
             Id = modelId,
-            DisplayName = "Test Model",
+            FileName = "Test Model",
             FilePath = "/path/to/model.stl",
             FileSizeBytes = 1024,
             FileHash = "abc123",
@@ -229,7 +229,7 @@ public class FileConsistencyControllerTests
         var gcode = new GcodeFile
         {
             Id = gcodeId,
-            DisplayName = "Test Gcode",
+            FileName = "Test Gcode",
             FilePath = "/path/to/test.gcode",
             FileSizeBytes = 2048,
             FileHash = "def456",

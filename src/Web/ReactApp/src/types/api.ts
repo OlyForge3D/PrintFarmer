@@ -637,12 +637,13 @@ export enum GcodeSource {
   Harvest = 1,
 }
 
-export interface GcodeFile {
+// Full G-code library file (domain model with metadata)
+export interface GcodeLibraryFile {
   id: string;
-  originalFileName: string;
-  displayName: string;
-  fileSizeBytes: number;
+  fileName: string;
+  fileSize: number;
   uploadedAt: Date;
+  thumbnailUrl?: string;
   source: GcodeSource;
   sourcePrinterId?: string;
   sourcePrinterName?: string;
@@ -746,15 +747,16 @@ export interface StartBulkHarvestRequest {
   options: HarvestOptions;
 }
 
+// Lightweight file browser entry for hierarchical navigation
 export interface GcodeFile {
   id: string;
   path: string;
-  name: string;
-  size: number;
-  modifiedAt: Date;
+  fileName: string; // Display name for the file/folder (matches backend GcodeFileEntryDto.FileName)
+  fileSize: number;
+  uploadedAt: Date;
   isDirectory: boolean;
   harvestOperationId?: string;
-  thumbnailPath?: string;
+  thumbnailUrl?: string;
 }
 
 export interface GetGcodeFilesRequest {
@@ -1006,7 +1008,7 @@ export interface MultiUploadFailure {
 
 // Response for multi-file upload endpoint.
 export interface MultiUploadResponse {
-  created: GcodeFile[];
+  created: GcodeLibraryFile[];
   failed: MultiUploadFailure[];
   succeededCount: number;
   failedCount: number;

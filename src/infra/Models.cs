@@ -961,10 +961,10 @@ public enum GcodeSourceDto
 /// </summary>
 public record GcodeFileDto(
     Guid Id,
-    string OriginalFileName,
-    string DisplayName,
-    long FileSizeBytes,
+    string FileName,
+    long FileSize,
     DateTime UploadedAt,
+    string? ThumbnailUrl = null,
     GcodeSourceDto Source = GcodeSourceDto.Upload,
     Guid? SourcePrinterId = null,
     string? SourcePrinterName = null,
@@ -994,7 +994,7 @@ public record GcodeFileDto(
 /// </summary>
 public class CreateGcodeFileDto
 {
-    public string DisplayName { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string[]? Tags { get; set; }
     public double? RequiredNozzleDiameter { get; set; }
@@ -1017,7 +1017,7 @@ public class CreateGcodeFileDto
 /// Update payload for modifying G-code library metadata.
 /// </summary>
 public record UpdateGcodeFileDto(
-    string DisplayName,
+    string FileName,
     string? Description = null,
     string[]? Tags = null,
     double? RequiredNozzleDiameter = null,
@@ -1480,7 +1480,6 @@ public record GcodeMetadataDto(
 public class Model3DDto
 {
     public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty;
     public long FileSize { get; set; }
     public string FileType { get; set; } = string.Empty; // stl, 3mf, obj, ply
@@ -1502,7 +1501,7 @@ public class Model3DDto
 /// </summary>
 public record Model3DEntryDto(
     string Path,
-    string Name,
+    string FileName,
     long Size,
     DateTime ModifiedAt,
     bool IsDirectory,

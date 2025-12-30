@@ -97,7 +97,7 @@ namespace Farm.Web.Api.Services.Gcode
                 string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
-                    Name: subdir,
+                    FileName: subdir,
                     Size: 0,
                     ModifiedAt: DateTime.UtcNow, // Directories don't have modification time in DB
                     IsDirectory: true
@@ -127,7 +127,7 @@ namespace Farm.Web.Api.Services.Gcode
             // Add files from database
             foreach (var file in dbFiles)
             {
-                if (!IsMatch(file.OriginalFileName, search))
+                if (!IsMatch(file.FileName, search))
                 {
                     continue;
                 }
@@ -142,17 +142,19 @@ namespace Farm.Web.Api.Services.Gcode
                     continue;
                 }
 
-                string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
+                string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
 
                 // Convert thumbnail path to API URL if available
                 string? thumbnailUrl = null;
-                if (!string.IsNullOrEmpty(file.ThumbnailPath))
+                if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                 {
+                    // Construct full path from directory + filename
+                    string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
                     // Convert full filesystem path to virtual path for API download endpoint
                     // Remove the storage root prefix to get virtual path
                     string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
                     string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
-                    string normalizedThumbnailPath = Path.GetFullPath(file.ThumbnailPath);
+                    string normalizedThumbnailPath = Path.GetFullPath(fullThumbnailPath);
 
                     if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
                     {
@@ -166,13 +168,13 @@ namespace Farm.Web.Api.Services.Gcode
                     else
                     {
                         // Fallback: just use the filename
-                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(Path.GetFileName(file.ThumbnailPath))}";
+                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(file.ThumbnailFileName)}";
                     }
                 }
 
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
-                    Name: file.OriginalFileName,
+                    FileName: file.FileName,
                     Size: file.FileSizeBytes,
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
@@ -189,20 +191,20 @@ namespace Farm.Web.Api.Services.Gcode
             if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
 
             int totalFiles = entries.Count(e => !e.IsDirectory);
@@ -279,7 +281,7 @@ namespace Farm.Web.Api.Services.Gcode
                 string childVirtual = CombineVirtual(virtualPathNormalized, subdir);
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
-                    Name: subdir,
+                    FileName: subdir,
                     Size: 0,
                     ModifiedAt: DateTime.UtcNow,
                     IsDirectory: true,
@@ -293,20 +295,21 @@ namespace Farm.Web.Api.Services.Gcode
             // Add files with gcodeFileId (GUID) and thumbnail URL
             foreach (var file in dbFiles)
             {
-                if (!IsMatch(file.OriginalFileName, search))
+                if (!IsMatch(file.FileName, search))
                 {
                     continue;
                 }
 
-                string childVirtual = CombineVirtual(virtualPathNormalized, file.OriginalFileName);
+                string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
 
                 // Convert thumbnail path to API URL if available
                 string? thumbnailUrl = null;
-                if (!string.IsNullOrEmpty(file.ThumbnailPath))
+                if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                 {
+                    string thumbnailFullPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
                     string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
                     string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
-                    string normalizedThumbnailPath = Path.GetFullPath(file.ThumbnailPath);
+                    string normalizedThumbnailPath = Path.GetFullPath(thumbnailFullPath);
 
                     if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
                     {
@@ -317,13 +320,13 @@ namespace Farm.Web.Api.Services.Gcode
                     }
                     else
                     {
-                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(Path.GetFileName(file.ThumbnailPath))}";
+                        thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(file.ThumbnailFileName)}";
                     }
                 }
 
                 entries.Add(new GcodeFileEntryDto(
                     Path: childVirtual,
-                    Name: file.OriginalFileName,
+                    FileName: file.FileName,
                     Size: file.FileSizeBytes,
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
@@ -342,20 +345,20 @@ namespace Farm.Web.Api.Services.Gcode
             if (normalizedSortBy.Equals("size", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Size).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else if (normalizedSortBy.Equals("date", StringComparison.OrdinalIgnoreCase))
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.ModifiedAt).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
             else
             {
                 entries = orderDesc
-                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList()
-                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                    ? entries.OrderByDescending(e => e.IsDirectory).ThenByDescending(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList()
+                    : entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase).ToList();
             }
 
             // Apply pagination
@@ -438,8 +441,8 @@ namespace Farm.Web.Api.Services.Gcode
             }
 
             // Return the virtual path using the display name (original filename), not the GUID
-            string virtualFilePath = CombineVirtual(virtualDir, gcodeFile.DisplayName);
-            return new GcodeFileEntryDto(virtualFilePath, gcodeFile.DisplayName, gcodeFile.FileSizeBytes, info.LastWriteTimeUtc, false);
+            string virtualFilePath = CombineVirtual(virtualDir, gcodeFile.FileName);
+            return new GcodeFileEntryDto(virtualFilePath, gcodeFile.FileName, gcodeFile.FileSizeBytes, info.LastWriteTimeUtc, false);
         }
 
         /// <summary>
@@ -495,9 +498,8 @@ namespace Farm.Web.Api.Services.Gcode
                 GcodeFile gcodeFile = new()
                 {
                     Id = fileId,
-                    OriginalFileName = fileName,
-                    DisplayName = Path.GetFileNameWithoutExtension(fileName),
-                    FilePath = Path.GetFullPath(filePath),
+                    FileName = fileName,
+                    FilePath = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory(),
                     FolderId = targetFolder.Id,
                     FileSizeBytes = fileInfo.Length,
                     FileHash = fileHash,
@@ -510,7 +512,7 @@ namespace Farm.Web.Api.Services.Gcode
                     EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
                     SlicerName = metadata?.SlicerName,
                     SlicerVersion = metadata?.SlicerVersion,
-                    ThumbnailPath = thumbnailPath,
+                    ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -522,7 +524,7 @@ namespace Farm.Web.Api.Services.Gcode
                 if (filePath != finalFilePath && File.Exists(filePath))
                 {
                     File.Move(filePath, finalFilePath, overwrite: true);
-                    gcodeFile.FilePath = Path.GetFullPath(finalFilePath);
+                    gcodeFile.FileName = $"{fileId}{fileExtension}";
                     _logger.LogInformation("Moved file from {SourcePath} to {FinalPath}", filePath, finalFilePath);
                 }
 
@@ -533,7 +535,7 @@ namespace Farm.Web.Api.Services.Gcode
                     if (thumbnailPath != finalThumbnailPath)
                     {
                         File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
-                        gcodeFile.ThumbnailPath = Path.GetFullPath(finalThumbnailPath);
+                        gcodeFile.ThumbnailFileName = $"{fileId}_thumb.png";
                         _logger.LogInformation("Moved thumbnail from {SourcePath} to {FinalPath}", thumbnailPath, finalThumbnailPath);
                     }
                 }
@@ -629,7 +631,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             GcodeFileEntryDto dto = new(
                 Path: CombineVirtual(virtualDir, name),
-                Name: name,
+                FileName: name,
                 Size: 0,
                 ModifiedAt: Directory.GetLastWriteTimeUtc(newDirFullPath),
                 IsDirectory: true
@@ -982,10 +984,9 @@ namespace Farm.Web.Api.Services.Gcode
             GcodeFile gcodeFile = new()
             {
                 Id = fileId,
-                OriginalFileName = originalFileName,
-                DisplayName = Path.GetFileNameWithoutExtension(originalFileName),
+                FileName = $"{fileId}{fileExtension}",
                 FolderId = targetFolder.Id,
-                FilePath = Path.GetFullPath(finalFilePath),
+                FilePath = storageDir,
                 FileSizeBytes = fileSizeBytes,
                 FileHash = fileHash,
                 UploadedAt = DateTime.UtcNow,
@@ -997,7 +998,7 @@ namespace Farm.Web.Api.Services.Gcode
                 EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
                 SlicerName = metadata?.SlicerName,
                 SlicerVersion = metadata?.SlicerVersion,
-                ThumbnailPath = thumbnailPath,
+                ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };

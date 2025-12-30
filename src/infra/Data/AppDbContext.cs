@@ -287,12 +287,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         _ = modelBuilder.Entity<GcodeFile>(b =>
         {
             _ = b.HasKey(g => g.Id);
-            _ = b.Property(g => g.OriginalFileName).IsRequired().HasMaxLength(255);
-            _ = b.Property(g => g.DisplayName).IsRequired().HasMaxLength(255);
+            _ = b.Property(g => g.FileName).IsRequired().HasMaxLength(255);
             _ = b.Property(g => g.FileHash).IsRequired().HasMaxLength(64);
             _ = b.Property(g => g.FileSizeBytes).IsRequired();
             _ = b.Property(g => g.FilePath).IsRequired().HasMaxLength(512);
-            _ = b.Property(g => g.ThumbnailPath).HasMaxLength(512); // Path to thumbnail image
+            _ = b.Property(g => g.ThumbnailFileName).HasMaxLength(255); // Path to thumbnail image
             _ = b.Property(g => g.SlicerName).HasMaxLength(128);
             _ = b.Property(g => g.SlicerVersion).HasMaxLength(64);
             _ = b.Property(g => g.RequiredMaterial).HasMaxLength(64);
@@ -658,13 +657,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         _ = modelBuilder.Entity<Model3D>(b =>
         {
             _ = b.HasKey(m => m.Id);
-            _ = b.Property(m => m.OriginalFileName).IsRequired().HasMaxLength(255);
-            _ = b.Property(m => m.DisplayName).IsRequired().HasMaxLength(255);
+            _ = b.Property(m => m.FileName).IsRequired().HasMaxLength(255);
             _ = b.Property(m => m.FilePath).IsRequired().HasMaxLength(512);
             _ = b.Property(m => m.FileHash).IsRequired().HasMaxLength(64);
             _ = b.Property(m => m.FileFormat).HasConversion<int>();
             _ = b.Property(m => m.FileSizeBytes).IsRequired();
-            _ = b.Property(m => m.ThumbnailPath).HasMaxLength(512); // Path to thumbnail image
+            _ = b.Property(m => m.ThumbnailFileName).HasMaxLength(255); // Path to thumbnail image
             _ = b.Property(m => m.ValidationErrors).HasColumnType("TEXT");
             _ = b.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
             _ = b.Property(m => m.LastVerificationResult).HasColumnType("TEXT");

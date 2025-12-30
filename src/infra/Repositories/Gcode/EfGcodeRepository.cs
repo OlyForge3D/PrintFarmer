@@ -34,8 +34,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
             {
                 var searchLower = search.ToLowerInvariant();
                 query = query.Where(g =>
-                    (g.OriginalFileName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (g.DisplayName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (g.FileName?.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ?? false) ||
                     (g.Description != null && g.Description.Contains(searchLower, StringComparison.OrdinalIgnoreCase)));
             }
 

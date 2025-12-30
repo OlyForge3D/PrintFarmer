@@ -94,8 +94,7 @@ namespace Farm.Web.Api.Tests.Services
             Model3D existing = new Model3D
             {
                 Id = Guid.NewGuid(),
-                OriginalFileName = "model.stl",
-                DisplayName = "model",
+                FileName = "model",
                 FilePath = "path",
                 FileSizeBytes = 12,
                 FileHash = contentHash,

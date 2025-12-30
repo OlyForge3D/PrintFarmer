@@ -388,7 +388,7 @@ public class TagServiceTests
         var tagId1 = Guid.NewGuid();
         var tagId2 = Guid.NewGuid();
 
-        var model = new Model3D { Id = modelId, DisplayName = "Test Model", OriginalFileName = "test.stl", FilePath = "/models/test.stl" };
+        var model = new Model3D { Id = modelId, FileName = "test.stl", FilePath = "/models/test.stl" };
         var tag1 = new Model3DTag { Id = tagId1, Name = "Support" };
         var tag2 = new Model3DTag { Id = tagId2, Name = "Detail" };
 
@@ -435,7 +435,7 @@ public class TagServiceTests
         var validTagId = Guid.NewGuid();
         var invalidTagId = Guid.NewGuid();
 
-        var model = new Model3D { Id = modelId, DisplayName = "Test Model", OriginalFileName = "test.stl", FilePath = "/models/test.stl" };
+        var model = new Model3D { Id = modelId, FileName = "test.stl", FilePath = "/models/test.stl" };
         var validTag = new Model3DTag { Id = validTagId, Name = "Support" };
 
         _model3dRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
@@ -463,7 +463,7 @@ public class TagServiceTests
     {
         // Arrange
         var modelId = Guid.NewGuid();
-        var model = new Model3D { Id = modelId, DisplayName = "Test Model", OriginalFileName = "test.stl", FilePath = "/models/test.stl" };
+        var model = new Model3D { Id = modelId, FileName = "test.stl", FilePath = "/models/test.stl" };
 
         _model3dRepository.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(model);
@@ -591,8 +591,8 @@ public class TagServiceTests
         var modelId2 = Guid.NewGuid();
         var tagId = Guid.NewGuid();
 
-        var model1 = new Model3D { Id = modelId1, DisplayName = "Model1", OriginalFileName = "model1.stl", FilePath = "/models/model1.stl" };
-        var model2 = new Model3D { Id = modelId2, DisplayName = "Model2", OriginalFileName = "model2.stl", FilePath = "/models/model2.stl" };
+        var model1 = new Model3D { Id = modelId1, FileName = "model1.stl", FilePath = "/models/model1.stl" };
+        var model2 = new Model3D { Id = modelId2, FileName = "model2.stl", FilePath = "/models/model2.stl" };
         var tag = new Model3DTag { Id = tagId, Name = "Support" };
 
         _model3dRepository.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))

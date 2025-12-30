@@ -146,7 +146,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
             }
 
             // Upload the model file to the slicer storage
-            string fileKey = $"models/{Guid.NewGuid()}/{model.OriginalFileName}";
+            string fileKey = $"models/{Guid.NewGuid()}/{model.FileName}";
             string modelFileUrl;
             using (FileStream fileStream = new(model.FilePath, FileMode.Open, FileAccess.Read))
             {
@@ -159,7 +159,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
                 UserId = userId,
                 PrinterId = printerId,
                 ModelFileUrl = new Uri(modelFileUrl, UriKind.RelativeOrAbsolute),
-                ModelFileName = model.OriginalFileName,
+                ModelFileName = model.FileName,
                 SlicerEngine = Enum.Parse<SlicerEngineType>(slicerEngine, true),
                 SlicerProfile = profile
             };
@@ -210,7 +210,7 @@ public class SlicingSubmissionService : ISlicingSubmissionService
                 _ = SlicingJobStore.Add(storeJob);
             }
 
-            _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.OriginalFileName})");
+            _logger.LogInformation($"Slicing job submitted for uploaded model {modelId} ({model.FileName})");
 
             return new SlicingSubmissionResult(true, Result: sliceResult);
         }
