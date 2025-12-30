@@ -111,12 +111,6 @@ type HarvestFileUpdatedCallback = (evt: HarvestFileUpdatedEvent) => void;
 
 export class SignalRService {
   private connection: HubConnection | null = null;
-  private harvestFileDiscoveredCallbacks: HarvestFileDiscoveredCallback[] = [];
-  private harvestFileUpdatedCallbacks: HarvestFileUpdatedCallback[] = [];
-  private harvestOperationProgressCallbacks: HarvestOperationProgressCallback[] = [];
-  private harvestOperationCompletedCallbacks: HarvestOperationCompletedCallback[] = [];
-  private harvestDiscoveryRestartedCallbacks: HarvestDiscoveryRestartedCallback[] = [];
-  private harvestDiscoveryCompleteCallbacks: HarvestDiscoveryCompleteCallback[] = [];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second

@@ -843,8 +843,16 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
 
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
+        // TODO: SDCP file list implementation needs to parse actual response from SDCP protocol
+        // Currently returns placeholder data - should extract size and modified timestamp from SDCP response
         var files = await GetFileListAsync(baseUrl, ct);
-        return files?.Select(f => new PrinterFileInfo { Name = f, Path = f }).ToList() ?? new();
+        return files?.Select(f => new PrinterFileInfo 
+        { 
+            Name = f, 
+            Path = f,
+            // Size and Modified should be extracted from SDCP protocol response
+            // when proper implementation is added
+        }).ToList() ?? new();
     }
 
     Task<string?> ISupportsCamera.GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default)

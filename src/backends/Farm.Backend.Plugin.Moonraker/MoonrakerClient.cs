@@ -850,6 +850,16 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
 
     public async Task<string[]> GetFileListAsync(string baseUrl, CancellationToken ct = default)
     {
+        // Call the new method that returns full file info, then extract just the paths for backward compatibility
+        var fileInfoList = await GetFileListWithMetadataAsync(baseUrl, ct);
+        return fileInfoList.Select(f => f.Path).ToArray();
+    }
+
+    /// <summary>
+    /// Get list of G-code files with metadata (size, modified date) from Moonraker.
+    /// </summary>
+    private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, CancellationToken ct = default)
+    {
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -860,7 +870,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return Array.Empty<string>();
+                return new List<PrinterFileInfo>();
             }
 
             await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
@@ -870,10 +880,10 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             if (!root.TryGetProperty("result", out JsonElement result) ||
                 result.ValueKind != JsonValueKind.Array)
             {
-                return Array.Empty<string>();
+                return new List<PrinterFileInfo>();
             }
 
-            List<string> files = new();
+            List<PrinterFileInfo> files = new();
             foreach (JsonElement file in result.EnumerateArray())
             {
                 if (file.TryGetProperty("path", out JsonElement path) &&
@@ -882,15 +892,38 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                     string? fileName = path.GetString();
                     if (!string.IsNullOrEmpty(fileName) && fileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
                     {
-                        files.Add(fileName);
+                        // Extract size if available
+                        long? size = null;
+                        if (file.TryGetProperty("size", out JsonElement sizeElement) &&
+                            sizeElement.ValueKind == JsonValueKind.Number)
+                        {
+                            size = sizeElement.GetInt64();
+                        }
+
+                        // Extract modified timestamp if available
+                        DateTime? modified = null;
+                        if (file.TryGetProperty("modified", out JsonElement modifiedElement) &&
+                            modifiedElement.ValueKind == JsonValueKind.Number)
+                        {
+                            double timestamp = modifiedElement.GetDouble();
+                            modified = DateTimeOffset.FromUnixTimeSeconds((long)timestamp).UtcDateTime;
+                        }
+
+                        files.Add(new PrinterFileInfo
+                        {
+                            Name = fileName,
+                            Path = fileName,
+                            Size = size,
+                            Modified = modified
+                        });
                     }
                 }
             }
-            return files.ToArray();
+            return files;
         }
         catch
         {
-            return Array.Empty<string>();
+            return new List<PrinterFileInfo>();
         }
     }
 
@@ -1988,9 +2021,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     /// </summary>
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        // Moonraker returns string array, convert to PrinterFileInfo list
-        var files = await GetFileListAsync(baseUrl, ct);
-        return files?.Select(f => new PrinterFileInfo { Name = f, Path = f }).ToList() ?? new();
+        // Use the new method that extracts file metadata including size
+        return await GetFileListWithMetadataAsync(baseUrl, ct);
     }
 
 #pragma warning disable S1006 // Default parameters in explicit interface implementation

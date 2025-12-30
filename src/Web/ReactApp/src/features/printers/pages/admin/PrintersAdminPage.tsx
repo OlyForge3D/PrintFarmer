@@ -8,7 +8,7 @@ import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { PrinterDiscoveryModal } from '@/features/printers/components/PrinterDiscoveryModal';
 import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
 import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfirmationModal';
-import { ImportResultsModal } from '@/common/components/modals/ImportResultsModal';
+import ImportProgressModal from '@/features/printers/components/ImportProgressModal';
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { toast } from 'sonner';
@@ -34,13 +34,7 @@ export function PrintersAdminPage() {
     valid: boolean;
   };
 
-  const [previewItems, setPreviewItems] = React.useState<PreviewItem[] | null>(null);
   const [importing, setImporting] = React.useState<boolean>(false);
-  const [duplicateHandling, setDuplicateHandling] = React.useState<'skip' | 'overwrite' | 'rename'>('skip');
-  const [importResults, setImportResults] = React.useState<import('@/types/api').BulkImportResultItem[] | null>(null);
-  const [importStats, setImportStats] = React.useState<{ imported: number; skipped: number; failed: number }>({ imported: 0, skipped: 0, failed: 0 });
-  const [showImportResults, setShowImportResults] = React.useState(false);
-  const [retryingIndex, setRetryingIndex] = React.useState<number | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [showExportOptions, setShowExportOptions] = React.useState(false);
   const [exportProgress, setExportProgress] = React.useState<number | null>(null);
@@ -59,6 +53,9 @@ export function PrintersAdminPage() {
     isOpen: boolean;
     printers: Printer[];
   }>({ isOpen: false, printers: [] });
+  const [showImportProgress, setShowImportProgress] = React.useState(false);
+  const [importFileName, setImportFileName] = React.useState('');
+  const [importTotalCount, setImportTotalCount] = React.useState(0);
 
   // Check if discovery service is available
   React.useEffect(() => {
@@ -100,42 +97,6 @@ export function PrintersAdminPage() {
     const interval = setInterval(checkDiscoveryAvailability, 30000);
     
     return () => clearInterval(interval);
-  }, []);
-  React.useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
-
-    const setupSignalR = async () => {
-      try {
-        if (!printerHubService.isConnected()) {
-          await printerHubService.start();
-        }
-
-        // Subscribe to import progress updates
-        unsubscribe = printerHubService.onPrinterImportProgress((progress) => {
-          setImportResults(prev => {
-            if (!prev) return [progress];
-            // Update existing result or add new one
-            const existing = prev.findIndex(r => r.index === progress.index);
-            if (existing >= 0) {
-              const updated = [...prev];
-              updated[existing] = progress;
-              return updated;
-            }
-            return [...prev, progress];
-          });
-        });
-      } catch (error) {
-        console.error('Failed to set up PrinterHub:', error);
-      }
-    };
-
-    setupSignalR();
-
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
   }, []);
 
   const handleExport = () => {
@@ -198,6 +159,26 @@ export function PrintersAdminPage() {
     fileInputRef.current?.click();
   };
 
+  // Helper function to count printers in file
+  const countPrintersInFile = async (file: File): Promise<number> => {
+    try {
+      const text = await file.text();
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      
+      if (extension === 'json') {
+        const data = JSON.parse(text);
+        return Array.isArray(data) ? data.length : 0;
+      } else if (extension === 'csv') {
+        const lines = text.split('\n').filter(line => line.trim());
+        // Subtract header row
+        return Math.max(0, lines.length - 1);
+      }
+      return 0;
+    } catch {
+      return 0;
+    }
+  };
+
   const handleFile = async (file?: File) => {
     try {
       const f = file || (fileInputRef.current?.files ? fileInputRef.current.files[0] : undefined);
@@ -209,6 +190,18 @@ export function PrintersAdminPage() {
         toast.error('File must be CSV or JSON format');
         return;
       }
+
+      // Parse file to get count
+      const printerCount = await countPrintersInFile(f);
+      if (printerCount === 0) {
+        toast.error('No printers found in file');
+        return;
+      }
+
+      // Show progress modal immediately
+      setImportFileName(f.name);
+      setImportTotalCount(printerCount);
+      setShowImportProgress(true);
 
       // Send file to backend for parsing and import
       const formData = new FormData();
@@ -236,195 +229,12 @@ export function PrintersAdminPage() {
       // Refresh printers list to show newly imported printers
       await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       
-      const { importedCount, skippedCount, failureCount, results } = result;
-      
-      // Show results modal if there are any results
-      if (results && results.length > 0) {
-        const stats = {
-          imported: importedCount,
-          skipped: skippedCount,
-          failed: failureCount
-        };
-        setImportStats(stats);
-        setImportResults(results);
-        setShowImportResults(true);
-      }
-      
-      // Show toast notification
-      if (failureCount > 0) {
-        toast.error(`Import completed with ${failureCount} error${failureCount === 1 ? '' : 's'} - See modal for details`);
-      } else if (importedCount > 0) {
-        const summary = `Successfully imported ${importedCount} printer${importedCount === 1 ? '' : 's'}${skippedCount > 0 ? `, skipped ${skippedCount}` : ''}`;
-        toast.success(summary);
-      } else if (skippedCount > 0 && failureCount === 0) {
-        toast.info(`No new printers imported (${skippedCount} skipped due to duplicates)`);
-      }
+      // ImportProgressModal shows real-time results, no need for additional summary toast
     } catch (err) {
       console.error('[Import] Import failed', err);
       setImporting(false);
+      setShowImportProgress(false);
       toast.error(err instanceof Error ? err.message : 'Failed to import file');
-    }
-  };
-
-  const handleConfirmImport = async () => {
-  if (!previewItems || previewItems.length === 0) return;
-    const toImport = previewItems.filter(i => i.valid);
-    if (toImport.length === 0) {
-      toast.error('No valid printers to import');
-      return;
-    }
-    
-    // Initialize all items with "Pending" status
-    const pendingResults = toImport.map((item) => ({
-      index: item.__index,
-      name: item.name,
-      status: 'Pending' as const
-    }));
-    setImportResults(pendingResults);
-    setImporting(true);
-    
-    try {
-      // Prefer server-side bulk endpoint for better validation and per-item errors
-      const dtos = toImport.map(i => ({
-        name: i.name,
-        serverUrl: i.serverUrl,
-        backend: i.backend,
-        apiKey: i.apiKey,
-        notes: i.notes,
-        manufacturerId: i.manufacturerId,
-        modelId: i.modelId,
-        newManufacturerName: i.manufacturerName,
-        newModelName: i.modelName
-      }));
-
-      const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
-      // Map results back to preview item indices
-      const mappedResults = resp.results?.map((r, idx) => ({ ...r, index: toImport[idx].__index })) || [];
-      setImportResults(mappedResults);
-      // Keep previewItems so admin can review results
-      
-      // Show detailed feedback based on results
-      const { importedCount = 0, skippedCount = 0, failureCount = 0 } = resp;
-      
-      setImportStats({ imported: importedCount, skipped: skippedCount, failed: failureCount });
-      
-      // Always show the results modal for visibility
-      setShowImportResults(true);
-      
-      if (failureCount > 0) {
-        toast.error(`Import completed with ${failureCount} error${failureCount === 1 ? '' : 's'} - see details below`);
-      }
-      
-      if (importedCount > 0) {
-        const summary = `Imported ${importedCount} printer${importedCount === 1 ? '' : 's'}${skippedCount > 0 ? `, skipped ${skippedCount}` : ''}`;
-        toast.success(summary);
-      } else if (skippedCount > 0 && failureCount === 0) {
-        toast.info(`No new printers imported (${skippedCount} skipped due to duplicates)`);
-      }
-      
-      // Invalidate printer queries globally so all pages (admin + main printers page) see new printers immediately
-      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
-      
-      // Also refetch for immediate local update
-      if (refetch) {
-        await refetch();
-      }
-    } catch (err) {
-      console.error('Batch import failed', err);
-      toast.error('Import encountered errors');
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const handleRetryRow = async (item: PreviewItem) => {
-    // Retry a single row by sending a single-element bulk request so server returns same result shape
-    setRetryingIndex(item.__index);
-    try {
-      const dto = {
-        name: item.name,
-        serverUrl: item.serverUrl,
-        backend: item.backend,
-        apiKey: item.apiKey,
-        notes: item.notes,
-        manufacturerId: item.manufacturerId,
-        modelId: item.modelId,
-        newManufacturerName: item.manufacturerName,
-        newModelName: item.modelName
-      };
-  const resp = await apiClient.bulkCreatePrinters([dto], { duplicateHandling });
-      // resp.results is array; server returns index relative to input (0). Map it back to the preview item's original index
-      const singleResult = resp.results && resp.results.length > 0 ? { ...resp.results[0], index: item.__index } : undefined;
-      setImportResults(prev => {
-        const next = (prev || []).filter(r => r.index !== item.__index);
-        return singleResult ? [...next, singleResult] : next;
-      });
-      
-      // Invalidate printer queries globally so all pages see retried printer immediately
-      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
-      
-      if (singleResult && singleResult.status === 'Success') {
-        toast.success(`Imported ${singleResult.name}`);
-      } else if (singleResult && singleResult.status === 'Skipped') {
-        toast(`Skipped ${singleResult.name || 'row'}`);
-      } else {
-        toast.error(`Failed to import ${item.name || 'row'}`);
-      }
-    } catch (err) {
-      console.error('Retry failed', err);
-      toast.error('Retry failed');
-    } finally {
-      setRetryingIndex(null);
-    }
-  };
-
-  const handleRetryAllFailed = async () => {
-    if (!importResults || importResults.length === 0) {
-      toast('No previous import results to retry');
-      return;
-    }
-    // Find failed result indices and map back to preview items
-    const failed = importResults.filter(r => r.status === 'Failed');
-    if (failed.length === 0) {
-      toast('No failed rows to retry');
-      return;
-    }
-
-    const failedItems: PreviewItem[] = (previewItems || []).filter(pi => failed.some(f => f.index === pi.__index));
-    if (failedItems.length === 0) {
-      toast.error('Failed rows not present in current preview');
-      return;
-    }
-
-    setImporting(true);
-    try {
-      const dtos = failedItems.map(i => ({
-        name: i.name,
-        serverUrl: i.serverUrl,
-        backend: i.backend,
-        apiKey: i.apiKey,
-        notes: i.notes,
-        manufacturerId: i.manufacturerId,
-        modelId: i.modelId,
-        newManufacturerName: i.manufacturerName,
-        newModelName: i.modelName
-      }));
-  const resp = await apiClient.bulkCreatePrinters(dtos, { duplicateHandling });
-      // Merge results: map resp.results (0..n) back to original indices
-      const mapped = resp.results?.map((r, idx) => ({ ...r, index: failedItems[idx].__index })) || [];
-      setImportResults(prev => {
-        const others = (prev || []).filter(p => !mapped.some(m => m.index === p.index));
-        return [...others, ...mapped];
-      });
-      toast.success(`Retried ${mapped.length} failed rows`);
-      
-      // Invalidate printer queries globally so all pages see retried printers immediately
-      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
-    } catch (err) {
-      console.error('Retry all failed failed', err);
-      toast.error('Retry all failed encountered an error');
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -894,119 +704,6 @@ export function PrintersAdminPage() {
             </div>
           </div>
 
-          {previewItems && (
-            <div className="card">
-              <div className="card-header">
-                {(() => {
-                  const totalItems = previewItems.length;
-                  const completedItems = importResults?.length ?? 0;
-                  const progressPercent = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-                  return (
-                    <div className="flex items-center justify-between w-full">
-                      <div className="card-header-title">Import preview ({previewItems.length})</div>
-                      {importing && (
-                        <div className="flex items-center gap-3">
-                          <div className="text-sm text-pf-text-secondary">
-                            <span className="font-semibold">{completedItems}/{totalItems}</span> processed • <span className="font-semibold">{progressPercent}%</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-              <div className="card-body gap-md">
-                <div className="overflow-x-auto">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Printer Name</th>
-                        <th>Manufacturer</th>
-                        <th>Model</th>
-                        <th>Server URL</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewItems.map(item => {
-                        const importResult = importResults?.find(r => r.index === item.__index);
-                        return (
-                          <tr key={item.__index}>
-                            <td className="text-pf-text-primary font-medium">{item.name || <i className="text-pf-text-tertiary">(missing)</i>}</td>
-                            <td className="text-pf-text-secondary">{item.manufacturerName || <span className="text-pf-warning-text">-</span>}</td>
-                            <td className="text-pf-text-secondary">{item.modelName || <span className="text-pf-warning-text">-</span>}</td>
-                            <td className="text-pf-text-secondary">{item.serverUrl || <span className="text-pf-error-text">(missing)</span>}</td>
-                            <td className="text-center text-xs">
-                              {importResult ? (
-                                <>
-                                  {importResult.status === 'Pending' && (
-                                    <div className="flex items-center justify-center gap-1">
-                                      <svg className="animate-spin h-3 w-3 text-pf-text-secondary" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                      </svg>
-                                      <span className="text-pf-text-secondary">Pending</span>
-                                    </div>
-                                  )}
-                                  {importResult.status === 'Success' && (
-                                    <div className="flex flex-col items-start gap-1">
-                                      <span className="text-pf-success-text font-semibold">Success</span>
-                                      {importResult.id && (
-                                        <a href={`/printers/${importResult.id}`} className="text-pf-accent underline text-xs">Open</a>
-                                      )}
-                                    </div>
-                                  )}
-                                  {importResult.status === 'Skipped' && <span className="text-pf-warning-text font-semibold">Skipped</span>}
-                                  {importResult.status === 'Failed' && (
-                                    <div className="flex flex-col gap-1">
-                                      <span className="text-pf-error-text font-semibold">Failed{importResult.reason ? ':' : ''}</span>
-                                      {importResult.reason && <span className="text-pf-error-text text-xs">{importResult.reason}</span>}
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-pf-text-tertiary">-</span>
-                              )}
-                            </td>
-                            <td className="text-center">
-                              <Tooltip content={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Only failed imports can be retried'}>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  disabled={retryingIndex !== null || importResult?.status !== 'Failed'}
-                                  onClick={() => handleRetryRow(item)}
-                                  aria-label={retryingIndex === item.__index ? 'Retrying...' : importResult?.status === 'Failed' ? 'Retry import' : 'Retry (only available for failed imports)'}
-                                >
-                                  {retryingIndex === item.__index ? 'Retrying...' : 'Retry'}
-                                </Button>
-                              </Tooltip>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex gap-md flex-wrap items-center">
-                  <div className="form-group inline flex items-center gap-2">
-                    <Label>Duplicate handling:</Label>
-                    <Select value={duplicateHandling} onChange={e => setDuplicateHandling(e.target.value as 'skip' | 'overwrite' | 'rename')}>
-                      <option value="skip">Skip</option>
-                      <option value="overwrite">Overwrite</option>
-                      <option value="rename">Rename</option>
-                    </Select>
-                  </div>
-                  <Button size="sm" variant="primary" disabled={importing} aria-label="Confirm import of previewed printers" onClick={handleConfirmImport}>{importing ? 'Importing...' : 'Confirm Import'}</Button>
-                  <Button size="sm" variant="secondary" disabled={importing} aria-label="Return to main printers table to see imported printers" onClick={() => { setPreviewItems(null); setImportResults(null); }}>{importing ? 'Importing...' : 'Close'}</Button>
-                  <Tooltip content={importing ? 'Cannot retry during import' : !importResults?.some(r => r.status === 'Failed') ? 'No failed imports to retry' : 'Retry all failed imports'}>
-                    <Button size="sm" variant="secondary" disabled={importing || !importResults?.some(r => r.status === 'Failed')} aria-label="Retry all failed imports" onClick={handleRetryAllFailed}>Retry all failed</Button>
-                  </Tooltip>
-                </div>
-              </div>
-            </div>
-          )}
           <EditPrinterModal
             printerId={editPrinterId}
             isOpen={isEditModalOpen}
@@ -1032,18 +729,14 @@ export function PrintersAdminPage() {
           onCancel={handleCancelDelete}
         />
 
-        <ImportResultsModal
-          isOpen={showImportResults}
-          results={importResults?.map(r => ({
-            index: r.index,
-            name: r.name,
-            status: r.status,
-            reason: r.reason
-          })) || null}
-          importedCount={importStats.imported}
-          skippedCount={importStats.skipped}
-          failureCount={importStats.failed}
-          onClose={() => setShowImportResults(false)}
+        <ImportProgressModal
+          isOpen={showImportProgress}
+          onClose={() => {
+            setShowImportProgress(false);
+            queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+          }}
+          fileName={importFileName}
+          totalCount={importTotalCount}
         />
       </PageTemplate>
     </ProtectedRoute>

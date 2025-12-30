@@ -422,13 +422,19 @@ public class GcodeHarvestService(
             _logger.LogInformation($"Sending {gcodeFileCount} discovered files to frontend for operation {operation.Id}");
             foreach (PrinterFileInfo fileInfo in filteredFiles)
             {
+                // Separate directory path from filename
+                // fileInfo.Path could be "file.gcode" or "subfolder/file.gcode"
+                string fullPath = fileInfo.Path;
+                string fileName = Path.GetFileName(fullPath); // Gets just the filename
+                string directoryPath = Path.GetDirectoryName(fullPath) ?? string.Empty; // Gets directory portion, or empty if root
+
                 // Save discovered file to database so user can select it
                 HarvestDiscoveredFile discoveredFile = new()
                 {
                     Id = Guid.NewGuid(),
                     HarvestOperationId = operation.Id,
-                    FileName = fileInfo.Name,
-                    FilePath = fileInfo.Path,
+                    FileName = fileName, // Just the filename
+                    FilePath = directoryPath, // Just the directory path (empty string for root)
                     Size = fileInfo.Size,
                     ExtractedSlicerName = fileInfo.SlicerName,
                     ExtractedMaterial = fileInfo.FilamentWeightGrams.HasValue ? $"~{Math.Round(fileInfo.FilamentWeightGrams.Value)}g" : "",
@@ -444,7 +450,7 @@ public class GcodeHarvestService(
                 // Send file discovered event directly to SignalR clients via broadcaster
                 DiscoveredGcodeFileDto fileDto = MapToDto(discoveredFile);
                 await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfilediscovered", fileDto, CancellationToken.None);
-                _logger.LogInformation($"Sent FileDiscovered event for file '{fileInfo.Name}' to SignalR clients in operation {operation.Id}");
+                _logger.LogInformation($"Sent FileDiscovered event for file '{fileName}' to SignalR clients in operation {operation.Id}");
             }
 
             // Discovery is complete - files are now shown to user for selection

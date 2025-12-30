@@ -430,7 +430,7 @@ namespace Farm.Web.Api.Services.Model
                     Id = modelId,
                     FileName = fileName,
                     FolderId = rootFolder.Id,  // Root folder for uploaded files
-                    FilePath = _modelsPath,  // Store directory path
+                    FilePath = string.Empty,  // Empty string for root directory (relative path within models folder)
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
                     FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),

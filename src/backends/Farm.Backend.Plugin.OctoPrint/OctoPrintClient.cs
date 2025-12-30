@@ -1654,8 +1654,84 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        var files = await GetFileListAsync(baseUrl, apiKey ?? "");
-        return files?.Select(f => new PrinterFileInfo { Name = Path.GetFileName(f), Path = f }).ToList() ?? new();
+        var filesWithMetadata = await GetFileListWithMetadataAsync(baseUrl, apiKey ?? "");
+        return filesWithMetadata;
+    }
+
+    private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, string apiKey)
+    {
+        baseUrl = NormalizeBaseUrl(baseUrl);
+        try
+        {
+            HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local?recursive=true");
+            request.Headers.Add("X-Api-Key", apiKey);
+            HttpResponseMessage response = await SendWithRetryAsync(request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new List<PrinterFileInfo>();
+            }
+
+            string jsonContent = await response.Content.ReadAsStringAsync();
+            using JsonDocument doc = JsonDocument.Parse(jsonContent);
+            JsonElement root = doc.RootElement;
+
+            List<PrinterFileInfo> files = new();
+            if (root.TryGetProperty("files", out JsonElement filesArray))
+            {
+                ExtractFileInfoFromJson(filesArray, files, "");
+            }
+
+            return files;
+        }
+        catch (Exception ex)
+        {
+            LogError("Get file list failed", ex);
+            return new List<PrinterFileInfo>();
+        }
+    }
+
+    private static void ExtractFileInfoFromJson(JsonElement element, List<PrinterFileInfo> files, string path)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+            {
+                if (item.TryGetProperty("name", out JsonElement nameEl) && item.TryGetProperty("type", out JsonElement typeEl))
+                {
+                    string name = nameEl.GetString() ?? "";
+                    string type = typeEl.GetString() ?? "";
+                    string fullPath = string.IsNullOrEmpty(path) ? name : $"{path}/{name}";
+
+                    // Filter for machine code files (gcode)
+                    if (type.Equals("machinecode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Extract size if available
+                        long? size = null;
+                        if (item.TryGetProperty("size", out JsonElement sizeEl) && sizeEl.ValueKind == JsonValueKind.Number)
+                        {
+                            size = sizeEl.GetInt64();
+                        }
+
+                        // Extract modified timestamp if available (OctoPrint uses "date" field with Unix timestamp)
+                        DateTime? modified = null;
+                        if (item.TryGetProperty("date", out JsonElement dateEl) && dateEl.ValueKind == JsonValueKind.Number)
+                        {
+                            double timestamp = dateEl.GetDouble();
+                            modified = DateTimeOffset.FromUnixTimeSeconds((long)timestamp).UtcDateTime;
+                        }
+
+                        files.Add(new PrinterFileInfo
+                        {
+                            Name = Path.GetFileName(fullPath),
+                            Path = fullPath,
+                            Size = size,
+                            Modified = modified
+                        });
+                    }
+                }
+            }
+        }
     }
 
     async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)

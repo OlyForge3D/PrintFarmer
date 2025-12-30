@@ -606,8 +606,61 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
     async Task<List<PrinterFileInfo>> ISupportsFileList.GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
     {
-        var files = await GetFileListAsync(baseUrl, apiKey, ct);
-        return files?.Select(f => new PrinterFileInfo { Name = f, Path = f }).ToList() ?? new();
+        // Use the new method that extracts file metadata including size
+        return await GetFileListWithMetadataAsync(baseUrl, apiKey, ct);
+    }
+
+    private async Task<List<PrinterFileInfo>> GetFileListWithMetadataAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default)
+    {
+        try
+        {
+            // Try the v1 API first (more official, supports metadata)
+            FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, "/local", "", apiKey, ct: ct);
+            if (folderInfo is FolderInfo folder)
+            {
+                // Return names of non-folder entries with size information
+                if (folder.Children != null && folder.Children.Length > 0)
+                {
+                    // Upstream API encodes file vs folder in the 'Type' property
+                    return folder.Children
+                        .Where(f => f.Type != FileTypes.Folder)
+                        .Select(f => new PrinterFileInfo
+                        {
+                            Name = f.Name,
+                            Path = f.Name,
+                            Size = f.Size,
+                            Modified = f.MTimestamp > 0 ? DateTimeOffset.FromUnixTimeSeconds(f.MTimestamp).UtcDateTime : null
+                        })
+                        .ToList();
+                }
+
+                return new List<PrinterFileInfo>();
+            }
+            return new List<PrinterFileInfo>();
+        }
+        catch (Exception ex)
+        {
+            // Fallback to legacy /api/files endpoint (OctoPrint compatibility)
+            _logger?.LogWarning($"Failed to get file list from v1 API, trying legacy endpoint: {ex.Message}");
+            try
+            {
+                List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, apiKey, ct);
+                return legacyFiles
+                    .Where(f => f.Type != "FOLDER" && !string.IsNullOrEmpty(f.Display))
+                    .Select(f => new PrinterFileInfo
+                    {
+                        Name = f.Display,
+                        Path = f.Display
+                        // Legacy API (FileChild model) doesn't provide size or modified timestamp
+                    })
+                    .ToList();
+            }
+            catch (Exception legacyEx)
+            {
+                _logger?.LogError(legacyEx, "Failed to get file list from legacy endpoint as well");
+                return new List<PrinterFileInfo>();
+            }
+        }
     }
 
     async Task<bool> ISupportsFileUpload.UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default)
