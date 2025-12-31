@@ -69,7 +69,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
         }
       }}
     >
-      <div className="bg-pf-bg-0 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border">
+      <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
           <div className="flex items-center gap-2">
             <PrintFarmerLogo size={32} className="mr-2" />

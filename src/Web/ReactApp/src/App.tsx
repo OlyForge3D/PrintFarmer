@@ -24,10 +24,9 @@ import { printerSignalRService } from '@/services/printer-signalr';
 // Feature Pages
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
 import { SpoolsPage } from '@/features/catalog/pages/SpoolsPage';
-import { FilesPage } from '@/features/gcode/pages/FilesPage';
+import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
 import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
 import { HarvestHistoryPage } from '@/features/gcode/pages/HarvestHistoryPage';
-import { GcodeLibrary } from '@/features/gcode/pages/GcodeLibrary';
 import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 import { ModelDetailPage } from '@/features/models3d/pages/ModelDetailPage';
 import { PrintersPage } from '@/features/printers/pages/PrintersPage';
@@ -126,9 +125,8 @@ function AuthenticatedAppRoutes() {
         <Route path="harvest/*">
           <Route index element={<HarvestPage />} />
           <Route path="history" element={<HarvestHistoryPage />} />
-          <Route path="library" element={<GcodeLibrary />} />
         </Route>
-        <Route path="files" element={<FilesPage />} />
+        <Route path="files" element={<GcodeLibraryPage />} />
         <Route path="catalog" element={<CatalogPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="spools" element={<SpoolsPage />} />

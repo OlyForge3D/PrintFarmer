@@ -217,7 +217,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
         />
         
         {/* Modal */}
-        <div className="inline-block align-bottom bg-pf-bg-0 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative overflow-visible">
+        <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative overflow-visible">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">

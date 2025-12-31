@@ -131,8 +131,23 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
     const canSubmit = selectedModelIds.length > 0 && selectedTagIds.length > 0 && !isLoading;
 
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-pf-bg-0 rounded-lg shadow-xl border border-pf-border max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div 
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget && !isLoading) {
+                    onClose();
+                }
+            }}
+            onKeyDown={(e) => {
+                if (e.key === 'Escape' && !isLoading) {
+                    onClose();
+                }
+            }}
+        >
+            <div 
+                className="bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+            >
                 {/* Header */}
                 <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between">
                     <h2 className="text-xl font-semibold text-pf-text-primary">Bulk Tag Assignment</h2>

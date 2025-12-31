@@ -26,7 +26,7 @@ export function SlicerConfirmModal({ isOpen, slicer, onConfirm, onCancel }: Slic
         }
       }}
     >
-      <div className="bg-pf-bg-0 border border-pf-border rounded-xl shadow-xl max-w-md w-full mx-4">
+      <div className="bg-pf-bg-1 border border-pf-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
           <div className="flex items-center">
             <AlertIcon className="w-6 h-6 text-pf-error-text mr-3" />

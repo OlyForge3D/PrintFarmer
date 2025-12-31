@@ -479,11 +479,14 @@ public class GcodeFilesController(
     }
 
     /// <summary>
-    /// Deletes one or more files (directories are not supported currently).
+    /// Delete G-code files by file paths (for hierarchical browser)
     /// </summary>
+    /// <param name="request">Request with list of file paths to delete</param>
+    /// <param name="recursive">Whether to recursively delete directories (not currently supported)</param>
+    /// <returns>Deletion result with count</returns>
     [HttpDelete]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(400)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> DeleteAsync([FromBody] DeleteFilesRequest request, [FromQuery] bool recursive = false)
     {
         if (request?.FilePaths == null || request.FilePaths.Count == 0)
@@ -652,42 +655,70 @@ public class GcodeFilesController(
     }
 
     /// <summary>
-    /// Create a new directory inside the virtual G-code library.
+    /// Create a new virtual folder in the G-code library
     /// </summary>
-    /// <param name="path">Parent virtual directory (defaults to root '/').</param>
-    /// <param name="name">Directory name (no path separators).</param>
-    [HttpPost("mkdir")]
-    [ProducesResponseType(typeof(GcodeFileEntryDto), 201)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(409)]
+    /// <param name="request">Request containing the folder path</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Operation result</returns>
+    [HttpPost("folder")]
+    [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status409Conflict)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Directory name validated (invalid chars, separators removed) and combined under validated parent path; GetFullPath+StartsWith used prior to Directory.Exists.")]
-    public async Task<ActionResult<GcodeFileEntryDto>> MakeDirectoryAsync([FromQuery] string? path = "/", [FromQuery] string? name = null)
+    public async Task<ActionResult<FolderOperationResultDto>> CreateFolderAsync([FromBody] CreateFolderRequest request, CancellationToken ct)
     {
+        string? path = null;
+        string? name = null;
+        
         try
         {
-            GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, HttpContext.RequestAborted);
-            return Created($"/api/gcode-files?path={Uri.EscapeDataString(Path.GetDirectoryName(dto.Path) ?? "/")}", dto);
+            if (request == null || string.IsNullOrWhiteSpace(request.Path))
+            {
+                return BadRequest(new FolderOperationResultDto(false, "Folder path is required"));
+            }
+
+            // Extract parent path and folder name from the full path
+            string fullPath = request.Path.Trim('/');
+            string[] pathParts = fullPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            name = pathParts.Length > 0 ? pathParts[^1] : null;
+            path = pathParts.Length > 1 ? "/" + string.Join("/", pathParts[..^1]) : "/";
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return BadRequest(new FolderOperationResultDto(false, "Folder path cannot be empty. Please provide a folder name."));
+            }
+
+            logger.LogDebug($"[CreateFolder] Input: '{request.Path}' -> path='{path}', name='{name}'");
+
+            GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, ct);
+            
+            logger.LogInformation($"[CreateFolder] Successfully created virtual folder: '{request.Path}'");
+            return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto(true, "Folder created successfully"));
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            logger.LogWarning($"[CreateFolder] Invalid argument: {ex.Message}");
+            return BadRequest(new FolderOperationResultDto(false, ex.Message));
         }
         catch (DirectoryNotFoundException ex)
         {
-            return NotFound(ex.Message);
+            logger.LogWarning($"[CreateFolder] Parent directory not found: {ex.Message}");
+            return NotFound(new FolderOperationResultDto(false, ex.Message));
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
         {
-            return Conflict(ex.Message);
+            logger.LogInformation($"[CreateFolder] Folder already exists at: {request.Path}");
+            return Conflict(new FolderOperationResultDto(false, ex.Message));
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            logger.LogWarning($"[CreateFolder] Invalid operation: {ex.Message}");
+            return BadRequest(new FolderOperationResultDto(false, ex.Message));
         }
         catch (Exception ex)
         {
-            logger.LogError($"Failed to create directory (path={path}, name={name}): {ex.Message}");
-            return Problem("Failed to create directory", statusCode: 500);
+            logger.LogError($"[CreateFolder] Unexpected error (path={path}, name={name}): {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to create folder: {ex.GetType().Name}"));
         }
     }
 
@@ -782,47 +813,144 @@ public class GcodeFilesController(
         return NoContent();
     }
 
+    /// <summary>
+    /// Move G-code files to a different virtual folder by file IDs
+    /// </summary>
+    /// <param name="request">Move request with file IDs and target folder</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Operation result</returns>
     [HttpPost("move")]
-    [ProducesResponseType(typeof(object), 200)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(409)]
-    public async Task<IActionResult> MoveAsync([FromBody] MoveRequestDto request)
+    [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MoveFilesAsync([FromBody] MoveGcodeFilesRequest request, CancellationToken ct)
     {
-        if (request == null || string.IsNullOrWhiteSpace(request.SourcePath) || string.IsNullOrWhiteSpace(request.DestinationPath))
-        {
-            return BadRequest("sourcePath and destinationPath required");
-        }
-
         try
         {
-            (bool ok, string virtualPath, bool isDirectory) = await gcodeFilesService.MoveAsync(
-                request.SourcePath, request.DestinationPath, request.Overwrite, HttpContext.RequestAborted);
-            if (!ok)
+            if (request == null || request.ModelIds == null || request.ModelIds.Count == 0)
             {
-                return NotFound("Source not found");
+                return BadRequest(new FolderOperationResultDto(false, "At least one file ID is required"));
             }
 
-            return Ok(new { path = virtualPath, isDirectory });
+            if (string.IsNullOrWhiteSpace(request.TargetDirectoryId))
+            {
+                return BadRequest(new FolderOperationResultDto(false, "Target directory ID is required"));
+            }
+
+            // Use the directory ID (virtual path) exactly as provided by the frontend
+            // Frontend is responsible for constructing valid directory IDs
+            string targetDirectoryPath = request.TargetDirectoryId;
+            logger.LogDebug($"[MoveFiles] Moving {request.ModelIds.Count} G-code file(s) to virtual directory: '{targetDirectoryPath}'");
+
+            int movedCount = 0;
+            int failedCount = 0;
+            var failedFiles = new List<(string id, string reason)>();
+
+            // Move each file - virtual move (update database folder reference)
+            foreach (var fileIdStr in request.ModelIds)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(fileIdStr))
+                    {
+                        continue;
+                    }
+
+                    if (!Guid.TryParse(fileIdStr, out Guid fileId))
+                    {
+                        logger.LogWarning($"[MoveFiles] Invalid file ID format: '{fileIdStr}'. Expected GUID from GcodeFileId field, not Path.");
+                        failedFiles.Add((fileIdStr, "Invalid file ID format - use GcodeFileId, not Path"));
+                        failedCount++;
+                        continue;
+                    }
+
+                    // This will update the file's FolderId in the database
+                    bool moved = await gcodeFilesService.MoveToFolderAsync(fileId, targetDirectoryPath, ct);
+                    
+                    if (moved)
+                    {
+                        movedCount++;
+                        logger.LogDebug($"[MoveFiles] Successfully moved file: {fileId}");
+                    }
+                    else
+                    {
+                        logger.LogWarning($"[MoveFiles] File not found or failed to move: {fileId}");
+                        failedFiles.Add((fileIdStr, "File not found or failed to move"));
+                        failedCount++;
+                    }
+                }
+                catch (ArgumentException ex)
+                {
+                    logger.LogWarning($"[MoveFiles] Invalid argument for file {fileIdStr}: {ex.Message}");
+                    failedFiles.Add((fileIdStr, $"Invalid argument: {ex.Message}"));
+                    failedCount++;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    logger.LogWarning($"[MoveFiles] Access denied for file {fileIdStr}: {ex.Message}");
+                    failedFiles.Add((fileIdStr, "Access denied"));
+                    failedCount++;
+                }
+                catch (IOException ex)
+                {
+                    logger.LogWarning($"[MoveFiles] IO error for file {fileIdStr}: {ex.Message}");
+                    failedFiles.Add((fileIdStr, $"IO error: {ex.Message}"));
+                    failedCount++;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning($"[MoveFiles] Unexpected error for file {fileIdStr}: {ex.GetType().Name}: {ex.Message}");
+                    failedFiles.Add((fileIdStr, $"{ex.GetType().Name}: {ex.Message}"));
+                    failedCount++;
+                }
+            }
+
+            string message = failedCount == 0
+                ? $"Successfully moved {movedCount} file(s)"
+                : $"Moved {movedCount} file(s), failed to move {failedCount} file(s)";
+
+            if (failedFiles.Count > 0)
+            {
+                var failureDetails = failedFiles.Take(3).Select(f => $"{f.id} ({f.reason})").ToList();
+                message += $" - Failed: {string.Join(", ", failureDetails)}";
+                if (failedFiles.Count > 3)
+                {
+                    message += $" and {failedFiles.Count - 3} more";
+                }
+            }
+
+            logger.LogInformation($"[MoveFiles] Completed: {movedCount} succeeded, {failedCount} failed");
+            return Ok(new FolderOperationResultDto(failedCount == 0, message));
         }
-        catch (InvalidOperationException ex)
+        catch (ArgumentException ex)
         {
-            if (ex.Message.Contains("already exists"))
-            {
-                return Conflict(ex.Message);
-            }
-
-            return BadRequest(ex.Message);
+            logger.LogError($"[MoveFiles] Invalid argument: {ex.Message}");
+            return BadRequest(new FolderOperationResultDto(false, $"Invalid request: {ex.Message}"));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogError($"[MoveFiles] Access denied: {ex.Message}");
+            return StatusCode(StatusCodes.Status403Forbidden, new FolderOperationResultDto(false, "Access denied: insufficient permissions"));
+        }
+        catch (IOException ex)
+        {
+            logger.LogError($"[MoveFiles] IO error: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"I/O error: {ex.Message}"));
         }
         catch (Exception ex)
         {
-            logger.LogError($"Move failed {request.SourcePath} -> {request.DestinationPath}: {ex.Message}");
-            return Problem("Failed to move", statusCode: 500);
+            logger.LogError($"[MoveFiles] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
         }
     }
 }
 
 // ---------------- Additional DTOs for move & settings ----------------
+public record MoveGcodeFilesRequest(
+    [property: JsonPropertyName("modelIds")] List<string> ModelIds,
+    [property: JsonPropertyName("targetDirectoryId")] string TargetDirectoryId
+);
+
 public record MoveRequestDto(
     [property: JsonPropertyName("sourcePath")] string SourcePath,
     [property: JsonPropertyName("destinationPath")] string DestinationPath,

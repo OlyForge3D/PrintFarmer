@@ -7,12 +7,13 @@ import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 
 export interface FileEntry {
   path: string;
-  name: string;
+  fileName: string;  // Changed from 'name' to match API response
   size: number;
   modifiedAt: string;
   isDirectory: boolean;
-  thumbnailUrl?: string;
-  modelId?: string;  // File ID (GUID) for efficient file lookups
+  thumbnailPath?: string;  // Changed from 'thumbnailUrl' to match API response
+  modelId?: string;  // File ID (GUID) for 3D models
+  gcodeFileId?: string;  // File ID (GUID) for gcode files
   directoryId?: string;  // Directory ID (virtual path) for efficient directory lookups
 }
 
@@ -257,8 +258,21 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
       );
       
       if (!response.ok) {
-        const error = await response.json().catch(() => ({message: 'Unknown error'}));
-        throw new Error((error as {message: string}).message || 'Failed to create folder');
+        // Try to parse as JSON first, then fall back to text
+        let errorMessage = 'Failed to create folder';
+        try {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const error = await response.json();
+            errorMessage = error.message || errorMessage;
+          } else {
+            // Plain text response
+            errorMessage = await response.text();
+          }
+        } catch {
+          // If parsing fails, use default message
+        }
+        throw new Error(errorMessage);
       }
       
       return response.json();
@@ -268,9 +282,9 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
       setIsCreatingFolder(false);
       setNewFolderName('');
       setFolderNameError(null);
-      // Invalidate and refetch immediately
-      queryClient.invalidateQueries({ queryKey: [`${endpoint}-hierarchy`], refetchType: 'all' });
-      queryClient.invalidateQueries({ queryKey: [`${endpoint}-all-folders`], refetchType: 'all' });
+      // Force immediate refetch of both queries
+      queryClient.refetchQueries({ queryKey: [`${endpoint}-hierarchy`] });
+      queryClient.refetchQueries({ queryKey: [`${endpoint}-all-folders`] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -458,12 +472,11 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
               <Button
                 onClick={() => setIsCreatingFolder(true)}
                 disabled={isCreatingFolder}
-                variant="secondary"
+                variant="subtle"
                 size="sm"
                 title="Create new folder"
               >
                 <FolderPlusIcon className="w-4 h-4 mr-1" />
-                New Folder
               </Button>
               <span className="text-xs text-pf-text-secondary">{files.length} files</span>
             </div>
@@ -529,7 +542,6 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                     )}
                   </th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text">Thumbnail / Name</th>
-                  <th className="px-4 py-2 text-right font-semibold text-pf-text w-24">Size</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-40">Modified</th>
                   <th className="px-4 py-2 text-center font-semibold text-pf-text w-12">Action</th>
                 </tr>
@@ -543,21 +555,27 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                     }`}
                     draggable={true}
                     onDragStart={(e) => {
-                      setIsDragging(true);
-                      // If this file isn't selected, move just this file
-                      // Otherwise move all selected files
-                      const filesToMove = selectedFiles.includes(file.path) 
-                        ? selectedFiles 
-                        : [file.path];
+                      // Get file ID (GUID) - use gcodeFileId for gcode, modelId for 3D models
+                      const fileId = endpoint === 'gcode' ? file.gcodeFileId : file.modelId;
+                      if (!fileId) {
+                        toast.error('Cannot move file: missing file ID');
+                        e.preventDefault();
+                        return;
+                      }
                       
-                      // Store files to move in dataTransfer for use in drop handler
-                      // Note: filesToMove already contains full paths from the API
+                      // If this file isn't selected, move just this file
+                      // Otherwise move all selected files by their IDs
+                      const filesToMove = selectedFiles.includes(file.path) 
+                        ? files.filter((f: FileEntry) => selectedFiles.includes(f.path)).map((f: FileEntry) => endpoint === 'gcode' ? f.gcodeFileId : f.modelId).filter(Boolean) as string[]
+                        : [fileId];
+                      
+                      // Store file IDs (GUIDs) to move in dataTransfer for use in drop handler
                       e.dataTransfer!.setData('application/json', JSON.stringify(filesToMove));
                       
                       // Set custom drag image using thumbnail if available
-                      if (file.thumbnailUrl) {
+                      if (file.thumbnailPath) {
                         const img = new Image();
-                        img.src = file.thumbnailUrl;
+                        img.src = file.thumbnailPath;
                         const canvas = document.createElement('canvas');
                         canvas.width = 80;
                         canvas.height = 80;
@@ -571,7 +589,6 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       }
                       e.dataTransfer!.effectAllowed = 'move';
                     }}
-                    onDragEnd={() => setIsDragging(false)}
                   >
                     <td className="px-4 py-3">
                       <Checkbox
@@ -582,7 +599,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                     <td className="px-4 py-3 flex items-center gap-3">
                       {/* Thumbnail Column */}
                       <div className="relative flex-shrink-0">
-                        {file.thumbnailUrl ? (
+                        {file.thumbnailPath ? (
                           <div
                             className={`w-12 h-12 rounded border-2 overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
                               selectedFiles.includes(file.path)
@@ -592,20 +609,28 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                             draggable
                             onDragStart={(e) => {
                               e.stopPropagation();
-                              setIsDragging(true);
                               e.dataTransfer!.effectAllowed = 'move';
+                              
+                              // Get file ID (GUID) - use gcodeFileId for gcode, modelId for 3D models
+                              const fileId = endpoint === 'gcode' ? file.gcodeFileId : file.modelId;
+                              if (!fileId) {
+                                toast.error('Cannot move file: missing file ID');
+                                e.preventDefault();
+                                return;
+                              }
+                              
                               // If this file isn't selected, move just this file
-                              // Otherwise move all selected files
+                              // Otherwise move all selected files by their IDs
                               const filesToMove = selectedFiles.includes(file.path)
-                                ? selectedFiles
-                                : [file.path];
+                                ? files.filter((f: FileEntry) => selectedFiles.includes(f.path)).map((f: FileEntry) => endpoint === 'gcode' ? f.gcodeFileId : f.modelId).filter(Boolean) as string[]
+                                : [fileId];
                               
                               // Store files to move in dataTransfer
                               e.dataTransfer!.setData('application/json', JSON.stringify(filesToMove));
                               
                               // Create drag image from thumbnail
                               const img = document.createElement('img');
-                              img.src = file.thumbnailUrl!;
+                              img.src = file.thumbnailPath!;
                               img.onload = () => {
                                 const canvas = document.createElement('canvas');
                                 canvas.width = 60;
@@ -622,11 +647,10 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                                 }
                               };
                             }}
-                            onDragEnd={() => setIsDragging(false)}
                           >
                             <img
-                              src={file.thumbnailUrl}
-                              alt={file.name}
+                              src={file.thumbnailPath}
+                              alt={file.fileName}
                               className="w-full h-full object-cover"
                             />
                             {selectedFiles.length > 1 && selectedFiles.includes(file.path) && (
@@ -642,12 +666,9 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                         )}
                       </div>
                       <div>
-                        <div className="font-medium text-pf-text-primary">{file.name}</div>
+                        <div className="font-medium text-pf-text-primary">{file.fileName}</div>
                         <div className="text-xs text-pf-text-tertiary">{formatBytes(file.size)}</div>
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-right text-pf-text-secondary">
-                      {formatBytes(file.size)}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
                       {formatDate(file.modifiedAt)}

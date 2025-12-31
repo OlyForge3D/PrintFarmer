@@ -146,7 +146,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
 
   const content = (
     <div
-      className={`bg-pf-bg-0 rounded-lg w-full h-full flex flex-col p-6 relative ${inline ? 'border border-pf-border' : 'shadow-lg'} ${className}`}
+      className={`bg-pf-bg-1 rounded-lg w-full h-full flex flex-col p-6 relative ${inline ? 'border border-pf-border' : 'shadow-lg'} ${className}`}
     >
       {!hideCloseButton && onClose && (
         <Button

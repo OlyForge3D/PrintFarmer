@@ -909,8 +909,8 @@ public class Model3DFilesController : ControllerBase
                     // Parse the model ID (GUID)
                     if (!Guid.TryParse(modelIdStr, out Guid modelId))
                     {
-                        _logger.LogWarning($"[MoveModels] Invalid model ID format: '{modelIdStr}'");
-                        failedFiles.Add((modelIdStr, "Invalid model ID format"));
+                        _logger.LogWarning($"[MoveModels] Invalid model ID format: '{modelIdStr}'. Expected GUID from ModelId field, not Path.");
+                        failedFiles.Add((modelIdStr, "Invalid model ID format - use ModelId, not Path"));
                         failedCount++;
                         continue;
                     }

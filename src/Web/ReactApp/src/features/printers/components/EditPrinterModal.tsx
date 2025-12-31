@@ -184,7 +184,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex items-center justify-center min-h-screen px-4 py-8 text-center sm:block sm:p-0">
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
-        <div className="inline-block align-bottom bg-pf-bg-0 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative">
+        <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">Edit Printer</h3>
             <Button

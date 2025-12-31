@@ -182,9 +182,19 @@ namespace Farm.Infrastructure.Repositories.Gcode
             }
 
             // Get files by finding the folder with matching path
-            return await _db.GcodeFiles
-                .Where(g => g.Folder != null && g.Folder.Path == directory)
-                .ToListAsync(ct);
+            // For root directory ("/"), also include files with NULL folder (orphaned files)
+            if (directory == "/")
+            {
+                return await _db.GcodeFiles
+                    .Where(g => (g.Folder != null && g.Folder.Path == directory) || g.Folder == null)
+                    .ToListAsync(ct);
+            }
+            else
+            {
+                return await _db.GcodeFiles
+                    .Where(g => g.Folder != null && g.Folder.Path == directory)
+                    .ToListAsync(ct);
+            }
         }
 
         public async Task<Guid?> GetLatestHarvestOperationIdForPrinterAsync(Guid printerId, CancellationToken ct)

@@ -1293,7 +1293,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for downloads
 
-            string encodedFilename = Uri.EscapeDataString(filename);
+            // Encode each path segment separately to preserve forward slashes
+            // e.g., "folder/subfolder/file.gcode" -> "folder/subfolder/file.gcode" (only special chars encoded)
+            string[] pathSegments = filename.Split('/');
+            string encodedFilename = string.Join("/", pathSegments.Select(Uri.EscapeDataString));
+            
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);

@@ -20,6 +20,7 @@ namespace Farm.Web.Api.Services.Gcode
         Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, CancellationToken ct);
         Task<(byte[] bytes, string fileName)?> DownloadAsync(string path, CancellationToken ct);
         Task<(bool ok, string virtualPath, bool isDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct);
+        Task<bool> MoveToFolderAsync(Guid fileId, string targetFolderPath, CancellationToken ct);
         Task<GcodeUploadSettingsResponse> GetSettingsAsync(string userId, IGcodeUploadSettings uploadSettings, IGcodeUploadQuotaService quotaService, CancellationToken ct);
     }
 }

@@ -834,12 +834,19 @@ public class GcodeHarvestService(
                     continue;
                 }
 
+                // Combine directory path and filename to get full path for download
+                // FilePath contains directory (empty for root), FileName contains just the filename
+                string fullPathForDownload = string.IsNullOrWhiteSpace(discoveredFile.FilePath)
+                    ? discoveredFile.FileName  // Root directory: just use filename
+                    : $"{discoveredFile.FilePath}/{discoveredFile.FileName}"; // Subdirectory: combine with /
+
                 PrinterBackend backend = (PrinterBackend)operation.Printer.Backend;
-                using MemoryStream? gcodeContent = await DownloadFileAsync(backend, operation.Printer, discoveredFile.FilePath);
+                _logger.LogInformation($"[IMPORT-LIFECYCLE] About to download file: FileName={discoveredFile.FileName}, FilePath={discoveredFile.FilePath}, FullPath={fullPathForDownload}, Backend={backend}");
+                using MemoryStream? gcodeContent = await DownloadFileAsync(backend, operation.Printer, fullPathForDownload);
 
                 if (gcodeContent == null)
                 {
-                    _logger.LogWarning($"[IMPORT-LIFECYCLE] Download returned null for {discoveredFile.FileName}");
+                    _logger.LogWarning($"[IMPORT-LIFECYCLE] Download returned null for {discoveredFile.FileName}, FilePath was: {discoveredFile.FilePath}");
                     discoveredFile.Status = HarvestFileStatus.Failed;
                     discoveredFile.Error = $"Failed to download {discoveredFile.FileName}";
                     discoveredFile.CompletedAt = DateTime.UtcNow;

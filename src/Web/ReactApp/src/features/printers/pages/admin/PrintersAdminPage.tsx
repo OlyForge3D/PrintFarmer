@@ -12,7 +12,7 @@ import ImportProgressModal from '@/features/printers/components/ImportProgressMo
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { toast } from 'sonner';
-import { DeleteIcon, EditIcon, CheckCircleIcon, CircleIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, EditIcon, CheckCircleIcon, CircleIcon, PrinterIcon } from '@/common/components/icons/MdiIcons';
 import { Alert, Button, Checkbox, Label, Select, Tooltip } from '@/common/components/ui';
 import type { Printer, UpdatePrinterDto } from '@/types/api';
 
@@ -445,7 +445,11 @@ export function PrintersAdminPage() {
 
   return (
     <ProtectedRoute requiredRole="farm_admin">
-      <PageTemplate title="Admin: Printers" subtitle="Import and export printers" maxWidth="max-w-4xl">
+      <PageTemplate 
+        title="Admin: Printers"
+        icon={PrinterIcon}
+        subtitle="Import and export printers" 
+        maxWidth="max-w-4xl">
         <div className="gap-md flex flex-col">
           <div className="flex items-center gap-3">
             {discoveryAvailable && (

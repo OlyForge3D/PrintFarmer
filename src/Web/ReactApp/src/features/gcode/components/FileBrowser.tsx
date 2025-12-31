@@ -8,6 +8,7 @@ import {
   ArrowDownTrayIcon,
   TrashIcon
 } from '@heroicons/react/24/outline';
+import { GridViewIcon, ListViewIcon } from '@/common/components/icons/MdiIcons';
 
 import { GcodeFile, GetGcodeFilesResponse, GcodeUploadSettings } from '@/types/api';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
@@ -535,33 +536,36 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               {showSettings ? 'Close Settings' : 'Settings'}
             </Button>
           )}
-          <div className="flex border border-pf-border rounded">
+          <div className="flex gap-1 bg-pf-bg-0 border border-pf-border rounded p-1">
             <Button
               type="button"
-              onClick={() => setViewMode('list')}
-              variant={viewMode === 'list' ? 'primary' : 'secondary'}
+              onClick={() => setViewMode('explorer')}
+              variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
               size="sm"
-              className="rounded-r-none"
+              title="Explorer view"
+              className="px-2"
             >
-              List
+              <FolderIcon className="w-4 h-4" />
             </Button>
             <Button
               type="button"
               onClick={() => setViewMode('grid')}
               variant={viewMode === 'grid' ? 'primary' : 'secondary'}
               size="sm"
-              className="border-l border-pf-border"
+              title="Grid view"
+              className="px-2"
             >
-              Grid
+              <GridViewIcon className="w-4 h-4" />
             </Button>
             <Button
               type="button"
-              onClick={() => setViewMode('explorer')}
-              variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
+              onClick={() => setViewMode('list')}
+              variant={viewMode === 'list' ? 'primary' : 'secondary'}
               size="sm"
-              className="rounded-l-none border-l border-pf-border"
+              title="List view"
+              className="px-2"
             >
-              Explorer
+              <ListViewIcon className="w-4 h-4" />
             </Button>
           </div>
         </div>

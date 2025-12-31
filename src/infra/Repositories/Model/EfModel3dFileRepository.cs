@@ -61,10 +61,21 @@ namespace Farm.Infrastructure.Repositories.Model
             }
 
             // Get valid models by finding the folder with the matching path, then getting all models in that folder
-            return await _db.Models3D
-                .Where(m => m.IsValid && m.Folder != null && m.Folder.Path == directory)
-                .OrderByDescending(m => m.UploadedAt)
-                .ToListAsync(ct);
+            // For root directory ("/"), also include files with NULL folder (orphaned files)
+            if (directory == "/")
+            {
+                return await _db.Models3D
+                    .Where(m => m.IsValid && ((m.Folder != null && m.Folder.Path == directory) || m.Folder == null))
+                    .OrderByDescending(m => m.UploadedAt)
+                    .ToListAsync(ct);
+            }
+            else
+            {
+                return await _db.Models3D
+                    .Where(m => m.IsValid && m.Folder != null && m.Folder.Path == directory)
+                    .OrderByDescending(m => m.UploadedAt)
+                    .ToListAsync(ct);
+            }
         }
 
         public async Task<List<string>> ListSubdirectoriesAsync(string parentDirectory, CancellationToken ct)

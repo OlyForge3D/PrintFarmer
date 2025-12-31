@@ -20,6 +20,18 @@ using Microsoft.AspNetCore.Http;
 
 namespace Farm.Web.Api.Services.Gcode
 {
+    /// <summary>
+    /// Service for managing G-code file operations including upload, listing, metadata extraction,
+    /// and virtual folder organization. Handles both physical file storage and database tracking
+    /// with support for hierarchical browsing and efficient lookups.
+    /// </summary>
+    /// <remarks>
+    /// This service implements virtual folder architecture where:
+    /// - Physical files are stored in a flat directory structure with GUID-based names
+    /// - Virtual folders exist only in the database for organizational purposes
+    /// - Files are tracked in the database with metadata, thumbnails, and folder references
+    /// - Move operations update database references without moving physical files
+    /// </remarks>
     public class GcodeFilesService : IGcodeFilesService
     {
         private readonly IGcodeRepository _gcodeRepo;
@@ -45,6 +57,23 @@ namespace Farm.Web.Api.Services.Gcode
             _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
         }
 
+        /// <summary>
+        /// Lists G-code files and subdirectories within a specific virtual path with pagination and filtering.
+        /// </summary>
+        /// <param name="path">Virtual path to browse (e.g., '/', '/subfolder')</param>
+        /// <param name="sortBy">Sort field: 'name', 'size', or 'date'</param>
+        /// <param name="sortOrder">Sort order: 'asc' or 'desc'</param>
+        /// <param name="search">Optional search term to filter by filename</param>
+        /// <param name="page">Page number (1-based, default: 1)</param>
+        /// <param name="pageSize">Items per page (min: 1, max: 500, default: 100)</param>
+        /// <param name="harvestId">Optional harvest operation ID to filter files</param>
+        /// <param name="printerId">Optional printer ID for filtering (currently unused)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Paginated list of files and directories with metadata</returns>
+        /// <remarks>
+        /// This method queries the database for files and subdirectories, applies sorting and filtering,
+        /// and returns a paginated response. Directories are always sorted before files.
+        /// </remarks>
         public async Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct)
         {
             if (page < 1)
@@ -374,6 +403,25 @@ namespace Farm.Web.Api.Services.Gcode
             return new GcodeFileListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
         }
 
+        /// <summary>
+        /// Uploads a single G-code file to the specified virtual directory with automatic metadata and thumbnail extraction.
+        /// </summary>
+        /// <param name="path">Virtual directory path where the file should be uploaded</param>
+        /// <param name="file">File to upload (IFormFile from multipart/form-data request)</param>
+        /// <param name="uploadSettings">Upload settings including allowed extensions</param>
+        /// <param name="quotaService">Quota service for tracking upload limits</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Metadata about the uploaded file including virtual path and size</returns>
+        /// <exception cref="InvalidOperationException">Thrown when file type is not allowed or path is unsafe</exception>
+        /// <remarks>
+        /// The upload process:
+        /// 1. Validates file extension against allowed extensions
+        /// 2. Saves file to storage with GUID-based filename
+        /// 3. Extracts metadata (print time, material, slicer info)
+        /// 4. Extracts and saves thumbnail if present
+        /// 5. Creates database record with all metadata
+        /// 6. Associates file with virtual folder
+        /// </remarks>
         public async Task<GcodeFileEntryDto> UploadFileAsync(string? path, IFormFile file, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             string ext = Path.GetExtension(file.FileName) ?? string.Empty;
@@ -553,6 +601,19 @@ namespace Farm.Web.Api.Services.Gcode
             }
         }
 
+        /// <summary>
+        /// Uploads multiple G-code files in a single operation with individual error handling per file.
+        /// </summary>
+        /// <param name="path">Virtual directory path where files should be uploaded</param>
+        /// <param name="files">Collection of files to upload</param>
+        /// <param name="uploadSettings">Upload settings including allowed extensions</param>
+        /// <param name="quotaService">Quota service for tracking upload limits</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Response containing lists of successfully uploaded and failed files</returns>
+        /// <remarks>
+        /// This method processes each file independently, so partial success is possible.
+        /// Failed uploads are captured with error messages without stopping the entire operation.
+        /// </remarks>
         public async Task<MultiUploadResponse> UploadMultipleFilesAsync(string? path, IFormFileCollection files, IGcodeUploadSettings uploadSettings, Farm.Web.Api.Services.IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             List<GcodeFileEntryDto> created = new();
@@ -597,7 +658,20 @@ namespace Farm.Web.Api.Services.Gcode
             return new MultiUploadResponse(created, failed, created.Count, failed.Count);
         }
 
-        public Task<GcodeFileEntryDto> MakeDirectoryAsync(string? path, string? name, CancellationToken ct)
+        /// <summary>
+        /// Creates a new virtual folder in the G-code library for organizational purposes.
+        /// </summary>
+        /// <param name="path">Parent virtual directory path</param>
+        /// <param name="name">Name of the new folder</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Metadata about the created folder</returns>
+        /// <exception cref="ArgumentException">Thrown when name is empty or contains invalid characters</exception>
+        /// <remarks>
+        /// This creates a virtual folder that exists only in the database (not on disk).
+        /// Virtual folders are used for organizing files without creating physical directories.
+        /// Physical files remain in a flat storage structure with GUID-based names.
+        /// </remarks>
+        public async Task<GcodeFileEntryDto> MakeDirectoryAsync(string? path, string? name, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -608,37 +682,85 @@ namespace Farm.Web.Api.Services.Gcode
                 throw new ArgumentException("Invalid directory name");
             }
 
-            // Resolve path using IStoragePathService
-            (_, string parentDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
-
-            // Create parent directory if needed
-            if (!Directory.Exists(parentDirFullPath))
+            // Resolve virtual path
+            string virtualDir = string.IsNullOrWhiteSpace(path) || path == "/" ? "/" : path.Trim();
+            if (!virtualDir.StartsWith('/'))
             {
-                _ = Directory.CreateDirectory(parentDirFullPath);
+                virtualDir = "/" + virtualDir;
             }
 
-            string newDirFullPath = Path.GetFullPath(Path.Combine(parentDirFullPath, name));
-            if (!newDirFullPath.StartsWith(parentDirFullPath, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Unsafe directory target");
-            }
-            if (Directory.Exists(newDirFullPath))
-            {
-                throw new InvalidOperationException("Directory already exists");
-            }
+            // Create virtual folder path
+            string folderPath = CombineVirtual(virtualDir, name);
 
-            _ = Directory.CreateDirectory(newDirFullPath);
+            // Track the folder in the database (virtual organization, not physical directories)
+            Folder folder = await _folderService.GetOrCreateFolderAsync(folderPath, "gcode", ct);
+            _logger.LogInformation($"[MakeDirectory] Created virtual folder in database: {folderPath}");
 
             GcodeFileEntryDto dto = new(
-                Path: CombineVirtual(virtualDir, name),
+                Path: folderPath,
                 FileName: name,
                 Size: 0,
-                ModifiedAt: Directory.GetLastWriteTimeUtc(newDirFullPath),
+                ModifiedAt: folder.CreatedAt,
                 IsDirectory: true
             );
-            return Task.FromResult(dto);
+            return dto;
         }
 
+        /// <summary>
+        /// Moves a G-code file to a different virtual folder by updating its database folder reference.
+        /// </summary>
+        /// <param name="fileId">GUID of the file to move</param>
+        /// <param name="targetFolderPath">Virtual path of the destination folder</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if the file was successfully moved; false if file was not found</returns>
+        /// <remarks>
+        /// This is a virtual move operation that only updates the file's FolderId reference in the database.
+        /// The physical file remains in its original location on disk with its GUID-based filename.
+        /// Target folder is created automatically if it doesn't exist.
+        /// </remarks>
+        public async Task<bool> MoveToFolderAsync(Guid fileId, string targetFolderPath, CancellationToken ct)
+        {
+            try
+            {
+                // Get the file from database (with includes)
+                var gcodeFile = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
+                if (gcodeFile == null)
+                {
+                    _logger.LogWarning($"[MoveToFolder] File not found: {fileId}");
+                    return false;
+                }
+
+                // Get or create the target folder
+                var targetFolder = await _folderService.GetOrCreateFolderAsync(targetFolderPath, "gcode", ct);
+
+                // Update the folder reference (virtual move - physical file stays in place)
+                gcodeFile.FolderId = targetFolder.Id;
+                
+                // Save changes to database
+                await _gcodeRepo.SaveChangesAsync(ct);
+
+                _logger.LogInformation($"[MoveToFolder] Moved file {gcodeFile.FileName} to folder {targetFolderPath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[MoveToFolder] Failed to move file {fileId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Deletes one or more G-code files or directories from the virtual file system.
+        /// </summary>
+        /// <param name="virtualPaths">Collection of virtual paths to delete</param>
+        /// <param name="recursive">If true, recursively deletes directories and their contents</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if at least one file was deleted successfully; false otherwise</returns>
+        /// <remarks>
+        /// This method resolves virtual paths to physical locations and deletes the actual files.
+        /// Failed deletions are logged but don't stop the operation - partial success is possible.
+        /// Database records should be cleaned up separately (not handled by this method).
+        /// </remarks>
         public Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, CancellationToken ct)
         {
             string storageRoot = _storagePathService.GetGcodeStorageDirectory();
@@ -674,6 +796,16 @@ namespace Farm.Web.Api.Services.Gcode
             return Task.FromResult(deleted > 0);
         }
 
+        /// <summary>
+        /// Downloads a G-code file by reading it from disk and returning the bytes and filename.
+        /// </summary>
+        /// <param name="path">Virtual path to the file</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Tuple of file bytes and filename, or null if file not found</returns>
+        /// <remarks>
+        /// This method resolves the virtual path to the physical file location and reads the entire file into memory.
+        /// For large files, consider streaming instead of reading all bytes at once.
+        /// </remarks>
         public async Task<(byte[] bytes, string fileName)?> DownloadAsync(string path, CancellationToken ct)
         {
             // Resolve path using IStoragePathService
@@ -689,6 +821,19 @@ namespace Farm.Web.Api.Services.Gcode
             return (bytes, fileName);
         }
 
+        /// <summary>
+        /// Moves or renames a file or directory from one virtual path to another (physical file move).
+        /// </summary>
+        /// <param name="sourcePath">Virtual source path</param>
+        /// <param name="destinationPath">Virtual destination path</param>
+        /// <param name="overwrite">If true, overwrites existing files at destination</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Tuple indicating success, final virtual path, and whether it's a directory</returns>
+        /// <exception cref="InvalidOperationException">Thrown when destination exists and overwrite is false, or when trying to overwrite a directory</exception>
+        /// <remarks>
+        /// This performs a physical file/directory move operation on disk.
+        /// For virtual folder moves (database-only), use MoveToFolderAsync instead.
+        /// </remarks>
         public Task<(bool ok, string virtualPath, bool isDirectory)> MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken ct)
         {
             string storageRoot = _storagePathService.GetGcodeStorageDirectory();
@@ -740,6 +885,18 @@ namespace Farm.Web.Api.Services.Gcode
             return Task.FromResult((true, destVirtual, isDirectory));
         }
 
+        /// <summary>
+        /// Retrieves current upload settings and quota information for a specific user.
+        /// </summary>
+        /// <param name="userId">User identifier for quota lookup</param>
+        /// <param name="uploadSettings">Upload settings service</param>
+        /// <param name="quotaService">Quota service for retrieving usage limits</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Settings including allowed extensions, daily limit, and current usage</returns>
+        /// <remarks>
+        /// This method combines configuration settings with per-user quota information
+        /// to provide a complete view of upload capabilities and restrictions.
+        /// </remarks>
         public Task<GcodeUploadSettingsResponse> GetSettingsAsync(string userId, IGcodeUploadSettings uploadSettings, IGcodeUploadQuotaService quotaService, CancellationToken ct)
         {
             long used = 0;
@@ -748,10 +905,23 @@ namespace Farm.Web.Api.Services.Gcode
             return Task.FromResult(new GcodeUploadSettingsResponse(uploadSettings.AllowedExtensions, limit, used));
         }
 
-        // Helper methods
+        #region Helper Methods
+
+        /// <summary>
+        /// Checks if a filename matches the search term (case-insensitive).
+        /// </summary>
+        /// <param name="name">Filename to check</param>
+        /// <param name="search">Search term (null or empty means match all)</param>
+        /// <returns>True if name matches search or search is empty; false otherwise</returns>
         private static bool IsMatch(string name, string? search)
             => string.IsNullOrWhiteSpace(search) || name.Contains(search, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Combines a base virtual path with a child name to create a full virtual path.
+        /// </summary>
+        /// <param name="baseVirtual">Base virtual path (e.g., '/' or '/folder')</param>
+        /// <param name="childName">Child filename or folder name</param>
+        /// <returns>Combined virtual path with proper separator handling</returns>
         private static string CombineVirtual(string? baseVirtual, string childName)
         {
             if (baseVirtual == "/")
@@ -762,6 +932,11 @@ namespace Farm.Web.Api.Services.Gcode
             return UrlNormalizer.CombineUrl(baseVirtual ?? "/", childName);
         }
 
+        /// <summary>
+        /// Normalizes a virtual path by removing leading/trailing slashes and handling the root directory.
+        /// </summary>
+        /// <param name="path">Virtual path to normalize</param>
+        /// <returns>Normalized path (empty string for root, no leading/trailing slashes otherwise)</returns>
         private static string NormalizeVirtualPath(string? path)
         {
             if (string.IsNullOrWhiteSpace(path) || path == "/")
@@ -783,9 +958,20 @@ namespace Farm.Web.Api.Services.Gcode
             return normalizedPath;
         }
 
+        /// <summary>
+        /// Safely extracts the original filename from a path, returning a default if invalid.
+        /// </summary>
+        /// <param name="name">Filename or path</param>
+        /// <returns>Safe filename or "(unnamed)" if null/empty</returns>
         private static string SafeOriginalName(string? name)
             => string.IsNullOrWhiteSpace(name) ? "(unnamed)" : Path.GetFileName(name);
 
+        /// <summary>
+        /// Sanitizes a filename by replacing invalid characters with underscores and ensuring proper extension.
+        /// </summary>
+        /// <param name="originalName">Original filename to sanitize</param>
+        /// <param name="ext">File extension to ensure (e.g., ".gcode")</param>
+        /// <returns>Sanitized filename safe for filesystem use</returns>
         private static string SanitizeFileName(string originalName, string ext)
         {
             string safeName = originalName;
@@ -800,6 +986,18 @@ namespace Farm.Web.Api.Services.Gcode
             return safeName;
         }
 
+        /// <summary>
+        /// Saves an uploaded file to disk with automatic name collision resolution.
+        /// </summary>
+        /// <param name="file">File to save</param>
+        /// <param name="targetDirFullPath">Physical target directory path</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Tuple of full file path and safe filename</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the resolved path is unsafe (directory traversal attempt)</exception>
+        /// <remarks>
+        /// If a file with the same name exists, appends " (N)" before the extension.
+        /// Performs security checks to prevent directory traversal attacks.
+        /// </remarks>
         private static async Task<(string fullTargetPath, string safeName)> SaveUploadedFileAsync(IFormFile file, string targetDirFullPath, CancellationToken ct)
         {
             string ext = Path.GetExtension(file.FileName) ?? string.Empty;
@@ -1005,5 +1203,7 @@ namespace Farm.Web.Api.Services.Gcode
 
             return gcodeFile;
         }
+
+        #endregion
     }
 }

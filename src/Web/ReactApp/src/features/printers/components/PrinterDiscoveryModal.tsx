@@ -225,7 +225,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
 
-        <div className="relative inline-block align-bottom bg-pf-bg-0 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl border border-pf-border">
+        <div className="relative inline-block align-bottom bg-pf-bg-1 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl border border-pf-border">
           {/* Close X button in corner */}
           <div className="absolute top-0 right-0 pt-4 pr-4">
             <Button
@@ -326,7 +326,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                   <div className="space-y-4">
                     {/* Debug panel (gated) */}
                     {window.PrintFarmerDebug?.printerDiscoveryDisplay && (
-                      <div className="mb-2 p-2 bg-pf-bg-0 border border-pf-border rounded text-xs text-pf-text-tertiary">
+                      <div className="mb-2 p-2 bg-pf-bg-2 border border-pf-border rounded text-xs text-pf-text-tertiary">
                         {renderUnknown({ foundPrinters, progress })}
                       </div>
                     )}
@@ -339,7 +339,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       </Button>
                     </div>
 
-                    <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-md p-2 bg-pf-bg-0">
+                    <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-md p-2 bg-pf-bg-2">
                       {foundPrinters.map((printer) => {
                         const config = printerConfigs[printer.serverUrl];
                         const hasConfig = !!(config?.manufacturerId || config?.newManufacturerName);

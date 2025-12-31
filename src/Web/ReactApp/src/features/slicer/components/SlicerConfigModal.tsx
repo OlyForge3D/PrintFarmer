@@ -184,7 +184,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
         }
       }}
     >
-      <div className="bg-pf-bg-0 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b">
           <h2 className="text-xl font-semibold">Configure Slicing</h2>

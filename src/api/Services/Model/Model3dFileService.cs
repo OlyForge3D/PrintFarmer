@@ -19,6 +19,19 @@ using Microsoft.Extensions.Configuration;
 
 namespace Farm.Web.Api.Services.Model
 {
+    /// <summary>
+    /// Service for managing 3D model files with support for virtual folder organization and metadata extraction.
+    /// </summary>
+    /// <remarks>
+    /// This service provides comprehensive 3D model file management capabilities including:
+    /// - Upload and storage of STL, OBJ, and 3MF model files
+    /// - Virtual folder hierarchy for organizing models (folders exist only in database)
+    /// - Automatic thumbnail generation from model files
+    /// - Model analysis for dimensions and file format validation
+    /// - Pagination and search capabilities for model listings
+    /// - Tag-based organization through Model3DTag relationships
+    /// Physical files are stored with GUID-based names in a flat directory structure.
+    /// </remarks>
     public class Model3DFileService : IModel3DFileService
     {
         private readonly IUnitOfWork _unitOfWork;
@@ -55,6 +68,14 @@ namespace Farm.Web.Api.Services.Model
             }
         }
 
+        /// <summary>
+        /// Lists all valid 3D model files in the system.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Read-only list of model DTOs with basic file information</returns>
+        /// <remarks>
+        /// Returns only valid models (non-deleted) with file size, format, upload date, and thumbnail URLs.
+        /// </remarks>
         public async Task<IReadOnlyList<Model3DDto>> ListModelsAsync(CancellationToken ct)
         {
             IReadOnlyList<Model3D> models = await _unitOfWork.Model3dFiles.ListValidAsync(ct);
@@ -71,6 +92,22 @@ namespace Farm.Web.Api.Services.Model
             }).ToList();
         }
 
+        /// <summary>
+        /// Lists 3D models with virtual folder hierarchy, pagination, sorting, and search capabilities.
+        /// </summary>
+        /// <param name="path">Virtual directory path (e.g., "/MyModels/Characters"). Defaults to root "/"</param>
+        /// <param name="sortBy">Field to sort by: "name", "size", "date". Defaults to "name"</param>
+        /// <param name="sortOrder">Sort direction: "asc" or "desc". Defaults to "asc"</param>
+        /// <param name="search">Optional search term for filtering model names (case-insensitive)</param>
+        /// <param name="page">Page number (1-based). Min: 1</param>
+        /// <param name="pageSize">Items per page. Min: 1, Max: 500</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Response containing paginated models, folders, and pagination metadata</returns>
+        /// <remarks>
+        /// Uses virtual folder architecture where folders exist only in database.
+        /// Supports breadcrumb navigation with parent path tracking.
+        /// Returns both subdirectories and models in the specified path.
+        /// </remarks>
         public async Task<Model3DListResponse> ListModelsWithHierarchyAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, CancellationToken ct)
         {
             if (page < 1)
@@ -185,6 +222,14 @@ namespace Farm.Web.Api.Services.Model
             return new Model3DListResponse(pagedEntries, totalFiles, totalSize, page, pageSize, totalPages, totalItems);
         }
 
+        #region Helper Methods
+
+        /// <summary>
+        /// Combines parent virtual path with child name to create full virtual path.
+        /// </summary>
+        /// <param name="parentPath">Parent directory path or null for root</param>
+        /// <param name="name">Child folder or file name</param>
+        /// <returns>Combined virtual path (e.g., "/parent/child")</returns>
         private static string CombineVirtual(string? parentPath, string name)
         {
             if (string.IsNullOrEmpty(parentPath) || parentPath == "/")
@@ -194,6 +239,12 @@ namespace Farm.Web.Api.Services.Model
             return UrlNormalizer.CombineUrl(parentPath, name);
         }
 
+        /// <summary>
+        /// Checks if a name matches the search term (case-insensitive substring match).
+        /// </summary>
+        /// <param name="name">Name to check against search term</param>
+        /// <param name="search">Search term, or null to match all</param>
+        /// <returns>True if name matches search criteria, false otherwise</returns>
         private static bool IsMatch(string name, string? search)
         {
             if (string.IsNullOrWhiteSpace(search))
@@ -203,6 +254,12 @@ namespace Farm.Web.Api.Services.Model
             return name.Contains(search, StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Retrieves a specific 3D model by its unique identifier.
+        /// </summary>
+        /// <param name="id">Unique model identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Model DTO with file details, or null if not found</returns>
         public async Task<Model3DDto?> GetModelAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
@@ -223,12 +280,24 @@ namespace Farm.Web.Api.Services.Model
             };
         }
 
+        /// <summary>
+        /// Gets the physical file path for a 3D model file.
+        /// </summary>
+        /// <param name="id">Unique model identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Full filesystem path to the model file, or null if not found</returns>
         public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
             return model?.FilePath;
         }
 
+        /// <summary>
+        /// Gets the physical file path for a model's thumbnail image.
+        /// </summary>
+        /// <param name="id">Unique model identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Full filesystem path to thumbnail, or null if thumbnail not available</returns>
         public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
@@ -239,6 +308,17 @@ namespace Farm.Web.Api.Services.Model
             return Path.Combine(model.FilePath, model.ThumbnailFileName);
         }
 
+        /// <summary>
+        /// Deletes a 3D model and its associated files (model file and thumbnail).
+        /// </summary>
+        /// <param name="id">Unique model identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <exception cref="KeyNotFoundException">Thrown when model with specified ID does not exist</exception>
+        /// <remarks>
+        /// Deletes both database record and physical files.
+        /// Removes model file, thumbnail (if exists), and all tag associations.
+        /// Uses Entity Framework change tracking to cascade delete relationships.
+        /// </remarks>
         public async Task DeleteModelAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
@@ -275,6 +355,17 @@ namespace Farm.Web.Api.Services.Model
             }
         }
 
+        /// <summary>
+        /// Validates a 3D model file upload before processing.
+        /// </summary>
+        /// <param name="modelFile">HTTP form file containing the model</param>
+        /// <returns>Validation result indicating success/failure and error messages</returns>
+        /// <remarks>
+        /// Validates:
+        /// - File is not null or empty
+        /// - File extension is supported (.stl, .obj, .3mf)
+        /// - File size is within limits (max 100 MB)
+        /// </remarks>
         public Model3DValidationResultDto ValidateModel(IFormFile modelFile)
         {
             if (modelFile == null || modelFile.Length == 0)
@@ -539,10 +630,23 @@ namespace Farm.Web.Api.Services.Model
         /// <summary>
         /// Gets or creates a Folder entity for the given directory path and type
         /// </summary>
+        /// <summary>
+        /// Gets an existing folder or creates a new one at the specified virtual path.
+        /// </summary>
+        /// <param name="directoryPath">Virtual directory path (e.g., "/MyFolder/SubFolder")</param>
+        /// <param name="folderType">Folder type identifier (e.g., "model", "gcode")</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Existing or newly created folder entity</returns>
+        /// <remarks>
+        /// Creates intermediate folders as needed (similar to mkdir -p).
+        /// Folders are virtual entities existing only in database.
+        /// </remarks>
         public async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
             // Delegate to shared folder management service
             return await _folderManagementService.GetOrCreateFolderAsync(directoryPath, folderType, ct);
         }
+
+        #endregion
     }
 }

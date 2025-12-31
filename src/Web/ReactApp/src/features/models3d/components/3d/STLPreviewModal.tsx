@@ -97,7 +97,7 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
         }
       }}
     >
-      <div className="rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-pf-bg-0 border border-pf-border">
+      <div className="rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-pf-bg-1 border border-pf-border">
         {/* Header */}
         <div className="px-6 py-4 flex items-center justify-between border-b border-pf-border" style={{
           background: 'linear-gradient(to right, var(--pf-bg-0), var(--pf-bg-1))',
@@ -127,7 +127,7 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
           </div>
 
           {/* Info Panel */}
-          <div className="w-64 rounded-lg p-4 overflow-y-auto bg-pf-bg-0 border border-pf-border">
+          <div className="w-64 rounded-lg p-4 overflow-y-auto bg-pf-bg-1 border border-pf-border">
             <h3 className="text-lg font-semibold mb-4 text-pf-text-primary">Model Information</h3>
 
             {modelInfo ? (
@@ -188,7 +188,7 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="bg-pf-bg-0 px-6 py-3 border-t border-pf-border flex justify-end gap-3">
+        <div className="bg-pf-bg-1 px-6 py-3 border-t border-pf-border flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose}>
             Close
           </Button>

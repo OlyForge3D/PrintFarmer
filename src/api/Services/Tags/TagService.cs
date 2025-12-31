@@ -12,6 +12,18 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Tags
 {
+    /// <summary>
+    /// Service for managing 3D model tags with automatic name normalization.
+    /// </summary>
+    /// <remarks>
+    /// This service provides tag management capabilities including:
+    /// - CRUD operations for tags (create, read, delete)
+    /// - Automatic PascalCase normalization of tag names for consistency
+    /// - Tag-to-model associations (assign, remove, bulk operations)
+    /// - Duplicate tag handling via normalization ("my tag" → "MyTag")
+    /// Tag names are normalized to PascalCase to prevent duplicates with different casing.
+    /// See TAG_NORMALIZATION_IMPLEMENTATION.md for complete details.
+    /// </remarks>
     public class TagService : ITagService
     {
         private readonly ITagRepository _tagRepository;
@@ -31,6 +43,12 @@ namespace Farm.Web.Api.Services.Tags
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <summary>
+        /// Retrieves all tags in the system.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Read-only list of all tag DTOs with ID, name, color, and description</returns>
+        /// <exception cref="Exception">Propagated from repository layer if database access fails</exception>
         public async Task<IReadOnlyList<Model3DTagDto>> GetAllTagsAsync(CancellationToken ct)
         {
             try
@@ -51,6 +69,13 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        /// <summary>
+        /// Retrieves a specific tag by its unique identifier.
+        /// </summary>
+        /// <param name="tagId">Unique tag identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Tag DTO with details, or null if tag not found</returns>
+        /// <exception cref="Exception">Propagated from repository layer if database access fails</exception>
         public async Task<Model3DTagDto?> GetTagByIdAsync(Guid tagId, CancellationToken ct)
         {
             try
@@ -76,6 +101,21 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        /// <summary>
+        /// Creates a new tag with automatic name normalization to PascalCase.
+        /// </summary>
+        /// <param name="dto">Tag creation DTO containing name, color, and description</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Created tag DTO, or existing tag if normalized name already exists</returns>
+        /// <exception cref="ArgumentNullException">Thrown when dto is null</exception>
+        /// <exception cref="ArgumentException">Thrown when tag name is null, empty, or whitespace</exception>
+        /// <remarks>
+        /// Tag names are normalized to PascalCase before storage:
+        /// - "my tag" → "MyTag"
+        /// - "MY_TAG" → "MyTag"
+        /// - "my-tag" → "MyTag"
+        /// If a tag with the normalized name already exists, returns the existing tag instead of creating a duplicate.
+        /// </remarks>
         public async Task<Model3DTagDto> CreateTagAsync(CreateModel3DTagDto dto, CancellationToken ct)
         {
             try
@@ -154,9 +194,21 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        #region Helper Methods
+
         /// <summary>
-        /// Convert string to PascalCase (capitalize first letter of each word)
+        /// Converts a string to PascalCase format for tag name normalization.
         /// </summary>
+        /// <param name="input">Input string to normalize</param>
+        /// <returns>PascalCase formatted string (e.g., "my tag" → "MyTag")</returns>
+        /// <remarks>
+        /// Normalization strategy:
+        /// - Splits on spaces, hyphens, underscores, and camelCase boundaries
+        /// - Capitalizes first letter of each word
+        /// - Removes non-alphanumeric characters except those used for splitting
+        /// - Joins words without separators
+        /// Example: "MY_TAG", "my-tag", "my tag" all normalize to "MyTag"
+        /// </remarks>
         private static string ToPascalCase(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
@@ -189,6 +241,16 @@ namespace Farm.Web.Api.Services.Tags
             return string.Concat(pascalWords);
         }
 
+        /// <summary>
+        /// Deletes a tag and all its associations with models.
+        /// </summary>
+        /// <param name="tagId">Unique tag identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <exception cref="KeyNotFoundException">Thrown when tag with specified ID does not exist</exception>
+        /// <remarks>
+        /// Removes tag entity and cascades to delete all ModelTagMapping associations.
+        /// Uses Entity Framework change tracking for cascade deletes.
+        /// </remarks>
         public async Task DeleteTagAsync(Guid tagId, CancellationToken ct)
         {
             try
@@ -210,6 +272,18 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        /// <summary>
+        /// Assigns multiple tags to a 3D model.
+        /// </summary>
+        /// <param name="modelId">Unique model identifier (GUID)</param>
+        /// <param name="tagIds">Collection of tag identifiers to assign</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <exception cref="ArgumentNullException">Thrown when tagIds collection is null</exception>
+        /// <exception cref="KeyNotFoundException">Thrown when model does not exist</exception>
+        /// <remarks>
+        /// Skips tags that are already assigned to prevent duplicate mappings.
+        /// Only creates new mappings for tags not yet associated with the model.
+        /// </remarks>
         public async Task AssignTagsToModelAsync(Guid modelId, IEnumerable<Guid> tagIds, CancellationToken ct)
         {
             try
@@ -265,6 +339,15 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        /// <summary>
+        /// Removes a tag assignment from a 3D model.
+        /// </summary>
+        /// <param name="modelId">Unique model identifier (GUID)</param>
+        /// <param name="tagId">Unique tag identifier (GUID) to remove</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <remarks>
+        /// Silently succeeds if mapping does not exist (idempotent operation).
+        /// </remarks>
         public async Task RemoveTagFromModelAsync(Guid modelId, Guid tagId, CancellationToken ct)
         {
             try
@@ -285,6 +368,13 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        /// <summary>
+        /// Retrieves all tags assigned to a specific 3D model.
+        /// </summary>
+        /// <param name="modelId">Unique model identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Read-only list of tag DTOs associated with the model</returns>
+        /// <exception cref="KeyNotFoundException">Thrown when model does not exist</exception>
         public async Task<IReadOnlyList<Model3DTagDto>> GetModelTagsAsync(Guid modelId, CancellationToken ct)
         {
             try
@@ -317,6 +407,18 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        /// <summary>
+        /// Assigns multiple tags to multiple 3D models in a single operation.
+        /// </summary>
+        /// <param name="modelIds">Collection of model identifiers to assign tags to</param>
+        /// <param name="tagIds">Collection of tag identifiers to assign</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <exception cref="ArgumentNullException">Thrown when modelIds or tagIds is null</exception>
+        /// <remarks>
+        /// Creates mappings for all model-tag combinations that don't already exist.
+        /// Skips existing mappings to prevent duplicates.
+        /// All operations performed in a single transaction via Unit of Work.
+        /// </remarks>
         public async Task BulkAssignTagsAsync(IEnumerable<Guid> modelIds, IEnumerable<Guid> tagIds, CancellationToken ct)
         {
             try
@@ -335,5 +437,7 @@ namespace Farm.Web.Api.Services.Tags
                 throw;
             }
         }
+
+        #endregion
     }
 }

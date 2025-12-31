@@ -60,7 +60,7 @@ export function PrinterSelectorModal({
                 }
             }}
         >
-            <div className="bg-pf-bg-0 rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="bg-pf-bg-1 rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-pf-border">
                     <h2 className="text-2xl font-bold text-pf-text">Select Printer</h2>
@@ -114,7 +114,7 @@ export function PrinterSelectorModal({
                                     >
                                         {/* Cover Image */}
                                         {coverImageUrl && (
-                                            <div className="relative w-full h-40 overflow-hidden bg-pf-bg-0">
+                                            <div className="relative w-full h-40 overflow-hidden bg-pf-bg-1">
                                                 <img
                                                     src={coverImageUrl}
                                                     alt={printer.name}

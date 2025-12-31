@@ -126,7 +126,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
         
-        <div className="relative bg-pf-bg-0 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
+        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
             <div>
@@ -208,7 +208,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
               <div>
                 {/* Summary Statistics */}
                 {totalsData && totalsData.jobTotals && !totalsLoading && (
-                  <div className="bg-pf-bg-0 border border-pf-border rounded-lg p-4 mb-6">
+                  <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 mb-6">
                     <h3 className="text-lg font-medium text-pf-text-primary mb-4 flex items-center">
                       <ChartIcon className="h-5 w-5 mr-2" />
                       Print Statistics
@@ -306,7 +306,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                   {historyData.jobs.map((job: HistoryJob) => (
                     <div
                       key={job.jobId}
-                      className="bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:shadow-sm transition-shadow"
+                      className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:shadow-sm transition-shadow"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">

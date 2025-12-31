@@ -172,7 +172,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
         
-        <div className="relative bg-pf-bg-0 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
+        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
             <div>
@@ -257,7 +257,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                   {getSortedFiles().map((file) => (
                     <div
                       key={file.fileName}
-                      className="relative flex items-center justify-between bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
+                      className="relative flex items-center justify-between bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
                       onMouseEnter={() => file.thumbnailUrl && setHoveredThumbnail(file.fileName)}
                       onMouseLeave={() => setHoveredThumbnail(null)}
                     >
@@ -349,7 +349,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between p-6 border-t border-pf-border bg-pf-bg-0">
+          <div className="flex items-center justify-between p-6 border-t border-pf-border bg-pf-bg-1">
             <p className="text-sm text-pf-text-secondary">
               {files.length} file{files.length !== 1 ? 's' : ''} available on printer
             </p>
@@ -373,7 +373,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDialog(null)} />
         
-        <div className="relative bg-pf-bg-0 rounded-lg shadow-xl max-w-md w-full">
+        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
             <h3 className="text-lg font-semibold text-pf-text-primary">
@@ -407,7 +407,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
             )}
 
             {/* File Details */}
-            <div className="bg-pf-bg-0 rounded p-3 space-y-2">
+            <div className="bg-pf-bg-1 rounded p-3 space-y-2">
               <p className="text-sm text-pf-text-secondary">File:</p>
               <p className="text-pf-text-primary font-medium break-all">{confirmDialog.file.fileName}</p>
               
@@ -427,7 +427,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
             </div>
 
             {/* Confirmation Message */}
-            <div className="bg-pf-bg-0 rounded p-3 border border-pf-border-warning">
+            <div className="bg-pf-bg-1 rounded p-3 border border-pf-border-warning">
               {confirmDialog.type === 'print' ? (
                 <p className="text-sm text-pf-text-primary">
                   Start printing this file? The printer will begin the print job.
@@ -441,7 +441,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-pf-border bg-pf-bg-0">
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-pf-border bg-pf-bg-1">
             <Button
               type="button"
               variant="secondary"

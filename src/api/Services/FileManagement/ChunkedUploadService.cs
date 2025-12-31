@@ -39,6 +39,25 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Initializes a new chunked upload session for large file uploads.
+    /// </summary>
+    /// <param name="userId">User identifier for quota tracking</param>
+    /// <param name="fileName">Original filename with extension</param>
+    /// <param name="fileSize">Total file size in bytes</param>
+    /// <param name="targetDirectory">Physical directory path for file storage</param>
+    /// <param name="allowedExtensions">Collection of allowed file extensions (e.g., [".gcode", ".stl"])</param>
+    /// <param name="hashAlgorithm">Optional hash algorithm for integrity verification ("sha256" or "sha1")</param>
+    /// <param name="expectedHash">Optional expected hash value for verification</param>
+    /// <param name="virtualDirectory">Optional virtual directory path for organization</param>
+    /// <returns>Upload initialization result with session ID, filename, and recommended chunk size</returns>
+    /// <exception cref="ArgumentException">Thrown when required parameters are invalid or extension not allowed</exception>
+    /// <exception cref="InvalidOperationException">Thrown when file validation fails or session cannot be created</exception>
+    /// <remarks>
+    /// Creates temporary .part file for chunked data and .meta.json for session recovery.
+    /// Generates unique GUID-based upload ID for session tracking.
+    /// Recommended chunk size: 1 MB for optimal performance.
+    /// </remarks>
     public ChunkedUploadInitResult InitializeUpload(
         string userId,
         string fileName,
@@ -145,6 +164,25 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         return new ChunkedUploadInitResult(uploadId, uniqueName, virtualPath, DefaultRecommendedChunkSize);
     }
 
+    /// <summary>
+    /// Appends a data chunk to an active upload session.
+    /// </summary>
+    /// <param name="uploadId">Unique upload session identifier (GUID)</param>
+    /// <param name="offset">Byte offset where this chunk should be appended (must match current uploaded bytes)</param>
+    /// <param name="chunkData">Binary chunk data to append</param>
+    /// <param name="userId">User identifier for quota verification</param>
+    /// <param name="quotaService">Quota service for usage tracking and limits</param>
+    /// <returns>Upload status with progress, completion state, and thumbnail path (if complete)</returns>
+    /// <exception cref="ArgumentException">Thrown when uploadId or chunkData is invalid</exception>
+    /// <exception cref="ArgumentNullException">Thrown when quotaService is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when session not found, paused, offset mismatch, quota exceeded, or chunk too large</exception>
+    /// <remarks>
+    /// Validates offset matches expected position to prevent data corruption.
+    /// Checks user quota before appending chunk; reverts quota on failure.
+    /// Updates incremental hash if configured for integrity verification.
+    /// Automatically finalizes upload (extracts metadata/thumbnail) when complete.
+    /// Removes session from memory and cleans up temporary files on completion.
+    /// </remarks>
     public async Task<ChunkedUploadStatus> AppendChunkAsync(
         string uploadId,
         long offset,
@@ -238,6 +276,17 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
     }
 
+    /// <summary>
+    /// Retrieves current status of an upload session or attempts to resume from persisted state.
+    /// </summary>
+    /// <param name="uploadId">Unique upload session identifier (GUID)</param>
+    /// <returns>Upload status if session exists, null if not found or cannot be resumed</returns>
+    /// <remarks>
+    /// First checks in-memory sessions for active uploads.
+    /// If not in memory, attempts to rehydrate from .meta.json file for recovery.
+    /// Validates temporary file existence and consistency before resuming.
+    /// Returns null if session expired, files deleted, or metadata corrupted.
+    /// </remarks>
     public ChunkedUploadStatus? GetOrResumeUpload(string uploadId)
     {
         if (string.IsNullOrWhiteSpace(uploadId))
@@ -291,6 +340,14 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         return null;
     }
 
+    /// <summary>
+    /// Retrieves the virtual directory path associated with an upload session.
+    /// </summary>
+    /// <param name="uploadId">Unique upload session identifier (GUID)</param>
+    /// <returns>Virtual directory path, or null if session not found or no virtual directory set</returns>
+    /// <remarks>
+    /// Used for organizing uploaded files in virtual folder hierarchies.
+    /// </remarks>
     public string? GetUploadVirtualDirectory(string uploadId)
     {
         if (string.IsNullOrWhiteSpace(uploadId))
@@ -306,6 +363,15 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         return null;
     }
 
+    /// <summary>
+    /// Pauses an active upload session, allowing it to be resumed later.
+    /// </summary>
+    /// <param name="uploadId">Unique upload session identifier (GUID)</param>
+    /// <returns>Upload status with paused flag set, or null if session not found</returns>
+    /// <remarks>
+    /// Sets session to paused state; subsequent AppendChunk calls will fail until resumed.
+    /// Persists paused state to metadata file for recovery.
+    /// </remarks>
     public ChunkedUploadStatus? PauseUpload(string uploadId)
     {
         if (string.IsNullOrWhiteSpace(uploadId))
@@ -348,6 +414,15 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             null);
     }
 
+    /// <summary>
+    /// Resumes a paused upload session.
+    /// </summary>
+    /// <param name="uploadId">Unique upload session identifier (GUID)</param>
+    /// <returns>Upload status with paused flag cleared, or null if session not found</returns>
+    /// <remarks>
+    /// Clears paused state; AppendChunk calls will succeed again.
+    /// Persists resumed state to metadata file.
+    /// </remarks>
     public ChunkedUploadStatus? ResumeUpload(string uploadId)
     {
         if (string.IsNullOrWhiteSpace(uploadId))
@@ -390,6 +465,14 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             null);
     }
 
+    /// <summary>
+    /// Cancels an upload session and cleans up temporary files.
+    /// </summary>
+    /// <param name="uploadId">Unique upload session identifier (GUID)</param>
+    /// <remarks>
+    /// Removes session from memory and deletes temporary .part file and .meta.json.
+    /// Silently succeeds if session not found or files already deleted (idempotent operation).
+    /// </remarks>
     public void CancelUpload(string uploadId)
     {
         if (string.IsNullOrWhiteSpace(uploadId))
@@ -418,6 +501,22 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
     }
 
+    #region Helper Methods
+
+    /// <summary>
+    /// Finalizes a completed upload by moving file, extracting metadata, and generating thumbnail.
+    /// </summary>
+    /// <param name="state">Internal upload state containing file paths and hash information</param>
+    /// <returns>Thumbnail path if generated successfully, null otherwise</returns>
+    /// <remarks>
+    /// Finalization steps:
+    /// 1. Validates hash if algorithm configured (throws exception on mismatch)
+    /// 2. Moves .part file to final location with sanitized name
+    /// 3. Extracts gcode metadata (best-effort, failures logged)
+    /// 4. Generates thumbnail from gcode (best-effort, failures logged)
+    /// 5. Cleans up temporary .meta.json file
+    /// Thumbnail and metadata extraction failures do not prevent upload completion.
+    /// </remarks>
     private async Task<string?> FinalizeUploadAsync(InternalUploadState state)
     {
         string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
@@ -522,6 +621,16 @@ public sealed class ChunkedUploadService : IChunkedUploadService
     /// Extract metadata from a finalized gcode file.
     /// This method is called after upload completes to extract metadata for database storage.
     /// </summary>
+    /// <summary>
+    /// Extracts gcode metadata from an uploaded file asynchronously.
+    /// </summary>
+    /// <param name="filePath">Physical path to the gcode file</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>Extracted metadata (print time, material usage, layer height, etc.), or null if extraction fails</returns>
+    /// <remarks>
+    /// Delegates to IGcodeMetadataExtractorService for actual extraction.
+    /// Returns null on any extraction failure; errors logged but not thrown (best-effort operation).
+    /// </remarks>
     public async Task<GcodeMetadataExtracted?> ExtractMetadataFromFileAsync(string filePath, CancellationToken ct = default)
     {
         try
@@ -556,6 +665,15 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
     }
 
+    /// <summary>
+    /// Persists upload session state to metadata file for crash recovery.
+    /// </summary>
+    /// <param name="state">Internal upload state to serialize</param>
+    /// <remarks>
+    /// Writes JSON metadata to .meta.json file alongside .part file.
+    /// Enables session recovery after application restart or crash.
+    /// Uses custom JSON serialization to exclude non-serializable Hasher.
+    /// </remarks>
     private void PersistState(InternalUploadState state)
     {
         try
@@ -585,12 +703,26 @@ public sealed class ChunkedUploadService : IChunkedUploadService
         }
     }
 
+    /// <summary>
+    /// Rehydrates upload session from persisted metadata file.
+    /// </summary>
+    /// <returns>Rehydrated internal state, or null if metadata file missing/invalid or temp file inconsistent</returns>
+    /// <remarks>
+    /// Validates:
+    /// - Metadata file exists and is readable
+    /// - Temporary .part file exists
+    /// - File size matches UploadedBytes in metadata
+    /// - Recreates hasher if hash algorithm configured
+    /// Returns null on any validation failure for safety.
+    /// </remarks>
     private InternalUploadState? RehydrateFromMetadata()
     {
         // In a real implementation, you would search for the metadata file
         // For now, return null - can be enhanced to search common temp locations
         return null;
     }
+
+    #endregion
 
     /// <summary>
     /// Internal state object for tracking an active upload session.

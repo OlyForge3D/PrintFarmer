@@ -2,7 +2,7 @@ import React, { useState, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { DeleteIcon, CloseIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, GridViewIcon, ListViewIcon, FileIcon, FolderIcon, UploadIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, CloseIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, GridViewIcon, ListViewIcon, FileIcon, FolderIcon, UploadIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
@@ -218,7 +218,6 @@ export const ModelsPage: React.FC = () => {
                 className="whitespace-nowrap"
               >
                 <UploadIcon className="w-4 h-4 mr-1" />
-                Upload
               </Button>
 
               <Button
@@ -227,8 +226,7 @@ export const ModelsPage: React.FC = () => {
                 size="sm"
                 className="whitespace-nowrap"
               >
-                <TagIcon className="w-4 h-4 mr-1" />
-                Filters
+                <FilterIcon className="w-4 h-4 mr-1" />
                 {selectedTags.length > 0 && (
                   <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-pf-accent text-white rounded">
                     {selectedTags.length}
@@ -244,7 +242,6 @@ export const ModelsPage: React.FC = () => {
                   className="whitespace-nowrap"
                 >
                   <TagIcon className="w-4 h-4 mr-1" />
-                  Bulk Tag
                 </Button>
               )}
             </div>
