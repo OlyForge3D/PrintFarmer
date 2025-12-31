@@ -505,7 +505,7 @@ export const ModelDetailPage: React.FC = () => {
                                     <div
                                         key={tag.id}
                                         className="flex items-center gap-1 px-3 py-1 rounded-full text-white text-sm"
-                                        style={{ backgroundColor: tag.color || '#6366f1' }}
+                                        style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                                     >
                                         <span>{tag.name}</span>
                                         <Button

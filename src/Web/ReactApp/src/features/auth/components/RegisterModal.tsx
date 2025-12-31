@@ -127,8 +127,15 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
   const allErrors = [...validationErrors, ...(error ? [error] : [])];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border max-h-[90vh] overflow-y-auto">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isLoading) {
+          handleClose();
+        }
+      }}
+    >
+      <div className="bg-pf-bg-0 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-pf-border">
           <div className="flex items-center gap-2">
             <PrintFarmerLogo size={32} className="mr-2" />
@@ -155,7 +162,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             {isLoading ? 'Creating account...' : 'Form ready'}
           </div>
           {allErrors.length > 0 && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm space-y-1">
+            <div className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm space-y-1" style={{ color: 'var(--pf-error)' }}>
               {allErrors.map((err, index) => (
                 <div key={index}>{err}</div>
               ))}

@@ -918,7 +918,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               onChange={e => setExtensionsInput(e.target.value)}
               placeholder=".gcode, .bgcode"
             />
-            <div className="text-xs text-gray-500">Current Limit: {(settings.dailyUploadLimitBytes / (1024*1024)).toFixed(2)} MB/day • Used: {(settings.userUsedBytes / (1024*1024)).toFixed(2)} MB</div>
+            <div className="text-xs text-pf-text-secondary">Current Limit: {(settings.dailyUploadLimitBytes / (1024*1024)).toFixed(2)} MB/day • Used: {(settings.userUsedBytes / (1024*1024)).toFixed(2)} MB</div>
             <div className="flex gap-2">
               <Button
                 onClick={async () => {

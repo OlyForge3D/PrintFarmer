@@ -221,11 +221,11 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 bg-black bg-opacity-75 transition-opacity" />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity" />
 
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
 
-        <div className="relative inline-block align-bottom bg-pf-bg-1 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl border border-pf-border">
+        <div className="relative inline-block align-bottom bg-pf-bg-0 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 lg:max-w-4xl border border-pf-border">
           {/* Close X button in corner */}
           <div className="absolute top-0 right-0 pt-4 pr-4">
             <Button

@@ -2,88 +2,93 @@
    PrintFarmer Theme System - CSS Custom Properties
    ============================================================================= */
 
-/* Root theme variables - Dark theme (default) */
-:root {
+/* Import individual theme files */
+@import './themes/github-dark.css';
+@import './themes/printfarmer-dark.css';
+
+/* Default theme (GitHub Dark) - applied when no data-theme attribute is set */
+/* Use :not([data-theme]) to allow data-theme attribute to override */
+:root:not([data-theme]) {
   /* Color system metadata */
-  --pf-theme-name: 'dark';
+  --pf-theme-name: 'github-dark';
   
-  /* Primary background colors */
-  --pf-bg-0: #0b1020;           /* Main page background */
-  --pf-bg-1: #0f172a;           /* Secondary background (cards) */
-  --pf-bg-2: #111827;           /* Tertiary background */
-  --pf-panel: #0e1528;          /* Panel background */
+  /* Primary background colors - GitHub Dark */
+  --pf-bg-0: #0d1117;           /* Main page background (GitHub canvas default) */
+  --pf-bg-1: #161b22;           /* Secondary background (cards/forms - GitHub canvas subtle) */
+  --pf-bg-2: #21262d;           /* Tertiary background (GitHub canvas inset) */
+  --pf-panel: #161b22;          /* Panel background */
   
-  /* Border and divider colors */
-  --pf-border: #243145;         /* Main border color */
-  --pf-border-light: #475569;   /* Light border */
-  --pf-border-medium: #334155;  /* Medium border */
-  --pf-border-dark: #1f2937;    /* Dark border */
-  --pf-border-gray: #64748b;    /* Gray border */
+  /* Border and divider colors - GitHub Dark */
+  --pf-border: #30363d;         /* Main border color (GitHub border default) */
+  --pf-border-light: #484f58;   /* Light border (GitHub border muted) */
+  --pf-border-medium: #30363d;  /* Medium border */
+  --pf-border-dark: #21262d;    /* Dark border */
+  --pf-border-gray: #6e7681;    /* Gray border */
   
-  /* Text colors with proper contrast ratios */
-  --pf-text-primary: #e5e7eb;   /* Primary text (4.5:1 on dark bg) */
-  --pf-text-secondary: #9ca3af; /* Secondary text (3:1 on dark bg) */
-  --pf-text-tertiary: #6b7280;  /* Tertiary text/muted */
-  --pf-text-light: #cbd5e1;     /* Light text */
-  --pf-text-muted: #94a3b8;     /* Muted text */
+  /* Text colors - GitHub Dark */
+  --pf-text-primary: #c9d1d9;   /* Primary text (GitHub fg default) */
+  --pf-text-secondary: #8b949e; /* Secondary text (GitHub fg muted) */
+  --pf-text-tertiary: #6e7681;  /* Tertiary text/muted (GitHub fg subtle) */
+  --pf-text-light: #c9d1d9;     /* Light text */
+  --pf-text-muted: #8b949e;     /* Muted text */
   
-  /* Accent and brand colors - Separate values for text vs background usage */
-  --pf-accent: #10b981;         /* Bright accent for text on dark backgrounds */
-  --pf-accent-bg: #047857;      /* Dark accent for button backgrounds with white text */
-  --pf-accent-2: #1d4ed8;       /* Darker blue for better contrast */
-  --pf-success: #10b981;        /* Bright success for text */
-  --pf-success-bg: #047857;     /* Dark success for button backgrounds */
-  --pf-success-hover: #065f46;  /* Success hover state */
-  --pf-link: #60a5fa;           /* Lighter blue for links on dark */
+  /* Accent and brand colors - GitHub Dark */
+  --pf-accent: #58a6ff;         /* Bright accent for text (GitHub accent fg) */
+  --pf-accent-bg: #0969da;      /* Dark accent for button backgrounds (GitHub accent emphasis) */
+  --pf-accent-2: #58a6ff;       /* Blue accent */
+  --pf-success: #3fb950;        /* Success green (GitHub success fg) */
+  --pf-success-bg: #238636;     /* Green button background (GitHub btn primary bg) */
+  --pf-success-hover: #2ea043;  /* Success hover state (GitHub btn primary hover bg) */
+  --pf-link: #58a6ff;           /* Links (GitHub accent fg) */
   
-  /* Semantic status colors */
-  --pf-status-online-bg: #064e3b;
-  --pf-status-online-text: #d1fae5;
-  --pf-status-online-border: #065f46;
-  --pf-status-offline-bg: #450a0a;
-  --pf-status-offline-text: #fee2e2;
-  --pf-status-offline-border: #7f1d1d;
+  /* Semantic status colors - GitHub Dark */
+  --pf-status-online-bg: #0d1117;
+  --pf-status-online-text: #3fb950;
+  --pf-status-online-border: #238636;
+  --pf-status-offline-bg: #0d1117;
+  --pf-status-offline-text: #f85149;
+  --pf-status-offline-border: #da3633;
   
-  /* Error and warning colors - Updated for better accessibility */
-  --pf-error: #dc2626;          /* Darker red for better contrast */
-  --pf-error-bg: #450a0a;
-  --pf-error-text: #fee2e2;
-  --pf-error-border: #7f1d1d;
-  --pf-warning: #d97706;        /* Darker orange for better contrast */
-  --pf-warning-text: #fecaca;
+  /* Error and warning colors - GitHub Dark */
+  --pf-error: #f85149;          /* Danger red (GitHub danger fg) */
+  --pf-error-bg: #0d1117;
+  --pf-error-text: #f85149;
+  --pf-error-border: #da3633;
+  --pf-warning: #d29922;        /* Warning yellow (GitHub attention fg) */
+  --pf-warning-text: #d29922;
   
   /* Loading and disabled states */
-  --pf-loading: #93c5fd;
-  --pf-loading-border: #2563eb;
-  --pf-disabled: #9ca3af;
+  --pf-loading: #58a6ff;
+  --pf-loading-border: #0969da;
+  --pf-disabled: #6e7681;
   
-  /* Gradient colors for buttons and cards - Updated for accessibility */
-  --pf-gradient-primary-start: #172036;
-  --pf-gradient-primary-end: #0f172a;
-  --pf-gradient-secondary-start: #1a2542;
-  --pf-gradient-secondary-end: #111b30;
-  --pf-gradient-success-start: #047857;    /* Updated to match accessible accent */
-  --pf-gradient-success-end: #065f46;      /* Updated to match accessible success-hover */
-  --pf-gradient-green-start: #16a34a;
-  --pf-gradient-green-end: #15803d;
-  --pf-gradient-green-active-start: #15803d;
-  --pf-gradient-green-active-end: #14532d;
-  --pf-gradient-gray-start: #64748b;
-  --pf-gradient-gray-end: #475569;
-  --pf-gradient-gray-dark-start: #4a5668;
-  --pf-gradient-gray-dark-end: #334155;
+  /* Gradient colors - GitHub Dark inspired */
+  --pf-gradient-primary-start: #161b22;
+  --pf-gradient-primary-end: #0d1117;
+  --pf-gradient-secondary-start: #21262d;
+  --pf-gradient-secondary-end: #161b22;
+  --pf-gradient-success-start: #1a6b2f;
+  --pf-gradient-success-end: #238636;
+  --pf-gradient-green-start: #238636;
+  --pf-gradient-green-end: #1a6b2f;
+  --pf-gradient-green-active-start: #2ea043;
+  --pf-gradient-green-active-end: #1a7f37;
+  --pf-gradient-gray-start: #6e7681;
+  --pf-gradient-gray-end: #484f58;
+  --pf-gradient-gray-dark-start: #484f58;
+  --pf-gradient-gray-dark-end: #30363d;
   
-  /* Focus and interaction states */
-  --pf-focus-ring: rgba(37, 99, 235, 0.5);
-  --pf-focus-ring-offset: #0b1020;
-  --pf-hover-overlay: rgba(255, 255, 255, 0.05);
-  --pf-active-overlay: rgba(255, 255, 255, 0.1);
+  /* Focus and interaction states - GitHub Dark */
+  --pf-focus-ring: rgba(88, 166, 255, 0.5);
+  --pf-focus-ring-offset: #0d1117;
+  --pf-hover-overlay: rgba(177, 186, 196, 0.12);
+  --pf-active-overlay: rgba(177, 186, 196, 0.2);
 
-  /* Skeleton / shimmer surfaces */
-  --pf-skeleton-bg: #1e293b;          /* Neutral surface for skeleton blocks */
-  --pf-skeleton-bg-alt: #243145;       /* Slight variation for layered skeletons */
-  --pf-skeleton-accent: #334155;       /* Accent bar / progress shimmer */
-  --pf-focus-outline: var(--pf-accent-2);
+  /* Skeleton / shimmer surfaces - GitHub Dark */
+  --pf-skeleton-bg: #21262d;
+  --pf-skeleton-bg-alt: #30363d;
+  --pf-skeleton-accent: #484f58;
+  --pf-focus-outline: var(--pf-accent);
   color-scheme: dark;
 }
 

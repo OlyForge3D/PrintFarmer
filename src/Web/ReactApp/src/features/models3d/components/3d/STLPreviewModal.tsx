@@ -84,8 +84,20 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
   const shouldShowViewer = file || fileUrl;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-pf-bg-1 border border-pf-border">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+      }}
+    >
+      <div className="rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-pf-bg-0 border border-pf-border">
         {/* Header */}
         <div className="px-6 py-4 flex items-center justify-between border-b border-pf-border" style={{
           background: 'linear-gradient(to right, var(--pf-bg-0), var(--pf-bg-1))',

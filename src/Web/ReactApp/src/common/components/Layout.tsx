@@ -324,8 +324,10 @@ export function Layout() {
 
             {/* Connection status */}
             <div className="flex items-center space-x-2">
-              <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'
-                }`} />
+              <div 
+                className="h-2 w-2 rounded-full" 
+                style={{ backgroundColor: isConnected ? 'var(--pf-success)' : 'var(--pf-error)' }}
+              />
               <span className="text-sm text-pf-text-tertiary">
                 {isConnected ? 'Connected' : 'Disconnected'}
               </span>
@@ -342,11 +344,11 @@ export function Layout() {
               >
                 {isAuthenticated && user ? (
                   <>
-                    <AccountCheckIcon className="h-5 w-5 text-green-500" />
+                    <AccountCheckIcon className="h-5 w-5 text-pf-success" />
                   </>
                 ) : (
                   <>
-                    <AccountIcon className="h-5 w-5 text-gray-400" />
+                    <AccountIcon className="h-5 w-5 text-pf-text-muted" />
                     <span className="hidden sm:block text-sm">Guest</span>
                   </>
                 )}

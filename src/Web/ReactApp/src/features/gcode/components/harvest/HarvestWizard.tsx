@@ -276,7 +276,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
               key={s}
               className={`h-1 flex-1 rounded ${
                 s < step
-                  ? 'bg-pf-success'
+                  ? 'bg-pf-success-bg'
                   : s === step
                     ? 'bg-pf-accent'
                     : 'bg-pf-border'

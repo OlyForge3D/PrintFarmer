@@ -5,6 +5,7 @@ import { SettingInputType } from '@/types/SettingInputType';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { ThemeSelector } from '@/common/components/ui/ThemeSelector';
 import {
   fetchSettingsMetadata,
   saveAllSettings,
@@ -176,29 +177,40 @@ export function SettingsPage() {
       maxWidth="max-w-3xl"
     >
       {loading ? (
-        <div className="text-center text-gray-500">Loading settings...</div>
+        <div className="text-center text-pf-text-secondary">Loading settings...</div>
       ) : error ? (
-        <div className="text-center text-red-600">{error}</div>
+        <div className="text-center text-pf-error">{error}</div>
       ) : (
-        <form onSubmit={e => { e.preventDefault(); handleSave(); }}>
-          {metadata.map((meta) => (
-            <SettingsPagelet
-              key={meta.key}
-              metadata={meta}
-              values={(settingsValues[meta.key] || {}) as Record<string, SettingValue>}
-              onChange={(field, value) => handleFieldChange(meta.key, field, value)}
-              fieldErrors={fieldErrorsBySection[meta.key]}
-            />
-          ))}
-          {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={saving}
-          >
-            {saving ? 'Saving...' : 'Save All'}
-          </Button>
-        </form>
+        <div className="space-y-6">
+          {/* Theme Selector Section */}
+          <div className="bg-pf-bg-1 rounded-lg p-6 border border-pf-border">
+            <h2 className="text-lg font-semibold text-pf-text-primary mb-4">
+              Appearance
+            </h2>
+            <ThemeSelector />
+          </div>
+
+          {/* Application Settings */}
+          <form onSubmit={e => { e.preventDefault(); handleSave(); }}>
+            {metadata.map((meta) => (
+              <SettingsPagelet
+                key={meta.key}
+                metadata={meta}
+                values={(settingsValues[meta.key] || {}) as Record<string, SettingValue>}
+                onChange={(field, value) => handleFieldChange(meta.key, field, value)}
+                fieldErrors={fieldErrorsBySection[meta.key]}
+              />
+            ))}
+            {saveError && <div className="text-pf-error mb-2">{saveError}</div>}
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={saving}
+            >
+              {saving ? 'Saving...' : 'Save All'}
+            </Button>
+          </form>
+        </div>
       )}
     </PageTemplate>
   );

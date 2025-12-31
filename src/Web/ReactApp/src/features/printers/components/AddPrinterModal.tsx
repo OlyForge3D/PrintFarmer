@@ -173,6 +173,20 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     }
   };
 
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleClose();
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen]);
+
   const handleClose = () => {
     setFormData({
       name: '',
@@ -198,12 +212,12 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
       <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
         {/* Overlay */}
         <div 
-          className="fixed inset-0 bg-pf-bg-0 bg-opacity-75 transition-opacity" 
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity" 
           onClick={handleClose}
         />
         
         {/* Modal */}
-        <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative overflow-visible">
+        <div className="inline-block align-bottom bg-pf-bg-0 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative overflow-visible">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">

@@ -248,7 +248,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
             <button
               onClick={onClose}
               disabled={false}
-              className="px-4 py-2 bg-pf-success hover:bg-pf-success-dark border border-pf-success-border rounded text-pf-success-text text-sm font-medium transition-colors"
+              className="px-4 py-2 bg-pf-success-bg hover:bg-pf-success-hover border border-pf-success rounded text-white text-sm font-medium transition-colors"
             >
               Finished
             </button>

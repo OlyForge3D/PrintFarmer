@@ -319,7 +319,7 @@ export const TagAdminPage: React.FC = () => {
                                         <td className="px-6 py-4">
                                             <div
                                                 className="w-8 h-8 rounded border border-pf-border"
-                                                style={{ backgroundColor: tag.color || '#6366f1' }}
+                                                style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                                                 title={tag.color}
                                             />
                                         </td>

@@ -14,7 +14,7 @@ export const SystemHealthSkeleton: React.FC<{ compact?: boolean; className?: str
       <div className="pf-skeleton pf-animate-skeleton h-5 w-40 mb-4" />
       <div className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+          <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-pf-bg-1">
             <div className="flex items-center space-x-2">
               <div className="pf-skeleton pf-animate-skeleton h-5 w-5 rounded-full" />
               <div className="pf-skeleton pf-animate-skeleton h-4 w-28" />

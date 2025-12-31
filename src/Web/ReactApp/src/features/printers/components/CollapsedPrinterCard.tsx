@@ -279,7 +279,7 @@ export function CollapsedPrinterCard({
             <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
               <div
                 ref={collapsedProgressRef}
-                className="bg-pf-success h-2 rounded-full transition-all duration-300"
+                className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
               >
                 <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, progress)))}%</span>
               </div>

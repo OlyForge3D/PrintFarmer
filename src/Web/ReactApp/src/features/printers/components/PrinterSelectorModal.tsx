@@ -47,7 +47,19 @@ export function PrinterSelectorModal({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) {
+                    onClose();
+                }
+            }}
+            onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                    onClose();
+                }
+            }}
+        >
             <div className="bg-pf-bg-0 rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-pf-border">

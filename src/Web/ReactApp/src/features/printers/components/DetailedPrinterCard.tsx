@@ -113,7 +113,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
 
   const stateColorClasses = (() => {
     if (!isOnline) return 'bg-slate-500 text-white';
-    if (isPrinting) return 'bg-pf-success text-pf-bg-0 font-bold';
+    if (isPrinting) return 'bg-pf-success-bg text-white font-bold';
     if (isPaused) return 'bg-yellow-600 text-white';
     if (isShutdown) return 'bg-red-600 text-white';
     return 'bg-blue-600 text-white';
@@ -363,7 +363,7 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
           <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
             <div
               ref={expandedProgressRef}
-              className="bg-pf-success h-2 rounded-full transition-all duration-300"
+              className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
             >
               <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, printer.progress))) }%</span>
             </div>

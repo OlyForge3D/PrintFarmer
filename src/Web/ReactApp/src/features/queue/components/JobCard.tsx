@@ -72,13 +72,13 @@ export const JobCard: React.FC<JobCardProps> = ({
   return (
     <div className={`
       bg-white rounded-lg border p-4 shadow-sm hover:shadow-md transition-shadow
-      ${isActive ? 'border-blue-300 bg-blue-50/50' : ''}
+      ${isActive ? 'border-pf-accent bg-pf-accent-bg/10' : ''}
       ${isCompleted ? 'border-gray-200 opacity-75' : ''}
     `}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center space-x-2 mb-1">
-            <h3 className="font-medium text-gray-900 truncate">{job.gcodeFileName}</h3>
+            <h3 className="font-medium text-pf-text-primary truncate">{job.gcodeFileName}</h3>
             <span className={`
               inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
               ${queueService.getStatusColor(job.status)}

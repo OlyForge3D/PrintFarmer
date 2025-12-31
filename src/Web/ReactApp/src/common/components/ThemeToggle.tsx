@@ -1,7 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
 import { SunIcon, MoonIcon, MonitorIcon } from '@/common/components/icons/MdiIcons';
-import { useTheme } from '@/contexts/ThemeHooks';
+import { useTheme } from '@/contexts/ThemeContext';
 import type { ThemeName } from '@/contexts/ThemeContext';
 
 interface ThemeToggleProps {

@@ -89,7 +89,7 @@ export default function LogsPage() {
       <div className="overflow-x-auto">
         <table className="min-w-full border">
           <thead>
-            <tr className="bg-gray-100">
+            <tr className="bg-pf-bg-1">
               <th className="p-2 border">Timestamp</th>
               <th className="p-2 border">Level</th>
               <th className="p-2 border">Message</th>

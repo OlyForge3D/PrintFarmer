@@ -35,14 +35,14 @@ export function EmailConfirmationBanner() {
   };
 
   return (
-    <div className="bg-yellow-500/10 border-b border-yellow-500/20">
+    <div className="border-b border-pf-border" style={{ backgroundColor: 'var(--pf-warning-bg)' }}>
       <div className="max-w-7xl mx-auto py-3 px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between flex-wrap">
           <div className="flex items-center flex-1">
-            <span className="flex p-2 rounded-lg bg-yellow-500/20">
-              <EmailIcon className="h-5 w-5 text-yellow-600" />
+            <span className="flex p-2 rounded-lg bg-pf-bg-2">
+              <EmailIcon className="h-5 w-5" style={{ color: 'var(--pf-warning)' }} />
             </span>
-            <p className="ml-3 font-medium text-yellow-800 dark:text-yellow-200">
+            <p className="ml-3 font-medium text-pf-text-primary">
               <span className="md:hidden">Please verify your email</span>
               <span className="hidden md:inline">
                 Please verify your email address to access all features
@@ -54,7 +54,8 @@ export function EmailConfirmationBanner() {
               variant="subtle"
               onClick={handleResend}
               disabled={sending}
-              className="flex items-center justify-center text-yellow-900 bg-yellow-100 hover:bg-yellow-200"
+              className="flex items-center justify-center bg-pf-bg-2 hover:bg-pf-border"
+              style={{ color: 'var(--pf-warning)' }}
             >
               {sending ? (
                 <>
@@ -75,7 +76,7 @@ export function EmailConfirmationBanner() {
               aria-label="Dismiss"
               className="p-1"
             >
-              <CloseIcon className="h-5 w-5 text-yellow-600" />
+              <CloseIcon className="h-5 w-5" style={{ color: 'var(--pf-warning)' }} />
             </Button>
           </div>
         </div>

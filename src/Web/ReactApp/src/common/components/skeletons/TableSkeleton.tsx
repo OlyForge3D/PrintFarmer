@@ -10,15 +10,15 @@ export const TableSkeleton: React.FC<{ rows?: number; cols?: number; className?:
   }[Math.min(cols, 8)] || 'grid-cols-5';
   return (
     <div className={`border border-gray-200 rounded-lg overflow-hidden ${className}`} aria-busy="true" aria-live="polite" aria-label="Loading table">
-      <div className="bg-gray-50 border-b border-gray-200 px-4 py-3">
-        <div className="h-4 w-40 bg-gray-200 rounded animate-pulse" />
+      <div className="bg-pf-bg-0 border-b border-pf-border px-4 py-3">
+        <div className="h-4 w-40 bg-pf-bg-2 rounded animate-pulse" />
       </div>
       <div className="divide-y divide-gray-200">
         {rowArray.map((_, r) => (
           <div key={r} className={`grid ${colClass}`}>
             {colArray.map((__, c) => (
               <div key={c} className="p-3">
-                <div className="h-3 w-full bg-gray-100 rounded animate-pulse" />
+                <div className="h-3 w-full bg-pf-bg-1 rounded animate-pulse" />
               </div>
             ))}
           </div>

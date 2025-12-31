@@ -124,9 +124,9 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   const modalContent = (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black bg-opacity-75" />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
         
-        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
+        <div className="relative bg-pf-bg-0 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
             <div>

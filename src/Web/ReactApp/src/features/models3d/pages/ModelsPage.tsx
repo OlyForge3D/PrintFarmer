@@ -273,7 +273,7 @@ export const ModelsPage: React.FC = () => {
                     >
                       <div
                         className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: tag.color || '#6366f1' }}
+                        style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                       />
                       <span className="truncate">{tag.name}</span>
                     </button>
@@ -328,7 +328,7 @@ export const ModelsPage: React.FC = () => {
                           <span
                             key={tag.id}
                             className="inline-block px-1.5 py-0.5 text-xs rounded text-white"
-                            style={{ backgroundColor: tag.color || '#6366f1' }}
+                            style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                           >
                             {tag.name}
                           </span>
@@ -447,7 +447,7 @@ export const ModelsPage: React.FC = () => {
                               <span
                                 key={tag.id}
                                 className="inline-block px-2 py-0.5 text-xs rounded text-white"
-                                style={{ backgroundColor: tag.color || '#6366f1' }}
+                                style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                               >
                                 {tag.name}
                               </span>

@@ -83,7 +83,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
         className="flex items-center gap-2"
       >
         {value ? (
-          <span className={`w-4 h-4 rounded border border-pf-border ${colorFamilyBgClass[value] || 'bg-gray-500'}`} aria-hidden="true" />
+          <span className={`w-4 h-4 rounded border border-pf-border ${colorFamilyBgClass[value] || 'bg-pf-text-muted'}`} aria-hidden="true" />
         ) : (
           <span className="w-4 h-4 rounded border border-dashed border-pf-border" aria-hidden="true" />
         )}
@@ -103,7 +103,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
           <div
             role="option"
             id={`${id || 'color-family'}-opt-0`}
-            className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${activeIdx === 0 ? 'bg-blue-600 text-white' : 'hover:bg-pf-bg-2'} ${value === '' ? 'font-medium' : ''}`}
+            className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${activeIdx === 0 ? 'bg-pf-accent-bg text-white' : 'hover:bg-pf-bg-2'} ${value === '' ? 'font-medium' : ''}`}
             onMouseEnter={() => setActiveIdx(0)}
             onMouseDown={e => e.preventDefault()}
             onClick={() => commit('')}
@@ -121,13 +121,13 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
                 key={fam}
                 role="option"
                 id={`${id || 'color-family'}-opt-${idx}`}
-                className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${active ? 'bg-blue-600 text-white' : 'hover:bg-pf-bg-2'} ${selected && !active ? 'font-medium' : ''}`}
+                className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${active ? 'bg-pf-accent-bg text-white' : 'hover:bg-pf-bg-2'} ${selected && !active ? 'font-medium' : ''}`}
                 onMouseEnter={() => setActiveIdx(idx)}
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => commit(fam)}
                 data-active={active ? 'true' : 'false'}
               >
-                <span className={`w-4 h-4 rounded border border-pf-border ${colorFamilyBgClass[fam] || 'bg-gray-500'}`} aria-hidden="true" />
+                <span className={`w-4 h-4 rounded border border-pf-border ${colorFamilyBgClass[fam] || 'bg-pf-text-muted'}`} aria-hidden="true" />
                 <span>{fam}</span>
               </div>
             );

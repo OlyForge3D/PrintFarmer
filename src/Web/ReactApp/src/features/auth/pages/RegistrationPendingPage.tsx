@@ -10,7 +10,7 @@ const RegistrationPendingPage: React.FC = () => {
           Your account has been created, but you cannot access PrintFarmer until an administrator approves your registration.<br />
           You will be notified once your account is approved.
         </p>
-        <Link to="/login" className="text-blue-600 hover:underline">Back to Login</Link>
+        <Link to="/login" className="text-pf-accent hover:underline">Back to Login</Link>
       </div>
     </div>
   );

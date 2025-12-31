@@ -39,9 +39,9 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
 
   return (
     <div>
-      <label htmlFor="location" className="block text-sm font-medium text-gray-700">
+      <label htmlFor="location" className="block text-sm font-medium text-pf-text-primary">
         {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
+        {required && <span style={{ color: 'var(--pf-error)' }} className="ml-1">*</span>}
       </label>
       <select
         id="location"
@@ -59,7 +59,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
           </option>
         ))}
       </select>
-      {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-1 text-sm" style={{ color: 'var(--pf-error)' }}>{error}</p>}
     </div>
   );
 };

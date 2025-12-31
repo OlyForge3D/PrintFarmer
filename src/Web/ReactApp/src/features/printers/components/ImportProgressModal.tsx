@@ -96,13 +96,13 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'Imported':
-        return <span className="text-green-600">✓</span>;
+        return <span style={{ color: 'var(--pf-success)' }}>✓</span>;
       case 'Failed':
-        return <span className="text-red-600">✗</span>;
+        return <span style={{ color: 'var(--pf-error)' }}>✗</span>;
       case 'Skipped':
-        return <span className="text-yellow-600">⊘</span>;
+        return <span style={{ color: 'var(--pf-warning)' }}>⊘</span>;
       case 'Pending':
-        return <span className="text-gray-400">●</span>;
+        return <span style={{ color: 'var(--pf-text-secondary)' }}>●</span>;
       default:
         return null;
     }
@@ -111,13 +111,13 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
   const getStatusClass = (status: string) => {
     switch (status) {
       case 'Imported':
-        return 'text-green-700 bg-green-50';
+        return 'bg-pf-bg-0 bg-opacity-50';
       case 'Failed':
-        return 'text-red-700';
+        return '';
       case 'Skipped':
-        return 'text-yellow-700';
+        return '';
       case 'Pending':
-        return 'text-gray-500';
+        return '';
       default:
         return '';
     }
@@ -145,26 +145,26 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
         <div className="flex gap-4 text-sm">
           <div className="flex items-center gap-1">
             <span className="font-semibold">{successCount}</span>
-            <span className="text-green-600">Imported</span>
+            <span style={{ color: 'var(--pf-success)' }}>Imported</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="font-semibold">{skippedCount}</span>
-            <span className="text-yellow-600">Skipped</span>
+            <span style={{ color: 'var(--pf-warning)' }}>Skipped</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="font-semibold">{failedCount}</span>
-            <span className="text-red-600">Failed</span>
+            <span style={{ color: 'var(--pf-error)' }}>Failed</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="font-semibold">{pendingCount}</span>
-            <span className="text-gray-500">Pending</span>
+            <span style={{ color: 'var(--pf-text-secondary)' }}>Pending</span>
           </div>
         </div>
 
         {/* Progress bar */}
-        <div className="w-full bg-gray-200 rounded-full h-2">
+        <div className="w-full bg-pf-bg-2 rounded-full h-2">
           <div
-            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+            className="bg-pf-accent h-2 rounded-full transition-all duration-300"
             style={{ width: `${((totalCount - pendingCount) / totalCount) * 100}%` }}
           />
         </div>

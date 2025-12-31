@@ -274,7 +274,7 @@ export function HarvestWizardStep4Progress({
                       <div
                         className={`h-full transition-all ${
                           file.status === 'completed'
-                            ? 'bg-pf-success'
+                            ? 'bg-pf-success-bg'
                             : 'bg-pf-accent'
                         }`}
                         style={{ width: `${Math.max(0, Math.min(100, file.progress))}%` } as React.CSSProperties}

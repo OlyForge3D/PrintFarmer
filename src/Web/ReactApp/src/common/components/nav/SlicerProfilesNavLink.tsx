@@ -7,7 +7,7 @@ export const SlicerProfilesNavLink: React.FC = () => {
   return (
     <Link
       to="/slicer-profiles"
-      className={`px-3 py-2 rounded text-sm font-medium ${active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+      className={`px-3 py-2 rounded text-sm font-medium ${active ? 'bg-pf-accent-bg text-white' : 'text-pf-text-primary hover:bg-pf-bg-1'}`}
     >
       Profiles
     </Link>

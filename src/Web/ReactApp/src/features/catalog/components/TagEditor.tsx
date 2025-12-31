@@ -195,7 +195,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({
                             >
                                 <div
                                     className="w-3 h-3 rounded-full flex-shrink-0"
-                                    style={{ backgroundColor: tag.color || '#6366f1' }}
+                                    style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                                 />
                                 <div className="flex-1 min-w-0">
                                     <div className="text-pf-text-primary font-medium text-sm truncate">{tag.name}</div>

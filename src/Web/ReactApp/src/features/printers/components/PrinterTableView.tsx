@@ -275,7 +275,7 @@ export function PrinterTableView({
                       <div className="flex items-center space-x-2">
                         <div className="w-12 bg-pf-border-dark rounded-full h-2">
                           <div
-                            className={`bg-pf-success ${styles['pf-progress-bar']} ${styles[`w-${Math.min(100, Math.max(0, Math.round(displayPrinter.progress / 5) * 5))}`]}`}
+                            className={`bg-pf-success-bg ${styles['pf-progress-bar']} ${styles[`w-${Math.min(100, Math.max(0, Math.round(displayPrinter.progress / 5) * 5))}`]}`}
                           />
                         </div>
                         <span className="text-sm text-pf-text-primary">

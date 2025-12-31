@@ -96,6 +96,20 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
     }
   }, [isOpen, modelFile]);
 
+  // Handle ESC key to close modal
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSlicing) {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, isSlicing, onClose]);
+
   const handleSlice = async () => {
     if (!selectedPrinter) return;
 
@@ -162,8 +176,15 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <div 
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSlicing) {
+          onClose();
+        }
+      }}
+    >
+      <div className="bg-pf-bg-0 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b">
           <h2 className="text-xl font-semibold">Configure Slicing</h2>

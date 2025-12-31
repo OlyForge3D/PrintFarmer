@@ -91,7 +91,7 @@ export const Modal: React.FC<ModalProps> = ({
     >
       <div
         className={clsx(
-          'w-full bg-pf-panel border border-pf-border rounded-lg shadow-xl',
+          'w-full bg-pf-bg-0 border border-pf-border rounded-lg shadow-xl',
           'transform transition-all',
           'max-h-[90vh] flex flex-col',
           sizeClasses[size],
