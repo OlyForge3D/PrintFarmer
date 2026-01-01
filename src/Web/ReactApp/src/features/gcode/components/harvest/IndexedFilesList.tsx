@@ -5,6 +5,7 @@ import type { HarvestFileDiscoveredEvent, HarvestFileProgress, HarvestFileUpdate
 import { toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';
+import { Modal } from '@/common/components/ui/Modal';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 
 interface FileWithProgress extends DiscoveredGcodeFileDto {
@@ -26,6 +27,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
+  const [errorModalFile, setErrorModalFile] = useState<FileWithProgress | null>(null);
   const filesRef = useRef<FileWithProgress[]>([]);
 
   // Helper to get status display string
@@ -333,21 +335,21 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-30">
             <tr>
-              <th className="p-2 border-b border-pf-border">
+              <th className="p-2 border-b border-pf-border whitespace-nowrap">
                 {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
                 <input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" />
               </th>
-              <th className="p-2 border-b border-pf-border text-left">File</th>
-              <th className="p-2 border-b border-pf-border text-left">Progress</th>
-              <th className="p-2 border-b border-pf-border text-right">Size</th>
-              <th className="p-2 border-b border-pf-border text-left">Slicer</th>
-              <th className="p-2 border-b border-pf-border text-left">Material</th>
-              <th className="p-2 border-b border-pf-border text-center">Nozzle</th>
-              <th className="p-2 border-b border-pf-border text-right">Print Time</th>
-              <th className="p-2 border-b border-pf-border text-right">Filament Used</th>
-              <th className="p-2 border-b border-pf-border text-center">Status</th>
-              <th className="p-2 border-b border-pf-border text-center">Error</th>
-              <th className="p-2 border-b border-pf-border text-center">Modified</th>
+              <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">File</th>
+              {files.some(f => f.progress) && (
+                <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">Progress</th>
+              )}
+              <th className="p-2 border-b border-pf-border text-right whitespace-nowrap">Size</th>
+              <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">Slicer</th>
+              <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">Material</th>
+              <th className="p-2 border-b border-pf-border text-center whitespace-nowrap">Nozzle</th>
+              <th className="p-2 border-b border-pf-border text-right whitespace-nowrap">Print Time</th>
+              <th className="p-2 border-b border-pf-border text-right whitespace-nowrap">Filament Used</th>
+              <th className="p-2 border-b border-pf-border text-center whitespace-nowrap">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -378,26 +380,28 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                           loading="lazy"
                         />
                       )}
-                      <span>{file.fileName}</span>
+                      <span className="text-xs">{file.fileName}</span>
                     </div>
                   </td>
-                  <td className="p-2 border-b border-pf-border">
-                    {file.progress && (
-                      <div className="flex flex-col gap-1">
-                        <div className="w-full bg-pf-bg-2 rounded-full h-2 overflow-hidden">
-                          <div
-                            className="bg-pf-accent h-full transition-all duration-300"
-                            style={{ width: `${file.progress.percent}%` }}
-                          />
+                  {files.some(f => f.progress) && (
+                    <td className="p-2 border-b border-pf-border">
+                      {file.progress && (
+                        <div className="flex flex-col gap-1">
+                          <div className="w-full bg-pf-bg-2 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="bg-pf-accent h-full transition-all duration-300"
+                              style={{ width: `${file.progress.percent}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-pf-muted">
+                            {file.progress.percent}% ({(file.progress.bytesCopied / 1024 / 1024).toFixed(1)}MB / {(file.progress.totalBytes / 1024 / 1024).toFixed(1)}MB)
+                          </span>
                         </div>
-                        <span className="text-xs text-pf-muted">
-                          {file.progress.percent}% ({(file.progress.bytesCopied / 1024 / 1024).toFixed(1)}MB / {(file.progress.totalBytes / 1024 / 1024).toFixed(1)}MB)
-                        </span>
-                      </div>
-                    )}
-                  </td>
+                      )}
+                    </td>
+                  )}
                   <td className="p-2 border-b border-pf-border text-right text-pf-muted">
-                    {(file.fileSizeBytes / 1024).toFixed(1)} KB
+                    <span className="text-xs">{(file.fileSizeBytes / 1024).toFixed(1)} KB</span>
                   </td>
                   <td className="p-2 border-b border-pf-border text-left text-pf-muted">
                     {file.extractedSlicerName && (
@@ -416,7 +420,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                       <span className="text-xs" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>{file.extractedNozzleDiameter}mm</span>
                     )}
                   </td>
-                  <td className="p-2 border-b border-pf-border text-right text-pf-muted">
+                  <td className="p-2 border-b border-pf-border text-right text-pf-muted whitespace-nowrap">
                     {file.extractedPrintTime && (
                       <span className="text-xs" title={`Est. print time: ${formatPrintTimeMinutes(file.extractedPrintTime)}`}>{formatPrintTimeMinutes(file.extractedPrintTime)}</span>
                     )}
@@ -428,16 +432,19 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                   </td>
                   <td className="p-2 border-b border-pf-border text-center">
                     {status !== undefined && (
-                      <span
+                      <button
+                        onClick={() => status === HarvestFileStatus.Failed && error && setErrorModalFile(file)}
+                        disabled={status !== HarvestFileStatus.Failed || !error}
                         className={
                           status === HarvestFileStatus.Complete ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-success-bg text-pf-success' :
                           status === HarvestFileStatus.InProgress ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-accent-bg text-pf-accent' :
+                          status === HarvestFileStatus.Failed && error ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-error-bg text-pf-error cursor-pointer hover:opacity-80 transition' :
                           status === HarvestFileStatus.Failed ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-error-bg text-pf-error' :
                           status === HarvestFileStatus.Skipped ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted' :
                           status === HarvestFileStatus.Cancelled ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted' :
                           'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-bg-2 text-pf-muted'
                         }
-                        title={getStatusString(status)}
+                        title={status === HarvestFileStatus.Failed && error ? 'Click to view error details' : getStatusString(status)}
                         aria-label={getStatusString(status)}
                       >
                         {status === HarvestFileStatus.Complete && <span title="Complete" aria-label="Complete">✔️</span>}
@@ -447,37 +454,9 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                         {status === HarvestFileStatus.Cancelled && <span title="Cancelled" aria-label="Cancelled">🚫</span>}
                         {status === HarvestFileStatus.Pending && <span title="Pending" aria-label="Pending">⏸️</span>}
                         {getStatusString(status)}
-                      </span>
+                      </button>
                     )}
                   </td>
-                  <td className="p-2 border-b border-pf-border text-center">
-                    {error && (
-                      <span className="inline-block px-2 py-0.5 rounded bg-pf-error-bg text-pf-error mr-2" title={error}>{error}</span>
-                    )}
-                    {error && (
-                      <>
-                        {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-                        <button
-                          className="inline-flex items-center px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted hover:bg-pf-accent-bg hover:text-pf-accent focus:outline-none focus:ring-2 focus:ring-pf-accent mr-1"
-                          title="Skip this file"
-                          aria-label="Skip file"
-                          onClick={() => handleSkipFile(file.id)}
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                        </button>
-                        {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-                        <button
-                          className="inline-flex items-center px-2 py-0.5 rounded bg-pf-accent-bg text-pf-accent hover:bg-pf-accent-dark hover:text-white focus:outline-none focus:ring-2 focus:ring-pf-accent"
-                          title="Retry this file"
-                          aria-label="Retry file"
-                          onClick={() => handleRetryFile(file.id)}
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeWidth="2" d="M12 4v4m0 0a8 8 0 11-8 8"/></svg>
-                        </button>
-                      </>
-                    )}
-                  </td>
-                  <td className="p-2 border-b border-pf-border text-center text-pf-muted">{file.modifiedAt ? new Date(file.modifiedAt).toLocaleString() : ''}</td>
                 </tr>
               );
             })}
@@ -502,6 +481,41 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
           )}
         </Button>
       </div>
+
+      {/* Error Details Modal */}
+      {errorModalFile && (
+        <Modal isOpen={!!errorModalFile} onClose={() => setErrorModalFile(null)} title="File Import Error" size="md">
+          <div className="space-y-4">
+            <div>
+              <h3 className="font-semibold text-pf-primary mb-2">File Name</h3>
+              <p className="text-pf-text-secondary font-mono text-sm">{errorModalFile.fileName}</p>
+            </div>
+            <div>
+              <h3 className="font-semibold text-pf-primary mb-2">Error Details</h3>
+              <p className="text-pf-error bg-pf-error-bg rounded px-3 py-2 text-sm">{errorModalFile.error || 'No error details available'}</p>
+            </div>
+            <div className="flex gap-2 justify-end pt-4">
+              <Button
+                variant="secondary"
+                onClick={() => handleSkipFile(errorModalFile.id)}
+                title="Skip this file"
+              >
+                Skip File
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  handleRetryFile(errorModalFile.id);
+                  setErrorModalFile(null);
+                }}
+                title="Retry this file"
+              >
+                Retry Import
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
