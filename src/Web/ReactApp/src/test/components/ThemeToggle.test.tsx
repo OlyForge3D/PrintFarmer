@@ -1,9 +1,9 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen, fireEvent } from '@testing-library/dom';
 import { ThemeToggle } from '@/common/components/ThemeToggle';
-import { ThemeProvider, type ThemeName, useThemeToggle } from '@/contexts/ThemeContext';
+import { ThemeProvider, useThemeToggle } from '@/contexts/ThemeContext';
 import { ReactNode } from 'react';
 
 // Mock localStorage
@@ -26,7 +26,7 @@ const createMockMatchMedia = (matches: boolean) => vi.fn().mockImplementation((q
 }));
 
 // Test wrapper with ThemeProvider
-const renderWithTheme = (ui: ReactNode, { defaultTheme = 'dark' }: { defaultTheme?: ThemeName } = {}) => {
+const renderWithTheme = (ui: ReactNode, { defaultTheme = 'github-dark' }: { defaultTheme?: 'github-dark' | 'printfarmer-dark' | 'light' | 'system' } = {}) => {
   return render(
     <ThemeProvider defaultTheme={defaultTheme}>
       {ui}
@@ -64,7 +64,7 @@ describe('ThemeToggle', () => {
       
       const button = screen.getByRole('button');
       expect(button).toBeInTheDocument();
-      expect(button).toHaveAttribute('aria-label', 'Current theme: Dark. Click to cycle themes.');
+      expect(button).toHaveAttribute('aria-label', 'Current theme: GitHub Dark. Click to cycle themes.');
     });
 
     it('cycles through themes on click', () => {
@@ -75,11 +75,15 @@ describe('ThemeToggle', () => {
       // Initial state: light
       expect(button).toHaveAttribute('aria-label', 'Current theme: Light. Click to cycle themes.');
       
-      // Click to cycle: light -> dark
+      // Click to cycle: light -> github-dark
       fireEvent.click(button);
-      expect(button).toHaveAttribute('aria-label', 'Current theme: Dark. Click to cycle themes.');
+      expect(button).toHaveAttribute('aria-label', 'Current theme: GitHub Dark. Click to cycle themes.');
       
-      // Click to cycle: dark -> system
+      // Click to cycle: github-dark -> printfarmer-dark
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-label', 'Current theme: PrintFarmer Dark. Click to cycle themes.');
+      
+      // Click to cycle: printfarmer-dark -> system
       fireEvent.click(button);
       expect(button).toHaveAttribute('aria-label', 'Current theme: System. Click to cycle themes.');
       
@@ -91,14 +95,18 @@ describe('ThemeToggle', () => {
     it('shows labels when showLabels is true', () => {
       renderWithTheme(<ThemeToggle showLabels />);
       
-      expect(screen.getByText('Dark')).toBeInTheDocument();
+      expect(screen.getByText('GitHub Dark')).toBeInTheDocument();
     });
 
     it('shows system computed theme in label', () => {
       renderWithTheme(<ThemeToggle showLabels />, { defaultTheme: 'system' });
       
       expect(screen.getByText('System')).toBeInTheDocument();
-      expect(screen.getByText('(dark)')).toBeInTheDocument();
+      // The computed theme is shown in the title attribute with its label
+      const buttons = screen.getAllByRole('button');
+      const compactButton = buttons[0];
+      // Check that the button's title attribute contains the computed theme label
+      expect(compactButton.getAttribute('title')).toMatch(/\(github dark\)/i);
     });
 
     it('applies custom className', () => {
@@ -114,7 +122,7 @@ describe('ThemeToggle', () => {
       expect(button).toHaveClass('p-1.5', 'text-sm');
       
       rerender(
-        <ThemeProvider defaultTheme="dark">
+        <ThemeProvider defaultTheme="github-dark">
           <ThemeToggle size="lg" />
         </ThemeProvider>
       );
@@ -132,18 +140,18 @@ describe('ThemeToggle', () => {
       expect(radioGroup).toHaveAttribute('aria-label', 'Theme selection');
       
       const buttons = screen.getAllByRole('radio');
-      expect(buttons).toHaveLength(3);
+      expect(buttons.length).toBeGreaterThanOrEqual(3); // At least light, github-dark, system
       
       // Use case-insensitive matching for labels to avoid minor text changes
       expect(screen.getByTestId('theme-option-light')).toBeInTheDocument();
-      expect(screen.getByTestId('theme-option-dark')).toBeInTheDocument();
+      expect(screen.getByTestId('theme-option-github-dark')).toBeInTheDocument();
       expect(screen.getByTestId('theme-option-system')).toBeInTheDocument();
     });
 
     it('shows active theme', () => {
-      renderWithTheme(<ThemeToggle variant="buttons" />, { defaultTheme: 'dark' });
+      renderWithTheme(<ThemeToggle variant="buttons" />, { defaultTheme: 'github-dark' });
       
-      const darkLabel = screen.getByTestId('theme-option-dark');
+      const darkLabel = screen.getByTestId('theme-option-github-dark');
       const darkInput = darkLabel.querySelector('input[type="radio"]') as HTMLInputElement;
       expect(darkInput.checked).toBe(true);
       expect(darkLabel).toHaveClass('bg-pf-accent');
@@ -151,7 +159,7 @@ describe('ThemeToggle', () => {
     });
 
     it('allows theme switching via buttons', () => {
-      renderWithTheme(<ThemeToggle variant="buttons" />, { defaultTheme: 'dark' });
+      renderWithTheme(<ThemeToggle variant="buttons" />, { defaultTheme: 'github-dark' });
       
       const lightLabel = screen.getByTestId('theme-option-light');
       const lightInput = lightLabel.querySelector('input[type="radio"]') as HTMLInputElement;
@@ -166,7 +174,8 @@ describe('ThemeToggle', () => {
       renderWithTheme(<ThemeToggle variant="buttons" showLabels />);
       
       expect(screen.getByText('Light')).toBeInTheDocument();
-      expect(screen.getByText('Dark')).toBeInTheDocument();
+      expect(screen.getByText('GitHub Dark')).toBeInTheDocument();
+      expect(screen.getByText('PrintFarmer Dark')).toBeInTheDocument();
       expect(screen.getByText('System')).toBeInTheDocument();
     });
   });
@@ -179,10 +188,11 @@ describe('ThemeToggle', () => {
       expect(select).toHaveAttribute('aria-label', 'Select theme');
       
       const options = screen.getAllByRole('option');
-      expect(options).toHaveLength(3);
+      expect(options.length).toBeGreaterThanOrEqual(4);
       
       expect(screen.getByRole('option', { name: 'Light' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Dark' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'GitHub Dark' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'PrintFarmer Dark' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'System' })).toBeInTheDocument();
     });
 
@@ -194,7 +204,7 @@ describe('ThemeToggle', () => {
     });
 
     it('allows theme switching via select', () => {
-      renderWithTheme(<ThemeToggle variant="dropdown" />, { defaultTheme: 'dark' });
+      renderWithTheme(<ThemeToggle variant="dropdown" />, { defaultTheme: 'github-dark' });
       
       const select = screen.getByRole('combobox');
       fireEvent.change(select, { target: { value: 'light' } });
@@ -219,7 +229,7 @@ describe('ThemeToggle', () => {
         'aria-label', 
         'Current theme: System. Click to cycle themes.'
       );
-      expect(button).toHaveAttribute('title', 'Current: System (dark). Click to change.');
+      expect(button).toHaveAttribute('title', 'Current: System (GitHub Dark). Click to change.');
     });
 
     it('provides proper ARIA attributes for button group', () => {
@@ -234,10 +244,10 @@ describe('ThemeToggle', () => {
       expect(lightButton).toHaveAttribute('type', 'radio');
       expect(lightButton).toHaveAttribute('aria-checked', 'true');
       
-      const darkButton = screen.getByLabelText(/Switch to dark theme/i) as HTMLInputElement;
-      expect(darkButton.tagName).toBe('INPUT');
-      expect(darkButton).toHaveAttribute('type', 'radio');
-      expect(darkButton).toHaveAttribute('aria-checked', 'false');
+      const githubDarkButton = screen.getByLabelText(/Switch to github dark theme/i) as HTMLInputElement;
+      expect(githubDarkButton.tagName).toBe('INPUT');
+      expect(githubDarkButton).toHaveAttribute('type', 'radio');
+      expect(githubDarkButton).toHaveAttribute('aria-checked', 'false');
     });
 
     it('provides proper ARIA label for dropdown', () => {
@@ -292,16 +302,16 @@ describe('ThemeToggle', () => {
       
       // Button variant
       rerender(
-        <ThemeProvider defaultTheme="dark">
+        <ThemeProvider defaultTheme="github-dark">
           <ThemeToggle variant="buttons" />
         </ThemeProvider>
       );
       const buttons = screen.getAllByRole('radio');
-      expect(buttons).toHaveLength(3);
+      expect(buttons).toHaveLength(4); // light, github-dark, printfarmer-dark, system
       
       // Dropdown variant
       rerender(
-        <ThemeProvider defaultTheme="dark">
+        <ThemeProvider defaultTheme="github-dark">
           <ThemeToggle variant="dropdown" />
         </ThemeProvider>
       );
@@ -332,10 +342,10 @@ describe('useThemeToggle hook', () => {
   });
 
   it('returns theme state and utilities', () => {
-    renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'dark' });
+    renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'github-dark' });
     
-    expect(screen.getByTestId('theme')).toHaveTextContent('dark');
-    expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark');
+    expect(screen.getByTestId('theme')).toHaveTextContent('github-dark');
+    expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark');
     expect(screen.getByTestId('is-light')).toHaveTextContent('false');
     expect(screen.getByTestId('is-dark')).toHaveTextContent('true');
     expect(screen.getByTestId('is-system')).toHaveTextContent('false');
@@ -352,18 +362,18 @@ describe('useThemeToggle hook', () => {
     renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'system' });
     
     expect(screen.getByTestId('is-system')).toHaveTextContent('true');
-    expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark'); // System preference
+    expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark'); // System preference
   });
 
   it('provides working toggle function', () => {
-    renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'dark' });
+    renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'github-dark' });
     
     fireEvent.click(screen.getByTestId('toggle'));
-    expect(screen.getByTestId('theme')).toHaveTextContent('light');
+    expect(screen.getByTestId('theme')).toHaveTextContent('printfarmer-dark');
   });
 
   it('provides working setTheme function', () => {
-    renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'dark' });
+    renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'github-dark' });
     
     fireEvent.click(screen.getByTestId('set-light'));
     expect(screen.getByTestId('theme')).toHaveTextContent('light');

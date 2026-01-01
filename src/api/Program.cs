@@ -13,6 +13,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Json;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.SignalR;
@@ -108,6 +109,9 @@ builder.Services.AddPrintFarmerDatabase(builder.Configuration);
 
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
+
+// Register SystemLog logger provider to capture all application logs to the database
+builder.Logging.AddSystemLogProvider(LogLevel.Information);
 
 // Register settings service
 // Bind system-level settings from IConfiguration so they are available before any DB access during startup.

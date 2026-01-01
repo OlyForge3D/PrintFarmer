@@ -22,7 +22,8 @@ export function ThemeToggle({
 
   const themes: { value: ThemeName; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { value: 'light', label: 'Light', icon: SunIcon },
-    { value: 'dark', label: 'Dark', icon: MoonIcon },
+    { value: 'github-dark', label: 'GitHub Dark', icon: MoonIcon },
+    { value: 'printfarmer-dark', label: 'PrintFarmer Dark', icon: MoonIcon },
     { value: 'system', label: 'System', icon: MonitorIcon },
   ];
 
@@ -92,6 +93,7 @@ export function ThemeToggle({
 
   // Compact variant - cycle through themes
   const currentTheme = themes.find(t => t.value === theme) || themes[0];
+  const computedThemeLabel = themes.find(t => t.value === computedTheme)?.label || computedTheme;
   const Icon = currentTheme.icon;
 
   return (
@@ -104,7 +106,7 @@ export function ThemeToggle({
       }}
       className={`${sizeClasses[size]} ${className} inline-flex items-center space-x-2 bg-pf-panel border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200`}
       aria-label={`Current theme: ${currentTheme.label}. Click to cycle themes.`}
-      title={`Current: ${currentTheme.label} (${computedTheme}). Click to change.`}
+      title={`Current: ${currentTheme.label} (${computedThemeLabel}). Click to change.`}
     >
       <Icon className={iconSizes[size]} />
       {showLabels && (

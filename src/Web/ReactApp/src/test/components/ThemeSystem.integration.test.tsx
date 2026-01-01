@@ -175,19 +175,25 @@ describe('Theme System Integration', () => {
     // Start: light
     expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: light');
     
-    // Click 1: light -> dark
+    // Click 1: light -> github-dark
     await act(async () => {
       fireEvent.click(toggle);
     });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: dark');
+    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: github-dark');
     
-    // Click 2: dark -> system
+    // Click 2: github-dark -> printfarmer-dark
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: printfarmer-dark');
+    
+    // Click 3: printfarmer-dark -> system
     await act(async () => {
       fireEvent.click(toggle);
     });
     expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: system');
     
-    // Click 3: system -> light
+    // Click 4: system -> light
     await act(async () => {
       fireEvent.click(toggle);
     });

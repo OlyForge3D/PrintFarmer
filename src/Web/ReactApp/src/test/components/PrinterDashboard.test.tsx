@@ -10,7 +10,7 @@ import { PrinterBackend } from '@/types/api';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 
 // Mock the API hooks
-vi.mock('@/hooks/useApi', async () => ({
+vi.mock('@/common/hooks/useApi', async () => ({
   usePrinters: vi.fn(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   useStartDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -52,7 +52,7 @@ vi.mock('@/hooks/useSignalR', () => ({
 }));
 
 // dynamic import after mocks
-const { usePrinters } = await import('@/hooks/useApi');
+const { usePrinters } = await import('@/common/hooks/useApi');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({

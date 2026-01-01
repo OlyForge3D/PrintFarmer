@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Button, Input, FormField, Select } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -14,11 +14,41 @@ interface SystemLog {
   metadata?: string;
 }
 
+type ColumnKey = 'timestamp' | 'level' | 'message' | 'correlationId' | 'source' | 'metadata' | 'exception';
+
+const DEFAULT_COLUMNS: Record<ColumnKey, { label: string; default: boolean }> = {
+  timestamp: { label: 'Timestamp', default: true },
+  level: { label: 'Level', default: true },
+  message: { label: 'Message', default: true },
+  correlationId: { label: 'CorrelationId', default: true },
+  source: { label: 'Source', default: true },
+  metadata: { label: 'Metadata', default: false },
+  exception: { label: 'Exception', default: false },
+};
+
+const COLUMNS_STORAGE_KEY = 'logs-page-columns';
+
 export function LogsPage() {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [useAdvancedQuery, setUseAdvancedQuery] = useState(false);
   const [queryString, setQueryString] = useState("");
+  const [visibleColumns, setVisibleColumns] = useState<Record<ColumnKey, boolean>>(() => {
+    const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return Object.fromEntries(
+          Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
+        ) as Record<ColumnKey, boolean>;
+      }
+    }
+    return Object.fromEntries(
+      Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
+    ) as Record<ColumnKey, boolean>;
+  });
+  const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
   const [filters, setFilters] = useState({
     correlationId: "",
     level: "",
@@ -26,6 +56,22 @@ export function LogsPage() {
     to: "",
     metadata: ""
   });
+
+  // Save column preferences to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+
+  const toggleColumn = (column: ColumnKey) => {
+    setVisibleColumns(prev => ({ ...prev, [column]: !prev[column] }));
+  };
+
+  const resetColumns = () => {
+    const defaults = Object.fromEntries(
+      Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
+    ) as Record<ColumnKey, boolean>;
+    setVisibleColumns(defaults);
+  };
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -74,8 +120,11 @@ export function LogsPage() {
     }
   };
 
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length;
+
   return (
     <PageTemplate title="System Logs">
+      {/* Mode Selection */}
       <div className="mb-4 flex gap-2">
         <Button 
           variant={useAdvancedQuery ? "secondary" : "primary"} 
@@ -91,6 +140,7 @@ export function LogsPage() {
         </Button>
       </div>
 
+      {/* Filters */}
       {!useAdvancedQuery && (
         <div className="mb-4 grid grid-cols-1 md:grid-cols-5 gap-2">
           <FormField label="CorrelationId" inline>
@@ -119,6 +169,7 @@ export function LogsPage() {
         </div>
       )}
 
+      {/* Advanced Query */}
       {useAdvancedQuery && (
         <div className="mb-4">
           <FormField label="Lucene Query" inline={false}>
@@ -143,38 +194,107 @@ export function LogsPage() {
         </div>
       )}
 
+      {/* Action Buttons */}
       <div className="mb-4 flex gap-2">
         <Button variant="primary" onClick={fetchLogs} disabled={loading}>Search</Button>
         <Button variant="success" onClick={exportLogs}>Export</Button>
       </div>
+
+      {/* Column Visibility Controls */}
+      <div className="mb-4 p-3 bg-pf-bg-1 rounded border border-pf-border">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-pf-text-primary">Visible Columns</h3>
+          <Button variant="secondary" size="sm" onClick={resetColumns}>Reset to Defaults</Button>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {Object.entries(DEFAULT_COLUMNS).map(([key, { label }]) => (
+            <label key={key} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={visibleColumns[key as ColumnKey]}
+                onChange={() => toggleColumn(key as ColumnKey)}
+                className="w-4 h-4 rounded border-pf-border bg-pf-bg-0"
+              />
+              <span className="text-sm text-pf-text-secondary">{label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
       {loading && <div className="text-pf-text-muted mb-4">Loading logs...</div>}
-      <div className="overflow-x-auto">
-        <table className="min-w-full border">
+
+      {/* Logs Table */}
+      <div className="overflow-x-auto border border-pf-border rounded">
+        <table className="w-full">
           <thead>
-            <tr className="bg-pf-bg-1">
-              <th className="p-2 border">Timestamp</th>
-              <th className="p-2 border">Level</th>
-              <th className="p-2 border">Message</th>
-              <th className="p-2 border">CorrelationId</th>
-              <th className="p-2 border">Metadata</th>
-              <th className="p-2 border">Exception</th>
-              <th className="p-2 border">Source</th>
+            <tr className="bg-pf-bg-1 border-b border-pf-border">
+              <th className="p-2 text-left text-xs font-semibold text-pf-text-primary">Expand</th>
+              {visibleColumns.timestamp && <th className="p-2 text-left text-xs font-semibold text-pf-text-primary w-32">Timestamp</th>}
+              {visibleColumns.level && <th className="p-2 text-left text-xs font-semibold text-pf-text-primary w-20">Level</th>}
+              {visibleColumns.message && <th className="p-2 text-left text-xs font-semibold text-pf-text-primary flex-1 min-w-80">Message</th>}
+              {visibleColumns.correlationId && <th className="p-2 text-left text-xs font-semibold text-pf-text-primary w-32">CorrelationId</th>}
+              {visibleColumns.source && <th className="p-2 text-left text-xs font-semibold text-pf-text-primary w-32">Source</th>}
+              {visibleColumns.metadata && <th className="p-2 text-left text-xs font-semibold text-pf-text-primary w-40">Metadata</th>}
+              {visibleColumns.exception && <th className="p-2 text-left text-xs font-semibold text-pf-text-primary w-40">Exception</th>}
             </tr>
           </thead>
           <tbody>
-            {logs.map(log => (
-              <tr key={log.id}>
-                <td className="p-2 border whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
-                <td className="p-2 border">{log.level}</td>
-                <td className="p-2 border max-w-xs truncate" title={log.message}>{log.message}</td>
-                <td className="p-2 border">{log.correlationId}</td>
-                <td className="p-2 border max-w-xs truncate" title={log.metadata}>{log.metadata}</td>
-                <td className="p-2 border max-w-xs truncate" title={log.exception}>{log.exception}</td>
-                <td className="p-2 border">{log.source}</td>
-              </tr>
+            {logs.map((log, index) => (
+              <React.Fragment key={log.id}>
+                <tr className={index % 2 === 0 ? 'bg-pf-bg-0' : 'bg-pf-bg-1'} style={{borderBottom: '1px solid var(--pf-border)'}}>
+                  <td className="p-2 text-center">
+                    <button
+                      onClick={() => setExpandedRowId(expandedRowId === log.id ? null : log.id)}
+                      className="text-pf-accent hover:text-pf-accent-hover"
+                    >
+                      {expandedRowId === log.id ? '▼' : '▶'}
+                    </button>
+                  </td>
+                  {visibleColumns.timestamp && <td className="p-2 text-xs text-pf-text-secondary whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>}
+                  {visibleColumns.level && <td className="p-2 text-xs text-pf-text-primary font-medium">{log.level}</td>}
+                  {visibleColumns.message && <td className="p-2 text-xs text-pf-text-secondary line-clamp-2">{log.message}</td>}
+                  {visibleColumns.correlationId && <td className="p-2 text-xs text-pf-text-secondary font-mono">{log.correlationId || '-'}</td>}
+                  {visibleColumns.source && <td className="p-2 text-xs text-pf-text-secondary">{log.source || '-'}</td>}
+                  {visibleColumns.metadata && <td className="p-2 text-xs text-pf-text-secondary truncate" title={log.metadata}>{log.metadata || '-'}</td>}
+                  {visibleColumns.exception && <td className="p-2 text-xs text-pf-text-secondary truncate" title={log.exception}>{log.exception ? '✗ Error' : '-'}</td>}
+                </tr>
+                {/* Expanded Row */}
+                {expandedRowId === log.id && (
+                  <tr className="bg-pf-bg-2 border-t-2 border-pf-accent">
+                    <td colSpan={1 + visibleColumnCount} className="p-4">
+                      <div className="space-y-3">
+                        {visibleColumns.message && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-pf-text-primary mb-1">Full Message</h4>
+                            <p className="text-xs text-pf-text-secondary bg-pf-bg-0 p-2 rounded whitespace-pre-wrap break-words font-mono">
+                              {log.message}
+                            </p>
+                          </div>
+                        )}
+                        {visibleColumns.metadata && log.metadata && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-pf-text-primary mb-1">Metadata</h4>
+                            <p className="text-xs text-pf-text-secondary bg-pf-bg-0 p-2 rounded whitespace-pre-wrap break-words font-mono">
+                              {log.metadata}
+                            </p>
+                          </div>
+                        )}
+                        {visibleColumns.exception && log.exception && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-pf-text-primary mb-1">Exception Details</h4>
+                            <p className="text-xs text-red-400 bg-pf-bg-0 p-2 rounded whitespace-pre-wrap break-words font-mono overflow-y-auto max-h-48">
+                              {log.exception}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
             {logs.length === 0 && !loading && (
-              <tr><td colSpan={7} className="p-2 text-center">No logs found</td></tr>
+              <tr><td colSpan={1 + visibleColumnCount} className="p-4 text-center text-pf-text-muted">No logs found</td></tr>
             )}
           </tbody>
         </table>

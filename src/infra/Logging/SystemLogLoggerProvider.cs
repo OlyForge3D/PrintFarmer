@@ -1,0 +1,258 @@
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.SystemLogs;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace Farm.Infrastructure.Logging;
+
+/// <summary>
+/// ILoggerProvider that writes all application logs to the SystemLog database table.
+/// Uses a background queue to batch writes asynchronously.
+/// Automatically captures X-Correlation-Id from HTTP context for tracing.
+/// </summary>
+public class SystemLogLoggerProvider : ILoggerProvider
+{
+    private readonly IServiceProvider _serviceProvider;
+    private readonly LogLevel _minimumLevel;
+    private readonly BlockingCollection<SystemLog> _logQueue;
+    private readonly CancellationTokenSource _cts;
+    private readonly Task _processingTask;
+
+    public SystemLogLoggerProvider(IServiceProvider serviceProvider, LogLevel minimumLevel = LogLevel.Information)
+    {
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _minimumLevel = minimumLevel;
+        _logQueue = new BlockingCollection<SystemLog>(1000);
+        _cts = new CancellationTokenSource();
+        // Don't start the processing task immediately - wait for service provider to be fully configured
+        _processingTask = ProcessLogsAsync(_cts.Token);
+    }
+
+    public ILogger CreateLogger(string categoryName)
+    {
+        var httpContextAccessor = _serviceProvider.GetService<IHttpContextAccessor>();
+        return new SystemLogLogger(categoryName, _logQueue, _minimumLevel, httpContextAccessor);
+    }
+
+    /// <summary>
+    /// Processes queued logs and writes them to the database in batches.
+    /// </summary>
+    private async Task ProcessLogsAsync(CancellationToken ct)
+    {
+        var batch = new List<SystemLog>(capacity: 50);
+        
+        // Add a small delay at the start to let the application fully initialize
+        await Task.Delay(2000, ct).ConfigureAwait(false);
+
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                // Try to get a log from the queue with a timeout
+                if (_logQueue.TryTake(out var log, 1000, ct))
+                {
+                    batch.Add(log);
+
+                    // Process batch when we have 50 items or timeout
+                    if (batch.Count >= 50)
+                    {
+                        await WriteBatchAsync(batch, ct);
+                        batch.Clear();
+                    }
+                }
+                else if (batch.Count > 0)
+                {
+                    // Timeout occurred, write any pending logs
+                    await WriteBatchAsync(batch, ct);
+                    batch.Clear();
+                }
+            }
+
+            // Flush remaining logs on shutdown
+            if (batch.Count > 0)
+            {
+                await WriteBatchAsync(batch, CancellationToken.None);
+            }
+
+            // Drain any remaining items in queue
+            while (_logQueue.TryTake(out var log, 100))
+            {
+                batch.Add(log);
+                if (batch.Count >= 50)
+                {
+                    await WriteBatchAsync(batch, CancellationToken.None);
+                    batch.Clear();
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                await WriteBatchAsync(batch, CancellationToken.None);
+            }
+        }
+        catch
+        {
+            // Silently fail - don't let logging errors break the application
+        }
+    }
+
+    /// <summary>
+    /// Writes a batch of logs to the database.
+    /// </summary>
+    private async Task WriteBatchAsync(List<SystemLog> batch, CancellationToken ct)
+    {
+        try
+        {
+            // Create a scope to get the repository
+            using var scope = _serviceProvider.CreateAsyncScope();
+            var repository = scope.ServiceProvider.GetService<ISystemLogRepository>();
+
+            if (repository == null)
+            {
+                return; // Repository not available yet
+            }
+
+            foreach (var log in batch)
+            {
+                try
+                {
+                    await repository.AddAsync(log, ct);
+                }
+                catch
+                {
+                    // Individual log write failed, continue with others
+                }
+            }
+        }
+        catch
+        {
+            // Silently fail - don't let logging errors break the application
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _logQueue.CompleteAdding();
+            _cts.Cancel();
+            
+            // Wait for processing to complete with timeout
+            if (_processingTask.Wait(TimeSpan.FromSeconds(5)))
+            {
+                _processingTask.Dispose();
+            }
+        }
+        catch
+        {
+            // Ignore disposal errors
+        }
+        finally
+        {
+            _logQueue.Dispose();
+            _cts.Dispose();
+        }
+    }
+}
+
+/// <summary>
+/// Logger that queues log messages for batch processing.
+/// Extracts correlation ID from HTTP context for distributed tracing.
+/// </summary>
+internal class SystemLogLogger : ILogger
+{
+    private readonly string _categoryName;
+    private readonly BlockingCollection<SystemLog> _logQueue;
+    private readonly LogLevel _minimumLevel;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+
+    public SystemLogLogger(string categoryName, BlockingCollection<SystemLog> logQueue, LogLevel minimumLevel, IHttpContextAccessor? httpContextAccessor = null)
+    {
+        _categoryName = categoryName;
+        _logQueue = logQueue;
+        _minimumLevel = minimumLevel;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+    {
+        return null; // Scopes not used for this implementation
+    }
+
+    public bool IsEnabled(LogLevel logLevel)
+    {
+        return logLevel >= _minimumLevel;
+    }
+
+    public void Log<TState>(
+        LogLevel logLevel,
+        EventId eventId,
+        TState state,
+        Exception? exception,
+        Func<TState, Exception?, string> formatter)
+    {
+        if (!IsEnabled(logLevel))
+        {
+            return;
+        }
+
+        try
+        {
+            var message = formatter(state, exception);
+            var exceptionText = exception?.ToString();
+            
+            // Try to extract correlation ID from HTTP context
+            var correlationId = GetCorrelationIdFromContext();
+
+            var log = new SystemLog
+            {
+                Timestamp = DateTime.UtcNow,
+                Level = logLevel.ToString(),
+                Message = message,
+                Exception = exceptionText,
+                Source = _categoryName,
+                CorrelationId = correlationId
+            };
+
+            // Non-blocking add to queue
+            _logQueue.TryAdd(log, 100);
+        }
+        catch
+        {
+            // Silently fail - don't let logging errors break the application
+        }
+    }
+
+    private string? GetCorrelationIdFromContext()
+    {
+        try
+        {
+            var httpContext = _httpContextAccessor?.HttpContext;
+            if (httpContext != null)
+            {
+                // Check for X-Correlation-Id header (sent by frontend)
+                if (httpContext.Request.Headers.TryGetValue("X-Correlation-Id", out var correlationId))
+                {
+                    return correlationId.ToString();
+                }
+                
+                // Fallback to X-Request-Id if available
+                if (httpContext.Request.Headers.TryGetValue("X-Request-Id", out var requestId))
+                {
+                    return requestId.ToString();
+                }
+            }
+        }
+        catch
+        {
+            // Silently fail - correlation ID is nice to have but not critical
+        }
+        
+        return null;
+    }
+}
