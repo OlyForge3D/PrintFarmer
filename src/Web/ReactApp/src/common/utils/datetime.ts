@@ -56,3 +56,22 @@ export const formatDuration = (start: Date | string, end?: Date | string): strin
   if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
   return `${seconds}s`;
 };
+
+/**
+ * Format print time in minutes to human-readable format (Xd Yh Zm)
+ * Only shows non-zero units (no decimal places)
+ * @param minutes - Print time in minutes
+ * @returns Formatted string (e.g., "2h 30m", "1d 5h 30m", "45m")
+ */
+export const formatPrintTimeMinutes = (minutes: number): string => {
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = Math.floor(minutes % 60);
+  
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0 || parts.length === 0) parts.push(`${mins}m`);
+  
+  return parts.join(' ');
+};

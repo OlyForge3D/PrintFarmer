@@ -5,6 +5,7 @@ import type { HarvestFileDiscoveredEvent, HarvestFileProgress, HarvestFileUpdate
 import { toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';
+import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 
 interface FileWithProgress extends DiscoveredGcodeFileDto {
   progress?: {
@@ -417,7 +418,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                   </td>
                   <td className="p-2 border-b border-pf-border text-right text-pf-muted">
                     {file.extractedPrintTime && (
-                      <span className="text-xs" title={`Est. print time: ${file.extractedPrintTime} min`}>{file.extractedPrintTime} min</span>
+                      <span className="text-xs" title={`Est. print time: ${formatPrintTimeMinutes(file.extractedPrintTime)}`}>{formatPrintTimeMinutes(file.extractedPrintTime)}</span>
                     )}
                   </td>
                   <td className="p-2 border-b border-pf-border text-right text-pf-muted">

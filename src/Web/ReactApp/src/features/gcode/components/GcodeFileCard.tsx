@@ -155,7 +155,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <div className="flex justify-between gap-1 text-[11px]">
                   <span>Print time:</span>
                   <span className="font-medium">
-                    {Math.floor(file.extractedPrintTime / 3600)}h {Math.floor((file.extractedPrintTime % 3600) / 60)}m
+                    {formatPrintTimeMinutes(file.extractedPrintTime)}
                   </span>
                 </div>
               )}
