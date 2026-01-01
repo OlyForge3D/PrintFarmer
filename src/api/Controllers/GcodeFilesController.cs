@@ -973,7 +973,19 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("harvestOperationId")] Guid? HarvestOperationId = null,
     [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null,
     [property: JsonPropertyName("gcodeFileId")] string? GcodeFileId = null,  // Include file ID for efficient lookups (GUID as string)
-    [property: JsonPropertyName("directoryId")] string? DirectoryId = null   // Include directory ID for efficient directory lookups (virtual path)
+    [property: JsonPropertyName("directoryId")] string? DirectoryId = null,   // Include directory ID for efficient directory lookups (virtual path)
+    [property: JsonPropertyName("targetModelName")] string? TargetModelName = null,  // Printer model this gcode was sliced for
+    [property: JsonPropertyName("requiredMaterial")] string? RequiredMaterial = null,  // Required filament type (e.g., "PLA", "PETG")
+    // Extracted metadata from G-code
+    [property: JsonPropertyName("extractedSlicerName")] string? ExtractedSlicerName = null,
+    [property: JsonPropertyName("extractedSlicerVersion")] string? ExtractedSlicerVersion = null,
+    [property: JsonPropertyName("extractedPrintTime")] double? ExtractedPrintTime = null,  // Minutes
+    [property: JsonPropertyName("extractedFilamentLength")] double? ExtractedFilamentLength = null,  // Millimeters
+    [property: JsonPropertyName("extractedNozzleDiameter")] double? ExtractedNozzleDiameter = null,  // Millimeters
+    [property: JsonPropertyName("extractedMaterial")] string? ExtractedMaterial = null,
+    [property: JsonPropertyName("extractedPrinterModel")] string? ExtractedPrinterModel = null,
+    [property: JsonPropertyName("extractedHotendTemp")] double? ExtractedHotendTemp = null,  // Celsius
+    [property: JsonPropertyName("extractedBedTemp")] double? ExtractedBedTemp = null  // Celsius
 );
 
 /// <summary>

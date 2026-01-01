@@ -47,12 +47,12 @@ export interface DiscoveredGcodeFileDto {
 }
 
 export enum HarvestFileStatus {
-  Pending = 0,
-  InProgress = 1,
-  Complete = 2,
-  Failed = 3,
-  Cancelled = 4,
-  Skipped = 5,
+  Pending = 'Pending',
+  InProgress = 'InProgress',
+  Complete = 'Complete',
+  Failed = 'Failed',
+  Cancelled = 'Cancelled',
+  Skipped = 'Skipped',
 }
 // PrintJobStatusDto for Moonraker print job status
 export interface PrintJobStatusDto {
@@ -757,6 +757,16 @@ export interface GcodeFile {
   isDirectory: boolean;
   harvestOperationId?: string;
   thumbnailUrl?: string;
+  // Extracted metadata from G-code
+  extractedSlicerName?: string;
+  extractedSlicerVersion?: string;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+  extractedNozzleDiameter?: number;
+  extractedMaterial?: string;
+  extractedPrinterModel?: string;
+  extractedHotendTemp?: number;
+  extractedBedTemp?: number;
 }
 
 export interface GetGcodeFilesRequest {

@@ -88,15 +88,50 @@ public class GcodeHarvestService(
             return false;
         }
 
-        // Clear error and mark as pending
+        // Load the operation to verify it exists
+        GcodeHarvestOperation? operation = await _unitOfWork.HarvestOperations.GetOperationByIdAsync(operationId, ct);
+        if (operation == null)
+        {
+            return false;
+        }
+
+        // Clear error and mark as pending, then immediately start import
         file.Status = HarvestFileStatus.Pending;
         file.Error = null;
+        file.CompletedAt = null; // Clear completion timestamp for retry
         await _unitOfWork.SaveChangesAsync(ct);
 
         // Send file update to SignalR clients
         await _harvestEventBroadcaster.BroadcastToGroupAsync(operationId, "harvestfileupdated", MapToDto(file), ct);
 
-        return true;
+        // Trigger the import for this single file by calling ImportSelectedFilesAsync
+        // This ensures the retry uses the exact same import logic as the original import
+        _logger.LogInformationWithSource($"Retrying import for file {file.FileName} (ID: {fileId})");
+        
+        try
+        {
+            ImportSelectedGcodeFilesDto retryRequest = new()
+            {
+                HarvestOperationId = operationId,
+                FileIds = new[] { fileId }
+            };
+            
+            GcodeHarvestResultDto result = await ImportSelectedFilesAsync(retryRequest, ct);
+            
+            // Check if the retry was successful
+            bool success = result.Success && result.ImportedFiles > 0;
+            if (!success)
+            {
+                _logger.LogWarning($"Retry failed for file {file.FileName}: {result.Message}");
+            }
+            
+            return success;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Exception during retry for file {file.FileName}: {ex.Message}");
+            return false;
+        }
     }
 
     public async Task<GcodeHarvestResultDto> StartHarvestAsync(StartGcodeHarvestDto request, CancellationToken ct = default)
@@ -954,6 +989,11 @@ public class GcodeHarvestService(
                             }
 
                             _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Updated discovered file metadata: nozzle={discoveredFile.ExtractedNozzleDiameter}, material={discoveredFile.ExtractedMaterial}, slicer={discoveredFile.ExtractedSlicerName}");
+
+                            // Save metadata updates to database and broadcast to UI immediately
+                            await scopedHarvestRepo.SaveChangesAsync(ct);
+                            await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToDto(discoveredFile), ct);
+                            _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Sent harvestfileupdated event with extracted metadata for {discoveredFile.FileName}");
                         }
 
                         // Download thumbnail from printer API if available (preferred over extraction)
@@ -1152,6 +1192,9 @@ public class GcodeHarvestService(
                         failedFileIds.Add(fileId.ToString());
                         errorDetails[fileId.ToString()] = $"Failed to import {dbFile.FileName}: {errorMessage}";
 
+                        // Increment the operation's FilesErrored counter
+                        operation.FilesErrored++;
+
                         _logger.LogWarning($"[IMPORT-LIFECYCLE] Marked file as Failed and sent event: {dbFile.FileName}");
                     }
                     else
@@ -1166,9 +1209,21 @@ public class GcodeHarvestService(
 
         try
         {
-            _logger.LogInformationWithSource($"Saving harvest operation with {importedFileIds.Count} files added to database");
+            _logger.LogInformationWithSource($"Saving harvest operation: {importedFileIds.Count} added, {skippedFileIds.Count} skipped, {failedFileIds.Count} errored");
             await _unitOfWork.SaveChangesAsync(ct);
             _logger.LogInformationWithSource($"Harvest operation saved successfully");
+
+            // Broadcast final operation progress update with error count
+            await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestoperationprogress", new
+            {
+                operationId = operation.Id,
+                filesFound = operation.FilesFound,
+                filesProcessed = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored,
+                filesAdded = operation.FilesAdded,
+                filesSkipped = operation.FilesSkipped,
+                filesErrored = operation.FilesErrored
+            }, ct);
+            _logger.LogInformationWithSource($"Sent final operation progress: Added={operation.FilesAdded}, Skipped={operation.FilesSkipped}, Errored={operation.FilesErrored}");
         }
         catch (Exception ex)
         {

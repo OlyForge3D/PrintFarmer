@@ -151,6 +151,8 @@ export const Models3DViewerPage: React.FC = () => {
             <p className="text-pf-text font-medium mb-2">Drag and drop your STL file here</p>
             <p className="text-sm text-pf-text-muted mb-4">or click to browse</p>
 
+            {/* Hidden file input triggered by container click */}
+            {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
             <input
               type="file"
               accept=".stl,.3mf,.obj,.ply"
@@ -233,7 +235,9 @@ export const Models3DViewerPage: React.FC = () => {
                       className="flex items-center justify-center gap-2"
                       onClick={() => {
                         // Handle delete
-                        console.log('Delete model:', model.id);
+                        if (window.PrintFarmerDebug?.models) {
+                          console.log('Delete model:', model.id);
+                        }
                       }}
                       title="Delete model"
                     >
@@ -260,7 +264,9 @@ export const Models3DViewerPage: React.FC = () => {
           }}
           onUseModel={() => {
             // Model is selected for use
-            console.log('Using model:', selectedModel.id);
+            if (window.PrintFarmerDebug?.models) {
+              console.log('Using model:', selectedModel.id);
+            }
             setIsPreviewOpen(false);
           }}
         />

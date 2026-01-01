@@ -277,9 +277,6 @@ public class GcodeFile
     public double? EstimatedPrintTimeMinutes { get; set; }
     public double? EstimatedFilamentLengthMm { get; set; }
     public double? EstimatedFilamentWeightG { get; set; }
-    public double? RequiredBuildVolumeX { get; set; }
-    public double? RequiredBuildVolumeY { get; set; }
-    public double? RequiredBuildVolumeZ { get; set; }
     public Guid? TargetPrinterId { get; set; }
     public Printer? TargetPrinter { get; set; }
     public Guid? TargetModelId { get; set; }
@@ -289,8 +286,8 @@ public class GcodeFile
     public string? SlicerSettings { get; set; } // JSON dump of key settings
     public double? LayerHeight { get; set; }
     public double? InfillPercentage { get; set; }
-    public double[]? PrintTemperatures { get; set; } // JSON field
-    public double? BedTemperature { get; set; }
+    public double? PrintTemperature { get; set; } // First layer print/hotend temperature
+    public double? BedTemperature { get; set; } // First layer bed temperature
     public double? PrintSpeed { get; set; }
     public string[]? TargetPrinterModels { get; set; } // JSON field
     public DateTime CreatedAt { get; set; }

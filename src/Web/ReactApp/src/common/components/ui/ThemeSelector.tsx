@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTheme, Theme } from '@/contexts/ThemeContext';
+import { Radio } from './Radio';
 
 export function ThemeSelector() {
   const { theme, setTheme } = useTheme();
@@ -33,12 +34,11 @@ export function ThemeSelector() {
             key={t.value}
             className="flex items-start gap-3 p-3 border border-pf-border rounded-lg cursor-pointer hover:bg-pf-bg-2 transition-colors"
           >
-            <input
-              type="radio"
+            <Radio
               name="theme"
               value={t.value}
               checked={theme === t.value}
-              onChange={(e) => setTheme(e.target.value as Theme)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTheme(e.target.value as Theme)}
               className="mt-1"
             />
             <div className="flex-1">

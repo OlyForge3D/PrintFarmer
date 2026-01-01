@@ -27,6 +27,20 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
   const [isImporting, setIsImporting] = useState(false);
   const filesRef = useRef<FileWithProgress[]>([]);
 
+  // Helper to get status display string
+  const getStatusString = (status: HarvestFileStatus | undefined): string => {
+    if (status === undefined || status === null) return 'Unknown';
+    switch (status) {
+      case HarvestFileStatus.Pending: return 'Pending';
+      case HarvestFileStatus.InProgress: return 'In Progress';
+      case HarvestFileStatus.Complete: return 'Complete';
+      case HarvestFileStatus.Failed: return 'Failed';
+      case HarvestFileStatus.Cancelled: return 'Cancelled';
+      case HarvestFileStatus.Skipped: return 'Skipped';
+      default: return `Unknown (${status})`;
+    }
+  };
+
   // Import selected files logic
   const handleImportSelected = async () => {
     if (selected.size === 0) return;
@@ -43,17 +57,32 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
       const skippedCount = (result.skippedFileIds?.length ?? 0);
       const failedCount = (result.failedFileIds?.length ?? 0);
       
-      // Update file statuses from the result
+      // Update file statuses from the result - preserve all existing file data including extracted metadata
       setFiles(prev => prev.map(f => {
         const imported = Array.isArray(result.importedFileIds) && result.importedFileIds.includes(f.id);
         const skipped = Array.isArray(result.skippedFileIds) && result.skippedFileIds.includes(f.id);
         const failed = Array.isArray(result.failedFileIds) && result.failedFileIds.includes(f.id);
         if (imported) {
-          // Keep existing progress data and status
-          return { ...f, status: HarvestFileStatus.Complete, error: '', progress: undefined };
+          // Keep ALL existing file data including extracted metadata (slicer, material, nozzle, etc.)
+          return { 
+            ...f, 
+            status: HarvestFileStatus.Complete, 
+            error: '', 
+            progress: undefined 
+          };
         }
-        if (skipped) return { ...f, status: HarvestFileStatus.Skipped, error: '', progress: undefined };
-        if (failed) return { ...f, status: HarvestFileStatus.Failed, error: result.errorDetails?.[f.id] || f.error, progress: undefined };
+        if (skipped) return { 
+          ...f, 
+          status: HarvestFileStatus.Skipped, 
+          error: '', 
+          progress: undefined 
+        };
+        if (failed) return { 
+          ...f, 
+          status: HarvestFileStatus.Failed, 
+          error: result.errorDetails?.[f.id] || f.error, 
+          progress: undefined 
+        };
         return f;
       }));
       
@@ -210,19 +239,19 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         status = evt.status;
       }
       
-      // Update file with new status and error information
+      // Update file with ALL fields from the event (use ?? to preserve existing only if event field is null/undefined)
       next[idx] = {
         ...next[idx],
         status: status ?? next[idx].status,
         error: evt.error,
         completedAt: evt.completedAt,
-        thumbnailUrl: evt.thumbnailUrl || next[idx].thumbnailUrl,
-        extractedSlicerName: evt.extractedSlicerName || next[idx].extractedSlicerName,
-        extractedSlicerVersion: evt.extractedSlicerVersion || next[idx].extractedSlicerVersion,
-        extractedMaterial: evt.extractedMaterial || next[idx].extractedMaterial,
-        extractedNozzleDiameter: evt.extractedNozzleDiameter || next[idx].extractedNozzleDiameter,
-        extractedPrintTime: evt.extractedPrintTime || next[idx].extractedPrintTime,
-        extractedFilamentLength: evt.extractedFilamentLength || next[idx].extractedFilamentLength
+        thumbnailUrl: evt.thumbnailUrl ?? next[idx].thumbnailUrl,
+        extractedSlicerName: evt.extractedSlicerName ?? next[idx].extractedSlicerName,
+        extractedSlicerVersion: evt.extractedSlicerVersion ?? next[idx].extractedSlicerVersion,
+        extractedMaterial: evt.extractedMaterial ?? next[idx].extractedMaterial,
+        extractedNozzleDiameter: evt.extractedNozzleDiameter ?? next[idx].extractedNozzleDiameter,
+        extractedPrintTime: evt.extractedPrintTime ?? next[idx].extractedPrintTime,
+        extractedFilamentLength: evt.extractedFilamentLength ?? next[idx].extractedFilamentLength
       };
       
       return next;
@@ -395,16 +424,19 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                           status === HarvestFileStatus.InProgress ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-accent-bg text-pf-accent' :
                           status === HarvestFileStatus.Failed ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-error-bg text-pf-error' :
                           status === HarvestFileStatus.Skipped ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted' :
-                          'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted'
+                          status === HarvestFileStatus.Cancelled ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted' :
+                          'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-bg-2 text-pf-muted'
                         }
-                        title={HarvestFileStatus[status]}
-                        aria-label={HarvestFileStatus[status]}
+                        title={getStatusString(status)}
+                        aria-label={getStatusString(status)}
                       >
                         {status === HarvestFileStatus.Complete && <span title="Complete" aria-label="Complete">✔️</span>}
                         {status === HarvestFileStatus.InProgress && <span title="In Progress" aria-label="In Progress">⏳</span>}
                         {status === HarvestFileStatus.Failed && <span title="Failed" aria-label="Failed">❌</span>}
                         {status === HarvestFileStatus.Skipped && <span title="Skipped" aria-label="Skipped">⏭️</span>}
-                        {HarvestFileStatus[status] ?? ''}
+                        {status === HarvestFileStatus.Cancelled && <span title="Cancelled" aria-label="Cancelled">🚫</span>}
+                        {status === HarvestFileStatus.Pending && <span title="Pending" aria-label="Pending">⏸️</span>}
+                        {getStatusString(status)}
                       </span>
                     )}
                   </td>

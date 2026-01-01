@@ -2,7 +2,6 @@ import React from 'react';
 import { usePrintersWithCameraUrls, queryKeys } from '@/common/hooks/useApi';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import { printerHubService } from '@/services/printerHubService';
 import { getPrinterBackendName } from '@/common/utils/enumHelpers';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { PrinterDiscoveryModal } from '@/features/printers/components/PrinterDiscoveryModal';
@@ -19,22 +18,7 @@ import type { Printer, UpdatePrinterDto } from '@/types/api';
 export function PrintersAdminPage() {
   const queryClient = useQueryClient();
   const { data: printers, isLoading, error, refetch } = usePrintersWithCameraUrls(true);
-  type PreviewItem = {
-    __index: number;
-    raw: Record<string, unknown>;
-    name: string;
-    serverUrl: string;
-    backend: number;
-    apiKey?: string | undefined;
-    notes?: string | undefined;
-    manufacturerId?: string | undefined;
-    modelId?: string | undefined;
-    manufacturerName?: string | undefined;
-    modelName?: string | undefined;
-    valid: boolean;
-  };
 
-  const [importing, setImporting] = React.useState<boolean>(false);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [showExportOptions, setShowExportOptions] = React.useState(false);
   const [exportProgress, setExportProgress] = React.useState<number | null>(null);
@@ -207,7 +191,6 @@ export function PrintersAdminPage() {
       const formData = new FormData();
       formData.append('file', f);
 
-      setImporting(true);
       const response = await fetch(`${getApiBaseUrl()}/printers/import`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -223,8 +206,6 @@ export function PrintersAdminPage() {
       if (window.PrintFarmerDebug?.import) {
         console.log('[Import] Backend response:', result);
       }
-
-      setImporting(false);
       
       // Refresh printers list to show newly imported printers
       await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
@@ -232,7 +213,6 @@ export function PrintersAdminPage() {
       // ImportProgressModal shows real-time results, no need for additional summary toast
     } catch (err) {
       console.error('[Import] Import failed', err);
-      setImporting(false);
       setShowImportProgress(false);
       toast.error(err instanceof Error ? err.message : 'Failed to import file');
     }
@@ -484,6 +464,7 @@ export function PrintersAdminPage() {
               ) : 'Refresh Capabilities'}
             </Button>
             {/* Hidden file input for import - using standard HTML hidden input pattern */}
+            {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
             <input
               ref={fileInputRef}
               type="file"

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { STLViewer } from '@/components/3D/STLViewer';
 import { STLPreviewModal } from '@/components/3D/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
+import { Button } from '@/common/components/ui';
 
 /**
  * STL Viewer Demo Page
@@ -67,6 +68,7 @@ export const STLViewerDemo: React.FC = () => {
             <p className="text-gray-400 mb-2">Drag and drop your STL file here or click to browse</p>
             <p className="text-sm text-gray-500">Maximum file size: 50 MB</p>
           </div>
+          {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
           <input
             ref={fileInputRef}
             type="file"
@@ -154,18 +156,17 @@ export const STLViewerDemo: React.FC = () => {
 
             {/* Action Buttons */}
             <div className="flex gap-4 justify-center">
-              <button
+              <Button
                 onClick={() => setShowModal(true)}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
               >
                 Open in Modal
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={clearFile}
-                className="px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors"
+                variant="secondary"
               >
                 Upload Different File
-              </button>
+              </Button>
             </div>
           </div>
         )}

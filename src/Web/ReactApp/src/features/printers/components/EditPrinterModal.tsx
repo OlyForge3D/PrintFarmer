@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LoadingIcon, RefreshIcon, CloseIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/common/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
@@ -83,7 +83,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen]);
+  }, [isOpen, handleClose]);
   
   // Update capability fields when default capabilities are fetched for a new model
   useEffect(() => {
@@ -150,11 +150,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     }
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     onClose();
     setValidationErrors({});
     setError('');
-  };
+  }, [onClose]);
 
   const handleRefreshCameraUrls = async () => {
     if (!printerId) return;

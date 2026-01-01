@@ -22,5 +22,7 @@ public class GcodeMetadataExtracted
     public double? NozzleDiameter { get; set; }
     public string? Material { get; set; }
     public double? LayerHeight { get; set; }
+    public double? PrintTemperature { get; set; } // First layer print/hotend temperature
+    public double? BedTemperature { get; set; } // First layer bed temperature
     public byte[]? ThumbnailData { get; set; } // PNG image data extracted from gcode
 }

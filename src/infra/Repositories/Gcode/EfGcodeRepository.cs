@@ -183,15 +183,18 @@ namespace Farm.Infrastructure.Repositories.Gcode
 
             // Get files by finding the folder with matching path
             // For root directory ("/"), also include files with NULL folder (orphaned files)
+            // Include TargetModel for displaying printer model information in file browser
             if (directory == "/")
             {
                 return await _db.GcodeFiles
+                    .Include(g => g.TargetModel)
                     .Where(g => (g.Folder != null && g.Folder.Path == directory) || g.Folder == null)
                     .ToListAsync(ct);
             }
             else
             {
                 return await _db.GcodeFiles
+                    .Include(g => g.TargetModel)
                     .Where(g => g.Folder != null && g.Folder.Path == directory)
                     .ToListAsync(ct);
             }

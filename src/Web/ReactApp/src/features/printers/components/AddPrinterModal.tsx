@@ -1,5 +1,5 @@
 // ...existing code...
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styles from './AddPrinterModal.module.css';
 import { LoadingIcon, CloseIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
@@ -185,9 +185,9 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen]);
+  }, [isOpen, handleClose]);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setFormData({
       name: '',
       serverUrl: '',
@@ -203,7 +203,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     setValidationErrors({});
     setError('');
     onClose();
-  };
+  }, [onClose]);
 
   if (!isOpen) return null;
 

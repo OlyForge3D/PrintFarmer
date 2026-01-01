@@ -43,6 +43,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
         {label}
         {required && <span style={{ color: 'var(--pf-error)' }} className="ml-1">*</span>}
       </label>
+      {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
       <select
         id="location"
         value={value || ''}

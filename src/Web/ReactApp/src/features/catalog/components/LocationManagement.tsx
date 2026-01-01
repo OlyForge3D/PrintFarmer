@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Location, CreateLocationRequest, UpdateLocationRequest, locationService } from '@/services/locationService';
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
+import { Button, Textarea } from '@/common/components/ui';
 
 /**
  * LocationManagement Component - Manage printer locations
@@ -105,12 +106,11 @@ export const LocationManagement: React.FC = () => {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Printer Locations</h1>
         {!showForm && (
-          <button
+          <Button
             onClick={() => setShowForm(true)}
-            className="bg-pf-accent-bg text-white font-bold py-2 px-4 rounded transition-opacity hover:opacity-90"
           >
             Add Location
-          </button>
+          </Button>
         )}
       </div>
 
@@ -149,32 +149,30 @@ export const LocationManagement: React.FC = () => {
               <label htmlFor="description" className="block text-sm font-medium text-pf-text-primary">
                 Description
               </label>
-              <textarea
+              <Textarea
                 id="description"
                 value={formData.description || ''}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="e.g., Main warehouse rack, first column"
                 rows={3}
-                className="mt-1 block w-full rounded-md shadow-sm py-2 px-3 focus:outline-none bg-pf-bg-0 text-pf-text-primary border border-pf-border"
               />
             </div>
 
             {/* Form actions */}
             <div className="flex gap-3 pt-4">
-              <button
+              <Button
                 type="submit"
                 disabled={loading}
-                className="bg-pf-accent-bg text-white font-bold py-2 px-4 rounded transition-opacity disabled:opacity-50 hover:opacity-90"
               >
                 {loading ? 'Saving...' : editingId ? 'Update' : 'Create'}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={handleCancel}
-                className="bg-pf-border-medium text-pf-text-primary font-bold py-2 px-4 rounded transition-opacity hover:opacity-80"
+                variant="secondary"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </form>
         </div>
@@ -228,19 +226,21 @@ export const LocationManagement: React.FC = () => {
                       {new Date(location.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
-                      <button
+                      <Button
                         onClick={() => handleEdit(location)}
-                        className="text-pf-accent hover:text-pf-accent-bg"
+                        variant="subtle"
+                        size="sm"
                       >
                         Edit
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => handleDelete(location.id)}
-                        style={{ color: 'var(--pf-error)' }}
-                        className="hover:opacity-80"
+                        variant="subtle"
+                        size="sm"
+                        className="text-pf-error hover:opacity-80"
                       >
                         Delete
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

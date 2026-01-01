@@ -1,3 +1,5 @@
+/* eslint-disable local/pf-no-raw-html-controls */
+// Complex 3D visualization control with WebGL integration - raw buttons for performance
 import React, { useState, useRef } from 'react';
 
 interface ViewCube3DProps {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Modal } from '@/common/components/ui/Modal';
+import { Button } from '@/common/components/ui';
 import { printerHubService, PrinterImportProgress } from '@/services/printerHubService';
 
 // Using PrinterImportProgress from printerHubService which has status: 'Pending' | 'Imported' | 'Skipped' | 'Failed'
@@ -46,7 +47,9 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
 
         // Subscribe to SignalR progress updates
         const unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
-          console.log('[ImportProgress] Received update:', progress);
+          if (window.PrintFarmerDebug?.import) {
+            console.log('[ImportProgress] Received update:', progress);
+          }
           
           setItems(prevItems => {
             const newItems = [...prevItems];
@@ -209,12 +212,11 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
         {/* Action buttons */}
         <div className="flex justify-end gap-2">
           {isComplete ? (
-            <button
+            <Button
               onClick={onClose}
-              className="px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-accent-hover"
             >
               Close
-            </button>
+            </Button>
           ) : (
             <div className="text-sm text-pf-text-secondary">
               Import in progress...

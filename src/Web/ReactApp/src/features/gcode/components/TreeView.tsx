@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronRightIcon, FolderIcon, DocumentIcon } from '@heroicons/react/24/outline';
-import { Button } from '@/common/components/ui';
+import { Button, Checkbox } from '@/common/components/ui';
 
 export interface TreeNode {
   path: string;
@@ -80,11 +80,10 @@ const TreeItem: React.FC<{
         )}
 
         {!node.isDirectory && (
-          <input
-            type="checkbox"
+          <Checkbox
             checked={isSelected}
             onChange={handleCheckboxChange}
-            className="flex-shrink-0 w-4 h-4"
+            className="flex-shrink-0"
             onClick={(e) => e.stopPropagation()}
           />
         )}

@@ -304,10 +304,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
                     v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
-            _ = b.Property(g => g.PrintTemperatures)
-                .HasConversion(
-                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
-                    v => v == null ? null : JsonSerializer.Deserialize<double[]>(v, (JsonSerializerOptions?)null));
             _ = b.Property(g => g.TargetPrinterModels)
                 .HasConversion(
                     v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),

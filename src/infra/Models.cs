@@ -978,9 +978,6 @@ public record GcodeFileDto(
     double? EstimatedPrintTimeMinutes = null,
     double? EstimatedFilamentLengthMm = null,
     double? EstimatedFilamentWeightG = null,
-    double? RequiredBuildVolumeX = null,
-    double? RequiredBuildVolumeY = null,
-    double? RequiredBuildVolumeZ = null,
     Guid? TargetPrinterId = null,
     string? TargetPrinterName = null,
     Guid? TargetModelId = null,
@@ -1003,9 +1000,6 @@ public class CreateGcodeFileDto
     public double? EstimatedPrintTimeMinutes { get; set; }
     public double? EstimatedFilamentLengthMm { get; set; }
     public double? EstimatedFilamentWeightG { get; set; }
-    public double? RequiredBuildVolumeX { get; set; }
-    public double? RequiredBuildVolumeY { get; set; }
-    public double? RequiredBuildVolumeZ { get; set; }
     public Guid? TargetPrinterId { get; set; }
     public Guid? TargetModelId { get; set; }
     public string? SlicerName { get; set; }
@@ -1026,9 +1020,6 @@ public record UpdateGcodeFileDto(
     double? EstimatedPrintTimeMinutes = null,
     double? EstimatedFilamentLengthMm = null,
     double? EstimatedFilamentWeightG = null,
-    double? RequiredBuildVolumeX = null,
-    double? RequiredBuildVolumeY = null,
-    double? RequiredBuildVolumeZ = null,
     Guid? TargetPrinterId = null,
     Guid? TargetModelId = null,
     string? SlicerName = null,

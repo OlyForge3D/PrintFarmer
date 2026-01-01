@@ -4,6 +4,7 @@ import { ChevronRightIcon, FolderIcon, DocumentIcon, TrashIcon, FolderPlusIcon }
 import { Button, Checkbox } from '@/common/components/ui';
 import { toast } from 'sonner';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import type { PrinterModelDto } from '@/types/api';
 
 export interface FileEntry {
   path: string;
@@ -15,6 +16,11 @@ export interface FileEntry {
   modelId?: string;  // File ID (GUID) for 3D models
   gcodeFileId?: string;  // File ID (GUID) for gcode files
   directoryId?: string;  // Directory ID (virtual path) for efficient directory lookups
+  targetModelName?: string;  // Printer model (for gcode files)
+  requiredMaterial?: string;  // Required filament type (for gcode files)
+  extractedNozzleDiameter?: number;  // Extracted nozzle size in mm
+  extractedMaterial?: string;  // Extracted material from G-code
+  extractedPrinterModel?: string;  // Extracted printer model from G-code
 }
 
 interface FolderNode {
@@ -60,6 +66,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   const [folderNameError, setFolderNameError] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('all');
   const inputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -69,6 +76,21 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
       inputRef.current.focus();
     }
   }, [isCreatingFolder]);
+
+  // Fetch printer models for filter (only for gcode endpoint)
+  const { data: printerModels = [] } = useQuery<PrinterModelDto[]>({
+    queryKey: ['printer-models'],
+    queryFn: async () => {
+      if (endpoint !== 'gcode') return [];
+      const response = await fetch(
+        `${getApiBaseUrl()}/catalog/printer-models`,
+        { headers: getAuthHeaders() }
+      );
+      if (!response.ok) throw new Error('Failed to fetch printer models');
+      return response.json();
+    },
+    enabled: endpoint === 'gcode'
+  });
 
   // Fetch folders and files for the entire tree and selected folder
   const { data: hierarchyData } = useQuery({
@@ -116,8 +138,11 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
     gcTime: 5 * 60 * 1000
   });
 
-  // Separate files and folders
-  const files = hierarchyData?.files?.filter((f: FileEntry) => !f.isDirectory) || [];
+  // Separate files and folders, then filter by printer model
+  const allFiles = hierarchyData?.files?.filter((f: FileEntry) => !f.isDirectory) || [];
+  const files = selectedPrinterModel === 'all'
+    ? allFiles
+    : allFiles.filter((f: FileEntry) => f.targetModelName === selectedPrinterModel);
 
   // Build tree structure for left pane
   const buildTree = (): FolderNode => {
@@ -452,6 +477,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   };
 
   return (
+    /* eslint-disable local/pf-no-unguarded-console */
     <div className="flex h-full gap-4 bg-pf-bg rounded-lg border border-pf-border">
       {/* Left Pane: Folder Tree */}
       <div className="w-64 flex-shrink-0 border-r border-pf-border overflow-y-auto">
@@ -469,6 +495,25 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
               {selectedFolder === '/' ? '/' : selectedFolder}
             </h3>
             <div className="flex items-center gap-3">
+              {endpoint === 'gcode' && printerModels.length > 0 && (
+                /* eslint-disable-next-line local/pf-no-raw-html-controls */
+                <select
+                  value={selectedPrinterModel}
+                  onChange={(e) => setSelectedPrinterModel(e.target.value)}
+                  className="px-3 py-1.5 text-sm bg-pf-bg border border-pf-border rounded text-pf-text focus:outline-none focus:ring-1 focus:ring-pf-accent"
+                  title="Filter by printer model"
+                >
+                  <option value="all">All Models ({allFiles.length})</option>
+                  {printerModels.map((model) => {
+                    const count = allFiles.filter((f: FileEntry) => f.targetModelName === model.name).length;
+                    return (
+                      <option key={model.id} value={model.name}>
+                        {model.name} ({count})
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
               <Button
                 onClick={() => setIsCreatingFolder(true)}
                 disabled={isCreatingFolder}
@@ -542,6 +587,9 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                     )}
                   </th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text">Thumbnail / Name</th>
+                  <th className="px-4 py-2 text-left font-semibold text-pf-text w-24">Size</th>
+                  <th className="px-4 py-2 text-left font-semibold text-pf-text w-24">Nozzle</th>
+                  <th className="px-4 py-2 text-left font-semibold text-pf-text w-32">Material</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-40">Modified</th>
                   <th className="px-4 py-2 text-center font-semibold text-pf-text w-12">Action</th>
                 </tr>
@@ -601,7 +649,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       <div className="relative flex-shrink-0">
                         {file.thumbnailPath ? (
                           <div
-                            className={`w-12 h-12 rounded border-2 overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
+                            className={`w-10 h-10 rounded border-2 overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
                               selectedFiles.includes(file.path)
                                 ? 'border-pf-primary shadow-md'
                                 : 'border-pf-border hover:border-pf-primary'
@@ -660,15 +708,26 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                             )}
                           </div>
                         ) : (
-                          <div className="w-12 h-12 rounded border-2 border-pf-border bg-pf-bg-2 flex items-center justify-center">
-                            <DocumentIcon className="w-6 h-6 text-pf-text-secondary" />
+                          <div className="w-10 h-10 rounded border-2 border-pf-border bg-pf-bg-2 flex items-center justify-center">
+                            <DocumentIcon className="w-5 h-5 text-pf-text-secondary" />
                           </div>
                         )}
                       </div>
                       <div>
                         <div className="font-medium text-pf-text-primary">{file.fileName}</div>
-                        <div className="text-xs text-pf-text-tertiary">{formatBytes(file.size)}</div>
+                        {file.targetModelName && (
+                          <div className="text-xs text-pf-text-tertiary">{file.targetModelName}</div>
+                        )}
                       </div>
+                    </td>
+                    <td className="px-4 py-3 text-pf-text-secondary">
+                      {formatBytes(file.size)}
+                    </td>
+                    <td className="px-4 py-3 text-pf-text-secondary">
+                      {file.isDirectory ? '-' : file.extractedNozzleDiameter ? `${file.extractedNozzleDiameter}mm` : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-pf-text-secondary">
+                      {file.isDirectory ? '-' : file.requiredMaterial || '-'}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
                       {formatDate(file.modifiedAt)}

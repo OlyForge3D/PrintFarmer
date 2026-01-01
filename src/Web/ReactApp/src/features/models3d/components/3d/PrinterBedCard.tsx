@@ -7,6 +7,7 @@
 import React, { useState } from 'react';
 import { PrinterBedVisualization, PrinterStatus } from './PrinterBedVisualization';
 import { PrinterModelDto } from '@/types/api';
+import { Button, Checkbox } from '@/common/components/ui';
 
 export interface PrinterBedCardProps {
   printerModel: PrinterModelDto;
@@ -175,22 +176,22 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
           {showControls && (
             <div className="space-y-2">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={autoRotate}
                   onChange={(e) => setAutoRotate(e.target.checked)}
-                  className="w-4 h-4 rounded bg-gray-700 border-gray-600 cursor-pointer"
                 />
                 <span className="text-sm text-gray-300">Auto-rotate</span>
               </label>
 
               {onRefresh && (
-                <button
+                <Button
                   onClick={onRefresh}
-                  className="w-full px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full"
                 >
                   Refresh Status
-                </button>
+                </Button>
               )}
             </div>
           )}

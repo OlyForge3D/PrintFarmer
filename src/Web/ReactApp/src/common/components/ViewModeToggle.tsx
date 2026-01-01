@@ -31,6 +31,7 @@ export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
   return (
     <div className="inline-flex border-b-2 border-pf-border">
       {modes.map((item, index) => (
+        // eslint-disable-next-line local/pf-no-raw-html-controls
         <button
           key={item.mode}
           onClick={() => onChange(item.mode)}

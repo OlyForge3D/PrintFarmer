@@ -203,4 +203,506 @@ G28
         // Should not throw and should still extract what it can
         result.Material.Should().Be("PLA");
     }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ExtractsThumbnailData()
+    {
+        // Simple base64-encoded thumbnail (very small PNG)
+        string base64Thumbnail = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        string gcodeContent = $@"; thumbnail begin 200x200
+;{base64Thumbnail}
+; thumbnail end
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.ThumbnailData.Should().NotBeNull();
+        result.ThumbnailData!.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesMultilineThumbnail()
+    {
+        // Split base64 into multiple lines (common in real gcode)
+        string gcodeContent = @"; thumbnail begin 200x200
+;iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk
+;+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
+; thumbnail end
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.ThumbnailData.Should().NotBeNull();
+        result.ThumbnailData!.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesMissingThumbnail()
+    {
+        string gcodeContent = @"; filament_type = PLA
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.ThumbnailData.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesInvalidThumbnailData()
+    {
+        // Invalid base64 should not crash
+        string gcodeContent = @"; thumbnail begin 200x200
+;!@#$%^&*()
+; thumbnail end
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.ThumbnailData.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesTimeInSecondsFormat()
+    {
+        // Generic TIME: format in seconds
+        string gcodeContent = @"; TIME: 3600
+; filament_type = PLA
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(60.0, 0.01);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesCuraTimeFormat()
+    {
+        // Cura Time: format
+        string gcodeContent = @"; Time: 7200
+; MATERIAL = PLA
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(120.0, 0.01);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesPrusaSlicerTimeFormat()
+    {
+        // PrusaSlicer detailed time format
+        string gcodeContent = @"; estimated printing time (normal mode) = 1h 15m 30s
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(75.5, 0.01);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesZeroPrintTime()
+    {
+        string gcodeContent = @"; estimated printing time (normal mode) = 0h 0m 0s
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.EstimatedPrintTimeMinutes.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ExtractsNozzleDiameterVariations()
+    {
+        string gcodeContent = @"; nozzle_diameter = 0.6
+; filament_type = PETG
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.NozzleDiameter.Should().Be(0.6);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesColonSeparatorInMetadata()
+    {
+        // Some slicers use colon instead of equals
+        string gcodeContent = @"; material: TPU
+; layer_height: 0.28
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.Material.Should().Be("TPU");
+        result.LayerHeight.Should().Be(0.28);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ExtractsFilamentLengthOnly()
+    {
+        string gcodeContent = @"; filament_length = 15000
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.FilamentLengthMm.Should().Be(15000);
+        result.FilamentWeightGrams.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ExtractsFilamentWeightOnly()
+    {
+        string gcodeContent = @"; filament_g = 50.25
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.FilamentWeightGrams.Should().Be(50.25);
+        result.FilamentLengthMm.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesWhitespaceVariations()
+    {
+        // Extra spaces and mixed whitespace
+        string gcodeContent = @";   filament_type   =   PLA   
+;  layer_height  :  0.2  
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.Material.Should().Be("PLA");
+        result.LayerHeight.Should().Be(0.2);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesSuperSlicerContent()
+    {
+        string gcodeContent = @"; generated by SuperSlicer 2.4.0
+; filament_type = PLA
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.SlicerName.Should().Contain("SuperSlicer");
+        result.SlicerVersion.Should().Be("2.4.0");
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ProcessesFirstAndLast500Lines()
+    {
+        // Metadata is now processed from both first 500 and last 500 lines
+        // Create file with > 1000 lines so metadata at line 501 won't be in last 500
+        var lines = new List<string>();
+        lines.AddRange(Enumerable.Range(0, 500).Select(i => $"G1 X{i} Y{i}"));
+        lines.Add("; filament_type = PLA"); // Line 501 - not in first 500, not in last 500
+        lines.AddRange(Enumerable.Range(0, 600).Select(i => $"G1 X{i}"));  // Total > 1100 lines
+
+        string gcodeContent = string.Join("\n", lines);
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.Material.Should().BeNull(); // Metadata at line 501 is not in first or last 500 lines
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesMaterialWithQuotes()
+    {
+        string gcodeContent = @"; filament_type = ""PLA""
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.Material.Should().Be("PLA");
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesDecimalNozzleDiameters()
+    {
+        string gcodeContent = @"; nozzle_diameter = 0.25
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.NozzleDiameter.Should().Be(0.25);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesVeryLongPrintTime()
+    {
+        // 24+ hour print
+        string gcodeContent = @"; estimated printing time (normal mode) = 26h 45m 30s
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(1605.5, 0.01);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_HandlesEmptyThumbnailBlock()
+    {
+        string gcodeContent = @"; thumbnail begin 200x200
+; thumbnail end
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.ThumbnailData.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesRealOrcaSlicerGcodeFile()
+    {
+        // Read the actual Voron_Design_Cube_v7 gcode file from OrcaSlicer
+        // Navigate up from bin/Debug/net9.0 to the test project root
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+        
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "orca",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        // Verify OrcaSlicer metadata - all parseable properties
+        result.Should().NotBeNull();
+        
+        // Slicer information (from header)
+        result.SlicerName.Should().Contain("OrcaSlicer");
+        result.SlicerVersion.Should().Be("2.3.1");
+        
+        // Material - now parsed from CONFIG_BLOCK at end of file
+        result.Material.Should().Be("PLA");
+        
+        // Nozzle diameter - also from CONFIG_BLOCK
+        result.NozzleDiameter.Should().Be(0.4);
+        
+        // Layer height - also from CONFIG_BLOCK
+        result.LayerHeight.Should().Be(0.2);
+        
+        // Print time - also from CONFIG_BLOCK
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(26.08, 0.5);
+        
+        // Filament info - also from CONFIG_BLOCK
+        result.FilamentLengthMm.Should().BeApproximately(3538.91, 1.0);
+        result.FilamentWeightGrams.Should().BeApproximately(10.55, 0.5);
+        
+        // Thumbnail is in the header and should be extracted
+        result.ThumbnailData.Should().NotBeNull();
+        result.ThumbnailData!.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesRealPrusaSlicerGcodeFile()
+    {
+        // Read the actual Shape-Box gcode file from PrusaSlicer
+        // Navigate up from bin/Debug/net9.0 to the test project root
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+        
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "prusa",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        // Verify PrusaSlicer metadata - all parseable properties
+        result.Should().NotBeNull();
+        
+        // Slicer information (from header)
+        result.SlicerName.Should().Contain("PrusaSlicer");
+        result.SlicerVersion.Should().Be("2.9.4");
+        
+        // Material - now parsed from CONFIG_BLOCK at end of file
+        result.Material.Should().Be("ASA");
+        
+        // Nozzle diameter - also from CONFIG_BLOCK
+        result.NozzleDiameter.Should().Be(0.4);
+        
+        // Layer height - also from CONFIG_BLOCK
+        result.LayerHeight.Should().Be(0.2);
+        
+        // Print time - also from CONFIG_BLOCK
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(28.75, 0.5);
+        
+        // Filament info - also from CONFIG_BLOCK
+        result.FilamentLengthMm.Should().BeApproximately(3424.48, 1.0);
+        result.FilamentWeightGrams.Should().BeApproximately(8.81, 0.5);
+        
+        // Thumbnail is in the header and should be extracted (PrusaSlicer uses thumbnail_QOI format)
+        result.ThumbnailData.Should().NotBeNull();
+        result.ThumbnailData!.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesOrcaSlicerAllMetadataProperties()
+    {
+        // This test uses the full-size OrcaSlicer gcode file (same as Voron_Design_Cube)
+        // The metadata is beyond the first 500 lines, so we verify the parser handles this correctly
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+        
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "orca",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        // Verify OrcaSlicer metadata - parser now reads from CONFIG_BLOCK at end of file
+        result.Should().NotBeNull();
+        
+        // Slicer information is in header (within first 500 lines)
+        result.SlicerName.Should().Contain("OrcaSlicer");
+        result.SlicerVersion.Should().Be("2.3.1");
+        
+        // Material - now parsed from CONFIG_BLOCK at end of file
+        result.Material.Should().Be("PLA");
+        
+        // Nozzle diameter - also from CONFIG_BLOCK
+        result.NozzleDiameter.Should().Be(0.4);
+        
+        // Layer height - also from CONFIG_BLOCK
+        result.LayerHeight.Should().Be(0.2);
+        
+        // Print time - also from CONFIG_BLOCK (26m 5s = 26.08 minutes)
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(26.08, 0.5);
+        
+        // Filament length - also from CONFIG_BLOCK
+        result.FilamentLengthMm.Should().BeApproximately(3538.91, 1.0);
+        
+        // Filament weight - also from CONFIG_BLOCK
+        result.FilamentWeightGrams.Should().BeApproximately(10.55, 0.5);
+        
+        // Thumbnail is in the header and should be extracted
+        result.ThumbnailData.Should().NotBeNull();
+        result.ThumbnailData!.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesPrusaSlicerAllMetadataProperties()
+    {
+        // This test uses the full-size PrusaSlicer gcode file (same as Shape-Box)
+        // The metadata is beyond the first 500 lines, so we verify the parser handles this correctly
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+        
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "prusa",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        // Verify PrusaSlicer metadata - parser now reads from CONFIG_BLOCK at end of file
+        result.Should().NotBeNull();
+        
+        // Slicer information is in header (within first 500 lines)
+        result.SlicerName.Should().Contain("PrusaSlicer");
+        result.SlicerVersion.Should().Be("2.9.4");
+        
+        // Material - now parsed from CONFIG_BLOCK at end of file
+        result.Material.Should().Be("ASA");
+        
+        // Nozzle diameter - also from CONFIG_BLOCK
+        result.NozzleDiameter.Should().Be(0.4);
+        
+        // Layer height - also from CONFIG_BLOCK
+        result.LayerHeight.Should().Be(0.2);
+        
+        // Print time - also from CONFIG_BLOCK (28m 45s = 28.75 minutes)
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(28.75, 0.5);
+        
+        // Filament length - also from CONFIG_BLOCK
+        result.FilamentLengthMm.Should().BeApproximately(3424.48, 1.0);
+        
+        // Filament weight - also from CONFIG_BLOCK
+        result.FilamentWeightGrams.Should().BeApproximately(8.81, 0.5);
+        
+        // Thumbnail (PrusaSlicer uses thumbnail_QOI format) is in header and should be extracted
+        result.ThumbnailData.Should().NotBeNull();
+        result.ThumbnailData!.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ExtractsTemperatures()
+    {
+        string gcodeContent = @"; first_layer_bed_temperature = 60
+; first_layer_temperature = 210
+G28
+";
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.BedTemperature.Should().Be(60);
+        result.PrintTemperature.Should().Be(210);
+    }
 }

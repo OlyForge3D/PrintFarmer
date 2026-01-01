@@ -61,7 +61,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       if (evt.operationId === operationId) {
         setOperation(prev => prev ? {
           ...prev,
-          status: evt.status as any,
+          status: evt.status as GcodeHarvestStatus,
           filesAdded: evt.filesAdded,
           filesSkipped: evt.filesSkipped,
           filesErrored: evt.filesErrored,
@@ -135,7 +135,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
           Skipped <span className="font-bold ml-1">{operation.filesSkipped}</span>
         </div>
         <div className="h-7 rounded bg-pf-error-bg border border-pf-error-border text-pf-error-text text-xs font-semibold flex items-center justify-center px-2">
-          Errored <span className="font-bold ml-1">{operation.filesErrored}</span>
+          Failed <span className="font-bold ml-1">{operation.filesErrored}</span>
         </div>
         <div className="h-7 rounded bg-pf-info-bg border border-pf-info-border text-pf-info-text text-xs font-semibold flex items-center justify-center px-2">
           Total <span className="font-bold ml-1">{operation.totalSizeBytes}</span>
@@ -245,28 +245,28 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       {!hideCloseButton && onClose && (
         <div className="mt-4 flex-shrink-0 flex justify-end gap-2">
           {!isCompleted && !isFailed && !isCancelled && (
-            <button
+            <Button
               onClick={onClose}
               disabled={false}
-              className="px-4 py-2 bg-pf-success-bg hover:bg-pf-success-hover border border-pf-success rounded text-white text-sm font-medium transition-colors"
+              className="bg-pf-success-bg hover:bg-pf-success-hover border-pf-success"
             >
               Finished
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             onClick={onClose}
             disabled={false}
-            className="px-4 py-2 bg-pf-bg-3 hover:bg-pf-bg-4 border border-pf-border rounded text-pf-text-primary text-sm font-medium transition-colors"
+            variant="secondary"
           >
             Close
-          </button>
+          </Button>
         </div>
       )}
 
       <div className="mb-2 flex-shrink-0">
         <div className="text-md font-semibold text-pf-primary mb-1">Discovered Files</div>
         <div className="text-xs text-pf-muted mb-2">
-          You can retry or skip errored files, or import selected files to the library. This list is available for review even after completion or cancellation.
+          You can retry or skip failed files, or import selected files to the library. This list is available for review even after completion or cancellation.
         </div>
       </div>
       <div className="rounded border border-pf-border bg-pf-surface overflow-hidden flex-1 min-h-0">

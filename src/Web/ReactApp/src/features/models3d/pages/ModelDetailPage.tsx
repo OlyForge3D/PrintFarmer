@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CloseIcon, ArrowLeftIcon, TagIcon, EditIcon, SaveIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TagEditor } from '@/features/catalog/components/TagEditor';
-import { Button, Input, FormField } from '@/common/components/ui';
+import { Button, Input, FormField, Textarea } from '@/common/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 
 interface ModelDetail {
@@ -328,11 +328,11 @@ export const ModelDetailPage: React.FC = () => {
                             <FormField label="Description">
                                 {isEditingDescription ? (
                                     <div className="flex gap-2 mt-2">
-                                        <textarea
+                                        <Textarea
                                             value={editedDescription}
                                             onChange={(e) => setEditedDescription(e.target.value)}
                                             placeholder="Add a description for this model..."
-                                            className="flex-1 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded text-pf-text-primary placeholder-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent resize-none"
+                                            className="flex-1 resize-none"
                                             rows={4}
                                         />
                                         <div className="flex flex-col gap-2">

@@ -14,6 +14,7 @@ import { GcodeFile, GetGcodeFilesResponse, GcodeUploadSettings } from '@/types/a
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
+import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
@@ -631,111 +632,21 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           // Grid view - card layout
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto">
             {files.files?.map((file: GcodeFile) => (
-              <div
+              <GcodeFileCard
                 key={file.path}
-                className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group"
-              >
-                {/* Thumbnail */}
-                <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
-                  {!file.isDirectory && file.thumbnailUrl ? (
-                    <img
-                      src={file.thumbnailUrl}
-                      alt={file.fileName}
-                      className="w-full h-full object-contain group-hover:scale-105 transition-transform"
-                    />
-                  ) : file.isDirectory ? (
-                    <FolderIcon className="w-12 h-12 text-pf-accent opacity-50" />
-                  ) : (
-                    <DocumentIcon className="w-12 h-12 text-pf-text-tertiary opacity-30" />
-                  )}
-                </div>
-
-                {/* File info */}
-                <div className="p-2.5 flex-1 flex flex-col">
-                  <h3 className="font-semibold text-pf-text-primary line-clamp-2 mb-1.5 text-sm">
-                    {file.fileName}
-                  </h3>
-
-                  {/* Metadata */}
-                  <div className="text-xs text-pf-text-secondary space-y-0.5 mb-2 flex-1">
-                    {!file.isDirectory && file.fileSize && (
-                      <div className="flex justify-between gap-1">
-                        <span>Size:</span>
-                        <span className="font-medium text-right">{formatBytes(file.fileSize)}</span>
-                      </div>
-                    )}
-                    {file.uploadedAt && (
-                      <div className="flex justify-between gap-1">
-                        <span>Modified:</span>
-                        <span className="font-medium text-right">
-                          {new Date(file.uploadedAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex gap-2">
-                    {file.isDirectory ? (
-                      <>
-                        <Button
-                          onClick={() => {
-                            setCurrentPath(file.path);
-                            setPage(1);
-                          }}
-                          variant="primary"
-                          size="sm"
-                          className="flex-1"
-                          title="Open Folder"
-                        >
-                          <FolderIcon className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          onClick={() => {
-                            if (confirm(`Delete ${file.fileName}?`)) {
-                              deleteMutation.mutate([file.path]);
-                            }
-                          }}
-                          disabled={deleteMutation.isPending}
-                          variant="danger"
-                          size="sm"
-                          className="px-2"
-                          title="Delete Folder"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button
-                          onClick={() => downloadMutation.mutate(file.path)}
-                          disabled={downloadMutation.isPending}
-                          variant="secondary"
-                          size="sm"
-                          className="flex-1"
-                          title="Download File"
-                        >
-                          <ArrowDownTrayIcon className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          onClick={() => {
-                            if (confirm(`Delete ${file.fileName}?`)) {
-                              deleteMutation.mutate([file.path]);
-                            }
-                          }}
-                          disabled={deleteMutation.isPending}
-                          variant="danger"
-                          size="sm"
-                          className="px-2"
-                          title="Delete File"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
+                file={file}
+                onNavigate={(path) => {
+                  setCurrentPath(path);
+                  setPage(1);
+                }}
+                onDownload={(path) => downloadMutation.mutate(path)}
+                onDelete={(path) => {
+                  if (confirm(`Delete ${file.fileName}?`)) {
+                    deleteMutation.mutate([path]);
+                  }
+                }}
+                isDeleting={deleteMutation.isPending}
+              />
             ))}
           </div>
         ) : (
@@ -752,10 +663,11 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                       onChange={handleSelectAll}
                     />
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Thumbnail</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Name</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Size</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Modified</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Thumbnail / Name</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-24">Size</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-24">Nozzle</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-32">Material</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-40">Modified</th>
                   <th className="px-4 py-3 text-right text-sm font-medium text-pf-text-primary">Actions</th>
                 </tr>
               </thead>
@@ -777,44 +689,51 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                       />
                     </td>
                     <td className="px-4 py-3">
-                      {!file.isDirectory && file.thumbnailUrl ? (
-                        <img
-                          src={file.thumbnailUrl}
-                          alt={file.fileName}
-                          className="w-12 h-12 rounded object-cover"
-                          onError={(e) => {
-                            e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
-                          }}
-                        />
-                      ) : (
-                        <div className="w-12 h-12 rounded bg-pf-bg-2 flex items-center justify-center">
-                          <DocumentIcon className="w-6 h-6 text-pf-text-tertiary" />
+                      <div className="flex items-center gap-3">
+                        <div className="relative flex-shrink-0">
+                          {!file.isDirectory && file.thumbnailUrl ? (
+                            <img
+                              src={file.thumbnailUrl}
+                              alt={file.fileName}
+                              className="w-10 h-10 rounded object-cover border-2 border-pf-border"
+                              onError={(e) => {
+                                e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
+                              }}
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded border-2 border-pf-border bg-pf-bg-2 flex items-center justify-center">
+                              {file.isDirectory ? (
+                                <FolderIcon className="w-5 h-5 text-pf-accent" />
+                              ) : (
+                                <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div
-                        className="flex items-center space-x-3 cursor-pointer hover:text-pf-accent"
-                        onClick={() => {
-                          if (file.isDirectory) {
-                            setCurrentPath(file.path);
-                            setPage(1);
-                          }
-                        }}
-                      >
-                        {file.isDirectory ? (
-                          <FolderIcon className="w-5 h-5 text-pf-accent" />
-                        ) : (
-                          <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
-                        )}
-                        <div className="flex flex-col">
-                          <span className="text-pf-text-primary font-medium">{file.fileName}</span>
-                          <span className="text-xs text-pf-text-tertiary">{file.path}</span>
+                        <div
+                          className="cursor-pointer hover:text-pf-accent"
+                          onClick={() => {
+                            if (file.isDirectory) {
+                              setCurrentPath(file.path);
+                              setPage(1);
+                            }
+                          }}
+                        >
+                          <div className="font-medium text-pf-text-primary">{file.fileName}</div>
+                          {file.extractedPrinterModel && (
+                            <div className="text-xs text-pf-text-tertiary">{file.extractedPrinterModel}</div>
+                          )}
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-pf-text-secondary">
                       {!file.isDirectory ? formatBytes(file.fileSize) : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
+                      {!file.isDirectory && file.extractedNozzleDiameter ? `${file.extractedNozzleDiameter}mm` : '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
+                      {!file.isDirectory ? (file.extractedMaterial || '-') : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-pf-text-secondary">
                       {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : '-'}

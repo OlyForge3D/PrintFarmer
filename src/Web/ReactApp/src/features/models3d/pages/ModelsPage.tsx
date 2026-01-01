@@ -258,14 +258,12 @@ export const ModelsPage: React.FC = () => {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                 {allTags.length > 0 ? (
                   allTags.map(tag => (
-                    <button
+                    <Button
                       key={tag.id}
                       onClick={() => toggleTag(tag.id)}
-                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors ${
-                        selectedTags.includes(tag.id)
-                          ? 'bg-pf-accent text-white'
-                          : 'bg-pf-bg-2 text-pf-text-primary hover:bg-pf-border'
-                      }`}
+                      variant={selectedTags.includes(tag.id) ? "primary" : "secondary"}
+                      size="sm"
+                      className="flex items-center gap-1.5 text-xs"
                       title={tag.description}
                     >
                       <div
@@ -273,7 +271,7 @@ export const ModelsPage: React.FC = () => {
                         style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
                       />
                       <span className="truncate">{tag.name}</span>
-                    </button>
+                    </Button>
                   ))
                 ) : (
                   <p className="text-xs text-pf-text-tertiary col-span-full text-center py-2">No tags available</p>

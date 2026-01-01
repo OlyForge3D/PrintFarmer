@@ -208,7 +208,20 @@ namespace Farm.Web.Api.Services.Gcode
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
                     HarvestOperationId: harvestOpId,
-                    ThumbnailPath: thumbnailUrl
+                    ThumbnailPath: thumbnailUrl,
+                    GcodeFileId: null,
+                    DirectoryId: null,
+                    TargetModelName: file.TargetModel?.Name,
+                    RequiredMaterial: file.RequiredMaterial,
+                    ExtractedSlicerName: file.SlicerName,
+                    ExtractedSlicerVersion: file.SlicerVersion,
+                    ExtractedPrintTime: file.EstimatedPrintTimeMinutes,
+                    ExtractedFilamentLength: file.EstimatedFilamentLengthMm,
+                    ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
+                    ExtractedMaterial: file.RequiredMaterial,
+                    ExtractedPrinterModel: file.TargetModel?.Name,
+                    ExtractedHotendTemp: file.PrintTemperature,
+                    ExtractedBedTemp: file.BedTemperature
                 ));
             }
 
@@ -317,7 +330,9 @@ namespace Farm.Web.Api.Services.Gcode
                     HarvestOperationId: null,
                     ThumbnailPath: null,
                     GcodeFileId: null,
-                    DirectoryId: childVirtual  // Virtual path is the directory ID
+                    DirectoryId: childVirtual,  // Virtual path is the directory ID
+                    TargetModelName: null,  // Directories don't have printer model
+                    RequiredMaterial: null  // Directories don't have material
                 ));
             }
 
@@ -362,7 +377,18 @@ namespace Farm.Web.Api.Services.Gcode
                     HarvestOperationId: null,
                     ThumbnailPath: thumbnailUrl,
                     GcodeFileId: file.Id.ToString(),  // GUID as string for file ID
-                    DirectoryId: null
+                    DirectoryId: null,
+                    TargetModelName: file.TargetModel?.Name,  // Include printer model name
+                    RequiredMaterial: file.RequiredMaterial,  // Include required filament type
+                    ExtractedSlicerName: file.SlicerName,
+                    ExtractedSlicerVersion: file.SlicerVersion,
+                    ExtractedPrintTime: file.EstimatedPrintTimeMinutes,
+                    ExtractedFilamentLength: file.EstimatedFilamentLengthMm,
+                    ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
+                    ExtractedMaterial: file.RequiredMaterial,
+                    ExtractedPrinterModel: file.TargetModel?.Name,
+                    ExtractedHotendTemp: file.PrintTemperature,
+                    ExtractedBedTemp: file.BedTemperature
                 ));
             }
 

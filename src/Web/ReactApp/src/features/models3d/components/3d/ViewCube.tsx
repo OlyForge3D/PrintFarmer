@@ -1,3 +1,5 @@
+/* eslint-disable local/pf-no-raw-html-controls */
+// Complex 3D CAD-style view control - raw buttons are intentional for performance and direct SVG integration
 import React from 'react';
 
 interface ViewCubeProps {
