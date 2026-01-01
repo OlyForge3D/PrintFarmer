@@ -13,6 +13,7 @@ import {
 } from '@heroicons/react/24/solid';
 import { Button } from '@/common/components/ui';
 import { GcodeFile } from '@/types/api';
+import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 
 interface GcodeFileCardProps {
   file: GcodeFile;
