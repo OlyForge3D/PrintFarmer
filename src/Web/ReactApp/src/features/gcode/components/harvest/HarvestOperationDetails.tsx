@@ -102,6 +102,10 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
   const isFailed = operation.status === GcodeHarvestStatus.Failed;
   const isCompleted = operation.status === GcodeHarvestStatus.Completed;
   const isCancelled = operation.status === GcodeHarvestStatus.Cancelled;
+  const isRunning = operation.status === GcodeHarvestStatus.Running;
+
+  // Don't show cancelled banner if files were discovered (user didn't actually cancel)
+  const shouldShowCancelledBanner = isCancelled && operation.filesFound === 0;
 
   const summaryTable = (
     <div className="mb-3">
@@ -208,7 +212,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       })()}
 
       {/* Cancelled Banner */}
-      {isCancelled && (
+      {shouldShowCancelledBanner && (
         <div className="bg-pf-warning-bg border border-pf-warning-border rounded-lg p-3 mb-3 flex-shrink-0">
           <div className="flex items-start gap-3">
             <svg className="w-5 h-5 text-pf-warning-text flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">

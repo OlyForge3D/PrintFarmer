@@ -173,20 +173,6 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     }
   };
 
-  // Handle ESC key to close modal
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handleClose();
-      }
-    };
-    
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, handleClose]);
-
   const handleClose = useCallback(() => {
     setFormData({
       name: '',
@@ -204,6 +190,20 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
     setError('');
     onClose();
   }, [onClose]);
+
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleClose();
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, handleClose]);
 
   if (!isOpen) return null;
 

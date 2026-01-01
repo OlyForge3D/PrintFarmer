@@ -181,8 +181,16 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         printerPath: evt.filePath,
         fileName: evt.fileName,
         fileSizeBytes: evt.fileSize,
+        modifiedAt: evt.modifiedAt,
         status,
-        error: evt.error
+        error: evt.error,
+        thumbnailUrl: evt.thumbnailUrl,
+        extractedSlicerName: evt.extractedSlicer,
+        extractedSlicerVersion: evt.extractedSlicerVersion,
+        extractedMaterial: evt.extractedMaterial,
+        extractedNozzleDiameter: evt.extractedNozzleDiameter,
+        extractedPrintTime: evt.extractedPrintTime,
+        extractedFilamentLength: evt.extractedFilamentLength
       };
       if (idx >= 0) {
         const next = [...prev];
@@ -293,9 +301,10 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-pf-primary animate-pulse">
-        <svg className="w-5 h-5 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
-        Loading indexed files...
+      <div className="flex flex-col items-center justify-center gap-3 py-8 text-pf-primary">
+        <svg className="w-8 h-8 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
+        <p className="font-medium">Loading files...</p>
+        <p className="text-sm text-pf-text-secondary">Connecting to harvest operation</p>
       </div>
     );
   }
@@ -310,8 +319,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
   if (!files.length) {
     return (
       <div className="flex items-center gap-2 text-pf-muted bg-pf-surface rounded px-3 py-2">
-        <svg className="w-5 h-5 text-pf-muted" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeWidth="2" d="M12 6v6l4 2"/></svg>
-        No indexed files found for this operation.
+        <svg className="w-5 h-5 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
+        Discovering files... Files will appear here as they are found.
       </div>
     );
   }
@@ -334,7 +343,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
               <th className="p-2 border-b border-pf-border text-left">Material</th>
               <th className="p-2 border-b border-pf-border text-center">Nozzle</th>
               <th className="p-2 border-b border-pf-border text-right">Print Time</th>
-              <th className="p-2 border-b border-pf-border text-right">Filament</th>
+              <th className="p-2 border-b border-pf-border text-right">Filament Used</th>
               <th className="p-2 border-b border-pf-border text-center">Status</th>
               <th className="p-2 border-b border-pf-border text-center">Error</th>
               <th className="p-2 border-b border-pf-border text-center">Modified</th>

@@ -163,6 +163,9 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
         throw new Error('Failed to start harvest operation: no queue item ID returned');
       }
 
+      // Show step 3 immediately (don't wait for operation to be created)
+      setStep(3);
+
       // Wait for the backend to create the actual operation (happens asynchronously)
       // Poll for up to 10 seconds for the operation to be created
       const operationId = await apiClient.waitForHarvestOperationCreated(state.selectedPrinterId, 10000);
@@ -172,8 +175,6 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
       
 
       setState(prev => ({ ...prev, operationId }));
-
-      setStep(3);
 
       // Join SignalR group for this discovery operation
       await signalRService.connect();
@@ -304,15 +305,29 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
             onStartDiscovery={handleStartDiscovery}
           />
         )}
-        {step === 3 && state.operationId && (
-          // Show harvest operation details with file selection and import progress
-          <HarvestOperationDetails
-            operationId={state.operationId}
-            onClose={handleCompleted}
-            inline={true}
-            hideCloseButton={true}
-            className="min-h-96"
-          />
+        {step === 3 && (
+          state.operationId ? (
+            // Show harvest operation details with file selection and import progress
+            <HarvestOperationDetails
+              operationId={state.operationId}
+              onClose={handleCompleted}
+              inline={true}
+              hideCloseButton={true}
+              className="min-h-96"
+            />
+          ) : (
+            // Show loading state while operation is being created
+            <div className="flex flex-col items-center justify-center min-h-96 space-y-4">
+              <svg className="w-12 h-12 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+              </svg>
+              <div className="text-center">
+                <p className="text-lg font-semibold text-pf-text-primary">Starting harvest operation...</p>
+                <p className="text-sm text-pf-text-secondary mt-2">Setting up discovery and preparing to scan files</p>
+              </div>
+            </div>
+          )
         )}
       </div>
 

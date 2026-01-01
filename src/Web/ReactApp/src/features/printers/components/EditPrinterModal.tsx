@@ -71,6 +71,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     }
   }, [printerDetails]);
   
+  const handleClose = useCallback(() => {
+    onClose();
+    setValidationErrors({});
+    setError('');
+  }, [onClose]);
+  
   // Handle ESC key to close modal
   useEffect(() => {
     if (!isOpen) return;
@@ -149,12 +155,6 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       setError(message);
     }
   };
-
-  const handleClose = useCallback(() => {
-    onClose();
-    setValidationErrors({});
-    setError('');
-  }, [onClose]);
 
   const handleRefreshCameraUrls = async () => {
     if (!printerId) return;

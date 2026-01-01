@@ -45,11 +45,16 @@ export type HarvestFileDiscoveredEvent = {
   fileName: string;
   filePath: string;
   fileSize: number;
+  modifiedAt?: string;
   status?: string;
   error?: string;
   thumbnailUrl?: string;
   extractedSlicer?: string;
+  extractedSlicerVersion?: string;
   extractedMaterial?: string;
+  extractedNozzleDiameter?: number;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
 };
 type HarvestFileDiscoveredCallback = (evt: HarvestFileDiscoveredEvent) => void;
 
