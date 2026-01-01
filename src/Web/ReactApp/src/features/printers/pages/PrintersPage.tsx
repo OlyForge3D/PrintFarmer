@@ -168,7 +168,7 @@ export function PrintersPage() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
+        <div className="mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
           <div className="h-8 w-48 bg-pf-bg-1 rounded mb-6 animate-pulse" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -188,7 +188,7 @@ export function PrintersPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-pf-bg-2 pt-20 pb-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-pf-text-primary mb-4">Error Loading Printers</h2>
             <p className="text-pf-text-secondary mb-6">{error.message}</p>
@@ -206,7 +206,6 @@ export function PrintersPage() {
       title="Printers"
       subtitle="Monitor and manage your 3D printer farm"
       icon={PrinterIcon}
-      maxWidth="max-w-7xl"
     >
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4">
         <div></div>

@@ -428,8 +428,7 @@ export function PrintersAdminPage() {
       <PageTemplate 
         title="Admin: Printers"
         icon={PrinterIcon}
-        subtitle="Import and export printers" 
-        maxWidth="max-w-4xl">
+        subtitle="Import and export printers">
         <div className="gap-md flex flex-col">
           <div className="flex items-center gap-3">
             {discoveryAvailable && (

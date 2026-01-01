@@ -315,7 +315,6 @@ export const SlicerProfilesPage: React.FC = () => {
       title="Slicer Profiles"
       subtitle="Manage imported slicer profiles (OrcaSlicer / PrusaSlicer)"
       icon={GearIcon}
-      maxWidth="max-w-6xl"
     >
       {/* OrcaSlicer Quick Actions */}
       <div className="mb-6 bg-pf-panel rounded-lg shadow p-4">

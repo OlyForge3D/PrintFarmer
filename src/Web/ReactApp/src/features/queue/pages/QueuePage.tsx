@@ -9,7 +9,6 @@ export const QueuePage: React.FC = () => {
       title="Print Queue"
       subtitle="Manage and monitor your print queue"
       icon={ListIcon}
-      maxWidth="max-w-7xl"
     >
       <QueueOverview />
     </PageTemplate>

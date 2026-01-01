@@ -38,7 +38,6 @@ import { SlicerDryRunPage } from '@/features/slicer/pages/SlicerDryRunPage';
 import { SlicerJobStatusPage } from '@/features/slicer/pages/SlicerJobStatusPage';
 import { SlicerSettingsPage } from '@/features/slicer/pages/SlicerSettingsPage';
 import WorkerManagementPage from '@/features/slicer/pages/WorkerManagementPage';
-import SlicersAdminPage from '@/features/slicer/pages/admin/SlicersAdminPage';
 import JobQueueDashboardPage from '@/features/queue/pages/JobQueueDashboardPage';
 import LoginPage from '@/features/auth/pages/LoginPage';
 import ForgotPasswordPage from '@/features/auth/pages/ForgotPasswordPage';
@@ -167,14 +166,6 @@ function AuthenticatedAppRoutes() {
           element={
             <ProtectedRoute requiredRole="farm_admin">
               <LocationManagementAdminPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/slicers"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicersAdminPage />
             </ProtectedRoute>
           }
         />

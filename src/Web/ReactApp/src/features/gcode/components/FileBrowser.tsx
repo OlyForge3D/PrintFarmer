@@ -105,7 +105,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     const serializable = uploadQueue.map(u => ({
       id: u.id,
       fileName: u.file.name,
-      fileSize: u.file.fileSize,
+      fileSize: u.file.size,
       fileType: u.file.type,
       progress: u.progress,
       status: u.status,
@@ -203,7 +203,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               'Content-Type': 'application/json',
               ...getAuthHeaders()
             },
-            body: JSON.stringify({ fileName: item.file.name, size: item.file.fileSize, path: currentPath })
+            body: JSON.stringify({ fileName: item.file.name, size: item.file.size, path: currentPath })
           });
           if (!initResp.ok) {
             throw new Error((await initResp.text()) || 'Chunk init failed');
@@ -224,7 +224,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               const st = await stResp.json();
               offset = st.uploadedBytes || 0;
               item.uploadedBytes = offset;
-              item.progress = Math.round((offset / item.file.fileSize) * 100);
+              item.progress = Math.round((offset / item.file.size) * 100);
               item.paused = !!st.paused;
               if (st.completed) {
                 item.status = 'done';
@@ -238,7 +238,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             // Ignore status check errors
           }
         }
-        while (offset < item.file.fileSize) {
+        while (offset < item.file.size) {
           if (item.cancelRequested) {
             // cancel on server
             try { fetch(`${apiBase}/gcode-files/chunk/${uploadId}`, { method: 'DELETE', headers: getAuthHeaders() }); } catch {
@@ -247,7 +247,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             throw new Error('Cancelled');
           }
           if (item.paused) { await new Promise(r => setTimeout(r, 250)); continue; }
-          const slice = item.file.slice(offset, Math.min(offset + CHUNK_SIZE, item.file.fileSize));
+          const slice = item.file.slice(offset, Math.min(offset + CHUNK_SIZE, item.file.size));
           const putResp = await fetch(`${apiBase}/gcode-files/chunk/${uploadId}?offset=${offset}`, {
             method: 'PUT',
             headers: { 
@@ -273,7 +273,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           const statusJson = await putResp.json().catch(() => null) as { isComplete?: boolean; finalHash?: string; paused?: boolean; completed?: boolean } | null;
           offset += slice.size;
           item.uploadedBytes = offset;
-          item.progress = Math.round((offset / item.file.fileSize) * 100);
+          item.progress = Math.round((offset / item.file.size) * 100);
           item.paused = !!statusJson?.paused;
           setUploadQueue(q => [...q]);
           if (statusJson?.completed) {
@@ -297,7 +297,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   item.status = 'uploading';
         setUploadQueue(q => [...q]);
         try {
-          if (item.file.fileSize >= CHUNK_THRESHOLD) {
+          if (item.file.size >= CHUNK_THRESHOLD) {
             await chunkUpload(item);
             item.progress = 100;
           } else {
@@ -338,7 +338,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           } else {
             item.status = 'done';
             if (item.finalHash) {
-              toast.success(`${item.file.fileName} uploaded (hash ${item.finalHash.slice(0,8)}…)`);
+              toast.success(`${item.file.name} uploaded (hash ${item.finalHash.slice(0,8)}…)`);
             }
             results.succeeded++;
           }

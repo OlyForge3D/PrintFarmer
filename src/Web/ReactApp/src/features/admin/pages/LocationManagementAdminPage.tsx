@@ -8,7 +8,6 @@ export function LocationManagementAdminPage() {
       title="Location Management"
       subtitle="Create, edit, and organize printer locations"
       icon={LayersIcon}
-      maxWidth="max-w-3xl"
     >
       <LocationManagement />
     </PageTemplate>

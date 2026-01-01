@@ -73,7 +73,6 @@ export const PrinterDashboard: React.FC = () => {
       title="Printer Dashboard"
       subtitle="Overview of your 3D printer farm status"
       icon={DashboardIcon}
-      maxWidth="max-w-7xl"
     >
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <StatsCard title="Total Printers" value={stats.total} color="blue" icon={PrinterIcon} />

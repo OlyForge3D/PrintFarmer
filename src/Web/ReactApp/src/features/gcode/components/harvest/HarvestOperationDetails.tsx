@@ -7,6 +7,7 @@ import { ErrorIcon } from './ErrorIcon';
 import { Button } from '@/common/components/ui/Button';
 import { apiClient } from '@/services/api';
 import { signalRService } from '@/services/harvest-signalr';
+import { HarvestFileProgress } from '@/services/harvest-signalr';
 
 interface HarvestOperationDetailsProps {
   operation?: GcodeHarvestOperation; // Optional - can be provided or fetched
@@ -15,9 +16,10 @@ interface HarvestOperationDetailsProps {
   inline?: boolean; // If true, render as inline panel instead of modal
   className?: string; // Allow custom styling for inline use
   hideCloseButton?: boolean;
+  perFileProgress?: Record<string, HarvestFileProgress>; // Per-file progress data for each file in the operation
 }
 
-export function HarvestOperationDetails({ operation: initialOperation, operationId: propOperationId, onClose, inline = false, className = '', hideCloseButton = false }: HarvestOperationDetailsProps) {
+export function HarvestOperationDetails({ operation: initialOperation, operationId: propOperationId, onClose, inline = false, className = '', hideCloseButton = false, perFileProgress = {} }: HarvestOperationDetailsProps) {
   const [operation, setOperation] = useState<GcodeHarvestOperation | null>(initialOperation || null);
   const [loading, setLoading] = useState(!initialOperation);
 

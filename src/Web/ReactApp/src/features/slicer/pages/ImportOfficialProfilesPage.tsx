@@ -166,7 +166,6 @@ export const ImportOfficialProfilesPage: React.FC = () => {
             title="Import Official Profiles"
             subtitle="Import system OrcaSlicer profiles for your registered printers"
             icon={Download}
-            maxWidth="max-w-4xl"
         >
             <div className="grid md:grid-cols-4 gap-6">
                 {/* Left: Printer Selection */}

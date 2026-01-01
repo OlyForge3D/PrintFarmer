@@ -156,7 +156,6 @@ export const TagAdminPage: React.FC = () => {
                 title="Tag Management"
                 subtitle="Manage all 3D model tags"
                 icon={TagIcon}
-                maxWidth="max-w-6xl"
             >
                 <div className="flex items-center justify-center h-64">
                     <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
@@ -170,7 +169,6 @@ export const TagAdminPage: React.FC = () => {
             title="Tag Management"
             subtitle="Manage all 3D model tags"
             icon={TagIcon}
-            maxWidth="max-w-6xl"
         >
             <div className="space-y-6">
                 {/* Create New Tag Form */}

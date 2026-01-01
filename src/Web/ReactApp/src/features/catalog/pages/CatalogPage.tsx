@@ -171,7 +171,6 @@ export function CatalogPage() {
         title="Catalog"
         subtitle="Manage printer manufacturers, models, and filament types"
         icon={DatabaseIcon}
-        maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center h-64">
           <div className="text-pf-text-secondary">Loading catalog...</div>
@@ -185,7 +184,6 @@ export function CatalogPage() {
       title="Catalog"
       subtitle="Manage printer manufacturers, models, and filament types"
       icon={DatabaseIcon}
-      maxWidth="max-w-7xl"
     >
       {error && (
         <Alert type="error">{error}</Alert>

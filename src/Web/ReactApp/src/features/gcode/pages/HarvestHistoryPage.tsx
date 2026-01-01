@@ -91,7 +91,6 @@ export function HarvestHistoryPage() {
         title="Harvest History"
         subtitle="View and analyze past harvest operations"
         icon={HistoryIcon}
-        maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center py-12">
           <div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
@@ -106,7 +105,6 @@ export function HarvestHistoryPage() {
         title="Harvest History"
         subtitle="View and analyze past harvest operations"
         icon={HistoryIcon}
-        maxWidth="max-w-7xl"
       >
         <Alert type="error" title="Error Loading Harvest History">
           <div className="space-y-3">
@@ -128,7 +126,6 @@ export function HarvestHistoryPage() {
       title="Harvest History"
       subtitle="View and analyze past harvest operations"
       icon={HistoryIcon}
-      maxWidth="max-w-7xl"
       actions={
         <Link
           to="/harvest"

@@ -348,7 +348,6 @@ export function UserManagementPage() {
         title="User Management"
         subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
         icon={Users}
-        maxWidth="max-w-7xl"
       >
         <TableSkeleton rows={6} cols={6} />
       </PageTemplate>
@@ -360,7 +359,6 @@ export function UserManagementPage() {
       title="User Management"
       subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
       icon={Users}
-      maxWidth="max-w-7xl"
       actions={
         <Button
           variant="primary"

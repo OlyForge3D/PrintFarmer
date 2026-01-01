@@ -485,7 +485,6 @@ export const NewSliceJobPage: React.FC = () => {
       title="New Slice Job"
       subtitle="OrcaSlicer-style distributed slicing"
       icon={LayersIcon}
-      maxWidth="max-w-7xl"
     >
       <form onSubmit={onSubmit} className="flex flex-col lg:flex-row gap-6 h-full">
         {/* LEFT SIDEBAR: OrcaSlicer Menu */}

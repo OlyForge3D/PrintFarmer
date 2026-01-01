@@ -100,7 +100,6 @@ export function ObservabilityDashboard() {
       title="System Observability"
       subtitle="Real-time system monitoring and telemetry data"
       icon={ActivityIcon}
-      maxWidth="max-w-7xl"
       actions={
         <Button
           type="button"

@@ -150,7 +150,6 @@ export const ModelsPage: React.FC = () => {
         title="3D Models"
         subtitle="Upload and manage your 3D models for slicing and printing"
         icon={CubeIcon}
-        maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center h-64">
           <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
@@ -164,7 +163,6 @@ export const ModelsPage: React.FC = () => {
       title="3D Models"
       subtitle="Upload and manage your 3D models for slicing and printing"
       icon={CubeIcon}
-      maxWidth="max-w-7xl"
     >
       <div className="space-y-4 h-full flex flex-col">
         {/* Toolbar */}

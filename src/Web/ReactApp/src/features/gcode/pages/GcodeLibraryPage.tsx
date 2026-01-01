@@ -14,7 +14,6 @@ export const GcodeLibraryPage: React.FC = () => {
       title="G-code Library"
       subtitle="Browse and manage your G-code files"
       icon={FileIcon}
-      maxWidth="max-w-7xl"
     >
       <FileBrowser
         harvestId={harvestId}

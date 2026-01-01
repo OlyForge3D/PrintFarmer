@@ -122,7 +122,6 @@ export const Models3DViewerPage: React.FC = () => {
       title="3D Models Viewer"
       subtitle="Browse, preview, and manage your 3D model files"
       icon={CubeIcon}
-      maxWidth="max-w-7xl"
     >
       <div className="space-y-6">
         {/* Upload Section */}

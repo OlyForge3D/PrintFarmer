@@ -64,7 +64,6 @@ export default function JobQueueDashboardPage() {
     <PageTemplate
       title="Slice Job Queue"
       subtitle={showQueue ? 'Viewing full queue (all jobs).' : 'Your slice jobs and progress.'}
-      maxWidth="max-w-6xl"
     >
       {loading && <div className="h-32 flex items-center justify-center text-sm">Loading jobs…</div>}
       {!loading && error && <Alert type="error">{error}</Alert>}

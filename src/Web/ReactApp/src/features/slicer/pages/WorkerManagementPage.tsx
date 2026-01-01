@@ -242,7 +242,6 @@ export default function WorkerManagementPage() {
         title="Worker Management"
         subtitle="Monitor and manage your Slicer workers"
         icon={WrenchIcon}
-        maxWidth="max-w-7xl"
       >
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
@@ -256,7 +255,6 @@ export default function WorkerManagementPage() {
       title="Worker Management"
       subtitle="Monitor and manage your Slicer workers"
       icon={WrenchIcon}
-      maxWidth="max-w-7xl"
       actions={
         <Button
           variant="secondary"

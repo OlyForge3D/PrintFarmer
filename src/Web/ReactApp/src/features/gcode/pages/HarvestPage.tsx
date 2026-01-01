@@ -121,7 +121,6 @@ export const HarvestPage: React.FC = () => {
       title="G-code Harvest"
       subtitle="Start harvesting G-code files from your printers"
       icon={ActivityIcon}
-      maxWidth="max-w-5xl"
     >
       {/* Details panel overlay */}
       {selectedOperation && (

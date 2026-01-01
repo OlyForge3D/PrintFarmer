@@ -94,26 +94,6 @@ export type HarvestDiscoveryCompleteEvent = {
 };
 type HarvestDiscoveryCompleteCallback = (evt: HarvestDiscoveryCompleteEvent) => void;
 
-// Harvest file updated event type (includes status and error information)
-export type HarvestFileUpdatedEvent = {
-  id: string;
-  operationId: string;
-  fileName: string;
-  filePath: string;
-  fileSize: number;
-  status: string;
-  error?: string;
-  completedAt?: string;
-  thumbnailUrl?: string;
-  extractedSlicerName?: string;
-  extractedSlicerVersion?: string;
-  extractedMaterial?: string;
-  extractedNozzleDiameter?: number;
-  extractedPrintTime?: number;
-  extractedFilamentLength?: number;
-};
-type HarvestFileUpdatedCallback = (evt: HarvestFileUpdatedEvent) => void;
-
 export class SignalRService {
   private connection: HubConnection | null = null;
   private reconnectAttempts = 0;

@@ -174,7 +174,6 @@ export function SettingsPage() {
       title="Settings"
       subtitle="Configure PrintFarmer application settings"
       icon={SettingsIcon}
-      maxWidth="max-w-3xl"
     >
       {loading ? (
         <div className="text-center text-pf-text-secondary">Loading settings...</div>
