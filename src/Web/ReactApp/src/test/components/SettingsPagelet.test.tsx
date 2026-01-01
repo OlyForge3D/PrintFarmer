@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi } from 'vitest';
-import { SettingsPagelet } from '@/components/SettingsPagelet';
+import { SettingsPagelet } from '@/common/components/SettingsPagelet';
 
 const mockMetadata = {
   key: 'SystemLogSettings',

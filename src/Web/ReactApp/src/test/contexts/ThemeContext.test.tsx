@@ -3,8 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { ThemeProvider } from '@/contexts/ThemeContext';
-import { useTheme, useComputedTheme, useAccessibilityPreferences } from '@/contexts/ThemeHooks';
+import { ThemeProvider, useTheme, useComputedTheme, useAccessibilityPreferences } from '@/contexts/ThemeContext';
 import { ReactNode } from 'react';
 
 // Mock localStorage

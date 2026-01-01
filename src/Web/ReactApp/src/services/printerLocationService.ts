@@ -8,10 +8,6 @@ export interface Printer {
   locationId?: string;
 }
 
-export interface PrinterListResponse {
-  printers: Printer[];
-}
-
 class PrinterLocationService {
   private api: AxiosInstance;
 
@@ -46,8 +42,8 @@ class PrinterLocationService {
    * Get all printers (used for drag and drop assignment)
    */
   async getAllPrinters(): Promise<Printer[]> {
-    const response = await this.api.get<PrinterListResponse>('/printers');
-    return response.data.printers || [];
+    const response = await this.api.get<Printer[]>('/printers');
+    return Array.isArray(response.data) ? response.data : [];
   }
 
   /**

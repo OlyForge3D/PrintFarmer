@@ -5,7 +5,7 @@ import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { Button, Input, FormField, Alert } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 
-export default function ResetPasswordPage() {
+export function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const [token, setToken] = useState('');
   const [email, setEmail] = useState('');

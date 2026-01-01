@@ -2,7 +2,7 @@
 import { render } from '@testing-library/react';
 import { screen, waitFor, fireEvent } from '@testing-library/dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { HarvestOperationDetails } from '@/components/harvest/HarvestOperationDetails';
+import { HarvestOperationDetails } from '@/features/gcode/components/harvest/HarvestOperationDetails';
 import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import * as api from '@/services/api';
 import React from 'react';

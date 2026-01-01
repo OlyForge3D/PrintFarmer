@@ -2,13 +2,13 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import PrintersAdminPage from '../PrintersAdminPage';
+import PrintersAdminPage from '@/features/printers/pages/admin/PrintersAdminPage';
 import * as api from '@/services/api';
 import * as hooks from '@/common/hooks/useApi';
 
 vi.mock('@/services/api');
 // Mock ProtectedRoute to avoid needing the AuthProvider in tests
-vi.mock('@/components/auth/ProtectedRoute', () => ({
+vi.mock('@/features/auth/components/ProtectedRoute', () => ({
   ProtectedRoute: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
 }));
 

@@ -726,5 +726,3 @@ export function PrintersAdminPage() {
     </ProtectedRoute>
   );
 }
-
-export default PrintersAdminPage;

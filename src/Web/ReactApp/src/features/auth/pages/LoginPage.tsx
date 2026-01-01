@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 
-export default function LoginPage() {
+export function LoginPage() {
   const [showRegister, setShowRegister] = useState(false);
   const navigate = useNavigate();
 

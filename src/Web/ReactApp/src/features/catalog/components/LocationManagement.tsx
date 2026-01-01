@@ -123,7 +123,7 @@ export const LocationManagement: React.FC = () => {
 
       {/* Create/Edit Form */}
       {showForm && (
-        <div className="shadow rounded-lg p-6 bg-pf-bg-1 border border-pf-border">
+        <div className="shadow rounded-lg p-6 bg-pf-bg-1 border border-pf-border max-w-4xl">
           <h2 className="text-xl font-semibold mb-4 text-pf-text-primary">
             {editingId ? 'Edit Location' : 'Create New Location'}
           </h2>
@@ -155,23 +155,24 @@ export const LocationManagement: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="e.g., Main warehouse rack, first column"
                 rows={3}
+                className="w-full"
               />
             </div>
 
             {/* Form actions */}
             <div className="flex gap-3 pt-4">
               <Button
-                type="submit"
-                disabled={loading}
-              >
-                {loading ? 'Saving...' : editingId ? 'Update' : 'Create'}
-              </Button>
-              <Button
                 type="button"
                 onClick={handleCancel}
                 variant="secondary"
               >
                 Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={loading}
+              >
+                {loading ? 'Saving...' : editingId ? 'Update' : 'Create'}
               </Button>
             </div>
           </form>
@@ -250,10 +251,12 @@ export const LocationManagement: React.FC = () => {
         )}
       </div>
 
-      {/* Drag and Drop Printer Assignment */}
-      <div className="border-t pt-8 mt-8">
-        <PrinterLocationDragDrop />
-      </div>
+      {/* Drag and Drop Printer Assignment - Only show if locations exist */}
+      {locations.length > 0 && (
+        <div className="border-t pt-8 mt-8">
+          <PrinterLocationDragDrop key={locations.length} locations={locations} />
+        </div>
+      )}
     </div>
   );
 };

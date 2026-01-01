@@ -617,16 +617,17 @@ export function SpoolsPage() {
         <>
           {/* Filters */}
           <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4">
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
-                <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
-              </div>
-              
+            <div className="flex items-center gap-2 mb-3">
+              <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
+              <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
+            </div>
+            
+            <div className="flex flex-wrap gap-2 items-center">
               <Select
                 aria-label="Filter by material"
                 value={filters.material}
                 onChange={(e) => setFilters(prev => ({ ...prev, material: e.target.value }))}
+                className="w-40"
               >
                 <option value="">All Materials</option>
                 {getMaterialOptions().map(material => (
@@ -638,6 +639,7 @@ export function SpoolsPage() {
                 aria-label="Filter by vendor"
                 value={filters.vendor}
                 onChange={(e) => setFilters(prev => ({ ...prev, vendor: e.target.value }))}
+                className="w-40"
               >
                 <option value="">All Vendors</option>
                 {getVendorOptions().map(vendor => (
@@ -656,6 +658,7 @@ export function SpoolsPage() {
                 aria-label="Select page size"
                 value={filters.pageSize}
                 onChange={(e) => setFilters(prev => ({ ...prev, pageSize: e.target.value }))}
+                className="w-40"
               >
                 <option value="10">10 per page</option>
                 <option value="50">50 per page</option>
@@ -667,6 +670,7 @@ export function SpoolsPage() {
                 aria-label="Filter by location"
                 value={filters.location}
                 onChange={(e) => setFilters(prev => ({ ...prev, location: e.target.value }))}
+                className="w-40"
               >
                 <option value="">All Locations</option>
                 {getLocationOptions().map(loc => (
@@ -678,14 +682,16 @@ export function SpoolsPage() {
                 aria-label="Filter archived"
                 value={filters.showArchived}
                 onChange={(e) => setFilters(prev => ({ ...prev, showArchived: e.target.value }))}
+                className="w-40"
               >
                 <option value="active">Active Only</option>
                 <option value="all">All</option>
                 <option value="archived">Archived Only</option>
               </Select>
 
-              <div className="ml-auto flex items-center gap-2 text-sm text-pf-text-secondary">
-                <span>Showing {getDisplayedSpools().length} of {getFilteredSpools().length} spools</span>
+              <div className="ml-auto flex flex-wrap gap-2 items-center text-sm">
+                <span className="text-pf-text-secondary">Showing {getDisplayedSpools().length} of {getFilteredSpools().length}</span>
+                
                 <label className="flex items-center gap-1 text-xs cursor-pointer">
                   <Checkbox
                     aria-label="Show empty spools"
@@ -694,12 +700,14 @@ export function SpoolsPage() {
                   />
                   Show empty
                 </label>
-                <label className="text-xs" htmlFor="sort-field">Sort:</label>
+
+                <label className="text-xs text-pf-text-secondary" htmlFor="sort-field">Sort:</label>
                 <Select
                   id="sort-field"
                   aria-label="Sort field"
                   value={sortField}
                   onChange={e => setSortField(e.target.value)}
+                  className="w-auto"
                 >
                   <option value="id">ID</option>
                   <option value="vendor">Vendor</option>

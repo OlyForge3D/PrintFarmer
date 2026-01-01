@@ -4,6 +4,7 @@ import { usePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import type { TempTargets, MoveRequest } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
@@ -79,7 +80,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
   const { data: apiPrinter, isLoading, refetch } = usePrinter(printerId || '');
   // Merge with realtime SignalR updates
-  const printer = usePrinterDisplay(apiPrinter || ({} as unknown));
+  const printer = usePrinterDisplay((apiPrinter as any) || ({} as any));
   
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -133,7 +134,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
     return (
-      <div className="fixed right-0 top-16 h-[calc(100vh-4rem)] w-96 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 flex items-center justify-center">
+      <div className="w-96 h-full bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 flex items-center justify-center flex-shrink-0">
         <div className="text-pf-text-secondary">Loading...</div>
       </div>
     );
@@ -329,7 +330,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   };
 
   return (
-    <div className="fixed right-0 top-16 h-[calc(100vh-4rem)] w-96 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col sidebar-enter">
+    <div className="w-96 h-full bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 border-l border-pf-border shadow-lg z-30 overflow-hidden flex flex-col sidebar-enter flex-shrink-0">
       {/* Header */}
       <div className="flex justify-between items-start p-4 border-b border-pf-border flex-shrink-0 gap-3">
         <div className="flex-1 min-w-0">

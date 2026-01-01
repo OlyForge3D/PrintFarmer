@@ -4,7 +4,7 @@ import { render } from '@testing-library/react';
 import { screen, fireEvent } from '@testing-library/dom';
 import { EnhancedPrinterCard } from '@/features/printers/components/EnhancedPrinterCard';
 import { PrinterBackend, type Printer } from '@/types/api';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthProvider } from '@/common/contexts/AuthContext';
 
 const basePrinter: Printer = {
   id: 'octo-2',
@@ -19,7 +19,7 @@ const basePrinter: Printer = {
 
 
 // Mock hasPermission to always return true
-vi.mock('@/contexts/AuthHooks', () => ({
+vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ hasPermission: () => true })
 }));
 

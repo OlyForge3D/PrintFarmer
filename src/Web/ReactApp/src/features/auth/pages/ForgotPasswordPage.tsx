@@ -5,7 +5,7 @@ import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { Button, Input, FormField  } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 
-export default function ForgotPasswordPage() {
+export function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

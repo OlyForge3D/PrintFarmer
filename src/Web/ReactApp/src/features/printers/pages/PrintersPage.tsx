@@ -248,12 +248,7 @@ export function PrintersPage() {
             <div className="text-center py-12">
               <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
-              <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer.</p>
-              <div className="flex justify-center">
-                {hasPermission('printers', 'create') && (
-                  <AddPrinterButton onSuccess={refetchPrinters} />
-                )}
-              </div>
+              <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
             </div>
           ) : viewMode === 'compact' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -268,7 +263,7 @@ export function PrintersPage() {
             </div>
           ) : viewMode === 'collapsed' ? (
             <div className="flex gap-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 flex-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 flex-1 transition-opacity duration-200">
                 {userPrinters.map((printer) => (
                   <CollapsedPrinterCard
                     key={printer.id}
@@ -280,10 +275,12 @@ export function PrintersPage() {
                 ))}
               </div>
               {expandedPrinterId && (
-                <PrinterDetailsSidebar
-                  printerId={expandedPrinterId}
-                  onClose={() => setExpandedPrinterId(null)}
-                />
+                <div className="w-96 flex-shrink-0">
+                  <PrinterDetailsSidebar
+                    printerId={expandedPrinterId}
+                    onClose={() => setExpandedPrinterId(null)}
+                  />
+                </div>
               )}
             </div>
           ) : viewMode === 'expandable' ? (

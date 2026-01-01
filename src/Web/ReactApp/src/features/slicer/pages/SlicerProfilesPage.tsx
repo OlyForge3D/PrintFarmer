@@ -626,5 +626,3 @@ export const SlicerProfilesPage: React.FC = () => {
     </PageTemplate>
   );
 };
-
-export default SlicerProfilesPage;

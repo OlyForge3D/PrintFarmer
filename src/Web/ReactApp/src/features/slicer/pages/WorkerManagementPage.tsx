@@ -12,7 +12,7 @@ import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon } from '@/common/components/icons/MdiIcons';
 
-export default function WorkerManagementPage() {
+export function WorkerManagementPage() {
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

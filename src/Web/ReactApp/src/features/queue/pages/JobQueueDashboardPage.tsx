@@ -5,7 +5,7 @@ import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 
-export default function JobQueueDashboardPage() {
+export function JobQueueDashboardPage() {
   const [jobs, setJobs] = useState<SliceJobStatusResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

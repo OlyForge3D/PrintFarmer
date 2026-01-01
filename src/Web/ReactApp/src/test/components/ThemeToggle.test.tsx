@@ -3,8 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen, fireEvent } from '@testing-library/dom';
 import { ThemeToggle } from '@/common/components/ThemeToggle';
-import { ThemeProvider, type ThemeName } from '@/contexts/ThemeContext';
-import { useThemeToggle } from '@/contexts/ThemeHooks';
+import { ThemeProvider, type ThemeName, useThemeToggle } from '@/contexts/ThemeContext';
 import { ReactNode } from 'react';
 
 // Mock localStorage

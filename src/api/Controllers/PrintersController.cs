@@ -1940,10 +1940,11 @@ public class PrintersController(
     /// <response code="404">Printer or location not found</response>
     /// <response code="500">Failed to assign printer to location</response>
     [HttpPost("{id}/location")]
-    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDto>> AssignPrinterToLocationAsync(
+    public async Task<ActionResult> AssignPrinterToLocationAsync(
         [FromRoute] Guid id,
         [FromBody] AssignPrinterToLocationRequest request,
         CancellationToken ct)
@@ -1965,8 +1966,7 @@ public class PrintersController(
             printer.LocationId = request.LocationId;
             await _printersService.SaveChangesAsync(ct);
 
-            var dto = await _printersService.GetPrinterDtoAsync(id, ct);
-            return Ok(dto);
+            return Ok(new { message = "Printer assigned to location successfully" });
         }
         catch (Exception ex)
         {

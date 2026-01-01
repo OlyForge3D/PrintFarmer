@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { colorFamilyBgClass } from '@/common/utils/colorFamilies';
-import { Button } from '@/common/components/ui';
 
 interface Props {
   value: string;
@@ -71,25 +70,26 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
   };
 
   return (
-    <div className="relative" aria-label={label} id={id ? id + '-wrapper' : undefined}>
-      <Button
-        ref={btnRef as React.RefObject<HTMLButtonElement>}
-        variant="secondary"
-        size="sm"
+    <div className="relative w-auto">
+      <button
+        ref={btnRef}
+        type="button"
         aria-haspopup="listbox"
         data-open={open ? 'true' : 'false'}
         onClick={() => { setOpen(o => !o); if (!open) setActiveIdx( value ? (families.indexOf(value) + 1) : 0 ); }}
         onKeyDown={onKeyDown}
-        className="flex items-center gap-2"
+        className="w-40 border rounded p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none pr-7 flex items-center justify-between gap-2"
       >
-        {value ? (
-          <span className={`w-4 h-4 rounded border border-pf-border ${colorFamilyBgClass[value] || 'bg-pf-text-muted'}`} aria-hidden="true" />
-        ) : (
-          <span className="w-4 h-4 rounded border border-dashed border-pf-border" aria-hidden="true" />
-        )}
-        <span className="truncate max-w-[6rem]">{visibleLabel}</span>
-        <span className="text-xs opacity-60" aria-hidden="true">{open ? '▲' : '▼'}</span>
-      </Button>
+        <span className="flex items-center gap-2 flex-1">
+          {value ? (
+            <span className={`w-4 h-4 rounded border border-pf-border flex-shrink-0 ${colorFamilyBgClass[value] || 'bg-pf-text-muted'}`} aria-hidden="true" />
+          ) : (
+            <span className="w-4 h-4 rounded border border-dashed border-pf-border flex-shrink-0" aria-hidden="true" />
+          )}
+          <span className="truncate">{visibleLabel}</span>
+        </span>
+        <span className="text-xs opacity-60 flex-shrink-0" aria-hidden="true">{open ? '▲' : '▼'}</span>
+      </button>
       {open && (
         <div
           ref={listRef}
@@ -97,7 +97,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
           tabIndex={-1}
           aria-label={label}
           aria-activedescendant={activeIdx >= 0 ? `${id || 'color-family'}-opt-${activeIdx}` : undefined}
-          className="absolute z-50 mt-1 w-52 max-h-72 overflow-auto rounded border border-pf-border bg-pf-bg-1 shadow-lg py-1"
+          className="absolute z-50 mt-1 w-40 max-h-72 overflow-auto rounded border border-pf-border bg-pf-bg-1 shadow-lg py-1"
           onKeyDown={onKeyDown}
         >
           <div

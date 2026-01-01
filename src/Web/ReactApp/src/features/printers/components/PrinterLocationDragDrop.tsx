@@ -2,26 +2,36 @@ import React, { useState, useEffect } from 'react';
 import { Location, locationService } from '@/services/locationService';
 import { Printer, printerLocationService } from '@/services/printerLocationService';
 
-export const PrinterLocationDragDrop: React.FC = () => {
-  const [locations, setLocations] = useState<Location[]>([]);
+interface PrinterLocationDragDropProps {
+  locations?: Location[];
+}
+
+export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = ({ locations: parentLocations }) => {
+  const [locations, setLocations] = useState<Location[]>(parentLocations || []);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draggedPrinter, setDraggedPrinter] = useState<Printer | null>(null);
 
-  // Load data on mount
+  // Load data on mount or when parent locations change
   useEffect(() => {
     loadData();
-  }, []);
+  }, [parentLocations]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const [locationsData, printersData] = await Promise.all([
-        locationService.getAllLocations(),
-        printerLocationService.getAllPrinters(),
-      ]);
+      
+      // Use parent locations if provided, otherwise fetch from API
+      let locationsData: Location[];
+      if (parentLocations && parentLocations.length > 0) {
+        locationsData = parentLocations;
+      } else {
+        locationsData = await locationService.getAllLocations();
+      }
+      
+      const printersData = await printerLocationService.getAllPrinters();
       setLocations(locationsData);
       setPrinters(printersData);
     } catch (err) {

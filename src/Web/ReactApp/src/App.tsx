@@ -30,25 +30,27 @@ import { HarvestHistoryPage } from '@/features/gcode/pages/HarvestHistoryPage';
 import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 import { ModelDetailPage } from '@/features/models3d/pages/ModelDetailPage';
 import { PrintersPage } from '@/features/printers/pages/PrintersPage';
-import PrintersAdminPage from '@/features/printers/pages/admin/PrintersAdminPage';
-import NewSliceJobPage from '@/features/slicer/pages/NewSliceJobPage';
-import SlicerProfilesPage from '@/features/slicer/pages/SlicerProfilesPage';
-import ImportOfficialProfilesPage from '@/features/slicer/pages/ImportOfficialProfilesPage';
+import { PrintersAdminPage } from '@/features/printers/pages/admin/PrintersAdminPage';
+import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
+import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
+import { ImportOfficialProfilesPage } from '@/features/slicer/pages/ImportOfficialProfilesPage';
 import { SlicerDryRunPage } from '@/features/slicer/pages/SlicerDryRunPage';
 import { SlicerJobStatusPage } from '@/features/slicer/pages/SlicerJobStatusPage';
 import { SlicerSettingsPage } from '@/features/slicer/pages/SlicerSettingsPage';
-import WorkerManagementPage from '@/features/slicer/pages/WorkerManagementPage';
-import JobQueueDashboardPage from '@/features/queue/pages/JobQueueDashboardPage';
-import LoginPage from '@/features/auth/pages/LoginPage';
-import ForgotPasswordPage from '@/features/auth/pages/ForgotPasswordPage';
-import ResetPasswordPage from '@/features/auth/pages/ResetPasswordPage';
+import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
+import { JobQueueDashboardPage } from '@/features/queue/pages/JobQueueDashboardPage';
+import { LoginPage } from '@/features/auth/pages/LoginPage';
+import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
+import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
-import RegistrationPendingPage from '@/features/auth/pages/RegistrationPendingPage';
+import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
-import LocationManagementAdminPage from '@/features/admin/pages/LocationManagementAdminPage';
-import LogsPage from '@/features/admin/pages/LogsPage';
+import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
+import { LogsPage } from '@/features/admin/pages/LogsPage';
+import { FilesPage } from '@/features/files/pages/FilesPage';
+import { AdminPage } from '@/features/admin/pages/AdminPage';
 
 // External packages
 import { OrcaImportWizard } from '@farm/slicers-orcaslicer-v2_3_1';
@@ -119,130 +121,15 @@ function AuthenticatedAppRoutes() {
         <Route index element={<PrinterDashboard />} />
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
-        <Route path="models" element={<ModelsPage />} />
-        <Route path="models/:modelId" element={<ModelDetailPage />} />
-        <Route path="harvest/*">
-          <Route index element={<HarvestPage />} />
-          <Route path="history" element={<HarvestHistoryPage />} />
-        </Route>
-        <Route path="files" element={<GcodeLibraryPage />} />
-        <Route path="catalog" element={<CatalogPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="files/*" element={<FilesPage />} />
         <Route path="spools" element={<SpoolsPage />} />
-        <Route
-          path="admin/tags"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <TagAdminPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/users"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <UserManagementPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/observability"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <ObservabilityDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/printers"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <PrintersAdminPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/locations"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <LocationManagementAdminPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/logs"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <LogsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/file-health"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <FileHealthDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/slicer"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicerSettingsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/slicer/dry-run"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicerDryRunPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/slicer/job-status"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicerJobStatusPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin/workers"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <WorkerManagementPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="jobs" element={<JobQueueDashboardPage />} />
+        <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
+        <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
+        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
+        <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
+        <Route path="admin/*" element={<AdminPage />} />
         <Route path="jobs/new" element={<NewSliceJobPage />} />
-        <Route
-          path="slicer-profiles"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <SlicerProfilesPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="profiles/import/orca"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <OrcaImportWizard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="profiles/import/official"
-          element={
-            <ProtectedRoute requiredRole="farm_admin">
-              <ImportOfficialProfilesPage />
-            </ProtectedRoute>
-          }
-        />
       </Route>
     </Routes>
   );
