@@ -57,7 +57,7 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         /// Lazy-initializes the 3D Model File repository, reusing the same DbContext.
         /// Coordinated with folder operations for model file organization.
         /// </summary>
-        public IModel3DFileRepository Model3dFiles => _model3dFileRepository ??= new EfModel3dFileRepository(_db);
+        public IModel3DFileRepository Model3dFiles => _model3dFileRepository ??= new EfModel3DFileRepository(_db);
 
         /// <summary>
         /// Lazy-initializes the Location repository, reusing the same DbContext.

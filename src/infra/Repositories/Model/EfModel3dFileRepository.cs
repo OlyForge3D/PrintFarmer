@@ -9,11 +9,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Model
 {
-    public class EfModel3dFileRepository : IModel3DFileRepository
+    public class EfModel3DFileRepository : IModel3DFileRepository
     {
         private readonly AppDbContext _db;
 
-        public EfModel3dFileRepository(AppDbContext db)
+        public EfModel3DFileRepository(AppDbContext db)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
         }
