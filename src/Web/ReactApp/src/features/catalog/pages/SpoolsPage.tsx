@@ -51,7 +51,6 @@ interface FilterState {
   color: string;
   pageSize: string;
   location: string;
-  showArchived: string; // 'all' | 'active' | 'archived'
   showEmpty: boolean; // include empty (0 remaining) spools
 }
 
@@ -66,7 +65,6 @@ export function SpoolsPage() {
     color: '',
   pageSize: '50',
   location: '',
-	showArchived: 'active',
   showEmpty: false
   });
   const [sortField, setSortField] = useState<string>('id');
@@ -304,8 +302,6 @@ export function SpoolsPage() {
     if (filters.vendor && !(spool.vendor || '').toLowerCase().includes(filters.vendor.toLowerCase())) return false;
     if (filters.color && classifyColor(spool.colorHex) !== filters.color) return false;
 	if (filters.location && !(spool.location || '').toLowerCase().includes(filters.location.toLowerCase())) return false;
-	if (filters.showArchived === 'active' && spool.archived) return false;
-	if (filters.showArchived === 'archived' && !spool.archived) return false;
     if (!filters.showEmpty) {
       const remaining = typeof spool.remainingWeightG === 'number' ? spool.remainingWeightG : (spool.initialWeightG != null && spool.usedWeightG != null ? (spool.initialWeightG - spool.usedWeightG) : null);
       if (remaining != null && remaining <= 0) return false;
@@ -464,91 +460,6 @@ export function SpoolsPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-pf-text-primary font-bebas uppercase">Spools</h1>
   <div className="flex gap-2 items-center">
-          <div className="relative">
-              {showColumnConfig ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label="Configure columns"
-                  title="Configure columns"
-                  aria-haspopup="dialog"
-                  aria-expanded="true"
-                  aria-controls="column-config-panel"
-                  onClick={() => setShowColumnConfig(false)}
-                >
-                  <GearIcon className="h-4 w-4" />
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label="Configure columns"
-                  title="Configure columns"
-                  aria-haspopup="dialog"
-                  aria-expanded="false"
-                  aria-controls="column-config-panel"
-                  onClick={() => setShowColumnConfig(true)}
-                >
-                  <GearIcon className="h-4 w-4" />
-                </Button>
-              )}
-              {showColumnConfig && (
-                <div id="column-config-panel" className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
-                  <div className="flex justify-between items-center mb-1">
-                    <div className="text-xs font-medium text-pf-text-secondary">Visible Columns</div>
-                    <Button
-                      size="sm"
-                      variant="subtle"
-                      onClick={() => setShowColumnConfig(false)}
-                      aria-label="Close column configuration"
-                      className="text-xs px-1"
-                    >✕</Button>
-                  </div>
-                  <ul className="space-y-1 max-h-64 overflow-auto" aria-label="Column list">
-                    {tableColumns.map((c, i) => (
-                      <li
-                        key={c.id}
-                        className={`flex items-center gap-2 group rounded ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
-                        draggable
-                        onDragStart={(e) => onDragStart(e, c.id)}
-                        onDragOver={onDragOver}
-                        onDrop={(e) => onDrop(e, c.id)}
-                        data-col-id={c.id}
-                        data-dragging={dragColId === c.id ? 'true' : 'false'}
-                        role="listitem"
-                      >
-                        <Checkbox
-                          id={`col-${c.id}`}
-                          checked={c.visible}
-                          onChange={() => toggleColumnVisibility(c.id)}
-                          aria-label={`Toggle column ${c.label}`}
-                        />
-                        <span className="text-xs flex-1 truncate">{c.label}</span>
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="subtle"
-                            onClick={() => moveColumn(c.id, -1)}
-                            disabled={i === 0}
-                            aria-label={`Move ${c.label} up`}
-                            className="text-[10px] px-1 py-0.5"
-                          >▲</Button>
-                          <Button
-                            size="sm"
-                            variant="subtle"
-                            onClick={() => moveColumn(c.id, 1)}
-                            disabled={i === tableColumns.length - 1}
-                            aria-label={`Move ${c.label} down`}
-                            className="text-[10px] px-1 py-0.5"
-                          >▼</Button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="text-[10px] text-pf-text-secondary pt-1 border-t border-pf-border">Reorder with arrows. At least one column must remain visible.</div>
-                </div>
-              )}
-            </div>
           <div className="flex rounded overflow-hidden border border-pf-border">
             <Button
               variant={viewMode === 'cards' ? 'primary' : 'secondary'}
@@ -571,8 +482,80 @@ export function SpoolsPage() {
               <TableIcon className="h-4 w-4" />
             </Button>
           </div>
+          <div className="relative">
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label="Configure columns"
+              title="Configure columns"
+              aria-haspopup="dialog"
+              aria-expanded={showColumnConfig && viewMode === 'table'}
+              aria-controls="column-config-panel"
+              onClick={() => setShowColumnConfig(!showColumnConfig)}
+              disabled={viewMode !== 'table'}
+            >
+              <GearIcon className="h-4 w-4" />
+            </Button>
+            {showColumnConfig && viewMode === 'table' && (
+              <div id="column-config-panel" className="absolute right-0 mt-2 w-72 z-20 bg-pf-bg-1 border border-pf-border rounded shadow-lg p-3 space-y-2" role="dialog" aria-label="Column configuration">
+                <div className="flex justify-between items-center mb-1">
+                  <div className="text-xs font-medium text-pf-text-secondary">Visible Columns</div>
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    onClick={() => setShowColumnConfig(false)}
+                    aria-label="Close column configuration"
+                    className="text-xs px-1"
+                  >✕</Button>
+                </div>
+                <ul className="space-y-1 max-h-64 overflow-auto" aria-label="Column list">
+                  {tableColumns.map((c, i) => (
+                    <li
+                      key={c.id}
+                      className={`flex items-center gap-2 group rounded ${dragColId === c.id ? 'bg-blue-600/20' : 'hover:bg-pf-bg-2'}`}
+                      draggable
+                      onDragStart={(e) => onDragStart(e, c.id)}
+                      onDragOver={onDragOver}
+                      onDrop={(e) => onDrop(e, c.id)}
+                      data-col-id={c.id}
+                      data-dragging={dragColId === c.id ? 'true' : 'false'}
+                      role="listitem"
+                    >
+                      <Checkbox
+                        id={`col-${c.id}`}
+                        checked={c.visible}
+                        onChange={() => toggleColumnVisibility(c.id)}
+                        aria-label={`Toggle column ${c.label}`}
+                      />
+                      <span className="text-xs flex-1 truncate">{c.label}</span>
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          onClick={() => moveColumn(c.id, -1)}
+                          disabled={i === 0}
+                          aria-label={`Move ${c.label} up`}
+                          className="text-[10px] px-1 py-0.5"
+                        >▲</Button>
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          onClick={() => moveColumn(c.id, 1)}
+                          disabled={i === tableColumns.length - 1}
+                          aria-label={`Move ${c.label} down`}
+                          className="text-[10px] px-1 py-0.5"
+                        >▼</Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="text-[10px] text-pf-text-secondary pt-1 border-t border-pf-border">Reorder with arrows. At least one column must remain visible.</div>
+              </div>
+            )}
+          </div>
           <Button
             variant="primary"
+            size="sm"
             onClick={loadSpools}
             disabled={loading || !spoolmanBaseUrl}
             aria-label="Refresh spools"
@@ -622,72 +605,108 @@ export function SpoolsPage() {
               <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
             </div>
             
-            <div className="flex flex-wrap gap-2 items-center">
-              <Select
-                aria-label="Filter by material"
-                value={filters.material}
-                onChange={(e) => setFilters(prev => ({ ...prev, material: e.target.value }))}
-                className="w-40"
-              >
-                <option value="">All Materials</option>
-                {getMaterialOptions().map(material => (
-                  <option key={material} value={material}>{material}</option>
-                ))}
-              </Select>
+            <div className="flex flex-wrap gap-4 items-end">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-pf-text-secondary">Material</label>
+                <Select
+                  aria-label="Filter by material"
+                  value={filters.material}
+                  onChange={(e) => setFilters(prev => ({ ...prev, material: e.target.value }))}
+                  className="w-40"
+                >
+                  <option value="">All Materials</option>
+                  {getMaterialOptions().map(material => (
+                    <option key={material} value={material}>{material}</option>
+                  ))}
+                </Select>
+              </div>
               
-              <Select
-                aria-label="Filter by vendor"
-                value={filters.vendor}
-                onChange={(e) => setFilters(prev => ({ ...prev, vendor: e.target.value }))}
-                className="w-40"
-              >
-                <option value="">All Vendors</option>
-                {getVendorOptions().map(vendor => (
-                  <option key={vendor} value={vendor}>{vendor}</option>
-                ))}
-              </Select>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-pf-text-secondary">Vendor</label>
+                <Select
+                  aria-label="Filter by vendor"
+                  value={filters.vendor}
+                  onChange={(e) => setFilters(prev => ({ ...prev, vendor: e.target.value }))}
+                  className="w-40"
+                >
+                  <option value="">All Vendors</option>
+                  {getVendorOptions().map(vendor => (
+                    <option key={vendor} value={vendor}>{vendor}</option>
+                  ))}
+                </Select>
+              </div>
 
-              <ColorFamilySelect
-                value={filters.color}
-                onChange={(val) => setFilters(prev => ({ ...prev, color: val }))}
-                options={getColorFamilyOptions()}
-                placeholder="All Colors"
-              />
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-pf-text-secondary">Color</label>
+                <ColorFamilySelect
+                  value={filters.color}
+                  onChange={(val) => setFilters(prev => ({ ...prev, color: val }))}
+                  options={getColorFamilyOptions()}
+                  placeholder="All Colors"
+                />
+              </div>
 
-              <Select
-                aria-label="Select page size"
-                value={filters.pageSize}
-                onChange={(e) => setFilters(prev => ({ ...prev, pageSize: e.target.value }))}
-                className="w-40"
-              >
-                <option value="10">10 per page</option>
-                <option value="50">50 per page</option>
-                <option value="100">100 per page</option>
-                <option value="All">Show All</option>
-              </Select>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-pf-text-secondary">Page Size</label>
+                <Select
+                  aria-label="Select page size"
+                  value={filters.pageSize}
+                  onChange={(e) => setFilters(prev => ({ ...prev, pageSize: e.target.value }))}
+                  className="w-40"
+                >
+                  <option value="10">10 per page</option>
+                  <option value="50">50 per page</option>
+                  <option value="100">100 per page</option>
+                  <option value="All">Show All</option>
+                </Select>
+              </div>
 
-              <Select
-                aria-label="Filter by location"
-                value={filters.location}
-                onChange={(e) => setFilters(prev => ({ ...prev, location: e.target.value }))}
-                className="w-40"
-              >
-                <option value="">All Locations</option>
-                {getLocationOptions().map(loc => (
-                  <option key={loc} value={loc}>{loc}</option>
-                ))}
-              </Select>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-pf-text-secondary">Location</label>
+                <Select
+                  aria-label="Filter by location"
+                  value={filters.location}
+                  onChange={(e) => setFilters(prev => ({ ...prev, location: e.target.value }))}
+                  className="w-40"
+                >
+                  <option value="">All Locations</option>
+                  {getLocationOptions().map(loc => (
+                    <option key={loc} value={loc}>{loc}</option>
+                  ))}
+                </Select>
+              </div>
 
-              <Select
-                aria-label="Filter archived"
-                value={filters.showArchived}
-                onChange={(e) => setFilters(prev => ({ ...prev, showArchived: e.target.value }))}
-                className="w-40"
-              >
-                <option value="active">Active Only</option>
-                <option value="all">All</option>
-                <option value="archived">Archived Only</option>
-              </Select>
+              {viewMode === 'cards' && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-pf-text-secondary" htmlFor="sort-field">Sort</label>
+                  <div className="flex gap-1 items-center">
+                    <Select
+                      id="sort-field"
+                      aria-label="Sort field"
+                      value={sortField}
+                      onChange={e => setSortField(e.target.value)}
+                      className="w-40"
+                    >
+                      <option value="id">ID</option>
+                      <option value="vendor">Vendor</option>
+                      <option value="material">Material</option>
+                      <option value="remaining">Remaining (g)</option>
+                      <option value="usedPercent">Used %</option>
+                      <option value="color">Color</option>
+                      <option value="location">Location</option>
+                      <option value="name">Name</option>
+                      <option value="archived">Archived</option>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="subtle"
+                      aria-label="Toggle sort direction"
+                      onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
+                      className="text-xs px-2 py-1"
+                    >{sortDir === 'asc' ? '▲' : '▼'}</Button>
+                  </div>
+                </div>
+              )}
 
               <div className="ml-auto flex flex-wrap gap-2 items-center text-sm">
                 <span className="text-pf-text-secondary">Showing {getDisplayedSpools().length} of {getFilteredSpools().length}</span>
@@ -701,31 +720,10 @@ export function SpoolsPage() {
                   Show empty
                 </label>
 
-                <label className="text-xs text-pf-text-secondary" htmlFor="sort-field">Sort:</label>
-                <Select
-                  id="sort-field"
-                  aria-label="Sort field"
-                  value={sortField}
-                  onChange={e => setSortField(e.target.value)}
-                  className="w-auto"
-                >
-                  <option value="id">ID</option>
-                  <option value="vendor">Vendor</option>
-                  <option value="material">Material</option>
-                  <option value="remaining">Remaining (g)</option>
-                  <option value="usedPercent">Used %</option>
-                  <option value="color">Color</option>
-                  <option value="location">Location</option>
-                  <option value="name">Name</option>
-                  <option value="archived">Archived</option>
-                </Select>
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  aria-label="Toggle sort direction"
-                  onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className="text-xs px-2 py-1"
-                >{sortDir === 'asc' ? '▲' : '▼'}</Button>
+                {viewMode === 'cards' && (
+                  <>
+                  </>
+                )}
                 <Button
                   size="sm"
                   variant="success"
@@ -736,10 +734,12 @@ export function SpoolsPage() {
             </div>
           </div>
 
-          <div className="text-xs text-pf-text-secondary flex flex-wrap gap-4 items-center">
-            <div className="flex items-center gap-1"><span className="inline-block px-2 py-0.5 text-[10px] rounded bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span> = Spool not for active use</div>
-            <div>Usage shows Used % / Remaining % (hover for weight details)</div>
-          </div>
+          {viewMode === 'cards' && (
+            <div className="text-xs text-pf-text-secondary flex flex-wrap gap-4 items-center">
+              <div className="flex items-center gap-1"><span className="inline-block px-2 py-0.5 text-[10px] rounded bg-red-600/20 text-red-300 border border-red-600/40 uppercase tracking-wide">Archived</span> = Spool not for active use</div>
+              <div>Usage shows Used % / Remaining % (hover for weight details)</div>
+            </div>
+          )}
 
           {viewMode === 'cards' && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
