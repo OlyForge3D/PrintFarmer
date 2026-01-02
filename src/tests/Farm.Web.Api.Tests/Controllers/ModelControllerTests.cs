@@ -206,14 +206,16 @@ namespace Farm.Web.Api.Tests.Controllers
             string modelPath = Path.Combine(Directory.GetCurrentDirectory(), "models");
             IConfigurationRoot configReal = new ConfigurationBuilder().AddInMemoryCollection(new[] { new KeyValuePair<string, string?>("ModelStorage:Path", modelPath) }).Build();
 
-            string tmpFile = Path.Combine(modelPath, $"model-{Guid.NewGuid()}.stl");
+            string fileId = Guid.NewGuid().ToString();
+            string fileName = $"{fileId}.stl";
+            string tmpFile = Path.Combine(modelPath, fileName);
 
             Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
             _ = mockRepo.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new Farm.Infrastructure.Domain.Model3D
             {
                 Id = Guid.NewGuid(),
-                FileName = "orig.stl",
-                FilePath = Path.GetFileName(tmpFile),
+                FileName = fileName,
+                FilePath = modelPath,
                 IsValid = true,
                 UploadedAt = DateTime.UtcNow
             });
@@ -235,7 +237,7 @@ namespace Farm.Web.Api.Tests.Controllers
 
             PhysicalFileResult physical = Assert.IsType<PhysicalFileResult>(result);
             Assert.Equal("application/vnd.ms-pki.stl", physical.ContentType);
-            Assert.Equal("orig.stl", physical.FileDownloadName);
+            Assert.EndsWith(".stl", physical.FileDownloadName);
         }
 
         [Fact]

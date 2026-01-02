@@ -547,8 +547,8 @@ namespace Farm.Web.Api.Services.Gcode
 
                 // Get file info
                 FileInfo fileInfo = new(filePath);
-                string fileName = originalFileName ?? fileInfo.Name;
-                string fileExtension = Path.GetExtension(fileName) ?? ".gcode";
+                string fullFileName = originalFileName ?? fileInfo.Name;
+                string fileExtension = Path.GetExtension(fullFileName) ?? ".gcode";
 
                 // Compute file hash
                 string fileHash;
@@ -572,7 +572,7 @@ namespace Farm.Web.Api.Services.Gcode
                 GcodeFile gcodeFile = new()
                 {
                     Id = fileId,
-                    FileName = fileName,
+                    FileName = fullFileName,  // Store original filename with extension
                     FilePath = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory(),
                     FolderId = targetFolder.Id,
                     FileSizeBytes = fileInfo.Length,
@@ -598,7 +598,7 @@ namespace Farm.Web.Api.Services.Gcode
                 if (filePath != finalFilePath && File.Exists(filePath))
                 {
                     File.Move(filePath, finalFilePath, overwrite: true);
-                    gcodeFile.FileName = $"{fileId}{fileExtension}";
+                    gcodeFile.FileName = $"{fileId}{fileExtension}";  // Store GUID-based filename
                     _logger.LogInformation("Moved file from {SourcePath} to {FinalPath}", filePath, finalFilePath);
                 }
 
@@ -609,7 +609,7 @@ namespace Farm.Web.Api.Services.Gcode
                     if (thumbnailPath != finalThumbnailPath)
                     {
                         File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
-                        gcodeFile.ThumbnailFileName = $"{fileId}_thumb.png";
+                        gcodeFile.ThumbnailFileName = finalThumbnailPath;  // Store the full path
                         _logger.LogInformation("Moved thumbnail from {SourcePath} to {FinalPath}", thumbnailPath, finalThumbnailPath);
                     }
                 }
@@ -617,7 +617,7 @@ namespace Farm.Web.Api.Services.Gcode
                 await _gcodeRepo.AddAsync(gcodeFile, ct);
                 await _gcodeRepo.SaveChangesAsync(ct);
 
-                _logger.LogInformation("Finalized chunked upload as GcodeFile database record for {FileName} with ID {FileId}", fileName, fileId);
+                _logger.LogInformation("Finalized chunked upload as GcodeFile database record for {FileName} with ID {FileId}", fullFileName, fileId);
                 return gcodeFile;
             }
             catch (Exception ex)

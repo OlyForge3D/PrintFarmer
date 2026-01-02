@@ -319,9 +319,7 @@ public class UpdateModelRequestTests
             MultiMaterial: false,
             NumberOfExtruders: 1,
             SupportsAutoLeveling: true,
-            MinHotendTemp: 0,
             MaxHotendTemp: 300,
-            MinBedTemp: 0,
             MaxBedTemp: 120,
             MaxPrintSpeed: 200);
 
@@ -394,15 +392,11 @@ public class UpdateModelRequestTests
             MultiMaterial: null,
             NumberOfExtruders: null,
             SupportsAutoLeveling: null,
-            MinHotendTemp: 20,
             MaxHotendTemp: 350,
-            MinBedTemp: 25,
             MaxBedTemp: 140,
             MaxPrintSpeed: 250);
 
-        request.MinHotendTemp.Should().Be(20);
         request.MaxHotendTemp.Should().Be(350);
-        request.MinBedTemp.Should().Be(25);
         request.MaxBedTemp.Should().Be(140);
     }
 
@@ -453,15 +447,11 @@ public class UpdateModelRequestTests
             MultiMaterial: null,
             NumberOfExtruders: null,
             SupportsAutoLeveling: null,
-            MinHotendTemp: 0,
             MaxHotendTemp: 0,
-            MinBedTemp: 0,
             MaxBedTemp: 0,
             MaxPrintSpeed: 0);
 
-        request.MinHotendTemp.Should().Be(0);
         request.MaxHotendTemp.Should().Be(0);
-        request.MinBedTemp.Should().Be(0);
         request.MaxBedTemp.Should().Be(0);
         request.MaxPrintSpeed.Should().Be(0);
     }

@@ -92,9 +92,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
                 m.NumberOfExtruders,
                 m.SupportsAutoLeveling,
                 // Temperature ranges
-                m.MinHotendTemp,
                 m.MaxHotendTemp,
-                m.MinBedTemp,
                 m.MaxBedTemp,
                 // Speed capabilities
                 m.MaxPrintSpeed)).ToListAsync(ct);

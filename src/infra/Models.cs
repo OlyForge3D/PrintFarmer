@@ -352,12 +352,17 @@ public class CreatePrinterDto : PrinterInfoDto
     public bool SupportsAutoLeveling { get; set; } = false;
     public double? NozzleDiameter { get; set; }
     public string[]? SupportedMaterials { get; set; }
-    public int? MinHotendTemp { get; set; }
     public int? MaxHotendTemp { get; set; }
-    public int? MinBedTemp { get; set; }
     public int? MaxBedTemp { get; set; }
     public string? CurrentMaterial { get; set; }
     public int? CurrentSpoolId { get; set; }
+
+    /// <summary>
+    /// Toolhead configurations for multi-toolhead printers.
+    /// If provided during import, these will be created instead of the default single toolhead.
+    /// If null, a default single toolhead will be created.
+    /// </summary>
+    public List<CreateToolheadDto>? Toolheads { get; set; }
 
     /// <summary>
     /// Create from discovered printer info with optional catalog metadata.
@@ -420,9 +425,7 @@ public record UpdatePrinterDto(
     bool? HasEnclosure = null,
     bool? MultiMaterial = null,
     int? NumberOfExtruders = null,
-    int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    int? MinBedTemp = null,
     int? MaxBedTemp = null,
     bool? SupportsAutoLeveling = null,
     int? MaxPrintSpeed = null,
@@ -551,9 +554,7 @@ public record PrinterModelDto(
     int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
     // Temperature ranges
-    int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    int? MinBedTemp = null,
     int? MaxBedTemp = null,
     // Speed capabilities
     int? MaxPrintSpeed = null);
@@ -700,6 +701,48 @@ public class PrinterInfoDto
 
     /// <summary>Whether the printer is currently reachable</summary>
     public bool IsReachable { get; set; }
+}
+
+/// <summary>
+/// Toolhead configuration for import/export.
+/// Represents a single hotend/nozzle configuration on a printer.
+/// </summary>
+public class CreateToolheadDto
+{
+    /// <summary>
+    /// Unique identifier (from exported data or generated on create).
+    /// </summary>
+    public Guid? Id { get; set; }
+
+    /// <summary>
+    /// Friendly name for this toolhead (e.g., "Extruder 1", "Left Tool").
+    /// </summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Zero-based index of this toolhead.
+    /// </summary>
+    public int Index { get; set; }
+
+    /// <summary>
+    /// Nozzle diameter in millimeters.
+    /// </summary>
+    public double? NozzleDiameter { get; set; }
+
+    /// <summary>
+    /// Maximum hotend temperature in °C.
+    /// </summary>
+    public int? MaxHotendTemp { get; set; }
+
+    /// <summary>
+    /// Materials this toolhead is rated for.
+    /// </summary>
+    public string[]? SupportedMaterials { get; set; }
+
+    /// <summary>
+    /// Whether this is the primary/default toolhead.
+    /// </summary>
+    public bool IsPrimary { get; set; }
 }
 
 /// <summary>
@@ -1130,9 +1173,7 @@ public record PrinterCapabilitiesDto(
     bool MultiMaterial = false,
     bool SupportsAutoLeveling = false,
     int NumberOfExtruders = 1,
-    [property: ImportExport(ImportExportTargets.Import)] int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    [property: ImportExport(ImportExportTargets.Import)] int? MinBedTemp = null,
     int? MaxBedTemp = null,
     [property: ImportExport(ImportExportTargets.Import)] string? CurrentMaterial = null,
     [property: ImportExport(ImportExportTargets.Import)] int? CurrentSpoolId = null,
@@ -1153,9 +1194,7 @@ public record CreatePrinterCapabilitiesDto(
     bool HasEnclosure = false,
     bool MultiMaterial = false,
     int NumberOfExtruders = 1,
-    [property: ImportExport(ImportExportTargets.Import)] int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    [property: ImportExport(ImportExportTargets.Import)] int? MinBedTemp = null,
     int? MaxBedTemp = null);
 
 /// <summary>
@@ -1172,9 +1211,7 @@ public record UpdatePrinterCapabilitiesDto(
     bool MultiMaterial = false,
     int NumberOfExtruders = 1,
     bool SupportsAutoLeveling = false,
-    [property: ImportExport(ImportExportTargets.Import)] int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    [property: ImportExport(ImportExportTargets.Import)] int? MinBedTemp = null,
     int? MaxBedTemp = null,
     int? MaxPrintSpeed = null,
     [property: ImportExport(ImportExportTargets.Import)] string? CurrentMaterial = null,

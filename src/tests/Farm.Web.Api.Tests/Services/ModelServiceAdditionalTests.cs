@@ -91,7 +91,8 @@ namespace Farm.Web.Api.Tests.Services
             // When base names differ, composite hash should be computed and a new model added
             mockRepo.Verify(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()), Times.Once);
             Assert.NotNull(result);
-            Assert.Equal("model.stl", result.FileName);
+            // FileName should now be GUID-based (matching GcodeFile pattern)
+            Assert.EndsWith(".stl", result.FileName);
         }
 
         [Fact]

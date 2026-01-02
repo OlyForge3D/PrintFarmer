@@ -333,6 +333,53 @@ public class PrinterLocationImportTests : IAsyncLifetime
         reimportedPrinter!.LocationId.Should().Be(_testLocation1.Id);
     }
 
+    [Fact]
+    public async Task ExportJsonAndImportAsync_IncludesLocation_CanBeImportedBack()
+    {
+        // Arrange - Create a printer with location
+        var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+
+        var ip = GetNextIpAddress();
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "JsonRoundTripPrinter",
+            ServerUrl = $"http://{ip}:7125",
+            OriginalServerUrl = $"http://{ip}:7125",
+            IpAddress = ip,
+            Backend = (int)_testBackend,
+            BackendPort = 7125,
+            LocationId = _testLocation1.Id,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId,
+            IsEnabled = true
+        };
+        _dbContext.Printers.Add(printer);
+        await _dbContext.SaveChangesAsync();
+
+        // Act - Export the printer as JSON
+        var jsonBytes = await _printersService.BuildExportJsonAsync(null, CancellationToken.None);
+        var json = Encoding.UTF8.GetString(jsonBytes);
+
+        // Assert - JSON should contain locationName field with value
+        json.Should().Contain("\"locationName\"");
+        json.Should().Contain("\"Warehouse\"");
+
+        // Act - Delete original printer and import from JSON
+        _dbContext.Printers.Remove(printer);
+        await _dbContext.SaveChangesAsync();
+
+        using var stream = new MemoryStream(jsonBytes);
+        var result = await _printersService.ImportFromStreamAsync(stream, "test.json", "skip", CancellationToken.None);
+
+        // Assert - Reimported printer should have location assigned
+        var reimportedPrinter = await _dbContext.Printers
+            .FirstOrDefaultAsync(p => p.Name == "JsonRoundTripPrinter");
+        reimportedPrinter.Should().NotBeNull();
+        reimportedPrinter!.LocationId.Should().Be(_testLocation1.Id);
+    }
+
     #endregion
 
     #region CSV Export Tests

@@ -229,7 +229,6 @@ public class ImportProcessorService : IImportProcessorService
             HasEnclosure = dto.HasEnclosure,
             MultiMaterial = dto.MultiMaterial,
             SupportsAutoLeveling = dto.SupportsAutoLeveling,
-            MinBedTemp = dto.MinBedTemp,
             MaxBedTemp = dto.MaxBedTemp,
             CurrentMaterial = dto.CurrentMaterial,
             CurrentSpoolId = dto.CurrentSpoolId,
@@ -248,7 +247,6 @@ public class ImportProcessorService : IImportProcessorService
             IsPrimary = true,
             NozzleDiameter = dto.NozzleDiameter ?? 0.4, // Default to standard 0.4mm nozzle
             SupportedMaterials = dto.SupportedMaterials,
-            MinHotendTemp = dto.MinHotendTemp,
             MaxHotendTemp = dto.MaxHotendTemp,
             UpdatedAt = DateTime.UtcNow
         };

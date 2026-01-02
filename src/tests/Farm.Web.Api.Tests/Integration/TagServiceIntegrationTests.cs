@@ -39,7 +39,7 @@ public class TagServiceIntegrationTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
-    private async Task<Model3D> CreateTestModelAsync(string displayName = "test-model")
+    private async Task<Model3D> CreateTestModelAsync(string fileName = "test-model.stl")
     {
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -47,8 +47,8 @@ public class TagServiceIntegrationTests : IAsyncLifetime
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
-            FileName = displayName,
-            FilePath = $"/models/{displayName}.stl",
+            FileName = fileName,
+            FilePath = $"/models/{fileName}",
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),
             FileFormat = ModelFileFormat.STL,

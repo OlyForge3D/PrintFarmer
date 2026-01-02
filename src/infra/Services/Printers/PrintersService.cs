@@ -705,6 +705,7 @@ namespace Farm.Infrastructure.Services.Printers
         private static readonly JsonSerializerOptions _exportJsonOptions = new(JsonSerializerDefaults.Web)
         {
             TypeInfoResolver = new Serialization.ImportExportTypeInfoResolver(),
+            WriteIndented = true,
         };
 
         public async Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct)
@@ -752,23 +753,26 @@ namespace Farm.Infrastructure.Services.Printers
             using MemoryStream ms = new MemoryStream();
             await using StreamWriter writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
 
-            await writer.WriteAsync("[");
+            await writer.WriteLineAsync("[");
             bool first = true;
             // Process each printer and include toolheads data
             foreach (Printer? p in printers)
             {
                 if (!first)
                 {
-                    await writer.WriteAsync(",");
+                    await writer.WriteLineAsync(",");
                 }
 
                 first = false;
                 Dictionary<string, object?> dtoDict = BuildExportPrinterDictionary(p);
                 string json = JsonSerializer.Serialize(dtoDict, _exportJsonOptions);
-                await writer.WriteAsync(json);
+                // Indent each printer object by 2 spaces
+                string indentedJson = string.Join(Environment.NewLine, json.Split(Environment.NewLine).Select(line => "  " + line));
+                await writer.WriteAsync(indentedJson);
                 await writer.FlushAsync();
             }
-            await writer.WriteAsync("]");
+            await writer.WriteLineAsync();
+            await writer.WriteLineAsync("]");
             await writer.FlushAsync();
 
             return ms.ToArray();
@@ -794,12 +798,12 @@ namespace Farm.Infrastructure.Services.Printers
                     FrontendPort = p.FrontendPort,
                     ApiKey = p.ApiKey,
                     Notes = p.Notes,
-                    // Export hardware specs directly from Printer (merged from legacy PrinterCapabilities)
+                    // Export hardware specs from Printer instance (populated at creation time from PrinterModel)
                     Capabilities = new PrinterCapabilitiesExportDto
                     {
                         Id = p.Id, // Use printer ID as capabilities ID
-                        NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter, // Get from primary toolhead
-                        SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials, // Get from primary toolhead
+                        NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter,
+                        SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials,
                         MaxBuildVolumeX = p.MaxBuildVolumeX,
                         MaxBuildVolumeY = p.MaxBuildVolumeY,
                         MaxBuildVolumeZ = p.MaxBuildVolumeZ,
@@ -807,10 +811,8 @@ namespace Farm.Infrastructure.Services.Printers
                         HasEnclosure = p.HasEnclosure,
                         MultiMaterial = p.MultiMaterial,
                         SupportsAutoLeveling = p.SupportsAutoLeveling,
-                        NumberOfExtruders = p.Toolheads?.Count ?? 1, // Use toolhead count
-                        MinHotendTemp = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.MinHotendTemp, // Get from primary toolhead
-                        MaxHotendTemp = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.MaxHotendTemp, // Get from primary toolhead
-                        MinBedTemp = p.MinBedTemp,
+                        NumberOfExtruders = p.Toolheads?.Count ?? 1,
+                        MaxHotendTemp = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.MaxHotendTemp,
                         MaxBedTemp = p.MaxBedTemp,
                         CurrentMaterial = p.CurrentMaterial,
                         CurrentSpoolId = p.CurrentSpoolId,
@@ -842,8 +844,10 @@ namespace Farm.Infrastructure.Services.Printers
         {
             Dictionary<string, object?> dict = new Dictionary<string, object?>
             {
+                // Core configuration (always present)
                 ["id"] = p.Id,
                 ["name"] = p.Name,
+                ["ipAddress"] = p.IpAddress,
                 ["serverUrl"] = p.ServerUrl,
                 ["originalServerUrl"] = p.OriginalServerUrl,
                 ["notes"] = p.Notes,
@@ -851,9 +855,12 @@ namespace Farm.Infrastructure.Services.Printers
                 ["model"] = p.Model?.Name,
                 ["locationName"] = p.Location?.Name,
                 ["backend"] = p.Backend,
+                ["backendPort"] = p.BackendPort,
+                ["frontendPort"] = p.FrontendPort,
                 ["apiKey"] = p.ApiKey,
                 ["dateAcquired"] = p.DateAcquired,
-                // Export hardware specs directly from Printer (merged from legacy PrinterCapabilities)
+                
+                // Hardware specs from Printer instance (populated at creation time from PrinterModel)
                 ["maxBuildVolumeX"] = p.MaxBuildVolumeX,
                 ["maxBuildVolumeY"] = p.MaxBuildVolumeY,
                 ["maxBuildVolumeZ"] = p.MaxBuildVolumeZ,
@@ -861,24 +868,26 @@ namespace Farm.Infrastructure.Services.Printers
                 ["hasEnclosure"] = p.HasEnclosure,
                 ["multiMaterial"] = p.MultiMaterial,
                 ["supportsAutoLeveling"] = p.SupportsAutoLeveling,
-                ["numberOfExtruders"] = p.Toolheads?.Count ?? 1,
-                ["minBedTemp"] = p.MinBedTemp,
-                ["maxBedTemp"] = p.MaxBedTemp,
+                
+                // Material and job tracking
                 ["currentMaterial"] = p.CurrentMaterial,
                 ["currentSpoolId"] = p.CurrentSpoolId,
                 ["isAvailable"] = p.IsAvailable,
-                ["lastUpdated"] = p.LastCapabilityUpdate
+                ["lastUpdated"] = p.LastCapabilityUpdate,
+                ["maxBedTemp"] = p.MaxBedTemp,
+                
+                // All toolheads as array (supports multi-toolhead printers)
+                ["toolheads"] = p.Toolheads?.Select(t => new Dictionary<string, object?>
+                {
+                    ["id"] = t.Id,
+                    ["name"] = t.Name,
+                    ["index"] = t.Index,
+                    ["nozzleDiameter"] = t.NozzleDiameter,
+                    ["maxHotendTemp"] = t.MaxHotendTemp,
+                    ["supportedMaterials"] = t.SupportedMaterials,
+                    ["isPrimary"] = t.IsPrimary
+                }).ToList() ?? new List<Dictionary<string, object?>>()
             };
-
-            // Export primary toolhead specs if available
-            Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
-            if (primaryToolhead != null)
-            {
-                dict["nozzleDiameter"] = primaryToolhead.NozzleDiameter;
-                dict["supportedMaterials"] = primaryToolhead.SupportedMaterials;
-                dict["minHotendTemp"] = primaryToolhead.MinHotendTemp;
-                dict["maxHotendTemp"] = primaryToolhead.MaxHotendTemp;
-            }
 
             return dict;
         }
@@ -1067,18 +1076,41 @@ namespace Farm.Infrastructure.Services.Printers
                 IsEnabled = dto.IsEnabled
             };
 
-            // Create a default Toolhead for single-toolhead printers
-            // Multi-toolhead printers can be added later via separate API
-            Toolhead defaultToolhead = new()
+            // Create toolheads from import data or use defaults
+            if (dto.Toolheads != null && dto.Toolheads.Count > 0)
             {
-                Id = Guid.NewGuid(),
-                PrinterId = p.Id,
-                Name = "Extruder 1",
-                Index = 0,
-                IsPrimary = true,
-                NozzleDiameter = 0.4 // Standard default nozzle size
-            };
-            p.Toolheads.Add(defaultToolhead);
+                // Import toolheads from JSON export
+                foreach (var toolheadDto in dto.Toolheads.OrderBy(t => t.Index))
+                {
+                    Toolhead toolhead = new()
+                    {
+                        Id = toolheadDto.Id ?? Guid.NewGuid(),
+                        PrinterId = p.Id,
+                        Name = toolheadDto.Name ?? $"Extruder {toolheadDto.Index + 1}",
+                        Index = toolheadDto.Index,
+                        NozzleDiameter = toolheadDto.NozzleDiameter ?? 0.4,
+                        MaxHotendTemp = toolheadDto.MaxHotendTemp,
+                        SupportedMaterials = toolheadDto.SupportedMaterials,
+                        IsPrimary = toolheadDto.IsPrimary
+                    };
+                    p.Toolheads.Add(toolhead);
+                }
+                _logger.LogInformation($"[CreatePrinterFromDto] Imported {dto.Toolheads.Count} toolhead(s) for printer {p.Name}");
+            }
+            else
+            {
+                // Create a default single Toolhead for single-toolhead printers
+                Toolhead defaultToolhead = new()
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = p.Id,
+                    Name = "Extruder 1",
+                    Index = 0,
+                    IsPrimary = true,
+                    NozzleDiameter = 0.4 // Standard default nozzle size
+                };
+                p.Toolheads.Add(defaultToolhead);
+            }
 
             // Assign location if provided
             if (!string.IsNullOrWhiteSpace(dto.LocationName))
@@ -1101,60 +1133,8 @@ namespace Farm.Infrastructure.Services.Printers
             return CreateOfflinePrinterDto(p);
         }
 
-        /// <summary>
-        /// Attempts automatic camera discovery for a printer in the background.
-        /// This is separated from CreatePrinterFromDtoAsync to avoid DbContext conflicts during bulk imports.
-        /// </summary>
-        private async Task AttemptBackgroundCameraDiscoveryAsync(Printer p)
-        {
-            try
-            {
-                var backend = (PrinterBackend)p.Backend;
-                if (!_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out _))
-                {
-                    _logger.LogDebug($"[CameraDiscovery] Backend {backend} does not support automatic camera discovery");
-                    return;
-                }
+        // Camera discovery methods removed - handled by RefreshCameraUrlsAsync called from status polling services
 
-                _logger.LogInformation($"[CameraDiscovery] Attempting automatic camera discovery for {p.Name} ({backend})");
-                try
-                {
-                    await RefreshCameraUrlsAsync(p.Id, CancellationToken.None);
-                    _logger.LogInformation($"[CameraDiscovery] Background camera discovery completed for {p.Name}");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, $"[CameraDiscovery] Background camera discovery failed for {p.Name}, continuing without cameras");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, $"[CameraDiscovery] Failed to start camera discovery for {p.Name}, continuing without cameras");
-            }
-        }
-
-        /// <summary>
-        /// Queues camera discovery for a printer to run asynchronously.
-        /// Used by import operations to avoid blocking the import response.
-        /// </summary>
-        private async Task QueueCameraDiscoveryAsync(Guid printerId)
-        {
-            try
-            {
-                Printer? printer = await FindByIdAsync(printerId, CancellationToken.None);
-                if (printer != null && string.IsNullOrEmpty(printer.CameraStreamUrl) && string.IsNullOrEmpty(printer.CameraSnapshotUrl))
-                {
-                    _logger.LogDebug($"[CameraDiscovery] Queued background camera discovery for printer {printer.Name} ({printerId})");
-                    await AttemptBackgroundCameraDiscoveryAsync(printer);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, $"[CameraDiscovery] Failed to queue camera discovery for printer {printerId}");
-            }
-        }
-
-        // High-level operations moved from controller
         /// <summary>
         /// Retrieves a camera snapshot image from the printer.
         /// </summary>
@@ -1993,20 +1973,9 @@ namespace Farm.Infrastructure.Services.Printers
                     // This is done as fire-and-forget using ThreadPool to avoid blocking the import response
                     if (createdPrinterId.HasValue && status == "Success")
                     {
-                        Guid printerId = createdPrinterId.Value;
-#pragma warning disable VSTHRD101
-                        _ = ThreadPool.QueueUserWorkItem(async (state) =>
-                        {
-                            try
-                            {
-                                await QueueCameraDiscoveryAsync(printerId);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, $"[BulkCreate] Failed to queue camera discovery for printer {printerId}");
-                            }
-                        });
-#pragma warning restore VSTHRD101
+                        // Skip background camera discovery during bulk import to avoid DbContext threading issues
+                        // Camera discovery will happen on the next status poll from the dashboard
+                        _logger.LogDebug($"[BulkCreate] Skipping background camera discovery for {printerDto.Name} - will discover on next status poll");
                     }
                 }
                 catch (Exception ex)

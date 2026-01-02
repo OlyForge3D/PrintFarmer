@@ -37,11 +37,6 @@ public class Toolhead
     public double? NozzleDiameter { get; set; }
 
     /// <summary>
-    /// Minimum hotend temperature in °C for this toolhead.
-    /// </summary>
-    public int? MinHotendTemp { get; set; }
-
-    /// <summary>
     /// Maximum hotend temperature in °C for this toolhead.
     /// </summary>
     public int? MaxHotendTemp { get; set; }
@@ -51,11 +46,6 @@ public class Toolhead
     /// Stored as JSON array in database.
     /// </summary>
     public string[]? SupportedMaterials { get; set; }
-
-    /// <summary>
-    /// Whether this toolhead has a heated chamber/enclosure for high-temp materials.
-    /// </summary>
-    public bool HasHeatedEnclosure { get; set; }
 
     /// <summary>
     /// Indicates if this is the primary/default toolhead for single-tool operations.

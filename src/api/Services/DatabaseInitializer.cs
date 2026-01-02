@@ -274,9 +274,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                         MultiMaterial = multiMaterial,
                         NumberOfExtruders = extruders,
                         SupportsAutoLeveling = autoLevel,
-                        MinHotendTemp = minHotend,
                         MaxHotendTemp = maxHotend,
-                        MinBedTemp = minBed,
                         MaxBedTemp = maxBed,
                         MaxPrintSpeed = maxSpeed
                     });

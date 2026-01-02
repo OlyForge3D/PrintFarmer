@@ -46,7 +46,6 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     }
 
     private async Task<Model3D> CreateTestModelAsync(
-        string displayName = "test-model",
         string originalFileName = "test-model.stl",
         string? path = null)
     {
@@ -71,8 +70,8 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
-            FileName = displayName,
-            FilePath = filePath,
+            FileName = Path.GetFileName(filePath),  // Store just the filename (GUID-based)
+            FilePath = Path.GetDirectoryName(filePath) ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models")),  // Store directory path (matching GcodeFile pattern)
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),
             FileFormat = ModelFileFormat.STL,
@@ -131,7 +130,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("specific-model", "specific.stl");
+        var model = await CreateTestModelAsync("specific-model.stl");
 
         // Act
         var result = await service.ListModelsAsync(CancellationToken.None);
@@ -139,8 +138,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert - Verify created model is in the list (may contain other test data)
         result.Should().Contain(m => m.Id == model.Id);
         var foundModel = result.First(m => m.Id == model.Id);
-        foundModel.FileName.Should().Be("specific-model");
-        foundModel.FileName.Should().Be("specific.stl");
+        foundModel.FileName.Should().Be(model.FileName);
     }
 
     [Fact]
@@ -150,9 +148,9 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model1 = await CreateTestModelAsync("multi-model-1", "multi1.stl");
-        var model2 = await CreateTestModelAsync("multi-model-2", "multi2.stl");
-        var model3 = await CreateTestModelAsync("multi-model-3", "multi3.stl");
+        var model1 = await CreateTestModelAsync("multi-model-1.stl");
+        var model2 = await CreateTestModelAsync("multi-model-2.stl");
+        var model3 = await CreateTestModelAsync("multi-model-3.stl");
 
         // Act
         var result = await service.ListModelsAsync(CancellationToken.None);
@@ -168,9 +166,9 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model1 = await CreateTestModelAsync("ordered-1", "ordered1.stl");
+        var model1 = await CreateTestModelAsync("ordered-1.stl");
         await Task.Delay(10); // Small delay to ensure different timestamps
-        var model2 = await CreateTestModelAsync("ordered-2", "ordered2.stl");
+        var model2 = await CreateTestModelAsync("ordered-2.stl");
 
         // Act
         var result = await service.ListModelsAsync(CancellationToken.None);
@@ -191,7 +189,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("test-model", "test.stl");
+        var model = await CreateTestModelAsync("test-model.stl");
 
         // Act
         var result = await service.GetModelAsync(model.Id, CancellationToken.None);
@@ -199,7 +197,8 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert
         result.Should().NotBeNull();
         result!.Id.Should().Be(model.Id);
-        result.FileName.Should().Be("test.stl");
+        // FileName should now be GUID-based (matching GcodeFile pattern)
+        result.FileName.Should().Be(model.FileName);
     }
 
     [Fact]
@@ -225,7 +224,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("metadata-test", "metadata.stl");
+        var model = await CreateTestModelAsync("metadata-test.stl");
 
         // Act
         var result = await service.GetModelAsync(model.Id, CancellationToken.None);
@@ -233,7 +232,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert
         result.Should().NotBeNull();
         result!.Id.Should().Be(model.Id);
-        result.FileName.Should().Be("metadata.stl");
+        result.FileName.Should().Be(model.FileName);
     }
 
     #endregion
@@ -247,15 +246,18 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("file-path-test", "filepath.stl");
+        var model = await CreateTestModelAsync("file-path-test.stl");
 
         // Act
         var result = await service.GetModelFilePathAsync(model.Id, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
-        result.Should().Be(model.FilePath);
-        File.Exists(result).Should().BeTrue();
+        // GetModelFilePathAsync returns a relative path that includes the filename
+        result.Should().Contain(model.FileName);
+        // The file should exist at the full path when combined with the base path
+        string fullPath = Path.Combine(model.FilePath, model.FileName);
+        File.Exists(fullPath).Should().BeTrue();
     }
 
     [Fact]
@@ -285,7 +287,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("no-thumbnail", "nothumbnail.stl");
+        var model = await CreateTestModelAsync("no-thumbnail.stl");
 
         // Act
         var result = await service.GetModelThumbnailPathAsync(model.Id, CancellationToken.None);
@@ -322,7 +324,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var model = await CreateTestModelAsync("to-delete", "todelete.stl");
+        var model = await CreateTestModelAsync("to-delete.stl");
         var modelId = model.Id;
 
         // Act
@@ -354,7 +356,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model = await CreateTestModelAsync("will-delete", "delete.stl");
+        var model = await CreateTestModelAsync("will-delete.stl");
 
         // Verify model exists before delete
         var beforeDelete = await service.GetModelAsync(model.Id, CancellationToken.None);
@@ -379,8 +381,8 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var model1 = await CreateTestModelAsync("hier-model-1", "hier1.stl");
-        var model2 = await CreateTestModelAsync("hier-model-2", "hier2.stl");
+        var model1 = await CreateTestModelAsync("hier-model-1.stl");
+        var model2 = await CreateTestModelAsync("hier-model-2.stl");
 
         // Act
         var result = await service.ListModelsWithHierarchyAsync(
@@ -407,7 +409,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
         for (int i = 0; i < 25; i++)
         {
-            await CreateTestModelAsync($"paged-{i}", $"paged{i}.stl");
+            await CreateTestModelAsync($"paged-{i}.stl");
         }
 
         // Act
@@ -432,9 +434,9 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var modelZ = await CreateTestModelAsync("z-model", "z.stl");
-        var modelA = await CreateTestModelAsync("a-model", "a.stl");
-        var modelM = await CreateTestModelAsync("m-model", "m.stl");
+        var modelZ = await CreateTestModelAsync("z-model.stl");
+        var modelA = await CreateTestModelAsync("a-model.stl");
+        var modelM = await CreateTestModelAsync("m-model.stl");
 
         // Act - Call with sort parameter (implementation may or may not use it)
         var result = await service.ListModelsWithHierarchyAsync(
@@ -458,8 +460,8 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        await CreateTestModelAsync("searchable-model", "searchable.stl");
-        await CreateTestModelAsync("other-model", "other.stl");
+        await CreateTestModelAsync("searchable-model.stl");
+        await CreateTestModelAsync("other-model.stl");
 
         // Act - Search for specific term
         var result = await service.ListModelsWithHierarchyAsync(
@@ -637,15 +639,17 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        var expectedFileName = "my-custom-model.stl";
-        var formFile = CreateMockFormFile(expectedFileName);
+        var originalFileName = "my-custom-model.stl";
+        var formFile = CreateMockFormFile(originalFileName);
 
         // Act
         var result = await service.UploadModelAsync(formFile, CancellationToken.None);
 
         // Assert
         result.Id.Should().NotBe(Guid.Empty);
-        result.FileName.Should().Be(expectedFileName);
+        // With standardized pattern, FileName should be GUID-based with correct extension
+        result.FileName.Should().EndWith(".stl");
+        result.FileName.Should().NotBe(originalFileName); // Verify it's GUID-based, not original name
     }
 
     [Fact]
@@ -727,7 +731,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert
         getResult.Should().NotBeNull();
         getResult!.Id.Should().Be(uploadResult.Id);
-        getResult.FileName.Should().Be(fileName);
+        getResult.FileName.Should().Be(uploadResult.FileName);  // Should match what was uploaded
     }
 
     [Fact]

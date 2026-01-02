@@ -124,7 +124,8 @@ public class GcodeFilesServiceTests
         result.Should().NotBeNull();
         added.Should().NotBeNull();
         added!.Id.Should().NotBeEmpty();
-        added.FileName.Should().Be("cool-model");
+        // FileName should now be GUID-based (matching standardized pattern)
+        added.FileName.Should().Be($"{added.Id}.gcode");
         added.SlicerName.Should().Be("TestSlicer");
         added.SlicerVersion.Should().Be("1.0");
         added.RequiredNozzleDiameter.Should().Be(0.4);
@@ -133,16 +134,16 @@ public class GcodeFilesServiceTests
         added.EstimatedFilamentLengthMm.Should().Be(1234);
         added.EstimatedFilamentWeightG.Should().Be(56);
 
-        string finalGcodeName = Path.GetFileName(added.FilePath);
-        finalGcodeName.Should().Be(added.Id + ".gcode");
-        File.Exists(added.FilePath).Should().BeTrue();
+        // FilePath should be the storage directory, construct full path with FileName
+        string fullPath = Path.Combine(added.FilePath, added.FileName);
+        File.Exists(fullPath).Should().BeTrue();
         File.Exists(sourcePath).Should().BeFalse();
 
         string expectedThumb = Path.Combine(storageDir, added.Id + "_thumb.png");
         added.ThumbnailFileName.Should().Be(expectedThumb);
         File.Exists(expectedThumb).Should().BeTrue();
 
-        using FileStream fs = File.OpenRead(added.FilePath);
+        using FileStream fs = File.OpenRead(fullPath);  // Open the full file path, not just FilePath (directory)
         using SHA256 sha = SHA256.Create();
         string expectedHash = Convert.ToHexString(await sha.ComputeHashAsync(fs, CancellationToken.None));
         added.FileHash.Should().Be(expectedHash);
@@ -170,7 +171,7 @@ public class GcodeFilesServiceTests
             new()
             {
                 Id = Guid.NewGuid(),
-                FileName = "model1",
+                FileName = "model1.gcode",  // Full filename with extension
                 FolderId = folderJob.Id,
                 FilePath = Path.Combine(storageDir, "jobs", "model1.gcode"),
                 FileSizeBytes = 1024,
@@ -181,7 +182,7 @@ public class GcodeFilesServiceTests
             new()
             {
                 Id = Guid.NewGuid(),
-                FileName = "other",
+                FileName = "other.gcode",  // Full filename with extension
                 FolderId = folderJob.Id,
                 FilePath = Path.Combine(storageDir, "jobs", "other.gcode"),
                 FileSizeBytes = 2048,

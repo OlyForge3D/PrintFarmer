@@ -129,8 +129,6 @@ public class Printer
     public int? MaxPrintSpeed { get; set; }
 
     // Bed temperature ranges
-    [ImportExport(ImportExportTargets.Import)]
-    public int? MinBedTemp { get; set; }
     public int? MaxBedTemp { get; set; }
 
     // Material and job tracking
@@ -207,10 +205,7 @@ public class PrinterModel
     public bool MultiMaterial { get; set; }
     public int NumberOfExtruders { get; set; } = 1;
     public bool SupportsAutoLeveling { get; set; }
-    public int? MinHotendTemp { get; set; } = 0;
     public int? MaxHotendTemp { get; set; } = 300;
-    [ImportExport(ImportExportTargets.Import)]
-    public int? MinBedTemp { get; set; } = 0;
     public int? MaxBedTemp { get; set; } = 120;
     public int? MaxPrintSpeed { get; set; } = 150; // mm/s
     public ICollection<PrinterModelFilamentType> SupportedFilamentTypes { get; } = new List<PrinterModelFilamentType>();

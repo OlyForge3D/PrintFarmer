@@ -470,9 +470,7 @@ public class PrintersController(
             p.MultiMaterial,
             p.SupportsAutoLeveling,
             p.Toolheads?.Count ?? 1, // NumberOfExtruders - use Toolheads collection count
-            null, // MinHotendTemp - now per-Toolhead
             null, // MaxHotendTemp - now per-Toolhead
-            p.MinBedTemp,
             p.MaxBedTemp,
             p.CurrentMaterial,
             p.CurrentSpoolId,
@@ -897,7 +895,7 @@ public class PrintersController(
         p.HasEnclosure = dto.HasEnclosure ?? p.HasEnclosure;
         p.MultiMaterial = dto.MultiMaterial ?? p.MultiMaterial;
         p.SupportsAutoLeveling = dto.SupportsAutoLeveling ?? p.SupportsAutoLeveling;
-        p.MinBedTemp = dto.MinBedTemp ?? p.MinBedTemp;
+
         p.MaxBedTemp = dto.MaxBedTemp ?? p.MaxBedTemp;
         p.LastCapabilityUpdate = DateTime.UtcNow;
 
@@ -907,7 +905,7 @@ public class PrintersController(
         {
             primaryToolhead.NozzleDiameter = dto.NozzleDiameter ?? primaryToolhead.NozzleDiameter;
             primaryToolhead.SupportedMaterials = dto.SupportedMaterials ?? primaryToolhead.SupportedMaterials;
-            primaryToolhead.MinHotendTemp = dto.MinHotendTemp ?? primaryToolhead.MinHotendTemp;
+
             primaryToolhead.MaxHotendTemp = dto.MaxHotendTemp ?? primaryToolhead.MaxHotendTemp;
             primaryToolhead.UpdatedAt = DateTime.UtcNow;
         }
@@ -1044,9 +1042,7 @@ public class PrintersController(
                 HasEnclosure: modelDto.HasEnclosure,
                 MultiMaterial: modelDto.MultiMaterial,
                 NumberOfExtruders: modelDto.NumberOfExtruders,
-                MinHotendTemp: modelDto.MinHotendTemp,
                 MaxHotendTemp: modelDto.MaxHotendTemp,
-                MinBedTemp: modelDto.MinBedTemp,
                 MaxBedTemp: modelDto.MaxBedTemp,
                 CurrentMaterial: null,
                 CurrentSpoolId: null,

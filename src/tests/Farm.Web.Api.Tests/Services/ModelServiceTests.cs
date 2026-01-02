@@ -75,7 +75,8 @@ namespace Farm.Web.Api.Tests.Services
             Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
 
             Assert.NotNull(result);
-            Assert.Equal("model.stl", result.FileName);
+            // FileName should now be GUID-based (matching GcodeFile pattern)
+            Assert.EndsWith(".stl", result.FileName);
             Assert.Equal("stl", result.FileType);
             mockRepo.Verify(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -94,7 +95,7 @@ namespace Farm.Web.Api.Tests.Services
             Model3D existing = new Model3D
             {
                 Id = Guid.NewGuid(),
-                FileName = "model",
+                FileName = "model.stl",
                 FilePath = "path",
                 FileSizeBytes = 12,
                 FileHash = contentHash,

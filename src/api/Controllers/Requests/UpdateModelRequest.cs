@@ -20,9 +20,7 @@ public record UpdateModelRequest(
     bool? SupportsAutoLeveling = null,
 
     // Temperature ranges
-    int? MinHotendTemp = null,
     int? MaxHotendTemp = null,
-    int? MinBedTemp = null,
     int? MaxBedTemp = null,
 
     // Speed capabilities

@@ -94,7 +94,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            FileName = "Benchmark Test",
+            FileName = "Benchmark Test.gcode",  // Include extension
             FilePath = $"/gcodes/benchmark-{uniqueId}.gcode",
             FileSizeBytes = 1024,
             FileHash = $"hash-{uniqueId}",
@@ -108,7 +108,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
 
         // Assert
         result.Should().NotBeEmpty();
-        result.Should().Contain(g => g.FileName.Contains("benchmark"));
+        result.Should().Contain(g => g.FileName.Contains("benchmark", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            FileName = "PLA Test",
+            FileName = "PLA Test.gcode",  // Include extension
             FilePath = "/gcodes/pla-test.gcode",
             FileSizeBytes = 1024,
             FileHash = "pla-hash",
@@ -151,7 +151,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            FileName = "0.4mm Nozzle",
+            FileName = "0.4mm Nozzle.gcode",  // Include extension
             FilePath = "/gcodes/nozzle-04.gcode",
             FileSizeBytes = 1024,
             FileHash = "nozzle-hash",
@@ -180,7 +180,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            FileName = "PETG Fixture",
+            FileName = "PETG Fixture.gcode",  // Include extension
             FilePath = "/gcodes/petg-fixture.gcode",
             FileSizeBytes = 1024,
             FileHash = "petg-hash",
@@ -214,7 +214,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            FileName = "Get Test",
+            FileName = "Get Test.gcode",  // Include extension
             FilePath = "/gcodes/get-test.gcode",
             FileSizeBytes = 1024,
             FileHash = "get-hash",
@@ -229,7 +229,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Assert
         result.Should().NotBeNull();
         result!.Id.Should().Be(file.Id);
-        result.FileName.Should().Be("Get Test");
+        result.FileName.Should().Be("Get Test.gcode");
     }
 
     [Fact]
@@ -261,7 +261,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            FileName = "Delete Test",
+            FileName = "Delete Test.gcode",  // Include extension
             FilePath = "/gcodes/delete-test.gcode",
             FileSizeBytes = 1024,
             FileHash = "delete-hash",
@@ -309,7 +309,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
-            FileName = $"Workflow {uniqueId}",
+            FileName = $"Workflow {uniqueId}.gcode",  // Include extension
             FilePath = $"/gcodes/workflow-{uniqueId}.gcode",
             FileSizeBytes = 1024,
             FileHash = $"workflow-hash-{uniqueId}",

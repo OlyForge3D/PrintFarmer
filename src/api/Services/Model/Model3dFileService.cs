@@ -289,7 +289,10 @@ namespace Farm.Web.Api.Services.Model
         public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
-            return model?.FilePath;
+            if (model == null) return null;
+            // Return relative path by combining FilePath (directory) with FileName (GUID filename)
+            // FilePath is the storage directory, FileName is the GUID-based filename
+            return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, "").TrimStart(Path.DirectorySeparatorChar, '/');
         }
 
         /// <summary>
@@ -329,6 +332,7 @@ namespace Farm.Web.Api.Services.Model
 
             try
             {
+                // Construct full path: FilePath is already the storage directory, combine with FileName
                 string fullModelPath = Path.Combine(model.FilePath, model.FileName);
                 if (_fileManagementService.IsSafePath(fullModelPath, _modelsPath) && System.IO.File.Exists(fullModelPath))
                 {
@@ -519,9 +523,9 @@ namespace Farm.Web.Api.Services.Model
                 Model3D model = new()
                 {
                     Id = modelId,
-                    FileName = fileName,
+                    FileName = fileName,  // Store GUID-based filename (e.g., "abc123.stl")
                     FolderId = rootFolder.Id,  // Root folder for uploaded files
-                    FilePath = string.Empty,  // Empty string for root directory (relative path within models folder)
+                    FilePath = _modelsPath,  // Store the models storage directory path (matching GcodeFile pattern)
                     FileSizeBytes = modelFile.Length,
                     FileHash = fileHash,
                     FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
