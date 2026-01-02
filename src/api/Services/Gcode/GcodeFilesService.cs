@@ -609,8 +609,12 @@ namespace Farm.Web.Api.Services.Gcode
                     if (thumbnailPath != finalThumbnailPath)
                     {
                         File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
-                        gcodeFile.ThumbnailFileName = finalThumbnailPath;  // Store the full path
+                        gcodeFile.ThumbnailFileName = Path.GetFileName(finalThumbnailPath);  // Store just filename, matching standardized pattern
                         _logger.LogInformation("Moved thumbnail from {SourcePath} to {FinalPath}", thumbnailPath, finalThumbnailPath);
+                    }
+                    else
+                    {
+                        gcodeFile.ThumbnailFileName = Path.GetFileName(finalThumbnailPath);  // Ensure filename is stored even if no move needed
                     }
                 }
 

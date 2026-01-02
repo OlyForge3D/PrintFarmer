@@ -140,7 +140,7 @@ public class GcodeFilesServiceTests
         File.Exists(sourcePath).Should().BeFalse();
 
         string expectedThumb = Path.Combine(storageDir, added.Id + "_thumb.png");
-        added.ThumbnailFileName.Should().Be(expectedThumb);
+        added.ThumbnailFileName.Should().Be(Path.GetFileName(expectedThumb));  // Store just filename, matching standardized pattern
         File.Exists(expectedThumb).Should().BeTrue();
 
         using FileStream fs = File.OpenRead(fullPath);  // Open the full file path, not just FilePath (directory)
