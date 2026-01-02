@@ -1133,6 +1133,27 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Queues camera discovery for a printer to run asynchronously.
+        /// Used by import operations to avoid blocking the import response.
+        /// </summary>
+        private async Task QueueCameraDiscoveryAsync(Guid printerId)
+        {
+            try
+            {
+                Printer? printer = await FindByIdAsync(printerId, CancellationToken.None);
+                if (printer != null && string.IsNullOrEmpty(printer.CameraStreamUrl) && string.IsNullOrEmpty(printer.CameraSnapshotUrl))
+                {
+                    _logger.LogDebug($"[CameraDiscovery] Queued background camera discovery for printer {printer.Name} ({printerId})");
+                    await AttemptBackgroundCameraDiscoveryAsync(printer);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"[CameraDiscovery] Failed to queue camera discovery for printer {printerId}");
+            }
+        }
+
         // High-level operations moved from controller
         /// <summary>
         /// Retrieves a camera snapshot image from the printer.
@@ -1968,25 +1989,24 @@ namespace Farm.Infrastructure.Services.Printers
                     // Broadcast import progress update to all connected clients
                     await _broadcaster.BroadcastPrinterImportProgressAsync(result, ct);
 
-                    // Attempt background camera discovery for successfully imported printers
-                    // This is done as fire-and-forget to avoid blocking the import response
-                    // Attempt background camera discovery for successfully imported printers
-                    // This is done as part of the import to avoid DbContext conflicts during bulk imports
+                    // Queue background camera discovery for successfully imported printers
+                    // This is done as fire-and-forget using ThreadPool to avoid blocking the import response
                     if (createdPrinterId.HasValue && status == "Success")
                     {
-                        Printer? createdPrinter = await FindByIdAsync(createdPrinterId.Value, ct);
-                        if (createdPrinter != null && string.IsNullOrEmpty(createdPrinter.CameraStreamUrl) && string.IsNullOrEmpty(createdPrinter.CameraSnapshotUrl))
+                        Guid printerId = createdPrinterId.Value;
+#pragma warning disable VSTHRD101
+                        _ = ThreadPool.QueueUserWorkItem(async (state) =>
                         {
-                            // Await camera discovery to ensure all database updates complete before returning
                             try
                             {
-                                await AttemptBackgroundCameraDiscoveryAsync(createdPrinter);
+                                await QueueCameraDiscoveryAsync(printerId);
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, $"[BulkCreate] Camera discovery failed for {createdPrinter.Name}, continuing without cameras");
+                                _logger.LogWarning(ex, $"[BulkCreate] Failed to queue camera discovery for printer {printerId}");
                             }
-                        }
+                        });
+#pragma warning restore VSTHRD101
                     }
                 }
                 catch (Exception ex)
