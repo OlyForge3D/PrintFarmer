@@ -2575,3 +2575,51 @@ export function GridIcon({ className = 'w-4 h-4', ariaLabel = 'Grid' }: Omit<Ico
   );
 }
 
+/**
+ * Perspective view icon - 3D perspective view
+ */
+export function PerspectiveIcon({ className = 'w-4 h-4', ariaLabel = 'Perspective View' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiCube} />
+    </svg>
+  );
+}
+
+/**
+ * Orthographic view icon - 2D flat view
+ */
+export function OrthographicIcon({ className = 'w-4 h-4', ariaLabel = 'Orthographic View' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiViewGrid} />
+    </svg>
+  );
+}
+
+/**
+ * Recenter camera icon - Reset camera position
+ */
+export function RecenterIcon({ className = 'w-4 h-4', ariaLabel = 'Recenter View' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiHome} />
+    </svg>
+  );
+}
+

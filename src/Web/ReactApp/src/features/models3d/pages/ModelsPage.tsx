@@ -2,7 +2,7 @@ import React, { useState, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { DeleteIcon, CloseIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, FileIcon, UploadIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, CloseIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, FileIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
@@ -53,6 +53,7 @@ export const ModelsPage: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
+  const [isViewerMaximized, setIsViewerMaximized] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -484,25 +485,52 @@ export const ModelsPage: React.FC = () => {
 
       {/* Model Viewer Modal */}
       {viewerModel && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-pf-border">
-            <div className="flex items-center justify-between p-4 border-b border-pf-border">
+        <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ${isViewerMaximized ? 'p-2' : 'p-4'}`}>
+          <div className={`bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border flex flex-col ${
+            isViewerMaximized 
+              ? 'w-full h-full max-w-none max-h-none' 
+              : 'max-w-4xl w-full max-h-[90vh]'
+          }`}>
+            <div className="flex items-center justify-between p-4 border-b border-pf-border flex-shrink-0">
               <h3 className="font-medium text-lg text-pf-text-primary">{viewerModel.name}</h3>
-              <Button
-                onClick={() => setViewerModel(null)}
-                variant="subtle"
-                size="sm"
-              >
-                <CloseIcon className="w-5 h-5" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => setIsViewerMaximized(!isViewerMaximized)}
+                  variant="subtle"
+                  size="sm"
+                  title={isViewerMaximized ? 'Restore size' : 'Maximize viewer'}
+                >
+                  {isViewerMaximized ? (
+                    <ArrowDownIcon className="w-5 h-5" />
+                  ) : (
+                    <ArrowUpIcon className="w-5 h-5" />
+                  )}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setViewerModel(null);
+                    setIsViewerMaximized(false);
+                  }}
+                  variant="subtle"
+                  size="sm"
+                >
+                  <CloseIcon className="w-5 h-5" />
+                </Button>
+              </div>
             </div>
-            <div className="p-4">
-              <Suspense fallback={<ViewerSkeleton variant="model" />}>
+            <div className={`p-4 flex-1 ${isViewerMaximized ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+              <Suspense fallback={
+                <ViewerSkeleton 
+                  variant="model" 
+                  className={isViewerMaximized ? 'h-full w-full' : 'h-[32rem] w-full'}
+                />
+              }>
                 {viewerModel.url && viewerModel.fileType && (
                   <ModelViewer
                     modelUrl={viewerModel.url}
                     fileType={viewerModel.fileType}
-                    className="h-96 w-full"
+                    showGrid={false} // Hide grid on Models page
+                    className={isViewerMaximized ? 'h-full w-full' : 'h-[32rem] w-full'}
                   />
                 )}
               </Suspense>
