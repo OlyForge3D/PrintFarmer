@@ -248,12 +248,18 @@ public class SpoolmanConfig
 }
 
 // G-code Library System
-public class GcodeFile
+
+/// <summary>
+/// Abstract base class for all stored files (GCode and 3D Models).
+/// Consolidates common file storage and management properties.
+/// </summary>
+public abstract class StoredFile
 {
     public Guid Id { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public Guid? FolderId { get; set; } // Foreign key to Folder entity
-    public Folder? Folder { get; set; } // Navigation property to Folder
+    public string Name { get; set; } = string.Empty; // Original filename for display
+    public string FileName { get; set; } = string.Empty; // GUID-based filename on disk
+    public Guid? FolderId { get; set; } // Foreign key to FolderNode entity
+    public FolderNode? Folder { get; set; } // Navigation property to FolderNode
     public string FilePath { get; set; } = string.Empty; // Directory path where file is stored
     public string? ThumbnailFileName { get; set; } // Just the thumbnail filename (stored in same directory as file)
     public long FileSizeBytes { get; set; }
@@ -261,6 +267,16 @@ public class GcodeFile
     public DateTime UploadedAt { get; set; }
     public string? Description { get; set; }
     public string? Tags { get; set; } // JSON array of tags
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    // File health status (populated by FileConsistencyAuditService)
+    public DateTime? LastHealthCheckDate { get; set; }
+    public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
+    public string? LastVerificationResult { get; set; } // JSON object with verification details
+}
+
+public class GcodeFile : StoredFile
+{
     public GcodeSource Source { get; set; }
     public Guid? SourcePrinterId { get; set; } // Printer it was harvested from
     public Printer? SourcePrinter { get; set; }
@@ -285,12 +301,6 @@ public class GcodeFile
     public double? BedTemperature { get; set; } // First layer bed temperature
     public double? PrintSpeed { get; set; }
     public string[]? TargetPrinterModels { get; set; } // JSON field
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-    // File health status (populated by FileConsistencyAuditService)
-    public DateTime? LastHealthCheckDate { get; set; }
-    public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
-    public string? LastVerificationResult { get; set; } // JSON object with verification details
 
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
@@ -383,19 +393,9 @@ public class HarvestFileGcodeFileMapping
 }
 
 // 3D Model Management System
-public class Model3D
+public class Model3D : StoredFile
 {
-    public Guid Id { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public Guid? FolderId { get; set; } // Foreign key to Folder entity
-    public Folder? Folder { get; set; } // Navigation property to Folder
-    public string FilePath { get; set; } = string.Empty; // Directory path where file is stored
-    public string? ThumbnailFileName { get; set; } // Just the thumbnail filename (stored in same directory as file)
-    public long FileSizeBytes { get; set; }
-    public string FileHash { get; set; } = string.Empty; // SHA256 for deduplication
     public ModelFileFormat FileFormat { get; set; }
-    public DateTime UploadedAt { get; set; }
-    public string? Description { get; set; }
     public double? DimensionX { get; set; } // in mm
     public double? DimensionY { get; set; } // in mm  
     public double? DimensionZ { get; set; } // in mm
@@ -404,12 +404,6 @@ public class Model3D
     public string? ValidationErrors { get; set; } // JSON array of validation issues
     public Guid? UploadedByUserId { get; set; }
     public User? UploadedByUser { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-    // File health status (populated by FileConsistencyAuditService)
-    public DateTime? LastHealthCheckDate { get; set; }
-    public FileHealthStatus HealthStatus { get; set; } = FileHealthStatus.Unknown;
-    public string? LastVerificationResult { get; set; } // JSON object with verification details
 
     // Navigation property for tags
     public ICollection<Model3DTagMapping> TagMappings { get; set; } = new List<Model3DTagMapping>();
@@ -851,7 +845,7 @@ public enum FileAuditType
 /// Folders provide hierarchical organization and enable referential integrity through FK relationships.
 /// Each folder is associated with a specific content type (models or gcode).
 /// </summary>
-public class Folder
+public class FolderNode
 {
     public Guid Id { get; set; }
     public string Path { get; set; } = string.Empty; // Virtual folder path (e.g., "/", "/subfolder")

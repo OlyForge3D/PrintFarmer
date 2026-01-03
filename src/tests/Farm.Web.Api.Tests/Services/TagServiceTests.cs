@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.Tags;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Tags;
 using Microsoft.EntityFrameworkCore;

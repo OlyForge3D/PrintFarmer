@@ -846,9 +846,9 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         // TODO: SDCP file list implementation needs to parse actual response from SDCP protocol
         // Currently returns placeholder data - should extract size and modified timestamp from SDCP response
         var files = await GetFileListAsync(baseUrl, ct);
-        return files?.Select(f => new PrinterFileInfo 
-        { 
-            Name = f, 
+        return files?.Select(f => new PrinterFileInfo
+        {
+            Name = f,
             Path = f,
             // Size and Modified should be extracted from SDCP protocol response
             // when proper implementation is added

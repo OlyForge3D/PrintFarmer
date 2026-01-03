@@ -20,7 +20,7 @@ export function PrinterCompactCard({
   const isPrinting = state.toLowerCase().includes('printing');
 
   return (
-    <div className="bg-pf-bg-1 rounded-lg p-4 shadow border border-pf-border hover:border-pf-primary transition-colors">
+    <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors">
       <div className="mb-3">
         {p.thumbnailUrl && !imageError ? (
           <div className="w-full h-32 bg-pf-border flex items-center justify-center rounded overflow-hidden mb-3">

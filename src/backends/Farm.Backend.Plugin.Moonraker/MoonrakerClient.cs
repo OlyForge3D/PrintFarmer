@@ -1297,7 +1297,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             // e.g., "folder/subfolder/file.gcode" -> "folder/subfolder/file.gcode" (only special chars encoded)
             string[] pathSegments = filename.Split('/');
             string encodedFilename = string.Join("/", pathSegments.Select(Uri.EscapeDataString));
-            
+
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);

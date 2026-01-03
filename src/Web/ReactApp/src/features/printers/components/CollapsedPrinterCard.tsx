@@ -19,45 +19,10 @@ import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { formatPrinterState } from '@/common/utils/printerStateDisplay';
+import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { PrinterBackend, type Printer } from '@/types/api';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
-import moonrakerIcon from '@/assets/moonraker.svg';
-import prusalinkIcon from '@/assets/prusalink.svg';
-import octoprintIcon from '@/assets/octoprint.svg';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
-
-// Backend icon helper
-function getBackendIcon(backend: PrinterBackend | number | string) {
-  let backendValue: PrinterBackend | undefined = undefined;
-  
-  // Handle numeric values
-  if (typeof backend === 'number') {
-    backendValue = backend;
-  } 
-  // Handle string values
-  else if (typeof backend === 'string') {
-    switch (backend.toLowerCase()) {
-      case 'moonraker': backendValue = PrinterBackend.Moonraker; break;
-      case 'prusalink': backendValue = PrinterBackend.PrusaLink; break;
-      case 'sdcp': backendValue = PrinterBackend.SDCP; break;
-      case 'octoprint': backendValue = PrinterBackend.OctoPrint; break;
-      default: backendValue = undefined;
-    }
-  }
-  
-  switch (backendValue) {
-    case PrinterBackend.Moonraker:
-      return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle mr-1" />;
-    case PrinterBackend.PrusaLink:
-      return <img src={prusalinkIcon} alt="PrusaLink" title="PrusaLink" className="inline h-5 w-5 align-middle mr-1" />;
-    case PrinterBackend.SDCP:
-      return <span title="SDCP" aria-label="SDCP" role="img" className="mr-1">📡</span>;
-    case PrinterBackend.OctoPrint:
-      return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle mr-1" />;
-    default:
-      return <span title="Other" aria-label="Other" role="img" className="mr-1">🖨️</span>;
-  }
-}
 
 interface CollapsedPrinterCardProps {
   printer: Printer;
@@ -125,7 +90,7 @@ export function CollapsedPrinterCard({
   };
 
   return (
-    <div className="border border-pf-border rounded-xl p-3 bg-gradient-to-b from-pf-bg-1 to-pf-bg-0 shadow-lg min-w-[18rem] max-w-[18rem]">
+    <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors w-full max-w-sm">
       {/* Top row: Name + Status Pill */}
       <div className="flex justify-between items-center mb-2 gap-2">
         <div className="flex-1 min-w-0">

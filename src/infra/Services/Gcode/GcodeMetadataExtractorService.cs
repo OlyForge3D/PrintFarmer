@@ -182,7 +182,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                     _logger.LogInformation("ExtractPrintTime: Found {Minutes}min (normal mode)", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
                     return;
                 }
-                
+
                 // Try minutes-only format: "26m 5s"
                 Match minMatch = Regex.Match(line, @"(\d+)m\s+(\d+)s");
                 if (minMatch.Success)
@@ -199,7 +199,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         // Second pass: Try generic TIME formats
         foreach (string line in lines)
         {
-            if (line.Contains("TIME:", StringComparison.OrdinalIgnoreCase) || 
+            if (line.Contains("TIME:", StringComparison.OrdinalIgnoreCase) ||
                 line.Contains("; Time:", StringComparison.OrdinalIgnoreCase))
             {
                 Match secondsMatch = Regex.Match(line, @"(?:TIME|Time):\s*(\d+)", RegexOptions.IgnoreCase);
@@ -234,7 +234,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                     _logger.LogInformation("ExtractPrintTime: Found {Minutes}min", (metadata.EstimatedPrintTimeMinutes ?? 0).ToString("F0"));
                     return;
                 }
-                
+
                 // Try minutes-only format
                 Match minMatch = Regex.Match(line, @"(\d+)m\s+(\d+)s");
                 if (minMatch.Success)
@@ -266,7 +266,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 _logger.LogInformation("ExtractFilamentInfo: Found {Length}mm of filament", length.ToString("F0"));
             }
         }
-        
+
         // Also try CONFIG_BLOCK format: "; filament used [mm] = 3538.91"
         if (metadata.FilamentLengthMm == null)
         {
@@ -298,7 +298,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 _logger.LogInformation("ExtractFilamentInfo: Found {Weight}g of filament", weight.ToString("F1"));
             }
         }
-        
+
         // Also try CONFIG_BLOCK format: "; filament used [g] = 10.55"
         if (metadata.FilamentWeightGrams == null)
         {
@@ -320,7 +320,7 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         // Extract first layer temperatures
         // OrcaSlicer: "; first_layer_bed_temperature = 55" and "; first_layer_temperature = 220"
         // PrusaSlicer: "; first_layer_bed_temperature = 110" and "; first_layer_temperature = 260"
-        
+
         foreach (string line in lines)
         {
             // Bed temperature - exact match to avoid "bed_temperature" variants
@@ -479,19 +479,19 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
     private List<string> ExtractConfigBlockLines(string[] allLines)
     {
         List<string> configLines = new List<string>();
-        
+
         try
         {
             // Take the last 600 lines - this works for both OrcaSlicer and PrusaSlicer
             // (OrcaSlicer metadata starts around 535 lines from end)
             int startIndex = Math.Max(0, allLines.Length - 600);
-            
+
             for (int i = startIndex; i < allLines.Length; i++)
             {
                 configLines.Add(allLines[i]);
             }
 
-            _logger.LogInformation("ExtractConfigBlockLines: Extracted {LineCount} lines from end of file (starting at line {StartLine})", 
+            _logger.LogInformation("ExtractConfigBlockLines: Extracted {LineCount} lines from end of file (starting at line {StartLine})",
                 configLines.Count.ToString(), startIndex.ToString());
         }
         catch (Exception ex)

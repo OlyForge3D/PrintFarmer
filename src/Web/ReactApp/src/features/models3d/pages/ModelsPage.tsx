@@ -2,8 +2,9 @@ import React, { useState, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { DeleteIcon, CloseIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, GridViewIcon, ListViewIcon, FileIcon, FolderIcon, UploadIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, CloseIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, FileIcon, UploadIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { Button, Input } from '@/common/components/ui';
@@ -22,15 +23,16 @@ const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>
 // Slicing now redirects to NewSliceJobPage for better UX with 3D preview
 // const SlicerConfigModal = lazyWithPreload<{...}>(...)
 import { slicerService } from '@/services/slicerService';
-import type { SlicedModelSummary } from '@/services/slicerService';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
-type Model = SlicedModelSummary & {
-  fileName?: string;
-  fileSize?: number;
-  fileType?: 'stl' | '3mf' | 'obj' | 'ply';
-  uploadedAt?: string; // alias of createdAt
-  url?: string;
-  thumbnailUrl?: string;
+type Model = {
+  id: string;
+  name: string;
+  fileName: string;
+  fileSize: number;
+  fileType: 'stl' | '3mf' | 'obj' | 'ply';
+  uploadedAt: string;
+  url: string;
+  thumbnailPath?: string;
   tags?: Array<{ id: string; name: string; color?: string }>;
 };
 
@@ -179,35 +181,10 @@ export const ModelsPage: React.FC = () => {
             />
             
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex gap-1 bg-pf-bg-0 border border-pf-border rounded p-1">
-                <Button
-                  onClick={() => setViewMode('explorer')}
-                  variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
-                  size="sm"
-                  title="Explorer view"
-                  className="px-2"
-                >
-                  <FolderIcon className="w-4 h-4" />
-                </Button>
-                <Button
-                  onClick={() => setViewMode('grid')}
-                  variant={viewMode === 'grid' ? 'primary' : 'secondary'}
-                  size="sm"
-                  title="Grid view"
-                  className="px-2"
-                >
-                  <GridViewIcon className="w-4 h-4" />
-                </Button>
-                <Button
-                  onClick={() => setViewMode('list')}
-                  variant={viewMode === 'list' ? 'primary' : 'secondary'}
-                  size="sm"
-                  title="List view"
-                  className="px-2"
-                >
-                  <ListViewIcon className="w-4 h-4" />
-                </Button>
-              </div>
+              <FileBrowserViewModeToggle 
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+              />
 
               <Button
                 onClick={() => setShowUploadModal(true)}
@@ -299,10 +276,10 @@ export const ModelsPage: React.FC = () => {
                 <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group">
                   {/* Model Preview */}
                   <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
-                    {model.thumbnailUrl ? (
+                    {model.thumbnailPath ? (
                       <img
-                        src={model.thumbnailUrl}
-                        alt={model.name}
+                        src={model.thumbnailPath}
+                        alt={model.fileName}
                         className="w-full h-full object-contain group-hover:scale-105 transition-transform"
                       />
                     ) : (
@@ -408,10 +385,10 @@ export const ModelsPage: React.FC = () => {
                         <div className="flex items-center gap-3 min-w-0">
                           {/* Thumbnail */}
                           <div className="w-12 h-12 flex-shrink-0 rounded bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
-                            {model.thumbnailUrl ? (
+                            {model.thumbnailPath ? (
                               <img
-                                src={model.thumbnailUrl}
-                                alt={model.name}
+                                src={model.thumbnailPath}
+                                alt={model.fileName}
                                 className="w-full h-full object-contain"
                               />
                             ) : (
@@ -454,7 +431,7 @@ export const ModelsPage: React.FC = () => {
                         )}
                       </td>
                       <td className="px-4 py-3 text-pf-text-secondary text-xs">
-                        {new Date(model.uploadedAt || (model as { createdAt?: string }).createdAt || Date.now()).toLocaleDateString()}
+                        {new Date(model.uploadedAt).toLocaleDateString()}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-2">

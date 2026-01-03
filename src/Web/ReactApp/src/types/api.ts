@@ -751,7 +751,8 @@ export interface StartBulkHarvestRequest {
 export interface GcodeFile {
   id: string;
   path: string;
-  fileName: string; // Display name for the file/folder (matches backend GcodeFileEntryDto.FileName)
+  fileName: string; // GUID-based filename for internal storage
+  name?: string; // Original filename uploaded by user (for display)
   fileSize: number;
   uploadedAt: Date;
   isDirectory: boolean;
@@ -795,7 +796,7 @@ export interface Model3DFile {
   size: number;
   modifiedAt: Date;
   isDirectory: boolean;
-  thumbnailUrl?: string;
+  thumbnailPath?: string;
 }
 
 export interface Model3DListResponse {

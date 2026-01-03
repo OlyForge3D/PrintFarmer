@@ -12,14 +12,14 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 public class GcodeLibraryControllerTests
 {
-    private readonly Mock<IGcodeLibraryService> _gcodeServiceMock;
+    private readonly Mock<IGcodeFilesService> _gcodeServiceMock;
     private readonly Mock<IWebHostEnvironment> _envMock;
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
     private readonly GcodeLibraryController _controller;
 
     public GcodeLibraryControllerTests()
     {
-        _gcodeServiceMock = new Mock<IGcodeLibraryService>();
+        _gcodeServiceMock = new Mock<IGcodeFilesService>();
         _envMock = new Mock<IWebHostEnvironment>();
         _loggerMock = new Mock<IUnifiedLoggingService>();
         _envMock.Setup(e => e.WebRootPath).Returns("/app/wwwroot");

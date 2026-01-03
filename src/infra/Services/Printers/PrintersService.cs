@@ -859,7 +859,7 @@ namespace Farm.Infrastructure.Services.Printers
                 ["frontendPort"] = p.FrontendPort,
                 ["apiKey"] = p.ApiKey,
                 ["dateAcquired"] = p.DateAcquired,
-                
+
                 // Hardware specs from Printer instance (populated at creation time from PrinterModel)
                 ["maxBuildVolumeX"] = p.MaxBuildVolumeX,
                 ["maxBuildVolumeY"] = p.MaxBuildVolumeY,
@@ -868,14 +868,14 @@ namespace Farm.Infrastructure.Services.Printers
                 ["hasEnclosure"] = p.HasEnclosure,
                 ["multiMaterial"] = p.MultiMaterial,
                 ["supportsAutoLeveling"] = p.SupportsAutoLeveling,
-                
+
                 // Material and job tracking
                 ["currentMaterial"] = p.CurrentMaterial,
                 ["currentSpoolId"] = p.CurrentSpoolId,
                 ["isAvailable"] = p.IsAvailable,
                 ["lastUpdated"] = p.LastCapabilityUpdate,
                 ["maxBedTemp"] = p.MaxBedTemp,
-                
+
                 // All toolheads as array (supports multi-toolhead printers)
                 ["toolheads"] = p.Toolheads?.Select(t => new Dictionary<string, object?>
                 {

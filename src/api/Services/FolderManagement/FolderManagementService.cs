@@ -22,7 +22,7 @@ namespace Farm.Web.Api.Services.FolderManagement
         /// <summary>
         /// Get an existing folder or create it if it doesn't exist.
         /// </summary>
-        public async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
+        public async Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
             return await _unitOfWork.Folders.GetOrCreateFolderAsync(directoryPath, folderType, ct);
         }

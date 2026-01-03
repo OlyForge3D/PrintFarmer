@@ -33,7 +33,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Model3D> Models3D => Set<Model3D>();
     public DbSet<Model3DTag> Model3DTags => Set<Model3DTag>();
     public DbSet<Model3DTagMapping> Model3DTagMappings => Set<Model3DTagMapping>();
-    public DbSet<Folder> Folders => Set<Folder>();
+    public DbSet<FolderNode> Folders => Set<FolderNode>();
     public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
     public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
     public DbSet<FilamentProfile> FilamentProfiles => Set<FilamentProfile>();

@@ -496,7 +496,7 @@ G28
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
-        
+
         string filePath = Path.Combine(
             testProjectPath,
             "Infrastructure",
@@ -511,27 +511,27 @@ G28
 
         // Verify OrcaSlicer metadata - all parseable properties
         result.Should().NotBeNull();
-        
+
         // Slicer information (from header)
         result.SlicerName.Should().Contain("OrcaSlicer");
         result.SlicerVersion.Should().Be("2.3.1");
-        
+
         // Material - now parsed from CONFIG_BLOCK at end of file
         result.Material.Should().Be("PLA");
-        
+
         // Nozzle diameter - also from CONFIG_BLOCK
         result.NozzleDiameter.Should().Be(0.4);
-        
+
         // Layer height - also from CONFIG_BLOCK
         result.LayerHeight.Should().Be(0.2);
-        
+
         // Print time - also from CONFIG_BLOCK
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(26.08, 0.5);
-        
+
         // Filament info - also from CONFIG_BLOCK
         result.FilamentLengthMm.Should().BeApproximately(3538.91, 1.0);
         result.FilamentWeightGrams.Should().BeApproximately(10.55, 0.5);
-        
+
         // Thumbnail is in the header and should be extracted
         result.ThumbnailData.Should().NotBeNull();
         result.ThumbnailData!.Length.Should().BeGreaterThan(0);
@@ -546,7 +546,7 @@ G28
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
-        
+
         string filePath = Path.Combine(
             testProjectPath,
             "Infrastructure",
@@ -561,27 +561,27 @@ G28
 
         // Verify PrusaSlicer metadata - all parseable properties
         result.Should().NotBeNull();
-        
+
         // Slicer information (from header)
         result.SlicerName.Should().Contain("PrusaSlicer");
         result.SlicerVersion.Should().Be("2.9.4");
-        
+
         // Material - now parsed from CONFIG_BLOCK at end of file
         result.Material.Should().Be("ASA");
-        
+
         // Nozzle diameter - also from CONFIG_BLOCK
         result.NozzleDiameter.Should().Be(0.4);
-        
+
         // Layer height - also from CONFIG_BLOCK
         result.LayerHeight.Should().Be(0.2);
-        
+
         // Print time - also from CONFIG_BLOCK
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(28.75, 0.5);
-        
+
         // Filament info - also from CONFIG_BLOCK
         result.FilamentLengthMm.Should().BeApproximately(3424.48, 1.0);
         result.FilamentWeightGrams.Should().BeApproximately(8.81, 0.5);
-        
+
         // Thumbnail is in the header and should be extracted (PrusaSlicer uses thumbnail_QOI format)
         result.ThumbnailData.Should().NotBeNull();
         result.ThumbnailData!.Length.Should().BeGreaterThan(0);
@@ -596,7 +596,7 @@ G28
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
-        
+
         string filePath = Path.Combine(
             testProjectPath,
             "Infrastructure",
@@ -611,29 +611,29 @@ G28
 
         // Verify OrcaSlicer metadata - parser now reads from CONFIG_BLOCK at end of file
         result.Should().NotBeNull();
-        
+
         // Slicer information is in header (within first 500 lines)
         result.SlicerName.Should().Contain("OrcaSlicer");
         result.SlicerVersion.Should().Be("2.3.1");
-        
+
         // Material - now parsed from CONFIG_BLOCK at end of file
         result.Material.Should().Be("PLA");
-        
+
         // Nozzle diameter - also from CONFIG_BLOCK
         result.NozzleDiameter.Should().Be(0.4);
-        
+
         // Layer height - also from CONFIG_BLOCK
         result.LayerHeight.Should().Be(0.2);
-        
+
         // Print time - also from CONFIG_BLOCK (26m 5s = 26.08 minutes)
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(26.08, 0.5);
-        
+
         // Filament length - also from CONFIG_BLOCK
         result.FilamentLengthMm.Should().BeApproximately(3538.91, 1.0);
-        
+
         // Filament weight - also from CONFIG_BLOCK
         result.FilamentWeightGrams.Should().BeApproximately(10.55, 0.5);
-        
+
         // Thumbnail is in the header and should be extracted
         result.ThumbnailData.Should().NotBeNull();
         result.ThumbnailData!.Length.Should().BeGreaterThan(0);
@@ -648,7 +648,7 @@ G28
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
-        
+
         string filePath = Path.Combine(
             testProjectPath,
             "Infrastructure",
@@ -663,29 +663,29 @@ G28
 
         // Verify PrusaSlicer metadata - parser now reads from CONFIG_BLOCK at end of file
         result.Should().NotBeNull();
-        
+
         // Slicer information is in header (within first 500 lines)
         result.SlicerName.Should().Contain("PrusaSlicer");
         result.SlicerVersion.Should().Be("2.9.4");
-        
+
         // Material - now parsed from CONFIG_BLOCK at end of file
         result.Material.Should().Be("ASA");
-        
+
         // Nozzle diameter - also from CONFIG_BLOCK
         result.NozzleDiameter.Should().Be(0.4);
-        
+
         // Layer height - also from CONFIG_BLOCK
         result.LayerHeight.Should().Be(0.2);
-        
+
         // Print time - also from CONFIG_BLOCK (28m 45s = 28.75 minutes)
         result.EstimatedPrintTimeMinutes.Should().BeApproximately(28.75, 0.5);
-        
+
         // Filament length - also from CONFIG_BLOCK
         result.FilamentLengthMm.Should().BeApproximately(3424.48, 1.0);
-        
+
         // Filament weight - also from CONFIG_BLOCK
         result.FilamentWeightGrams.Should().BeApproximately(8.81, 0.5);
-        
+
         // Thumbnail (PrusaSlicer uses thumbnail_QOI format) is in header and should be extracted
         result.ThumbnailData.Should().NotBeNull();
         result.ThumbnailData!.Length.Should().BeGreaterThan(0);

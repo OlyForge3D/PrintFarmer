@@ -9,13 +9,13 @@ import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 
 interface ModelDetail {
     id: string;
-    name: string;
+    name: string; // Original filename uploaded by user (for display and editing)
     fileName: string;
     fileSize: number;
     fileType: string;
     uploadedAt: string;
     url: string;
-    thumbnailUrl?: string;
+    thumbnailPath?: string;
     description?: string;
     dimensionX?: number;
     dimensionY?: number;
@@ -254,9 +254,9 @@ export const ModelDetailPage: React.FC = () => {
                 {/* Thumbnail */}
                 <div className="md:col-span-1">
                     <div className="bg-pf-bg-1 rounded-lg border border-pf-border aspect-square flex items-center justify-center overflow-hidden">
-                        {model.thumbnailUrl ? (
+                        {model.thumbnailPath ? (
                             <img
-                                src={model.thumbnailUrl}
+                                src={model.thumbnailPath}
                                 alt={model.name}
                                 className="w-full h-full object-contain"
                             />

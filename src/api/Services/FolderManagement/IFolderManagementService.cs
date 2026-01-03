@@ -17,7 +17,7 @@ namespace Farm.Web.Api.Services.FolderManagement
         /// <param name="directoryPath">Normalized directory path (e.g., "/" or "/subdir")</param>
         /// <param name="folderType">Type of folder: "gcode", "models", etc.</param>
         /// <param name="ct">Cancellation token</param>
-        /// <returns>Existing or newly created Folder entity</returns>
-        Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct);
+        /// <returns>Existing or newly created FolderNode entity</returns>
+        Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct);
     }
 }

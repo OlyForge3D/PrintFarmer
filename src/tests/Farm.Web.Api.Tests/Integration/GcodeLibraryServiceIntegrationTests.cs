@@ -16,7 +16,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Integration;
 
 /// <summary>
-/// Integration tests for GcodeLibraryService
+/// Integration tests for GcodeFilesService library operations
 /// Tests G-code file library management: queries, retrieval, deletion
 /// Covers filtering by search, material, and nozzle diameter
 /// Fast executing (~3-4 seconds for 15 tests) - suitable for CI/CD pipelines
@@ -50,7 +50,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         // Create test files
         var file1 = new GcodeFile
@@ -88,7 +88,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         var uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
         var file = new GcodeFile
@@ -117,7 +117,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         var file = new GcodeFile
         {
@@ -146,7 +146,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         var file = new GcodeFile
         {
@@ -175,7 +175,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         var file = new GcodeFile
         {
@@ -209,7 +209,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         var file = new GcodeFile
         {
@@ -237,7 +237,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         // Act
         var result = await service.GetFileAsync(Guid.NewGuid(), CancellationToken.None);
@@ -256,7 +256,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         var file = new GcodeFile
         {
@@ -284,7 +284,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
     {
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         // Act
         var result = await service.DeleteFileAsync(Guid.NewGuid(), CancellationToken.None);
@@ -303,7 +303,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var service = scope.ServiceProvider.GetRequiredService<IGcodeLibraryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
         var uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
         var file = new GcodeFile

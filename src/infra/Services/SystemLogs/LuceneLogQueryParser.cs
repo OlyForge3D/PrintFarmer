@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Farm.Infrastructure.Domain;
@@ -32,7 +32,7 @@ public static class LuceneLogQueryParser
             // Parse the Lucene query
             var parser = new QueryParser(LuceneVersion.AsVersionEnum(), "message", new SimpleAnalyzer(LuceneVersion.AsVersionEnum()));
             var query = parser.Parse(queryString);
-            
+
             // Convert Lucene query to lambda expression
             return CreateFilter(query);
         }
@@ -71,7 +71,7 @@ public static class LuceneLogQueryParser
 
                 filters.Add(filter);
             }
-            else if (!term.StartsWith("AND", StringComparison.OrdinalIgnoreCase) && 
+            else if (!term.StartsWith("AND", StringComparison.OrdinalIgnoreCase) &&
                      !term.StartsWith("OR", StringComparison.OrdinalIgnoreCase))
             {
                 // Default: search in message
@@ -108,11 +108,11 @@ public static class LuceneLogQueryParser
         if (query is Lucene.Net.Search.BooleanQuery boolQuery)
         {
             var filters = new List<Func<SystemLog, bool>>();
-            
+
             foreach (var clause in boolQuery.Clauses)
             {
                 var filter = CreateFilter(clause.Query);
-                
+
                 if (clause.Occur == Lucene.Net.Search.Occur.MUST)
                 {
                     filters.Add(filter);
@@ -156,10 +156,9 @@ public static class LuceneLogQueryParser
 /// </summary>
 internal static class LuceneVersionExtensions
 {
-    public static LuceneVersion AsVersionEnum(this string version) =>
-        version switch
-        {
-            "LUCENE_48" => LuceneVersion.LUCENE_48,
-            _ => LuceneVersion.LUCENE_48
-        };
+    /// <summary>
+    /// Converts string version to LuceneVersion enum.
+    /// Currently only LUCENE_48 is supported.
+    /// </summary>
+    public static LuceneVersion AsVersionEnum(this string version) => LuceneVersion.LUCENE_48;
 }

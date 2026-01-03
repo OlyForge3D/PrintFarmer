@@ -8,10 +8,11 @@ import {
   ArrowDownTrayIcon,
   TrashIcon
 } from '@heroicons/react/24/outline';
-import { GridViewIcon, ListViewIcon } from '@/common/components/icons/MdiIcons';
+import { UploadIcon } from '@/common/components/icons/MdiIcons';
 
-import { GcodeFile, GetGcodeFilesResponse, GcodeUploadSettings } from '@/types/api';
+import { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
+import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
@@ -122,15 +123,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   }, [uploadQueue]);
   const currentXhrRef = useRef<XMLHttpRequest | null>(null);
   const abortAllRef = useRef(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [settings, setSettings] = useState<GcodeUploadSettings | null>(null);
-  const [extensionsInput, setExtensionsInput] = useState('');
-
-  useEffect(() => {
-    if (showSettings) {
-      apiClient.getGcodeUploadSettings().then(s => { setSettings(s); setExtensionsInput(s.allowedExtensions.join(', ')); }).catch(() => {});
-    }
-  }, [showSettings]);
 
   const { data: files, isLoading } = useQuery<GetGcodeFilesResponse>({
     queryKey: ['gcode-files', currentPath, harvestId, printerId, sortBy, sortOrder, searchTerm, page, pageSize],
@@ -375,7 +367,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     }
   });
 
-  const mkdirMutation = useMutation({
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const createFolderMutation = useMutation({
     mutationFn: async (name: string) => {
       const resp = await fetch(`${getApiBaseUrl()}/gcode-files/mkdir?path=${encodeURIComponent(currentPath)}&name=${encodeURIComponent(name)}`, { 
         method: 'POST',
@@ -497,7 +490,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                   toast.error((e as Error)?.message || 'Duplicate scan failed');
                 }
               }}
-              variant="primary"
+              variant="secondary"
               size="sm"
             >
               Find Duplicates ({selectedFiles.length})
@@ -507,68 +500,16 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             <Button
               type="button"
               onClick={() => setShowUploadModal(true)}
-              variant="primary"
-              size="sm"
-            >
-              Upload Files
-            </Button>
-          )}
-          {hasPermission('gcode_harvest', 'create') && (
-            <Button
-              type="button"
-              onClick={() => {
-                const name = prompt('New directory name');
-                if (name) mkdirMutation.mutate(name);
-              }}
-              variant="secondary"
-              size="sm"
-              disabled={mkdirMutation.isPending}
-            >
-              New Folder
-            </Button>
-          )}
-          {hasPermission('gcode_harvest', 'update') && (
-            <Button
-              type="button"
-              onClick={() => setShowSettings(s => !s)}
               variant="secondary"
               size="sm"
             >
-              {showSettings ? 'Close Settings' : 'Settings'}
+                <UploadIcon className="w-4 h-4 mr-1" />
             </Button>
           )}
-          <div className="flex gap-1 bg-pf-bg-0 border border-pf-border rounded p-1">
-            <Button
-              type="button"
-              onClick={() => setViewMode('explorer')}
-              variant={viewMode === 'explorer' ? 'primary' : 'secondary'}
-              size="sm"
-              title="Explorer view"
-              className="px-2"
-            >
-              <FolderIcon className="w-4 h-4" />
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setViewMode('grid')}
-              variant={viewMode === 'grid' ? 'primary' : 'secondary'}
-              size="sm"
-              title="Grid view"
-              className="px-2"
-            >
-              <GridViewIcon className="w-4 h-4" />
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setViewMode('list')}
-              variant={viewMode === 'list' ? 'primary' : 'secondary'}
-              size="sm"
-              title="List view"
-              className="px-2"
-            >
-              <ListViewIcon className="w-4 h-4" />
-            </Button>
-          </div>
+          <FileBrowserViewModeToggle 
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
         </div>
       </div>
       {/* Search and filters */}
@@ -719,7 +660,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             }
                           }}
                         >
-                          <div className="font-medium text-pf-text-primary">{file.fileName}</div>
+                          <div className="font-medium text-pf-text-primary">{file.name}</div>
                           {file.extractedPrinterModel && (
                             <div className="text-xs text-pf-text-tertiary">{file.extractedPrinterModel}</div>
                           )}
@@ -828,45 +769,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
             >
               {[25,50,100,200,500].map(size => <option key={size} value={size}>{size}/page</option>)}
             </Select>
-          </div>
-        </div>
-      )}
-      {showSettings && settings && (
-        <div className="mt-6 bg-white border rounded p-4 space-y-4">
-          <h3 className="font-semibold text-sm">G-code Upload Settings</h3>
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-medium">Allowed Extensions (comma separated)</label>
-            <Input
-              value={extensionsInput}
-              onChange={e => setExtensionsInput(e.target.value)}
-              placeholder=".gcode, .bgcode"
-            />
-            <div className="text-xs text-pf-text-secondary">Current Limit: {(settings.dailyUploadLimitBytes / (1024*1024)).toFixed(2)} MB/day • Used: {(settings.userUsedBytes / (1024*1024)).toFixed(2)} MB</div>
-            <div className="flex gap-2">
-              <Button
-                onClick={async () => {
-                  const values = extensionsInput.split(',').map(v => v.trim()).filter(Boolean);
-                  if (values.length === 0) { toast.error('Provide at least one extension'); return; }
-                  try {
-                    await apiClient.updateGcodeUploadSettings(values);
-                    const fresh = await apiClient.getGcodeUploadSettings();
-                    setSettings(fresh);
-                    toast.success('Settings updated');
-                  } catch (e: unknown) {
-                    toast.error((e as Error).message || 'Failed');
-                  }
-                }}
-                variant="primary"
-              >Save</Button>
-              <Button
-                onClick={async () => {
-                  try { const fresh = await apiClient.getGcodeUploadSettings(); setSettings(fresh); setExtensionsInput(fresh.allowedExtensions.join(', ')); } catch {
-                    // Ignore settings reload errors
-                  }
-                }}
-                variant="secondary"
-              >Reset</Button>
-            </div>
           </div>
         </div>
       )}

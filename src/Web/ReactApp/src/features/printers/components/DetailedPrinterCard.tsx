@@ -1,38 +1,5 @@
-import moonrakerIcon from '@/assets/moonraker.svg';
-import octoprintIcon from '@/assets/octoprint.svg';
-import { PrinterBackend } from '@/types/api';
-
-// Official backend icon for this printer
-function getBackendIcon(backend: PrinterBackend | number | string) {
-  let backendValue: PrinterBackend | undefined = undefined;
-  if (typeof backend === 'number') {
-    backendValue = backend;
-  } else if (typeof backend === 'string') {
-    switch (backend) {
-      case 'Moonraker': backendValue = PrinterBackend.Moonraker; break;
-      case 'PrusaLink': backendValue = PrinterBackend.PrusaLink; break;
-      case 'SDCP': backendValue = PrinterBackend.SDCP; break;
-      case 'OctoPrint': backendValue = PrinterBackend.OctoPrint; break;
-      default: backendValue = undefined;
-    }
-  } else {
-    backendValue = undefined;
-  }
-  switch (backendValue) {
-    case PrinterBackend.Moonraker:
-      return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle mr-1" />;
-    case PrinterBackend.PrusaLink:
-      return <span title="PrusaLink" aria-label="PrusaLink" role="img" className="mr-1">🔗</span>;
-    case PrinterBackend.SDCP:
-      return <span title="SDCP" aria-label="SDCP" role="img" className="mr-1">📡</span>;
-    case PrinterBackend.OctoPrint:
-      return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle mr-1" />;
-    default:
-      return <span title="Other" aria-label="Other" role="img" className="mr-1">🖨️</span>;
-  }
-}
-
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { apiClient } from '@/services/api';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import type { Printer, TempTargets, MoveRequest } from '@/types/api';
@@ -61,7 +28,7 @@ interface DetailedPrinterCardProps {
   onDismiss?: () => void;
 }
 
-function formatTemperature(temp: number): string {
+function formatTemperature(temp: number | undefined): string {
   if (temp === undefined || temp === null) return '---';
   return `${temp.toFixed(1)}°C`;
 }
@@ -127,15 +94,17 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
   }, [printer.progress]);
 
   // Camera URL handling
-  const cameraUrls = printer.cameraUrls || [];
-  const hasCameraUrls = cameraUrls.length > 0;
-  const cameraStreamUrl = hasCameraUrls ? getApiBaseUrl(cameraUrls[0]) : null;
+  const cameraStreamUrl = apiPrinter.cameraStreamUrl ?? null;
+  const hasCameraUrls = !!cameraStreamUrl;
 
   const handleControlAction = async (action: string) => {
     try {
-      const result = await apiClient.controlPrinter(printer.id, action);
-      if (!result.success) {
-        console.error(`Failed to ${action}:`, result.error);
+      const response = await fetch(`${getApiBaseUrl()}/printers/${printer.id}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        console.error(`Failed to ${action}:`, response.statusText);
       }
     } catch (error) {
       console.error(`Error during ${action}:`, error);

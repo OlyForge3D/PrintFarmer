@@ -1,5 +1,6 @@
 import React from 'react';
 import { mdiViewList, mdiViewGrid, mdiViewComfy, mdiViewQuilt } from '@mdi/js';
+import { Button } from '@/common/components/ui';
 
 type ViewMode = 'compact' | 'collapsed' | 'expandable' | 'table';
 
@@ -29,24 +30,19 @@ export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
   ];
 
   return (
-    <div className="inline-flex border-b-2 border-pf-border">
-      {modes.map((item, index) => (
-        // eslint-disable-next-line local/pf-no-raw-html-controls
-        <button
+    <div className="inline-flex gap-0 p-1">
+      {modes.map((item) => (
+        <Button
           key={item.mode}
           onClick={() => onChange(item.mode)}
-          className={`px-3 py-2 rounded-sm transition-colors border-r border-pf-border -mb-0.5 ${
-            index === modes.length - 1 ? '' : ''
-          } ${
-            viewMode === item.mode
-              ? 'bg-slate-500 text-white border-b-2 border-slate-500'
-              : 'text-pf-text-secondary hover:text-pf-text-primary'
-          }`}
+          variant={viewMode === item.mode ? 'primary' : 'secondary'}
+          size="md"
           title={item.title}
           type="button"
+          className="px-3"
         >
           <MdiIcon path={item.icon} />
-        </button>
+        </Button>
       ))}
     </div>
   );

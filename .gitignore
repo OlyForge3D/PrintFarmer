@@ -98,6 +98,9 @@ src/test-artifacts/
 # but ignore src/api/artifacts/ as a safety-net for leftover files.
 src/api/artifacts/
 
+# Ignore API uploads directory (test-generated files and temporary uploads)
+src/api/uploads/
+
 # Auto-generated docker files 
 /dockerfiles/
 /docker-entrypoint-config.sh

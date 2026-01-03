@@ -7,9 +7,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
@@ -32,7 +33,7 @@ namespace Farm.Web.Api.Tests.Services
 
         private static Mock<IFolderManagementService> CreateFolderServiceMock()
         {
-            var folder = new Folder
+            var folder = new FolderNode
             {
                 Id = Guid.NewGuid(),
                 Path = "/",
@@ -42,6 +43,21 @@ namespace Farm.Web.Api.Tests.Services
             var mock = new Mock<IFolderManagementService>(MockBehavior.Strict);
             _ = mock.Setup(f => f.GetOrCreateFolderAsync("/", "models", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(folder);
+            return mock;
+        }
+
+        private static Mock<IStoredFileOperationsService> CreateStoredFileOperationsServiceMock()
+        {
+            var mock = new Mock<IStoredFileOperationsService>(MockBehavior.Loose);
+            mock.Setup(s => s.BuildThumbnailUrl(It.IsAny<StoredFile>(), It.IsAny<string>(), It.IsAny<string>()))
+                .Returns<StoredFile, string, string>((file, endpoint, storageDir) =>
+                    file.ThumbnailFileName != null ? $"{endpoint}?path={file.Id}/thumbnail" : null);
+            mock.Setup(s => s.GetFullFilePath(It.IsAny<StoredFile>()))
+                .Returns<StoredFile>(f => Path.Combine(f.FilePath, f.FileName));
+            mock.Setup(s => s.GetFullThumbnailPath(It.IsAny<StoredFile>()))
+                .Returns<StoredFile>(f => f.ThumbnailFileName != null ? Path.Combine(f.FilePath, f.ThumbnailFileName) : null);
+            mock.Setup(s => s.GenerateThumbnailFileName(It.IsAny<Guid>(), It.IsAny<string>()))
+                .Returns<Guid, string>((id, ext) => $"{id}_thumb{ext}");
             return mock;
         }
 
@@ -80,9 +96,14 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
             mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
             mockUoW.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-            
+
+            // Mock IStoragePathService (like GcodeFilesService does)
+            var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
             Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object);
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile file = CreateFormFile("file", content, "model.stl");
 
@@ -118,9 +139,14 @@ namespace Farm.Web.Api.Tests.Services
             // Wrap the repository in a UnitOfWork mock
             Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
             mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
-            
+
+            // Mock IStoragePathService (like GcodeFilesService does)
+            var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
             Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object);
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile badFile = CreateFormFile("file", "x", "model.exe");
 
@@ -142,9 +168,14 @@ namespace Farm.Web.Api.Tests.Services
             // Wrap the repository in a UnitOfWork mock
             Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
             mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
-            
+
+            // Mock IStoragePathService (like GcodeFilesService does)
+            var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
             Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object);
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.stl");
 
@@ -177,7 +208,12 @@ namespace Farm.Web.Api.Tests.Services
             mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
             mockUoW.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockAnalysis.Object);
+            // Mock IStoragePathService (like GcodeFilesService does)
+            var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 
@@ -210,7 +246,12 @@ namespace Farm.Web.Api.Tests.Services
             mockUoW.Setup(u => u.Model3dFiles).Returns(mockRepo.Object);
             mockUoW.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("db failure"));
 
-            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object);
+            // Mock IStoragePathService (like GcodeFilesService does)
+            var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+            mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
+            Model3DFileService service = new Model3DFileService(mockUoW.Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
             IFormFile file = CreateFormFile("file", "content", "model.stl");
 

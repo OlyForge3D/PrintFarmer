@@ -2,7 +2,7 @@
 import React from 'react';
 import clsx from 'clsx';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab' | 'toggle';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -20,7 +20,8 @@ const variantClasses: Record<ButtonVariant, string> = {
   danger: 'bg-pf-error hover:bg-pf-error text-white border border-pf-error-border',
   subtle: 'bg-transparent hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
   success: 'bg-gradient-to-b from-pf-gradient-success-start to-pf-gradient-success-end text-white border border-pf-success hover:bg-pf-success-hover',
-  tab: 'bg-transparent text-pf-text-muted border-b-2 border-transparent hover:text-pf-text-primary focus:ring-0'
+  tab: 'bg-transparent text-pf-text-muted border-b-2 border-transparent hover:text-pf-text-primary focus:ring-0',
+  toggle: 'bg-transparent text-pf-text-secondary hover:text-pf-text-primary border-transparent'
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -43,7 +44,7 @@ export const Button: React.FC<ButtonProps> = ({
   return (
     <button
       className={clsx(
-        'rounded font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pf-accent shadow-sm',
+        'rounded-sm font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
         variantClasses[variant],
         sizeClasses[size],
         className

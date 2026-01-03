@@ -356,6 +356,10 @@ builder.Services.AddHealthChecks()
 // Validation
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
+// File Management Services
+builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementService, Farm.Web.Api.Services.FileManagement.FileManagementService>();
+builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();
+
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 if (isMonolithicDeployment)

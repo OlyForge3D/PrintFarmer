@@ -669,7 +669,7 @@ public class GcodeFilesController(
     {
         string? path = null;
         string? name = null;
-        
+
         try
         {
             if (request == null || string.IsNullOrWhiteSpace(request.Path))
@@ -691,7 +691,7 @@ public class GcodeFilesController(
             logger.LogDebug($"[CreateFolder] Input: '{request.Path}' -> path='{path}', name='{name}'");
 
             GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, ct);
-            
+
             logger.LogInformation($"[CreateFolder] Successfully created virtual folder: '{request.Path}'");
             return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto(true, "Folder created successfully"));
         }
@@ -866,7 +866,7 @@ public class GcodeFilesController(
 
                     // This will update the file's FolderId in the database
                     bool moved = await gcodeFilesService.MoveToFolderAsync(fileId, targetDirectoryPath, ct);
-                    
+
                     if (moved)
                     {
                         movedCount++;
@@ -976,7 +976,7 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("directoryId")] string? DirectoryId = null,   // Include directory ID for efficient directory lookups (virtual path)
     [property: JsonPropertyName("targetModelName")] string? TargetModelName = null,  // Printer model this gcode was sliced for
     [property: JsonPropertyName("requiredMaterial")] string? RequiredMaterial = null,  // Required filament type (e.g., "PLA", "PETG")
-    // Extracted metadata from G-code
+                                                                                       // Extracted metadata from G-code
     [property: JsonPropertyName("extractedSlicerName")] string? ExtractedSlicerName = null,
     [property: JsonPropertyName("extractedSlicerVersion")] string? ExtractedSlicerVersion = null,
     [property: JsonPropertyName("extractedPrintTime")] double? ExtractedPrintTime = null,  // Minutes

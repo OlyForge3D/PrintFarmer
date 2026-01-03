@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
@@ -33,6 +34,8 @@ public class Model3DFilesController : ControllerBase
     private readonly ITagService _tagService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IFolderManagementService _folderService;
+    private readonly IStoredFileOperationsService _fileOperations;
+    private readonly IStoragePathService _storagePathService;
 
     public Model3DFilesController(
         IUnifiedLoggingService logger,
@@ -42,7 +45,9 @@ public class Model3DFilesController : ControllerBase
         IFileManagementService fileManagementService,
         ITagService tagService,
         IUnitOfWork unitOfWork,
-        IFolderManagementService folderService)
+        IFolderManagementService folderService,
+        IStoredFileOperationsService fileOperations,
+        IStoragePathService storagePathService)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
@@ -51,6 +56,8 @@ public class Model3DFilesController : ControllerBase
         _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
+        _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+        _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
         // Ensure path is absolute - if relative, combine with current directory first
@@ -252,7 +259,7 @@ public class Model3DFilesController : ControllerBase
                 FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
                 Url = $"/api/3d-models/{model.Id}/file",
-                ThumbnailUrl = model.ThumbnailFileName != null ? $"/api/3d-models/{model.Id}/thumbnail" : null,
+                ThumbnailPath = _fileOperations.BuildThumbnailUrl(model, "/api/3d-models/download", _storagePathService.GetModelUploadDirectory()),
                 Description = model.Description,
                 DimensionX = model.DimensionX,
                 DimensionY = model.DimensionY,
@@ -366,6 +373,47 @@ public class Model3DFilesController : ControllerBase
         {
             _logger.LogError(ex, $"[Thumbnail] Exception retrieving thumbnail for model {id}: {ex.Message}");
             return StatusCode(StatusCodes.Status500InternalServerError, "Error retrieving thumbnail");
+        }
+    }
+
+    /// <summary>
+    /// Download model file or thumbnail using path query parameter (generic download endpoint).
+    /// Unified with Gcode download endpoint pattern for consistency.
+    /// </summary>
+    /// <param name="path">Relative file path within model storage directory</param>
+    /// <returns>File content with appropriate media type</returns>
+    /// <remarks>
+    /// This endpoint serves both model files and thumbnails using a path-based query parameter approach,
+    /// consistent with the Gcode files download endpoint. This allows efficient thumbnail serving without
+    /// database lookups on each request.
+    /// </remarks>
+    [HttpGet("download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAsync([FromQuery] string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return BadRequest("path is required");
+        }
+
+        try
+        {
+            // Get file bytes (validates path internally)
+            (byte[] bytes, string fileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
+            if (result == null)
+            {
+                return NotFound();
+            }
+
+            var (fileBytes, safeFileName) = result.Value;
+            string contentType = GetContentType(safeFileName);
+            return File(fileBytes, contentType, safeFileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to download file {path}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to download file");
         }
     }
 
@@ -721,11 +769,12 @@ public class Model3DFilesController : ControllerBase
             {
                 Id = m.Id,
                 FileName = m.FileName,
+                Name = m.Name,
                 FileSize = m.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
                 UploadedAt = m.UploadedAt,
                 Url = $"/api/3d-models/{m.Id}/file",
-                ThumbnailUrl = m.ThumbnailFileName != null ? $"/api/3d-models/{m.Id}/thumbnail" : null,
+                ThumbnailPath = _fileOperations.BuildThumbnailUrl(m, "/api/3d-models/download", _storagePathService.GetModelUploadDirectory()),
                 Tags = m.TagMappings.Select(tm => new Model3DTagDto
                 {
                     Id = tm.Tag!.Id,
@@ -828,7 +877,7 @@ public class Model3DFilesController : ControllerBase
             try
             {
                 string folderPath = "/" + relativePath.Trim('/');
-                Folder folder = await _folderService.GetOrCreateFolderAsync(folderPath, "models", ct);
+                FolderNode folder = await _folderService.GetOrCreateFolderAsync(folderPath, "models", ct);
                 _logger.LogInformation($"[CreateFolder] Recorded folder in database: {folder.Path}");
             }
             catch (Exception dbEx)
@@ -1000,6 +1049,27 @@ public class Model3DFilesController : ControllerBase
             _logger.LogError($"[MoveModels] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
         }
+    }
+
+    /// <summary>
+    /// Helper method to determine content type from file extension.
+    /// </summary>
+    private string GetContentType(string fileName)
+    {
+        string extension = Path.GetExtension(fileName).ToLowerInvariant();
+        return extension switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".stl" => "model/stl",
+            ".obj" => "model/obj",
+            ".3mf" => "model/3mf",
+            ".gcode" => "text/plain",
+            ".bgcode" => "application/octet-stream",
+            _ => "application/octet-stream"
+        };
     }
 }
 

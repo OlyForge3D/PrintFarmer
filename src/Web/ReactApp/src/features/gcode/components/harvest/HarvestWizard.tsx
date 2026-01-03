@@ -49,6 +49,7 @@ interface HarvestWizardProps {
 export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardProps) {
   const [step, setStep] = useState(1);
   const [activeHarvests, setActiveHarvests] = useState<GcodeHarvestOperation[]>([]);
+  const [filesImported, setFilesImported] = useState(false);
   const [state, setState] = useState<HarvestWizardState>({
     selectedPrinterId: null,
     options: {
@@ -139,6 +140,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
 
   const handleStep2Complete = (options: HarvestWizardState['options']) => {
     setState(prev => ({ ...prev, options }));
+    setStep(3);
   };
 
   const handleStartDiscovery = useCallback(async () => {
@@ -227,6 +229,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
       // Reset discovery flag when going back from step 3
       if (step === 3) {
         discoveryStartedRef.current = false;
+        setFilesImported(false);
       }
       setStep(step - 1);
     }
@@ -314,6 +317,7 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
               inline={true}
               hideCloseButton={true}
               className="min-h-96"
+              onFilesImported={() => setFilesImported(true)}
             />
           ) : (
             // Show loading state while operation is being created
@@ -343,7 +347,12 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
           Back
         </Button>
         <div className="text-sm text-pf-text-secondary">
-          Step {step} of 3
+          {step === 3 && !filesImported && (
+            <span className="text-pf-warning">Select files and click Import to continue</span>
+          )}
+          {(step !== 3 || filesImported) && (
+            <span>Step {step} of 3</span>
+          )}
         </div>
         {step === 3 ? (
           <Button
@@ -351,6 +360,8 @@ export function HarvestWizard({ printers, onClose, onComplete }: HarvestWizardPr
             size="md"
             onClick={handleCompleted}
             className="min-w-24"
+            disabled={!filesImported}
+            title={!filesImported ? 'Import files first before finishing' : ''}
           >
             Finish
           </Button>

@@ -25,7 +25,7 @@ public class GcodeFilesServiceTests
 {
     private static Mock<IFolderManagementService> CreateFolderServiceMock(string expectedPath)
     {
-        var folder = new Folder
+        var folder = new FolderNode
         {
             Id = Guid.NewGuid(),
             Path = expectedPath,
@@ -36,6 +36,22 @@ public class GcodeFilesServiceTests
         mock.Setup(f => f.GetOrCreateFolderAsync(expectedPath, "gcode", It.IsAny<CancellationToken>())).ReturnsAsync(folder);
         return mock;
     }
+
+    private static Mock<IStoredFileOperationsService> CreateStoredFileOperationsServiceMock()
+    {
+        var mock = new Mock<IStoredFileOperationsService>(MockBehavior.Loose);
+        mock.Setup(s => s.BuildThumbnailUrl(It.IsAny<StoredFile>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns<StoredFile, string, string>((file, endpoint, storageDir) =>
+                file.ThumbnailFileName != null ? $"{endpoint}?path={file.Id}/thumbnail" : null);
+        mock.Setup(s => s.GetFullFilePath(It.IsAny<StoredFile>()))
+            .Returns<StoredFile>(f => Path.Combine(f.FilePath, f.FileName));
+        mock.Setup(s => s.GetFullThumbnailPath(It.IsAny<StoredFile>()))
+            .Returns<StoredFile>(f => f.ThumbnailFileName != null ? Path.Combine(f.FilePath, f.ThumbnailFileName) : null);
+        mock.Setup(s => s.GenerateThumbnailFileName(It.IsAny<Guid>(), It.IsAny<string>()))
+            .Returns<Guid, string>((id, ext) => $"{id}_thumb{ext}");
+        return mock;
+    }
+
     [Fact]
     public async Task FinalizeChunkedUploadAsync_ReturnsNullWhenFileMissingAndLogsWarning()
     {
@@ -53,7 +69,7 @@ public class GcodeFilesServiceTests
         logger.Setup(x => x.LogWarning(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
 
         var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -109,7 +125,7 @@ public class GcodeFilesServiceTests
             .ReturnsAsync(metadata);
 
         var mockFolderService = CreateFolderServiceMock("prints/models");
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -164,7 +180,7 @@ public class GcodeFilesServiceTests
 
         Guid printerId = Guid.NewGuid();
         Guid harvestId = Guid.NewGuid();
-        var folderJob = new Folder { Id = Guid.NewGuid(), Path = "jobs", FolderType = "gcode" };
+        var folderJob = new FolderNode { Id = Guid.NewGuid(), Path = "jobs", FolderType = "gcode" };
 
         var dbFiles = new List<GcodeFile>
         {
@@ -205,7 +221,7 @@ public class GcodeFilesServiceTests
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object);
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
         GcodeFileListResponse response = await service.ListAsync(

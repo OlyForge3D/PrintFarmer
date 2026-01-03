@@ -50,7 +50,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
         {!file.isDirectory && file.thumbnailUrl ? (
           <img
             src={file.thumbnailUrl}
-            alt={file.fileName}
+            alt={file.name}
             className="w-full h-full object-contain group-hover:scale-105 transition-transform"
           />
         ) : file.isDirectory ? (
@@ -63,7 +63,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
       {/* File info */}
       <div className="p-2.5 flex-1 flex flex-col">
         <h3 className="font-semibold text-pf-text-primary line-clamp-2 mb-1.5 text-sm">
-          {file.fileName}
+          {file.name}
         </h3>
 
         {/* Metadata */}

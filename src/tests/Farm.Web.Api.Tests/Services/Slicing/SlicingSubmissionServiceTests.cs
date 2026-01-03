@@ -6,8 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Model;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Slicing;
 using Farm.Web.Api.Services.Slicing;
@@ -374,9 +374,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid printerId = Guid.NewGuid();
         Guid userId = Guid.NewGuid();
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync(model);
 
         _mockFileStorage
             .Setup(f => f.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -407,9 +407,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid modelId = Guid.NewGuid();
         SlicerProfileDto profile = CreateTestProfile();
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Model3D?)null);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync((Model3D?)null);
 
         // Act
         SlicingSubmissionResult result = await _service.SubmitSlicingJobFromModelAsync(
@@ -435,9 +435,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         };
         SlicerProfileDto profile = CreateTestProfile();
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync(model);
 
         // Act
         SlicingSubmissionResult result = await _service.SubmitSlicingJobFromModelAsync(
@@ -466,9 +466,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid userId = Guid.NewGuid();
         string capturedKey = string.Empty;
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync(model);
 
         _mockFileStorage
             .Setup(f => f.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -510,9 +510,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         };
         SlicerProfileDto profile = CreateTestProfile();
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync(model);
 
         _mockFileStorage
             .Setup(f => f.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -545,10 +545,10 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid userId = Guid.NewGuid();
         bool repositoryCalled = false;
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .Callback<Guid, CancellationToken>((id, ct) => repositoryCalled = true)
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .Callback<Guid, CancellationToken>((id, ct) => repositoryCalled = true)
+    .ReturnsAsync(model);
 
         _mockFileStorage
             .Setup(f => f.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -588,9 +588,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid userId = Guid.NewGuid();
         long streamLength = 0;
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync(model);
 
         _mockFileStorage
             .Setup(f => f.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -634,9 +634,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         Guid jobId = Guid.NewGuid();
         const string uploadedUrl = "http://storage.local/testing-model.stl";
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync(model);
 
         _mockFileStorage
             .Setup(f => f.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -684,9 +684,9 @@ public class SlicingSubmissionServiceTests : IDisposable
         };
         SlicerProfileDto profile = CreateTestProfile();
 
-                _mockModel3dRepository
-        .Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(model);
+        _mockModel3dRepository
+.Setup(r => r.GetByIdAsync(modelId, It.IsAny<CancellationToken>()))
+    .ReturnsAsync(model);
 
         _mockFileStorage
             .Setup(f => f.UploadFileAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))

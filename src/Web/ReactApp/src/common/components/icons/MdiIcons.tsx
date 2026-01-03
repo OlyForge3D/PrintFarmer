@@ -1,9 +1,12 @@
 import { 
   mdiPrinter3dNozzleAlert, 
   mdiPrinter3dNozzle, 
+  mdiPrinter3d,
   mdiRadiator, 
   mdiRadiatorDisabled, 
   mdiEngineOff,
+  mdiFolderOpen,
+  mdiTools,
   mdiHome,
   mdiPlay,
   mdiPause,
@@ -45,7 +48,6 @@ import {
   mdiOpenInNew,
   mdiCamera,
   mdiMinus,
-  mdiPrinter,
   mdiWrench,
   mdiViewDashboard,
   mdiTrendingUp,
@@ -85,7 +87,10 @@ import {
   mdiNetwork,
   mdiCalendar,
   mdiChartBox,
-  mdiTimerOutline
+  mdiTimerOutline,
+  mdiFileImportOutline,
+  mdiFileExportOutline,
+  mdiPrinterSearch
 } from '@mdi/js';
 
 interface IconProps {
@@ -1184,6 +1189,32 @@ export function FolderIcon({ className = 'w-4 h-4', ariaLabel = 'Folder' }: Omit
 }
 
 /**
+ * Folder open icon
+ * 
+ * Material Design icon component for open file storage references.
+ * 
+ * @component
+ * @preview ![folder-open](https://unpkg.com/@mdi/svg@7.4.47/svg/folder-open.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/folder-open.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <FolderOpenIcon className="w-5 h-5" ariaLabel="Files" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FolderOpenIcon({ className = 'w-4 h-4', ariaLabel = 'Files' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFolderOpen} />
+    </svg>
+  );
+}
+
+/**
  * Cube icon
  * 
  * Material Design icon component for 3D model/content references.
@@ -1352,7 +1383,7 @@ export function PrinterIcon({ className = 'w-4 h-4', ariaLabel = 'Printer' }: Om
       aria-label={ariaLabel}
       role="img"
     >
-      <path fill="currentColor" d={mdiPrinter} />
+      <path fill="currentColor" d={mdiPrinter3d} />
     </svg>
   );
 }
@@ -1379,6 +1410,32 @@ export function WrenchIcon({ className = 'w-4 h-4', ariaLabel = 'Tools' }: Omit<
       role="img"
     >
       <path fill="currentColor" d={mdiWrench} />
+    </svg>
+  );
+}
+
+/**
+ * Tools icon for maintenance mode
+ * 
+ * Material Design icon component for maintenance mode indicator.
+ * 
+ * @component
+ * @preview ![tools](https://unpkg.com/@mdi/svg@7.4.47/svg/tools.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/tools.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <ToolsIcon className="w-5 h-5" ariaLabel="Maintenance Mode" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ToolsIcon({ className = 'w-4 h-4', ariaLabel = 'Maintenance Mode' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiTools} />
     </svg>
   );
 }
@@ -2392,6 +2449,84 @@ export function TimerIcon({ className = 'w-4 h-4', ariaLabel = 'Timer' }: Omit<I
       role="img"
     >
       <path fill="currentColor" d={mdiTimerOutline} />
+    </svg>
+  );
+}
+
+/**
+ * File import icon
+ * 
+ * Material Design icon component for import/upload file actions.
+ * 
+ * @component
+ * @preview ![file-import-outline](https://unpkg.com/@mdi/svg@7.4.47/svg/file-import-outline.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/file-import-outline.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <FileImportIcon className="w-5 h-5" ariaLabel="Import file" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FileImportIcon({ className = 'w-4 h-4', ariaLabel = 'Import file' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFileImportOutline} />
+    </svg>
+  );
+}
+
+/**
+ * File export icon
+ * 
+ * Material Design icon component for export/download file actions.
+ * 
+ * @component
+ * @preview ![file-export-outline](https://unpkg.com/@mdi/svg@7.4.47/svg/file-export-outline.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/file-export-outline.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <FileExportIcon className="w-5 h-5" ariaLabel="Export file" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FileExportIcon({ className = 'w-4 h-4', ariaLabel = 'Export file' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFileExportOutline} />
+    </svg>
+  );
+}
+
+/**
+ * Printer search icon
+ * 
+ * Material Design icon component for printer discovery/search actions.
+ * 
+ * @component
+ * @preview ![printer-search](https://unpkg.com/@mdi/svg@7.4.47/svg/printer-search.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/printer-search.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <PrinterSearchIcon className="w-5 h-5" ariaLabel="Discover printers" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function PrinterSearchIcon({ className = 'w-4 h-4', ariaLabel = 'Discover printers' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiPrinterSearch} />
     </svg>
   );
 }

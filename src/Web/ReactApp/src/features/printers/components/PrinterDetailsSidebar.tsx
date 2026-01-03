@@ -11,6 +11,7 @@ import { PrinterHistoryModal } from '@/features/printers/components/PrinterHisto
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/common/components/ui';
+import type { Printer } from '@/types/api';
 import { 
   NozzleIcon, 
   BedIcon, 
@@ -80,7 +81,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // Use empty string as default to satisfy hook typing, but we'll guard against empty printerId
   const { data: apiPrinter, isLoading, refetch } = usePrinter(printerId || '');
   // Merge with realtime SignalR updates
-  const printer = usePrinterDisplay((apiPrinter as any) || ({} as any));
+  const printer = usePrinterDisplay((apiPrinter || {}) as Printer);
   
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);

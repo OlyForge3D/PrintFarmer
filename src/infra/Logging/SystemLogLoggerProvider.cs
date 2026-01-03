@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,7 +45,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
     private async Task ProcessLogsAsync(CancellationToken ct)
     {
         var batch = new List<SystemLog>(capacity: 50);
-        
+
         // Add a small delay at the start to let the application fully initialize
         await Task.Delay(2000, ct).ConfigureAwait(false);
 
@@ -135,6 +135,9 @@ public class SystemLogLoggerProvider : ILoggerProvider
         }
     }
 
+    /// <summary>
+    /// Disposes the logger provider, stopping the background processing task and cleaning up resources.
+    /// </summary>
     public void Dispose()
     {
         try
@@ -143,9 +146,20 @@ public class SystemLogLoggerProvider : ILoggerProvider
             _cts.Cancel();
             
             // Wait for processing to complete with timeout
-            if (_processingTask.Wait(TimeSpan.FromSeconds(5)))
+            try
             {
-                _processingTask.Dispose();
+#pragma warning disable VSTHRD002 // Synchronous waiting is unavoidable in Dispose - we must complete resource cleanup
+                // Give the processing task a brief window to complete gracefully
+                _processingTask?.Wait(TimeSpan.FromMilliseconds(500));
+#pragma warning restore VSTHRD002
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cancellation is requested
+            }
+            catch
+            {
+                // Ignore timeout or other wait exceptions
             }
         }
         catch
@@ -156,6 +170,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
         {
             _logQueue.Dispose();
             _cts.Dispose();
+            _processingTask?.Dispose();
         }
     }
 }
@@ -205,7 +220,7 @@ internal class SystemLogLogger : ILogger
         {
             var message = formatter(state, exception);
             var exceptionText = exception?.ToString();
-            
+
             // Try to extract correlation ID from HTTP context
             var correlationId = GetCorrelationIdFromContext();
 
@@ -240,7 +255,7 @@ internal class SystemLogLogger : ILogger
                 {
                     return correlationId.ToString();
                 }
-                
+
                 // Fallback to X-Request-Id if available
                 if (httpContext.Request.Headers.TryGetValue("X-Request-Id", out var requestId))
                 {
@@ -252,7 +267,7 @@ internal class SystemLogLogger : ILogger
         {
             // Silently fail - correlation ID is nice to have but not critical
         }
-        
+
         return null;
     }
 }

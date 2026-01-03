@@ -1,13 +1,12 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import { useState, useCallback } from 'react';
-import moonrakerIcon from '@/assets/moonraker.svg';
-import octoprintIcon from '@/assets/octoprint.svg';
 import styles from './PrinterTableView.module.css';
-import { Printer, PrinterBackend } from '@/types/api';
+import { getBackendIcon } from '@/common/utils/printerBackendIcon';
+import { Printer } from '@/types/api';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CloseIcon, DeleteIcon, EditIcon } from '@/common/components/icons/MdiIcons';
-import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
+import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, ToolsIcon } from '@/common/components/icons/MdiIcons';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button } from '@/common/components/ui';
 
@@ -82,21 +81,6 @@ export function PrinterTableView({
         return 'text-pf-accent';
       default:
         return 'text-pf-text-secondary';
-    }
-  };
-
-  const getBackendIcon = (backend: PrinterBackend) => {
-    switch (backend) {
-      case PrinterBackend.Moonraker:
-        return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle" />;
-      case PrinterBackend.PrusaLink:
-        return <span title="PrusaLink" aria-label="PrusaLink" role="img">🔗</span>;
-      case PrinterBackend.SDCP:
-        return <span title="SDCP" aria-label="SDCP" role="img">📡</span>;
-      case PrinterBackend.OctoPrint:
-        return <img src={octoprintIcon} alt="OctoPrint" title="OctoPrint" className="inline h-5 w-5 align-middle" />;
-      default:
-        return <span title="Other" aria-label="Other" role="img">🖨️</span>;
     }
   };
 
@@ -309,12 +293,17 @@ export function PrinterTableView({
                       <Button
                         type="button"
                         onClick={() => onBulkSetMaintenance([printer], !printer.inMaintenance)}
-                        variant={printer.inMaintenance ? 'success' : 'secondary'}
+                        variant={printer.inMaintenance ? 'primary' : 'subtle'}
                         size="sm"
-                        className="!p-2 !h-auto"
+                        className={`!p-2 !h-auto ${printer.inMaintenance ? '!text-white' : ''}`}
+                        style={printer.inMaintenance ? { 
+                          backgroundColor: '#fb8c00',
+                          backgroundImage: 'linear-gradient(to bottom, #fb8c00, #fb8c00)',
+                          borderColor: '#fb8c00'
+                        } : undefined}
                         title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
                       >
-                        <WrenchIcon className="w-4 h-4" />
+                        <ToolsIcon className="w-4 h-4" ariaLabel={printer.inMaintenance ? 'Maintenance Enabled' : 'Maintenance Disabled'} />
                       </Button>
                       
                       {hasPermission('printers', 'update') && (

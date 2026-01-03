@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react';
 import { GcodeHarvestOperation, GcodeHarvestStatus } from '@/types/api';
 import { IndexedFilesList } from './IndexedFilesList';
@@ -7,7 +6,6 @@ import { ErrorIcon } from './ErrorIcon';
 import { Button } from '@/common/components/ui/Button';
 import { apiClient } from '@/services/api';
 import { signalRService } from '@/services/harvest-signalr';
-import { HarvestFileProgress } from '@/services/harvest-signalr';
 
 interface HarvestOperationDetailsProps {
   operation?: GcodeHarvestOperation; // Optional - can be provided or fetched
@@ -16,10 +14,10 @@ interface HarvestOperationDetailsProps {
   inline?: boolean; // If true, render as inline panel instead of modal
   className?: string; // Allow custom styling for inline use
   hideCloseButton?: boolean;
-  perFileProgress?: Record<string, HarvestFileProgress>; // Per-file progress data for each file in the operation
+  onFilesImported?: () => void; // Callback when files are successfully imported
 }
 
-export function HarvestOperationDetails({ operation: initialOperation, operationId: propOperationId, onClose, inline = false, className = '', hideCloseButton = false, perFileProgress = {} }: HarvestOperationDetailsProps) {
+export function HarvestOperationDetails({ operation: initialOperation, operationId: propOperationId, onClose, inline = false, className = '', hideCloseButton = false, onFilesImported }: HarvestOperationDetailsProps) {
   const [operation, setOperation] = useState<GcodeHarvestOperation | null>(initialOperation || null);
   const [loading, setLoading] = useState(!initialOperation);
 
@@ -113,7 +111,6 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
   const isFailed = operation.status === GcodeHarvestStatus.Failed;
   const isCompleted = operation.status === GcodeHarvestStatus.Completed;
   const isCancelled = operation.status === GcodeHarvestStatus.Cancelled;
-  const isRunning = operation.status === GcodeHarvestStatus.Running;
 
   // Don't show cancelled banner if files were discovered (user didn't actually cancel)
   const shouldShowCancelledBanner = isCancelled && operation.filesFound === 0;
@@ -285,7 +282,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
         </div>
       </div>
       <div className="rounded border border-pf-border bg-pf-surface overflow-hidden flex-1 min-h-0">
-        <IndexedFilesList operationId={operation.id} />
+        <IndexedFilesList operationId={operation.id} onFilesImported={onFilesImported} />
       </div>
     </div>
   );

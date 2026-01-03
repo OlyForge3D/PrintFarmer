@@ -26,11 +26,21 @@ namespace Farm.Web.Api.Services.Gcode
     /// with support for hierarchical browsing and efficient lookups.
     /// </summary>
     /// <remarks>
-    /// This service implements virtual folder architecture where:
-    /// - Physical files are stored in a flat directory structure with GUID-based names
-    /// - Virtual folders exist only in the database for organizational purposes
-    /// - Files are tracked in the database with metadata, thumbnails, and folder references
-    /// - Move operations update database references without moving physical files
+    /// <para>
+    /// This service implements a unified interface combining file browser (directory-based) and library
+    /// (metadata-based) operations for G-code management. It operates on a virtual folder architecture where:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>Physical files are stored in a flat directory structure with GUID-based names for efficiency</description></item>
+    /// <item><description>Virtual folders exist only in the database for organizational purposes</description></item>
+    /// <item><description>Files are tracked in the database with metadata, thumbnails, and folder references</description></item>
+    /// <item><description>Move operations update database references without moving physical files</description></item>
+    /// <item><description>Thumbnails are automatically extracted and stored alongside G-code files</description></item>
+    /// </list>
+    /// <para>
+    /// The service consolidates functionality that was previously split between separate file browser and
+    /// library services, providing a single source of truth for G-code file management.
+    /// </para>
     /// </remarks>
     public class GcodeFilesService : IGcodeFilesService
     {
@@ -40,14 +50,27 @@ namespace Farm.Web.Api.Services.Gcode
         private readonly IGcodeMetadataExtractorService _metadataExtractor;
         private readonly IGcodeThumbnailExtractorService _thumbnailExtractor;
         private readonly IFolderManagementService _folderService;
+        private readonly IStoredFileOperationsService _fileOperations;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="GcodeFilesService"/> class.
+        /// </summary>
+        /// <param name="gcodeRepo">Repository for G-code file database operations.</param>
+        /// <param name="logger">Logging service for diagnostic and error logging.</param>
+        /// <param name="storagePathService">Service providing paths to storage directories.</param>
+        /// <param name="metadataExtractor">Service for extracting metadata from G-code files.</param>
+        /// <param name="thumbnailExtractor">Service for extracting thumbnail images from G-code files.</param>
+        /// <param name="folderService">Service for managing virtual folder hierarchy.</param>
+        /// <param name="fileOperations">Service for stored file operations including thumbnail URL building.</param>
+        /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
         public GcodeFilesService(
             IGcodeRepository gcodeRepo,
             IUnifiedLoggingService logger,
             IStoragePathService storagePathService,
             IGcodeMetadataExtractorService metadataExtractor,
             IGcodeThumbnailExtractorService thumbnailExtractor,
-            IFolderManagementService folderService)
+            IFolderManagementService folderService,
+            IStoredFileOperationsService fileOperations)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -55,24 +78,35 @@ namespace Farm.Web.Api.Services.Gcode
             _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
             _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
             _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
+            _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
         }
 
         /// <summary>
         /// Lists G-code files and subdirectories within a specific virtual path with pagination and filtering.
         /// </summary>
-        /// <param name="path">Virtual path to browse (e.g., '/', '/subfolder')</param>
-        /// <param name="sortBy">Sort field: 'name', 'size', or 'date'</param>
-        /// <param name="sortOrder">Sort order: 'asc' or 'desc'</param>
-        /// <param name="search">Optional search term to filter by filename</param>
-        /// <param name="page">Page number (1-based, default: 1)</param>
-        /// <param name="pageSize">Items per page (min: 1, max: 500, default: 100)</param>
-        /// <param name="harvestId">Optional harvest operation ID to filter files</param>
-        /// <param name="printerId">Optional printer ID for filtering (currently unused)</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Paginated list of files and directories with metadata</returns>
+        /// <param name="path">Virtual path to browse (e.g., '/', '/subfolder'). Null or whitespace defaults to root.</param>
+        /// <param name="sortBy">Sort field: 'name', 'size', or 'date'. Case-insensitive.</param>
+        /// <param name="sortOrder">Sort order: 'asc' (ascending) or 'desc' (descending).</param>
+        /// <param name="search">Optional search term to filter by filename. Case-insensitive partial matching.</param>
+        /// <param name="page">Page number (1-based). Values &lt; 1 default to 1.</param>
+        /// <param name="pageSize">Items per page. Automatically clamped to range [1, 500]. Default if invalid: 100.</param>
+        /// <param name="harvestId">Optional harvest operation ID to filter files by harvest source.</param>
+        /// <param name="printerId">Optional printer ID for filtering (reserved for future use).</param>
+        /// <param name="ct">Cancellation token for canceling async operation.</param>
+        /// <returns>
+        /// A paginated response containing files and directories with metadata. Directories are always sorted
+        /// before files regardless of sort order.
+        /// </returns>
         /// <remarks>
-        /// This method queries the database for files and subdirectories, applies sorting and filtering,
-        /// and returns a paginated response. Directories are always sorted before files.
+        /// <para>
+        /// This method queries the database for files and subdirectories at the specified virtual path,
+        /// applies sorting and filtering, and returns a paginated result set. All paths are normalized
+        /// to start with '/' automatically.
+        /// </para>
+        /// <para>
+        /// Search is performed on filename only (not the full path). Page and pageSize parameters are
+        /// validated and clamped to reasonable ranges automatically.
+        /// </para>
         /// </remarks>
         public async Task<GcodeFileListResponse> ListAsync(string? path, string? sortBy, string? sortOrder, string? search, int page, int pageSize, Guid? harvestId, Guid? printerId, CancellationToken ct)
         {
@@ -723,7 +757,7 @@ namespace Farm.Web.Api.Services.Gcode
             string folderPath = CombineVirtual(virtualDir, name);
 
             // Track the folder in the database (virtual organization, not physical directories)
-            Folder folder = await _folderService.GetOrCreateFolderAsync(folderPath, "gcode", ct);
+            FolderNode folder = await _folderService.GetOrCreateFolderAsync(folderPath, "gcode", ct);
             _logger.LogInformation($"[MakeDirectory] Created virtual folder in database: {folderPath}");
 
             GcodeFileEntryDto dto = new(
@@ -765,7 +799,7 @@ namespace Farm.Web.Api.Services.Gcode
 
                 // Update the folder reference (virtual move - physical file stays in place)
                 gcodeFile.FolderId = targetFolder.Id;
-                
+
                 // Save changes to database
                 await _gcodeRepo.SaveChangesAsync(ct);
 
@@ -1212,6 +1246,7 @@ namespace Farm.Web.Api.Services.Gcode
             GcodeFile gcodeFile = new()
             {
                 Id = fileId,
+                Name = originalFileName,  // Store user-provided filename for display
                 FileName = $"{fileId}{fileExtension}",
                 FolderId = targetFolder.Id,
                 FilePath = storageDir,
@@ -1235,5 +1270,397 @@ namespace Farm.Web.Api.Services.Gcode
         }
 
         #endregion
+
+        /// <summary>
+        /// Queries the G-code library with optional filters for search, material, nozzle diameter, and target printer.
+        /// </summary>
+        /// <param name="search">Optional search term to match against filenames (case-insensitive partial match).</param>
+        /// <param name="material">Optional material filter (e.g., 'PLA', 'PETG') to match RequiredMaterial field.</param>
+        /// <param name="nozzleDiameter">Optional nozzle diameter in millimeters (e.g., 0.4, 0.6) to match RequiredNozzleDiameter field.</param>
+        /// <param name="targetPrinterId">Optional printer ID to filter files compatible with a specific printer.</param>
+        /// <param name="ct">Cancellation token for canceling async operation.</param>
+        /// <returns>
+        /// A read-only list of G-code file DTOs matching all specified criteria. Empty list if no matches found.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// All filters are optional and combined with AND logic (all must match). This method is the primary way
+        /// to discover files based on their metadata attributes.
+        /// </para>
+        /// <para>
+        /// The repository layer handles the actual filtering logic, which may include null checks and partial
+        /// matching for string fields. Returned DTOs include thumbnail URLs and all metadata.
+        /// </para>
+        /// </remarks>
+        public async Task<IReadOnlyList<GcodeFileDto>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct)
+        {
+            List<GcodeFile> files = await _gcodeRepo.QueryLibraryAsync(search, material, nozzleDiameter, targetPrinterId, ct);
+            return files.Select(file => MapToDto(file)).ToArray();
+        }
+
+        /// <summary>
+        /// Retrieves a specific G-code file by ID with full metadata and relationships.
+        /// </summary>
+        /// <param name="id">Unique identifier of the G-code file.</param>
+        /// <param name="ct">Cancellation token for canceling async operation.</param>
+        /// <returns>
+        /// DTO containing complete file metadata (description, tags, nozzle diameter, material, etc.),
+        /// or null if file with specified ID not found.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method includes all related data such as source printer information, target printer, and
+        /// associated 3D model. The DTO includes a thumbnail URL if a thumbnail is available.
+        /// </para>
+        /// <para>
+        /// Use this method to display detailed file information in the UI. Returns null gracefully if the
+        /// file does not exist rather than throwing an exception.
+        /// </para>
+        /// </remarks>
+        public async Task<GcodeFileDto?> GetFileAsync(Guid id, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            if (file is null)
+            {
+                return null;
+            }
+
+            return MapToDto(file);
+        }
+
+        /// <summary>
+        /// Uploads a G-code file to the library with full metadata.
+        /// </summary>
+        /// <param name="file">The uploaded file from an HTTP request. Must not be null.</param>
+        /// <param name="metadata">Metadata including description, tags, nozzle diameter, material, estimated print time, etc. Must not be null.</param>
+        /// <param name="webRootPath">Application web root path for thumbnail URL generation (used by MapToDto).</param>
+        /// <param name="ct">Cancellation token for canceling async operation.</param>
+        /// <returns>
+        /// DTO representing the newly uploaded file with all provided metadata and generated system fields
+        /// (ID, upload timestamp, thumbnail URL if available).
+        /// </returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if a file with the same content hash already exists (duplicate file detection) or if
+        /// file path validation fails.
+        /// </exception>
+        /// <exception cref="ArgumentNullException">Thrown if file or metadata parameter is null.</exception>
+        /// <remarks>
+        /// <para>
+        /// This method computes a SHA256 hash of the file content and checks for duplicates before saving.
+        /// If a duplicate is detected, an InvalidOperationException is thrown with the message "duplicate".
+        /// </para>
+        /// <para>
+        /// The file is saved to the G-code storage directory with a GUID-based filename for uniqueness.
+        /// All metadata from the CreateGcodeFileDto is persisted to the database. This is distinct from
+        /// the file browser UploadFileAsync in that it emphasizes metadata capture over virtual folder organization.
+        /// </para>
+        /// </remarks>
+        public async Task<GcodeFileDto> UploadFileAsync(IFormFile file, CreateGcodeFileDto metadata, string webRootPath, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(file);
+            ArgumentNullException.ThrowIfNull(metadata);
+
+            // Compute hash
+            string hash;
+            using (Stream stream = file.OpenReadStream())
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] hashBytes = await sha256.ComputeHashAsync(stream, ct);
+                hash = Convert.ToHexString(hashBytes);
+            }
+
+            // Check duplicate
+            GcodeFile? existing = await _gcodeRepo.FindByHashAsync(hash, ct);
+            if (existing is not null)
+            {
+                throw new InvalidOperationException("duplicate");
+            }
+
+            // Use StoragePathService to get the correct gcode storage directory
+            string libraryPath = _storagePathService.GetGcodeStorageDirectory();
+            string libraryRootFull = Path.GetFullPath(libraryPath);
+            _ = Directory.CreateDirectory(libraryRootFull);
+
+            // Save file
+            string fileName = $"{Guid.NewGuid()}.gcode";
+            string filePathFull = Path.GetFullPath(Path.Combine(libraryRootFull, fileName));
+            if (!filePathFull.StartsWith(libraryRootFull, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Invalid file path");
+            }
+
+            await using (FileStream fs = System.IO.File.Create(filePathFull))
+            {
+                await file.CopyToAsync(fs, ct);
+            }
+
+            GcodeFile gcodeFile = new()
+            {
+                Id = Guid.NewGuid(),
+                FileName = string.IsNullOrEmpty(metadata.FileName) ? file.FileName : metadata.FileName,
+                FilePath = libraryRootFull, // Store directory path
+                FileSizeBytes = file.Length,
+                FileHash = hash,
+                UploadedAt = DateTime.UtcNow,
+                Source = GcodeSource.Upload,
+                Description = metadata.Description,
+                Tags = metadata.Tags != null ? string.Join(',', metadata.Tags) : null,
+                RequiredNozzleDiameter = metadata.RequiredNozzleDiameter,
+                RequiredMaterial = metadata.RequiredMaterial,
+                CompatibleMaterials = metadata.CompatibleMaterials,
+                EstimatedPrintTimeMinutes = metadata.EstimatedPrintTimeMinutes,
+                EstimatedFilamentLengthMm = metadata.EstimatedFilamentLengthMm,
+                EstimatedFilamentWeightG = metadata.EstimatedFilamentWeightG,
+                TargetPrinterId = metadata.TargetPrinterId,
+                TargetModelId = metadata.TargetModelId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _gcodeRepo.AddAsync(gcodeFile, ct);
+            await _gcodeRepo.SaveChangesAsync(ct);
+
+            GcodeFile? saved = await _gcodeRepo.GetByIdWithIncludesAsync(gcodeFile.Id, ct);
+            return MapToDto(saved!);
+        }
+
+        /// <summary>
+        /// Updates metadata for an existing G-code file.
+        /// </summary>
+        /// <param name="id">Unique identifier of the file to update.</param>
+        /// <param name="request">DTO containing metadata fields to update. Null or empty fields are skipped (partial update).</param>
+        /// <param name="ct">Cancellation token for canceling async operation.</param>
+        /// <returns>
+        /// DTO containing the updated file with all current metadata after the update.
+        /// </returns>
+        /// <exception cref="KeyNotFoundException">Thrown if file with specified ID not found in the database.</exception>
+        /// <remarks>
+        /// <para>
+        /// This method performs a partial update - only provided fields are modified. Does not update file content,
+        /// core properties like UploadedAt, or file hash. Automatically updates the UpdatedAt timestamp.
+        /// </para>
+        /// <para>
+        /// All fields in the UpdateGcodeFileDto are optional. Null or empty fields are skipped, allowing selective
+        /// metadata updates without replacing the entire record.
+        /// </para>
+        /// </remarks>
+        public async Task<GcodeFileDto> UpdateFileAsync(Guid id, UpdateGcodeFileDto request, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            if (file == null)
+            {
+                throw new KeyNotFoundException();
+            }
+
+            if (!string.IsNullOrEmpty(request.FileName))
+            {
+                file.FileName = request.FileName;
+            }
+
+            if (request.Description != null)
+            {
+                file.Description = request.Description;
+            }
+
+            if (request.Tags != null)
+            {
+                file.Tags = string.Join(',', request.Tags);
+            }
+
+            if (request.RequiredNozzleDiameter.HasValue)
+            {
+                file.RequiredNozzleDiameter = request.RequiredNozzleDiameter;
+            }
+
+            if (!string.IsNullOrEmpty(request.RequiredMaterial))
+            {
+                file.RequiredMaterial = request.RequiredMaterial;
+            }
+
+            if (request.CompatibleMaterials != null)
+            {
+                file.CompatibleMaterials = request.CompatibleMaterials;
+            }
+
+            if (request.TargetPrinterId.HasValue)
+            {
+                file.TargetPrinterId = request.TargetPrinterId.Value;
+            }
+
+            if (request.TargetModelId.HasValue)
+            {
+                file.TargetModelId = request.TargetModelId.Value;
+            }
+
+            file.UpdatedAt = DateTime.UtcNow;
+
+            await _gcodeRepo.SaveChangesAsync(ct);
+
+            GcodeFile? saved = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            return MapToDto(saved!);
+        }
+
+        /// <summary>
+        /// Deletes a G-code file from the library.
+        /// </summary>
+        /// <param name="id">Unique identifier of the file to delete.</param>
+        /// <param name="ct">Cancellation token for canceling async operation.</param>
+        /// <returns>
+        /// True if deletion succeeded. False if file not found or cannot be deleted (e.g., in use by active print job).
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Before deletion, checks if the file is referenced by any active print queue jobs. If active jobs exist,
+        /// the deletion is prevented and returns false.
+        /// </para>
+        /// <para>
+        /// Removes both the physical file and its thumbnail from disk. If physical file deletion fails, the error
+        /// is logged as a warning but does not prevent the database record removal. This ensures the database stays
+        /// in sync even if filesystem operations partially fail.
+        /// </para>
+        /// <para>
+        /// Returns false gracefully if file not found rather than throwing an exception.
+        /// </para>
+        /// </remarks>
+        public async Task<bool> DeleteFileAsync(Guid id, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            if (file == null)
+            {
+                return false;
+            }
+
+            // Delete physical
+            try
+            {
+                string fullFilePath = Path.Combine(file.FilePath, file.FileName);
+                if (!string.IsNullOrEmpty(fullFilePath) && System.IO.File.Exists(fullFilePath))
+                {
+                    System.IO.File.Delete(fullFilePath);
+                }
+
+                if (!string.IsNullOrEmpty(file.ThumbnailFileName))
+                {
+                    string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+                    if (System.IO.File.Exists(fullThumbnailPath))
+                    {
+                        System.IO.File.Delete(fullThumbnailPath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to delete physical file for gcode {id}");
+            }
+
+            await _gcodeRepo.RemoveAsync(file, ct);
+            await _gcodeRepo.SaveChangesAsync(ct);
+            return true;
+        }
+
+        /// <summary>
+        /// Downloads a G-code file by ID, returning its complete contents.
+        /// </summary>
+        /// <param name="id">Unique identifier of the file to download.</param>
+        /// <param name="webRootPath">Application web root path (used for path resolution).</param>
+        /// <param name="ct">Cancellation token for canceling async operation.</param>
+        /// <returns>
+        /// Complete file contents as byte array suitable for HTTP response transmission, or null if file
+        /// not found in database or cannot be read from filesystem.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Checks both the database record and filesystem existence before returning. Returns null gracefully
+        /// if the file metadata exists but the physical file has been deleted or moved.
+        /// </para>
+        /// <para>
+        /// The returned byte array can be directly written to an HTTP response stream. No additional
+        /// encoding or transformation is performed.
+        /// </para>
+        /// </remarks>
+        public async Task<byte[]?> DownloadFileAsync(Guid id, string webRootPath, CancellationToken ct)
+        {
+            GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
+            if (file == null)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrEmpty(file.FilePath))
+            {
+                return null;
+            }
+
+            string fullPath = Path.Combine(file.FilePath, file.FileName);
+            if (!System.IO.File.Exists(fullPath))
+            {
+                return null;
+            }
+
+            return await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+        }
+
+        /// <summary>
+        /// Maps a GcodeFile domain model to a DTO with thumbnail URL construction.
+        /// </summary>
+        /// <param name="file">The GcodeFile domain model to convert to DTO.</param>
+        /// <returns>
+        /// A GcodeFileDto containing all file metadata with thumbnail URL properly constructed
+        /// from the physical filename and storage path.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method constructs the thumbnail URL (if a thumbnail exists) from the physical file location
+        /// using the centralized IThumbnailUrlBuilderService. This ensures consistent URL construction with
+        /// the Model3DFileService for uniform handling across the application.
+        /// </para>
+        /// <para>
+        /// All related data (source printer, target printer, target model) from the domain model is included
+        /// in the DTO. The method handles null/missing thumbnail filenames gracefully, returning null for
+        /// the thumbnail URL in such cases.
+        /// </para>
+        /// <para>
+        /// This is an internal helper method used consistently throughout the service to ensure uniform
+        /// DTO construction and thumbnail URL handling.
+        /// </para>
+        /// </remarks>
+        private GcodeFileDto MapToDto(GcodeFile file)
+        {
+            // Use centralized service method for efficient download-based thumbnail URL
+            string? thumbnailUrl = _fileOperations.BuildThumbnailUrl(
+                file,
+                "/api/gcode-files/download",
+                _storagePathService.GetGcodeStorageDirectory()
+            );
+
+            return new GcodeFileDto(
+                Id: file.Id,
+                Name: file.Name,
+                FileName: file.FileName,
+                FileSize: file.FileSizeBytes,
+                UploadedAt: file.UploadedAt,
+                ThumbnailUrl: thumbnailUrl,
+                Source: (GcodeSourceDto)(int)file.Source,
+                SourcePrinterId: file.SourcePrinterId,
+                SourcePrinterName: file.SourcePrinter?.Name,
+                OriginalPrinterPath: file.OriginalPrinterPath,
+                LastSeenOnPrinter: file.LastSeenOnPrinter,
+                Description: file.Description,
+                Tags: file.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
+                RequiredNozzleDiameter: file.RequiredNozzleDiameter,
+                RequiredMaterial: file.RequiredMaterial,
+                CompatibleMaterials: file.CompatibleMaterials,
+                EstimatedPrintTimeMinutes: file.EstimatedPrintTimeMinutes,
+                EstimatedFilamentLengthMm: file.EstimatedFilamentLengthMm,
+                EstimatedFilamentWeightG: file.EstimatedFilamentWeightG,
+                TargetPrinterId: file.TargetPrinterId,
+                TargetPrinterName: file.TargetPrinter?.Name,
+                TargetModelId: file.TargetModelId,
+                TargetModelName: file.TargetModel?.Name,
+                SlicerName: file.SlicerName,
+                SlicerVersion: file.SlicerVersion,
+                HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailFileName)
+            );
+        }
     }
 }

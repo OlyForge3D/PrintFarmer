@@ -8,6 +8,8 @@ import { Button } from '@/common/components/ui/Button';
 import { Modal } from '@/common/components/ui/Modal';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
 interface FileWithProgress extends DiscoveredGcodeFileDto {
   progress?: {
     bytesCopied: number;
@@ -19,15 +21,18 @@ interface FileWithProgress extends DiscoveredGcodeFileDto {
 
 interface IndexedFilesListProps {
   operationId: string;
+  onFilesImported?: () => void;
 }
 
-export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId }) => {
+export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId, onFilesImported }) => {
   const [files, setFiles] = useState<FileWithProgress[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
   const [errorModalFile, setErrorModalFile] = useState<FileWithProgress | null>(null);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(0);
   const filesRef = useRef<FileWithProgress[]>([]);
 
   // Helper to get status display string
@@ -121,6 +126,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
         }
       } else if (importedCount > 0 || skippedCount > 0) {
         toast.success(`Import completed successfully. Imported: ${importedCount}, Skipped: ${skippedCount}`);
+        // Notify parent component that files have been imported
+        onFilesImported?.();
       }
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e ? (e as { message?: string }).message : 'Unknown error';
@@ -272,8 +279,34 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
 
   apiClient.getDiscoveredGcodeFiles(operationId)
       .then(res => {
-        setFiles(res);
-        filesRef.current = res;
+        // Merge API results with any files that arrived via SignalR
+        // This prevents losing files that arrived while the API call was in flight
+        setFiles(prev => {
+          // Create a map of existing files by ID for efficient lookup
+          const existingMap = new Map(prev.map(f => [f.id, f]));
+          
+          // Add/update files from API response
+          const merged = new Map(existingMap);
+          res.forEach(apiFile => {
+            if (merged.has(apiFile.id)) {
+              // Merge with existing file, preserving any SignalR-provided data
+              const existing = merged.get(apiFile.id)!;
+              merged.set(apiFile.id, {
+                ...existing,
+                ...apiFile,
+                // Keep status if already set via SignalR
+                status: existing.status ?? apiFile.status,
+              });
+            } else {
+              // Add new file from API
+              merged.set(apiFile.id, apiFile);
+            }
+          });
+          
+          const result = Array.from(merged.values());
+          filesRef.current = result;
+          return result;
+        });
         setError(null);
       })
       .catch((e: Error) => setError(e.message || 'Failed to load files'))
@@ -328,6 +361,15 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
     );
   }
 
+  const handlePageSizeChange = (newSize: number) => {
+    setItemsPerPage(newSize);
+    setCurrentPage(0); // Reset to first page when size changes
+  };
+  const totalPages = Math.ceil(files.length / itemsPerPage);
+  const startIdx = currentPage * itemsPerPage;
+  const endIdx = startIdx + itemsPerPage;
+  const paginatedFiles = files.slice(startIdx, endIdx);
+
   return (
     <div className="flex flex-col h-full">
       <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-surface z-20">Indexed Files</h4>
@@ -337,23 +379,18 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
             <tr>
               <th className="p-2 border-b border-pf-border whitespace-nowrap">
                 {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-                <input type="checkbox" checked={selected.size === files.length} onChange={e => setSelected(e.target.checked ? new Set(files.map(f => f.id)) : new Set())} title="Select all files" aria-label="Select all files" />
+                <input type="checkbox" checked={paginatedFiles.length > 0 && paginatedFiles.every(f => selected.has(f.id))} onChange={e => setSelected(e.target.checked ? new Set([...selected, ...paginatedFiles.map(f => f.id)]) : new Set([...selected].filter(id => !paginatedFiles.map(f => f.id).includes(id))))} title="Select all files on this page" aria-label="Select all files on this page" />
               </th>
               <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">File</th>
               {files.some(f => f.progress) && (
                 <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">Progress</th>
               )}
               <th className="p-2 border-b border-pf-border text-right whitespace-nowrap">Size</th>
-              <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">Slicer</th>
-              <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">Material</th>
-              <th className="p-2 border-b border-pf-border text-center whitespace-nowrap">Nozzle</th>
-              <th className="p-2 border-b border-pf-border text-right whitespace-nowrap">Print Time</th>
-              <th className="p-2 border-b border-pf-border text-right whitespace-nowrap">Filament Used</th>
               <th className="p-2 border-b border-pf-border text-center whitespace-nowrap">Status</th>
             </tr>
           </thead>
           <tbody>
-            {files.map(file => {
+            {paginatedFiles.map(file => {
               const status = file.status;
               const error = file.error || '';
               const key = file.id || file.filePath || file.fileName;
@@ -403,33 +440,6 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
                   <td className="p-2 border-b border-pf-border text-right text-pf-muted">
                     <span className="text-xs">{(file.fileSizeBytes / 1024).toFixed(1)} KB</span>
                   </td>
-                  <td className="p-2 border-b border-pf-border text-left text-pf-muted">
-                    {file.extractedSlicerName && (
-                      <span className="text-xs" title={`Slicer: ${file.extractedSlicerName}${file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}`}>
-                        {file.extractedSlicerName}{file.extractedSlicerVersion ? ' ' + file.extractedSlicerVersion : ''}
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-2 border-b border-pf-border text-left text-pf-muted">
-                    {file.extractedMaterial && (
-                      <span className="text-xs" title={`Material: ${file.extractedMaterial}`}>{file.extractedMaterial}</span>
-                    )}
-                  </td>
-                  <td className="p-2 border-b border-pf-border text-center text-pf-muted">
-                    {file.extractedNozzleDiameter && (
-                      <span className="text-xs" title={`Nozzle: ${file.extractedNozzleDiameter}mm`}>{file.extractedNozzleDiameter}mm</span>
-                    )}
-                  </td>
-                  <td className="p-2 border-b border-pf-border text-right text-pf-muted whitespace-nowrap">
-                    {file.extractedPrintTime && (
-                      <span className="text-xs" title={`Est. print time: ${formatPrintTimeMinutes(file.extractedPrintTime)}`}>{formatPrintTimeMinutes(file.extractedPrintTime)}</span>
-                    )}
-                  </td>
-                  <td className="p-2 border-b border-pf-border text-right text-pf-muted">
-                    {file.extractedFilamentLength && (
-                      <span className="text-xs" title={`Filament: ${file.extractedFilamentLength}m`}>{file.extractedFilamentLength}m</span>
-                    )}
-                  </td>
                   <td className="p-2 border-b border-pf-border text-center">
                     {status !== undefined && (
                       <button
@@ -463,8 +473,72 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId 
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-3 border-t border-pf-border flex items-center justify-between bg-pf-surface">
-        <span className="text-pf-muted text-xs">Tip: Use checkboxes to select files to import.</span>
+      <div className="px-4 py-3 border-t border-pf-border flex items-center justify-between gap-4 bg-pf-surface">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label htmlFor="pageSize" className="text-sm text-pf-text-secondary">
+              Items per page:
+            </label>
+            <select
+              id="pageSize"
+              value={itemsPerPage}
+              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+              className="px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-secondary text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent min-w-[75px]"
+            >
+              {PAGE_SIZE_OPTIONS.map(size => (
+                <option key={size} value={size}>{size}</option>
+              ))}
+            </select>
+          </div>
+          <span className="text-pf-muted text-xs">
+            Showing {files.length === 0 ? 0 : startIdx + 1}-{Math.min(endIdx, files.length)} of {files.length} files
+          </span>
+          {totalPages > 1 && (
+            <div className="flex gap-1 ml-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage === 0}
+                onClick={() => setCurrentPage(0)}
+                className="!px-2 !py-1"
+                title="First page"
+              >
+                «
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage === 0}
+                onClick={() => setCurrentPage(currentPage - 1)}
+                className="!px-2 !py-1"
+                title="Previous page"
+              >
+                ‹
+              </Button>
+              <span className="text-pf-muted text-xs px-2 py-1">Page {currentPage + 1} of {totalPages}</span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage === totalPages - 1}
+                onClick={() => setCurrentPage(currentPage + 1)}
+                className="!px-2 !py-1"
+                title="Next page"
+              >
+                ›
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage === totalPages - 1}
+                onClick={() => setCurrentPage(totalPages - 1)}
+                className="!px-2 !py-1"
+                title="Last page"
+              >
+                »
+              </Button>
+            </div>
+          )}
+        </div>
         <Button
           onClick={handleImportSelected}
           disabled={selected.size === 0 || isImporting}

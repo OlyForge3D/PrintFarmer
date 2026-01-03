@@ -100,7 +100,20 @@ namespace Farm.Web.Api.Services.Model
         /// <param name="directoryPath">The virtual directory path (e.g., "/", "/subfolder")</param>
         /// <param name="folderType">The folder type: "models" or "gcode"</param>
         /// <param name="ct">Cancellation token</param>
-        /// <returns>The Folder entity, either existing or newly created</returns>
-        Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct);
+        /// <returns>The FolderNode entity, either existing or newly created</returns>
+        Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct);
+
+        /// <summary>
+        /// Downloads a file from the model storage directory by relative path.
+        /// Unified with Gcode download endpoint for consistent thumbnail serving.
+        /// </summary>
+        /// <param name="path">Relative path to the file within model storage directory</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Tuple of (file bytes, safe filename) if found, otherwise null</returns>
+        /// <remarks>
+        /// This method serves both model files and thumbnails using path-based lookups.
+        /// Path validation is performed internally to prevent directory traversal attacks.
+        /// </remarks>
+        Task<(byte[] bytes, string fileName)?> DownloadFileAsync(string path, CancellationToken ct);
     }
 }

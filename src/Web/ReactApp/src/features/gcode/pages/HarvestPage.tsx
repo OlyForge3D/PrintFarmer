@@ -127,7 +127,6 @@ export const HarvestPage: React.FC = () => {
         <HarvestOperationDetails
           operation={selectedOperation}
           onClose={() => setSelectedOperation(null)}
-          perFileProgress={perFileProgressMap[selectedOperation.id] || {}}
         />
       )}
 

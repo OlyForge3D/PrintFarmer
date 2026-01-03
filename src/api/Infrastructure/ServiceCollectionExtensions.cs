@@ -24,6 +24,7 @@ using Farm.Web.Api.Infrastructure.Caching;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
 using Farm.Web.Api.Services.Interfaces;
 using Farm.Web.Api.Services.JobDispatch;
@@ -194,9 +195,9 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.StorageManagement.IStoragePathService, Farm.Infrastructure.Services.StorageManagement.StoragePathService>();
 
         // File Management Services
-        _ = services.AddSingleton<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
-        _ = services.AddSingleton<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
-        _ = services.AddSingleton<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
+        _ = services.AddScoped<Services.FileManagement.IFileManagementService, Services.FileManagement.FileManagementService>();
+        _ = services.AddScoped<Services.FileManagement.IFileIntegrityService, Services.FileManagement.FileIntegrityService>();
+        _ = services.AddScoped<Services.FileManagement.IChunkedUploadService, Services.FileManagement.ChunkedUploadService>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Gcode.IGcodeThumbnailExtractorService, Services.FileManagement.GcodeThumbnailExtractorService>();
 
         // File system abstraction (pure wrapper around static File/Directory APIs)
@@ -232,7 +233,7 @@ public static class ServiceCollectionExtensions
         // - Harvest + Printers: Harvest operations tied to specific printers
         // - Model3dFiles + Folders: 3D models organized in folder hierarchy
         // - Locations + Printers: Printers located at specific facilities
-        _ = services.AddScoped<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork, Farm.Infrastructure.Repositories.UnitOfWork.UnitOfWork>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork, Farm.Infrastructure.Repositories.UnitOfWork.AppUnitOfWork>();
 
         // Individual repository registrations (for backward compatibility with existing code)
         // These are resolved through IUnitOfWork for coordinated operations
@@ -533,6 +534,9 @@ public static class ServiceCollectionExtensions
         // Folder management service (shared by model and gcode file services)
         _ = services.AddScoped<IFolderManagementService, FolderManagementService>();
 
+        // Stored file operations service (consolidated file and thumbnail operations)
+        _ = services.AddScoped<IStoredFileOperationsService, StoredFileOperationsService>();
+
         // Model services
         _ = services.AddScoped<Services.Model.IModel3DFileService, Services.Model.Model3DFileService>();
         _ = services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
@@ -544,7 +548,6 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
-        _ = services.AddScoped<Services.Gcode.IGcodeLibraryService, Services.Gcode.GcodeLibraryService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, Services.Gcode.SignalRHarvestEventBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
 

@@ -149,7 +149,7 @@ public static class ExampleSchemaFilter
             schema.Example = new OpenApiObject
             {
                 ["id"] = new OpenApiString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-                ["originalFileName"] = new OpenApiString("benchy.gcode"),
+                ["name"] = new OpenApiString("benchy.gcode"),
                 ["displayName"] = new OpenApiString("Benchy"),
                 ["fileSizeBytes"] = new OpenApiLong(3_456_789),
                 ["uploadedAt"] = new OpenApiString(DateTime.UtcNow.AddDays(-1).ToString("o")),

@@ -1,15 +1,12 @@
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
-import { BuildInfo } from '@/common/components/BuildInfo';
 import { ThemeToggle } from '@/common/components/ThemeToggle';
 import { Button } from '@/common/components/ui';
 import { 
   CloseIcon, 
-  FileIcon,
   HomeIcon,
   PrinterIcon,
-  CubeIcon,
   LayersIcon,
   SettingsIcon,
   MenuIcon,
@@ -20,7 +17,7 @@ import {
   ChevronDownIcon,
   UsersIcon,
   GearIcon,
-  FolderIcon,
+  FolderOpenIcon,
   HistoryIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -62,7 +59,7 @@ const navigation: NavigationElement[] = [
   {
     name: 'Files',
     href: '/files',
-    icon: FolderIcon,
+    icon: FolderOpenIcon,
     requiredPermission: { resource: 'models', action: 'read' }
   },
   {

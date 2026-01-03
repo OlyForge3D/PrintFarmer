@@ -2,10 +2,8 @@
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { ErrorBoundary } from '@/common/components/ErrorBoundary';
 import { Layout } from '@/common/components/Layout';
-import { ObservabilityDashboard } from '@/common/components/ObservabilityDashboard';
 import { PrinterDashboard } from '@/features/printers/components/PrinterDashboard';
 import { SetupWizard } from '@/features/auth/components/SetupWizard';
-import { FileHealthDashboard } from '@/features/gcode/components/file-health/FileHealthDashboard';
 
 // Contexts & Providers
 import { AuthProvider } from '@/common/contexts/AuthContext';
@@ -24,28 +22,14 @@ import { printerSignalRService } from '@/services/printer-signalr';
 // Feature Pages
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
 import { SpoolsPage } from '@/features/catalog/pages/SpoolsPage';
-import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
-import { HarvestPage } from '@/features/gcode/pages/HarvestPage';
-import { HarvestHistoryPage } from '@/features/gcode/pages/HarvestHistoryPage';
-import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
-import { ModelDetailPage } from '@/features/models3d/pages/ModelDetailPage';
 import { PrintersPage } from '@/features/printers/pages/PrintersPage';
-import { PrintersAdminPage } from '@/features/printers/pages/admin/PrintersAdminPage';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
-import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
-import { ImportOfficialProfilesPage } from '@/features/slicer/pages/ImportOfficialProfilesPage';
-import { SlicerDryRunPage } from '@/features/slicer/pages/SlicerDryRunPage';
-import { SlicerJobStatusPage } from '@/features/slicer/pages/SlicerJobStatusPage';
-import { SlicerSettingsPage } from '@/features/slicer/pages/SlicerSettingsPage';
-import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
-import { JobQueueDashboardPage } from '@/features/queue/pages/JobQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
 import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage';
 import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendingPage';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
-import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 import { LogsPage } from '@/features/admin/pages/LogsPage';
@@ -53,7 +37,6 @@ import { FilesPage } from '@/features/files/pages/FilesPage';
 import { AdminPage } from '@/features/admin/pages/AdminPage';
 
 // External packages
-import { OrcaImportWizard } from '@farm/slicers-orcaslicer-v2_3_1';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';

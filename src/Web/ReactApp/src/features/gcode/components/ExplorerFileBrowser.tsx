@@ -8,7 +8,8 @@ import type { PrinterModelDto } from '@/types/api';
 
 export interface FileEntry {
   path: string;
-  fileName: string;  // Changed from 'name' to match API response
+  fileName: string;  // GUID-based filename for internal storage
+  name?: string;  // Original filename uploaded by user (for display)
   size: number;
   modifiedAt: string;
   isDirectory: boolean;
@@ -714,7 +715,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                         )}
                       </div>
                       <div>
-                        <div className="font-medium text-pf-text-primary">{file.fileName}</div>
+                        <div className="font-medium text-pf-text-primary">{file.name}</div>
                         {file.targetModelName && (
                           <div className="text-xs text-pf-text-tertiary">{file.targetModelName}</div>
                         )}

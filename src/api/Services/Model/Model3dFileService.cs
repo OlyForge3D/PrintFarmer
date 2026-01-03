@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Models;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.FileManagement;
@@ -40,8 +41,10 @@ namespace Farm.Web.Api.Services.Model
         private readonly IModelAnalysisService? _analysisService;
         private readonly Farm.Web.Api.Services.IO.IFileSystem _fileSystem;
         private readonly IFileManagementService _fileManagementService;
+        private readonly IStoredFileOperationsService _fileOperations;
         private readonly IThumbnailGenerationService? _thumbnailService;
         private readonly IFolderManagementService _folderManagementService;
+        private readonly IStoragePathService _storagePathService;
 
         public Model3DFileService(
             IUnitOfWork unitOfWork,
@@ -50,6 +53,8 @@ namespace Farm.Web.Api.Services.Model
             Farm.Web.Api.Services.IO.IFileSystem fileSystem,
             IFileManagementService fileManagementService,
             IFolderManagementService folderManagementService,
+            IStoragePathService storagePathService,
+            IStoredFileOperationsService fileOperations,
             IModelAnalysisService? analysisService = null,
             IThumbnailGenerationService? thumbnailService = null)
         {
@@ -60,8 +65,11 @@ namespace Farm.Web.Api.Services.Model
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
             _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
             _folderManagementService = folderManagementService ?? throw new ArgumentNullException(nameof(folderManagementService));
+            _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+            _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
             ArgumentNullException.ThrowIfNull(configuration);
-            _modelsPath = configuration["ModelStorage:Path"] ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models"));
+            // Use storage path service for consistent path handling (like GcodeFilesService)
+            _modelsPath = storagePathService.GetModelUploadDirectory();
             if (!_fileSystem.DirectoryExists(_modelsPath))
             {
                 _fileSystem.CreateDirectory(_modelsPath);
@@ -80,16 +88,7 @@ namespace Farm.Web.Api.Services.Model
         {
             IReadOnlyList<Model3D> models = await _unitOfWork.Model3dFiles.ListValidAsync(ct);
 
-            return models.Select(m => new Model3DDto
-            {
-                Id = m.Id,
-                FileName = m.FileName,
-                FileSize = m.FileSizeBytes,
-                FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
-                UploadedAt = m.UploadedAt,
-                Url = $"/api/3d-models/{m.Id}/file",
-                ThumbnailUrl = m.ThumbnailFileName != null ? $"/api/3d-models/{m.Id}/thumbnail" : null
-            }).ToList();
+            return models.Select(m => MapToDto(m)).ToList();
         }
 
         /// <summary>
@@ -177,15 +176,7 @@ namespace Farm.Web.Api.Services.Model
                 }
 
                 string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
-                entries.Add(new Model3DEntryDto(
-                    Path: childVirtual,
-                    FileName: file.FileName,
-                    Size: file.FileSizeBytes,
-                    ModifiedAt: file.UploadedAt,
-                    IsDirectory: false,
-                    ThumbnailUrl: file.ThumbnailFileName != null ? $"/api/3d-models/{file.Id}/thumbnail" : null,
-                    ModelId: file.Id.ToString()  // Include model GUID for efficient lookups
-                ));
+                entries.Add(MapToEntryDto(file, childVirtual));
             }
 
             // Sorting
@@ -268,16 +259,7 @@ namespace Farm.Web.Api.Services.Model
                 return null;
             }
 
-            return new Model3DDto
-            {
-                Id = model.Id,
-                FileName = model.FileName,
-                FileSize = model.FileSizeBytes,
-                FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
-                UploadedAt = model.UploadedAt,
-                Url = $"/api/3d-models/{model.Id}/file",
-                ThumbnailUrl = model.ThumbnailFileName != null ? $"/api/3d-models/{model.Id}/thumbnail" : null
-            };
+            return MapToDto(model);
         }
 
         /// <summary>
@@ -289,7 +271,10 @@ namespace Farm.Web.Api.Services.Model
         public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
-            if (model == null) return null;
+            if (model == null)
+            {
+                return null;
+            }
             // Return relative path by combining FilePath (directory) with FileName (GUID filename)
             // FilePath is the storage directory, FileName is the GUID-based filename
             return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, "").TrimStart(Path.DirectorySeparatorChar, '/');
@@ -304,11 +289,11 @@ namespace Farm.Web.Api.Services.Model
         public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
         {
             Model3D? model = await _unitOfWork.Model3dFiles.GetByIdAsync(id, ct);
-            if (model?.ThumbnailFileName == null)
+            if (model == null)
             {
                 return null;
             }
-            return Path.Combine(model.FilePath, model.ThumbnailFileName);
+            return _fileOperations.GetFullThumbnailPath(model);
         }
 
         /// <summary>
@@ -332,20 +317,17 @@ namespace Farm.Web.Api.Services.Model
 
             try
             {
-                // Construct full path: FilePath is already the storage directory, combine with FileName
-                string fullModelPath = Path.Combine(model.FilePath, model.FileName);
+                // Construct full path using helper
+                string fullModelPath = _fileOperations.GetFullFilePath(model);
                 if (_fileManagementService.IsSafePath(fullModelPath, _modelsPath) && System.IO.File.Exists(fullModelPath))
                 {
                     System.IO.File.Delete(fullModelPath);
                 }
 
-                if (model.ThumbnailFileName != null)
+                string? fullThumbnailPath = _fileOperations.GetFullThumbnailPath(model);
+                if (fullThumbnailPath != null && System.IO.File.Exists(fullThumbnailPath))
                 {
-                    string fullThumbnailPath = Path.Combine(model.FilePath, model.ThumbnailFileName);
-                    if (System.IO.File.Exists(fullThumbnailPath))
-                    {
-                        System.IO.File.Delete(fullThumbnailPath);
-                    }
+                    System.IO.File.Delete(fullThumbnailPath);
                 }
 
                 await _unitOfWork.Model3dFiles.RemoveAsync(model, ct);
@@ -523,6 +505,7 @@ namespace Farm.Web.Api.Services.Model
                 Model3D model = new()
                 {
                     Id = modelId,
+                    Name = originalName,  // Store user-provided filename for display
                     FileName = fileName,  // Store GUID-based filename (e.g., "abc123.stl")
                     FolderId = rootFolder.Id,  // Root folder for uploaded files
                     FilePath = _modelsPath,  // Store the models storage directory path (matching GcodeFile pattern)
@@ -570,7 +553,7 @@ namespace Farm.Web.Api.Services.Model
                 {
                     if (_thumbnailService != null)
                     {
-                        string thumbnailFileName = $"{modelId}_thumb{_thumbnailService.ThumbnailFileExtension}";
+                        string thumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, _thumbnailService.ThumbnailFileExtension);
                         string thumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
 
                         if (_fileManagementService.IsSafePath(thumbnailPath, _modelsPath))
@@ -645,10 +628,137 @@ namespace Farm.Web.Api.Services.Model
         /// Creates intermediate folders as needed (similar to mkdir -p).
         /// Folders are virtual entities existing only in database.
         /// </remarks>
-        public async Task<Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
+        public async Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct)
         {
             // Delegate to shared folder management service
             return await _folderManagementService.GetOrCreateFolderAsync(directoryPath, folderType, ct);
+        }
+
+        #endregion
+
+        /// <summary>
+        /// Downloads a file from the model storage directory by relative path.
+        /// Unified with Gcode download endpoint for consistent thumbnail serving.
+        /// </summary>
+        /// <param name="path">Relative path to the file within model storage directory</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Tuple of (file bytes, safe filename) if found, otherwise null</returns>
+        /// <remarks>
+        /// This method serves both model files and thumbnails using path-based lookups.
+        /// Path validation is performed internally to prevent directory traversal attacks.
+        /// Paths are normalized and validated to ensure they stay within the model storage directory.
+        /// </remarks>
+        public async Task<(byte[] bytes, string fileName)?> DownloadFileAsync(string path, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                // Normalize path and validate it's within storage directory
+                string modelsDir = _storagePathService.GetModelUploadDirectory();
+                string normalizedPath = Path.GetFullPath(path);
+                string normalizedStorageDir = Path.GetFullPath(modelsDir);
+
+                // Construct full path
+                string fullPath = Path.Combine(normalizedStorageDir, path);
+                string resolvedPath = Path.GetFullPath(fullPath);
+
+                // Security check: ensure resolved path is within storage directory
+                if (!resolvedPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
+                {
+                    _logger.LogWarning($"[Download] Path traversal attempt blocked: {path}");
+                    return null;
+                }
+
+                // Check file exists
+                if (!_fileSystem.FileExists(resolvedPath))
+                {
+                    _logger.LogWarning($"[Download] File not found: {resolvedPath}");
+                    return null;
+                }
+
+                // Read file bytes
+                byte[] bytes = await _fileSystem.ReadAllBytesAsync(resolvedPath);
+                string fileName = Path.GetFileName(resolvedPath);
+
+                return (bytes, fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[Download] Error reading file {path}: {ex.Message}");
+                return null;
+            }
+        }
+
+        #region DTO Mapping Helpers
+
+        /// <summary>
+        /// Maps a Model3D domain model to a Model3DDto with thumbnail URL construction using download endpoint pattern.
+        /// </summary>
+        /// <param name="model">The Model3D domain model to convert.</param>
+        /// <returns>A Model3DDto with all file metadata and properly constructed thumbnail URL.</returns>
+        /// <remarks>
+        /// <para>
+        /// This method uses the same pattern as GcodeFilesService for thumbnail URL construction - a path-based
+        /// query parameter approach rather than a dedicated {id}/thumbnail endpoint. This provides efficient
+        /// thumbnail serving through the generic download endpoint without requiring database lookups.
+        /// </para>
+        /// <para>
+        /// The thumbnail URL is computed from the physical file location by calculating the relative path from
+        /// the model storage directory and encoding it for safe transmission in HTTP URLs.
+        /// </para>
+        /// </remarks>
+        private Model3DDto MapToDto(Model3D model)
+        {
+            string? thumbnailUrl = _fileOperations.BuildThumbnailUrl(
+                model,
+                "/api/3d-models/download",
+                _storagePathService.GetModelUploadDirectory()
+            );
+
+            return new Model3DDto
+            {
+                Id = model.Id,
+                Name = model.Name,
+                FileName = model.FileName,
+                FileSize = model.FileSizeBytes,
+                FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
+                UploadedAt = model.UploadedAt,
+                Url = $"/api/3d-models/{model.Id}/file",
+                ThumbnailPath = thumbnailUrl
+            };
+        }
+
+        /// <summary>
+        /// Maps a Model3D domain model to a Model3DEntryDto for folder browser listing with thumbnail URL.
+        /// </summary>
+        /// <param name="file">The Model3D domain model to convert.</param>
+        /// <param name="virtualPath">The virtual path within the folder hierarchy.</param>
+        /// <returns>A Model3DEntryDto representing the file in folder browser context.</returns>
+        /// <remarks>
+        /// This mapping is used for listing files in virtual folder hierarchies. The thumbnail URL uses the same
+        /// download endpoint pattern as MapToDto for consistency and efficiency.
+        /// </remarks>
+        private Model3DEntryDto MapToEntryDto(Model3D file, string virtualPath)
+        {
+            string? thumbnailUrl = _fileOperations.BuildThumbnailUrl(
+                file,
+                "/api/3d-models/download",
+                _storagePathService.GetModelUploadDirectory()
+            );
+
+            return new Model3DEntryDto(
+                Path: virtualPath,
+                FileName: file.FileName,
+                Size: file.FileSizeBytes,
+                ModifiedAt: file.UploadedAt,
+                IsDirectory: false,
+                ThumbnailPath: thumbnailUrl,
+                ModelId: file.Id.ToString()
+            );
         }
 
         #endregion

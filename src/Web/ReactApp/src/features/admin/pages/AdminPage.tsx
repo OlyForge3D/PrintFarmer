@@ -1,14 +1,10 @@
 import { SubMenuLayout } from '@/common/components/SubMenuLayout';
-import { PrinterIcon, LayersIcon, FileIcon, GearIcon, SettingsIcon, UsersIcon } from '@/common/components/icons/MdiIcons';
+import { PrinterIcon, LayersIcon, FileIcon, GearIcon } from '@/common/components/icons/MdiIcons';
 import { useLocation } from 'react-router-dom';
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { PrintersAdminPage } from '@/features/printers/pages/admin/PrintersAdminPage';
-import { LocationManagementAdminPage } from './LocationManagementAdminPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { FileHealthDashboard } from '@/features/gcode/components/file-health/FileHealthDashboard';
-import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
-import { SettingsPage } from './SettingsPage';
-import { UserManagementPage } from './UserManagementPage';
 import { TagAdminPage } from './TagAdminPage';
 import { ObservabilityDashboard } from '@/common/components/ObservabilityDashboard';
 import { SlicerDryRunPage } from '@/features/slicer/pages/SlicerDryRunPage';

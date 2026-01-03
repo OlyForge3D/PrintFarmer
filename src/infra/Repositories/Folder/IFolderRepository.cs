@@ -10,7 +10,7 @@ public interface IFolderRepository
     /// <summary>
     /// Get or create a folder by path and type
     /// </summary>
-    Task<Farm.Infrastructure.Domain.Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken cancellationToken = default);
+    Task<Farm.Infrastructure.Domain.FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Save all pending changes to the database
@@ -20,5 +20,5 @@ public interface IFolderRepository
     /// <summary>
     /// Get a folder by path and type
     /// </summary>
-    Task<Farm.Infrastructure.Domain.Folder?> GetByPathAndTypeAsync(string path, string folderType, CancellationToken cancellationToken = default);
+    Task<Farm.Infrastructure.Domain.FolderNode?> GetByPathAndTypeAsync(string path, string folderType, CancellationToken cancellationToken = default);
 }

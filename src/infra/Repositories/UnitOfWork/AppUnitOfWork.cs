@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -15,7 +15,7 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
     /// Unit of Work implementation providing coordinated access to all repositories.
     /// Ensures all repositories share a single DbContext instance for atomic transactions.
     /// </summary>
-    public class UnitOfWork : IUnitOfWork
+    public class AppUnitOfWork : IUnitOfWork
     {
         private readonly AppDbContext _db;
         private IGcodeRepository? _gcodeRepository;
@@ -25,7 +25,7 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         private IModel3DFileRepository? _model3dFileRepository;
         private ILocationRepository? _locationRepository;
 
-        public UnitOfWork(AppDbContext db)
+        public AppUnitOfWork(AppDbContext db)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
         }
@@ -75,22 +75,20 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
 
         /// <summary>
         /// Disposes the Unit of Work and its shared DbContext synchronously.
+        /// Note: DbContext is injected via dependency injection and should be managed by DI container.
         /// </summary>
         public void Dispose()
         {
-            _db?.Dispose();
             GC.SuppressFinalize(this);
         }
 
         /// <summary>
         /// Asynchronously disposes the Unit of Work and its shared DbContext.
+        /// Note: DbContext is injected via dependency injection and should be managed by DI container.
         /// </summary>
         public async ValueTask DisposeAsync()
         {
-            if (_db != null)
-            {
-                await _db.DisposeAsync();
-            }
+            await ValueTask.CompletedTask;
             GC.SuppressFinalize(this);
         }
     }

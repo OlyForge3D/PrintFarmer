@@ -35,10 +35,10 @@ public class SystemLogsController(Services.SystemLogs.ISystemLogService systemLo
     {
         // Get all logs and apply Lucene query filter
         IReadOnlyList<SystemLog> allLogs = await _service.QueryAllLogsAsync(null, null, null, null, null, ct);
-        
+
         var filter = LuceneLogQueryParser.Parse(q);
         var filteredLogs = allLogs.Where(filter).ToList();
-        
+
         return Ok(filteredLogs);
     }
 

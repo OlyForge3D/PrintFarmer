@@ -1008,6 +1008,7 @@ public record GcodeFileDto(
     long FileSize,
     DateTime UploadedAt,
     string? ThumbnailUrl = null,
+    string? Name = null,  // Original filename uploaded by user (for display)
     GcodeSourceDto Source = GcodeSourceDto.Upload,
     Guid? SourcePrinterId = null,
     string? SourcePrinterName = null,
@@ -1508,12 +1509,13 @@ public record GcodeMetadataDto(
 public class Model3DDto
 {
     public Guid Id { get; set; }
-    public string FileName { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty; // GUID-based filename for internal storage
+    public string? Name { get; set; } // Original filename uploaded by user (for display and editing)
     public long FileSize { get; set; }
     public string FileType { get; set; } = string.Empty; // stl, 3mf, obj, ply
     public DateTime UploadedAt { get; set; }
     public string Url { get; set; } = string.Empty;
-    public string? ThumbnailUrl { get; set; }
+    public string? ThumbnailPath { get; set; }
     public string? Description { get; set; }
     public double? DimensionX { get; set; } // in mm
     public double? DimensionY { get; set; } // in mm
@@ -1533,7 +1535,7 @@ public record Model3DEntryDto(
     long Size,
     DateTime ModifiedAt,
     bool IsDirectory,
-    string? ThumbnailUrl = null,
+    string? ThumbnailPath = null,
     string? ModelId = null,  // Include model ID for efficient file lookups
     string? DirectoryId = null  // Include directory ID for efficient directory lookups
 );

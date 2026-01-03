@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 
 interface SubMenuItem {
   name: string;
@@ -14,8 +14,6 @@ interface SubMenuLayoutProps {
 }
 
 export function SubMenuLayout({ title, items, children }: SubMenuLayoutProps) {
-  const location = useLocation();
-
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Submenu Panel */}

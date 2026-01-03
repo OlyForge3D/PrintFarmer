@@ -19,7 +19,7 @@ public class EfFolderRepository : IFolderRepository
     /// <summary>
     /// Get an existing folder or create it if it doesn't exist.
     /// </summary>
-    public async Task<Farm.Infrastructure.Domain.Folder> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken cancellationToken = default)
+    public async Task<Farm.Infrastructure.Domain.FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken cancellationToken = default)
     {
         // Normalize path
         string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(System.IO.Path.DirectorySeparatorChar, '/');
@@ -34,7 +34,7 @@ public class EfFolderRepository : IFolderRepository
         }
 
         // Create new folder
-        var newFolder = new Farm.Infrastructure.Domain.Folder
+        var newFolder = new Farm.Infrastructure.Domain.FolderNode
         {
             Id = Guid.NewGuid(),
             Path = normalizedPath,
@@ -51,7 +51,7 @@ public class EfFolderRepository : IFolderRepository
     /// <summary>
     /// Get a folder by path and type without creating it
     /// </summary>
-    public async Task<Farm.Infrastructure.Domain.Folder?> GetByPathAndTypeAsync(string path, string folderType, CancellationToken cancellationToken = default)
+    public async Task<Farm.Infrastructure.Domain.FolderNode?> GetByPathAndTypeAsync(string path, string folderType, CancellationToken cancellationToken = default)
     {
         string normalizedPath = string.IsNullOrWhiteSpace(path) ? "/" : path.TrimEnd(System.IO.Path.DirectorySeparatorChar, '/');
 

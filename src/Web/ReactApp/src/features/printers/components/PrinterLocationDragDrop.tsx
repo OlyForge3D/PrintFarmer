@@ -14,10 +14,6 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
   const [draggedPrinter, setDraggedPrinter] = useState<Printer | null>(null);
 
   // Load data on mount or when parent locations change
-  useEffect(() => {
-    loadData();
-  }, [parentLocations]);
-
   const loadData = async () => {
     try {
       setLoading(true);
@@ -40,6 +36,11 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentLocations]);
 
   const getUnassignedPrinters = () => {
     return printers.filter((p) => !p.locationId);
