@@ -499,7 +499,40 @@ namespace Farm.Web.Api.Services.Model
                     fileHash = _fileManagementService.ToHex(newHashBytes);
                 }
 
-                // Step 4: Create folder and DB record (still pointing to temp file for now)
+                // Step 4: Move temp file to final location and verify before creating database record
+                // This ensures the database never references a file that doesn't exist on disk
+                try
+                {
+                    if (_fileSystem.FileExists(tempFilePath))
+                    {
+                        // Delete any existing file at final location first (shouldn't happen but be safe)
+                        if (_fileSystem.FileExists(finalFilePath))
+                        {
+                            _fileSystem.DeleteFile(finalFilePath);
+                        }
+                        // Move temp to final location
+                        _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
+                        
+                        // Verify file exists at final location before proceeding
+                        if (!_fileSystem.FileExists(finalFilePath))
+                        {
+                            throw new InvalidOperationException("File move succeeded but verification failed - file not found at final location");
+                        }
+                        
+                        _logger.LogDebug($"Model file moved from temp to final location: {modelId}");
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Temp file not found after write operation");
+                    }
+                }
+                catch (Exception moveEx)
+                {
+                    _logger.LogError($"Failed to move model file from temp to final location: {moveEx.Message}");
+                    throw new InvalidOperationException("Failed to finalize model file", moveEx);
+                }
+
+                // Step 5: Create folder and database record AFTER file is confirmed on disk
                 var rootFolder = await GetOrCreateFolderAsync("/", "models", ct);
 
                 Model3D model = new()
@@ -525,30 +558,7 @@ namespace Farm.Web.Api.Services.Model
                 await _unitOfWork.Model3dFiles.AddAsync(model, ct);
                 await _unitOfWork.SaveChangesAsync(ct);
 
-                // Step 5: Move temp file to final location (only after DB commit succeeds)
-                try
-                {
-                    if (_fileSystem.FileExists(tempFilePath))
-                    {
-                        // Delete any existing file at final location first (shouldn't happen but be safe)
-                        if (_fileSystem.FileExists(finalFilePath))
-                        {
-                            _fileSystem.DeleteFile(finalFilePath);
-                        }
-                        // Move temp to final location
-                        _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
-                        _logger.LogDebug($"Model file moved from temp to final location: {modelId}");
-                    }
-                }
-                catch (Exception moveEx)
-                {
-                    _logger.LogError($"Failed to move model file from temp to final location: {moveEx.Message}. File remains in temp location.");
-                    // Note: DB record points to finalFilePath but file is still at tempFilePath
-                    // This will be detected by consistency audit and can be manually recovered
-                    throw new InvalidOperationException("Failed to finalize model file", moveEx);
-                }
-
-                // Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
+                // Step 6: Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
                 try
                 {
                     if (_thumbnailService != null)
@@ -558,7 +568,7 @@ namespace Farm.Web.Api.Services.Model
 
                         if (_fileManagementService.IsSafePath(thumbnailPath, _modelsPath))
                         {
-                            // Use final file path (not temp) for thumbnail generation
+                            // Use final file path for thumbnail generation
                             bool thumbSuccess = await _thumbnailService.GenerateThumbnailAsync(
                                 finalFilePath,
                                 model.FileFormat,
@@ -567,7 +577,7 @@ namespace Farm.Web.Api.Services.Model
 
                             if (thumbSuccess)
                             {
-                                // Update model with ONLY relative filename (e.g., "uuid_thumb.png")
+                                // Update model with thumbnail filename
                                 model.ThumbnailFileName = thumbnailFileName;
                                 await _unitOfWork.SaveChangesAsync(ct);
 
