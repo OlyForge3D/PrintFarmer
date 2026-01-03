@@ -1066,7 +1066,7 @@ public class GcodeHarvestService(
                 {
                     // Get or create root folder for gcode files (use "/" as root, not the physical path)
                     // This ensures folder paths are relative and don't include "/app" prefix
-                    var targetFolder = await GetOrCreateFolderAsync("/", "gcode", scopedServices, ct);
+                    var targetFolder = await _unitOfWork.Folders.GetOrCreateFolderAsync("/", "gcode", ct);
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Got or created folder: {targetFolder.Path}, Id={targetFolder.Id}");
 
                     // Create library entry
@@ -1576,41 +1576,6 @@ public class GcodeHarvestService(
         {
             _logger.LogError(ex, $"Error waiting for harvest tasks to complete");
         }
-    }
-
-    /// <summary>
-    /// Gets or creates a FolderNode entity for the given directory path and type
-    /// </summary>
-    private async Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, AsyncServiceScope scope, CancellationToken ct)
-    {
-        // Use the provided scoped AppDbContext to maintain consistency within the same transaction
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        // Normalize path
-        string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(Path.DirectorySeparatorChar, '/');
-
-        // Try to find existing folder
-        var existingFolder = await db.Folders
-            .FirstOrDefaultAsync(f => f.Path == normalizedPath && f.FolderType == folderType && !f.DeletedAt.HasValue, ct);
-
-        if (existingFolder != null)
-        {
-            return existingFolder;
-        }
-
-        // Create new folder in the same context
-        var newFolder = new FolderNode
-        {
-            Id = Guid.NewGuid(),
-            Path = normalizedPath,
-            FolderType = folderType,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        await db.AddAsync(newFolder, ct);
-        await db.SaveChangesAsync(ct);
-
-        return newFolder;
     }
 
 }

@@ -21,8 +21,14 @@ public class EfFolderRepository : IFolderRepository
     /// </summary>
     public async Task<Farm.Infrastructure.Domain.FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken cancellationToken = default)
     {
-        // Normalize path
+        // Normalize path: ensure root is "/" not empty string
         string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(System.IO.Path.DirectorySeparatorChar, '/');
+        
+        // If trimming left us with empty string, it was root "/"
+        if (string.IsNullOrEmpty(normalizedPath))
+        {
+            normalizedPath = "/";
+        }
 
         // Try to find existing folder
         var existingFolder = await _db.Folders

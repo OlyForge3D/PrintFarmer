@@ -104,6 +104,20 @@ namespace Farm.Web.Api.Services.Model
         Task<FolderNode> GetOrCreateFolderAsync(string directoryPath, string folderType, CancellationToken ct);
 
         /// <summary>
+        /// Moves a 3D model file to a different virtual folder by updating its database folder reference.
+        /// </summary>
+        /// <param name="modelId">GUID of the model to move</param>
+        /// <param name="targetFolderPath">Virtual path of the destination folder</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if the model was successfully moved; false if model was not found</returns>
+        /// <remarks>
+        /// This is a virtual move operation that only updates the model's FolderId reference in the database.
+        /// The physical file remains in its original location on disk with its GUID-based filename.
+        /// Target folder is created automatically if it doesn't exist.
+        /// </remarks>
+        Task<bool> MoveToFolderAsync(Guid modelId, string targetFolderPath, CancellationToken ct);
+
+        /// <summary>
         /// Downloads a file from the model storage directory by relative path.
         /// Unified with Gcode download endpoint for consistent thumbnail serving.
         /// </summary>

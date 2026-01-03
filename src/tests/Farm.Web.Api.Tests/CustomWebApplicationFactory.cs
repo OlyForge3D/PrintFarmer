@@ -19,10 +19,12 @@ namespace Farm.Web.Api.Tests
 {
     // Provides isolated in-memory SQLite database for each test instance.
     // Uses SQLite in-memory with shared cache so each factory instance gets its own isolated database.
-    public class CustomWebApplicationFactory : WebApplicationFactory<Program>
+    public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncDisposable
     {
         // Each test gets a unique in-memory database using named connection
         private readonly string _connectionString;
+        private readonly string _modelStoragePath;
+        private readonly string _gcodeStoragePath;
         private static int _databaseCounter = 0;
 
         public CustomWebApplicationFactory()
@@ -31,16 +33,27 @@ namespace Farm.Web.Api.Tests
             // Using auto-increment ID ensures complete isolation between tests
             var dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
             _connectionString = $"Data Source=:memory:?mode=memory&cache=shared";
+            
+            // Create temp directories for file storage (isolated per test)
+            var tempDir = Path.Combine(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
+            _modelStoragePath = Path.Combine(tempDir, "models");
+            _gcodeStoragePath = Path.Combine(tempDir, "gcode");
+            
+            // Create the directories
+            Directory.CreateDirectory(_modelStoragePath);
+            Directory.CreateDirectory(_gcodeStoragePath);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            // Configure worker auth shared key for testing
+            // Configure worker auth shared key and storage paths for testing
             builder.ConfigureAppConfiguration((context, config) =>
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["WorkerAuth:SharedKey"] = "test-worker-key"
+                    ["WorkerAuth:SharedKey"] = "test-worker-key",
+                    ["STORAGE_PATHS:UPLOADS"] = _modelStoragePath,
+                    ["STORAGE_PATHS:GCODE"] = _gcodeStoragePath
                 });
             });
 
@@ -73,6 +86,28 @@ namespace Farm.Web.Api.Tests
         {
             // Tests expect a factory instance configured for an isolated DB.
             return new CustomWebApplicationFactory();
+        }
+
+        /// <summary>
+        /// Cleans up temporary directories created during test setup.
+        /// </summary>
+        public override async ValueTask DisposeAsync()
+        {
+            // Clean up temporary storage directories
+            try
+            {
+                var tempDir = Path.GetDirectoryName(_modelStoragePath);
+                if (!string.IsNullOrEmpty(tempDir) && Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                }
+            }
+            catch
+            {
+                // Ignore cleanup errors (files might be locked)
+            }
+            
+            await base.DisposeAsync();
         }
 
         /// <summary>

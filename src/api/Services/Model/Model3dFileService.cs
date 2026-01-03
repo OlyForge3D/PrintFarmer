@@ -693,6 +693,53 @@ namespace Farm.Web.Api.Services.Model
             }
         }
 
+        #region Move Operations
+
+        /// <summary>
+        /// Moves a 3D model file to a different virtual folder by updating its database folder reference.
+        /// </summary>
+        /// <param name="modelId">GUID of the model to move</param>
+        /// <param name="targetFolderPath">Virtual path of the destination folder</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if the model was successfully moved; false if model was not found</returns>
+        /// <remarks>
+        /// This is a virtual move operation that only updates the model's FolderId reference in the database.
+        /// The physical file remains in its original location on disk with its GUID-based filename.
+        /// Target folder is created automatically if it doesn't exist.
+        /// </remarks>
+        public async Task<bool> MoveToFolderAsync(Guid modelId, string targetFolderPath, CancellationToken ct)
+        {
+            try
+            {
+                // Get the model from database
+                var model = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
+                if (model == null)
+                {
+                    _logger.LogWarning($"[MoveToFolder] Model not found: {modelId}");
+                    return false;
+                }
+
+                // Get or create the target folder
+                var targetFolder = await _folderManagementService.GetOrCreateFolderAsync(targetFolderPath, "models", ct);
+
+                // Update the folder reference (virtual move - physical file stays in place)
+                model.FolderId = targetFolder.Id;
+
+                // Save changes to database
+                await _unitOfWork.SaveChangesAsync(ct);
+
+                _logger.LogInformation($"[MoveToFolder] Moved model {model.FileName} to folder {targetFolderPath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[MoveToFolder] Failed to move model {modelId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        #endregion
+
         #region DTO Mapping Helpers
 
         /// <summary>

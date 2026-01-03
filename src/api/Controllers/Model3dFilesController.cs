@@ -964,28 +964,20 @@ public class Model3DFilesController : ControllerBase
                         continue;
                     }
 
-                    // Query the database by primary key (GUID) - O(1) lookup
-                    var targetModel = await _unitOfWork.Model3dFiles.GetByIdAsync(modelId, ct);
+                    // This will update the model's FolderId in the database
+                    bool moved = await _modelService.MoveToFolderAsync(modelId, targetDirectoryPath, ct);
 
-                    if (targetModel == null)
+                    if (moved)
+                    {
+                        movedCount++;
+                        _logger.LogDebug($"[MoveModels] Successfully moved model: {modelId}");
+                    }
+                    else
                     {
                         _logger.LogWarning($"[MoveModels] Model not found: {modelId}");
                         failedFiles.Add((modelIdStr, "Model not found"));
                         failedCount++;
-                        continue;
                     }
-
-                    // Get or create the target folder
-                    var targetFolder = await _modelService.GetOrCreateFolderAsync(targetDirectoryPath, "models", ct);
-
-                    // Update the folder reference (not physical files - those stay where they are)
-                    targetModel.FolderId = targetFolder.Id;
-                    await _unitOfWork.Model3dFiles.UpdateAsync(targetModel, ct);
-                    await _unitOfWork.SaveChangesAsync(ct);
-
-                    _logger.LogDebug($"[MoveModels] Updated model folder: {targetModel.Id} ({targetModel.FileName}) -> '{targetDirectoryPath}'");
-
-                    movedCount++;
                 }
                 catch (ArgumentException ex)
                 {
