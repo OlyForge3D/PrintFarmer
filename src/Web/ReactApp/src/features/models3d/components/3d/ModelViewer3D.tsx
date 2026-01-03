@@ -609,10 +609,9 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
       case 'ply':
         return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
       case '3mf':
-        // 3MF format is not currently supported for direct viewing
-        // TODO: Implement 3MF to STL conversion service or use a library
-        setError('3MF file format is not currently supported for viewing. Please convert to STL format.');
-        return null;
+        // 3MF files will be converted to STL by backend service
+        // Frontend treats them as STL after conversion
+        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
       default:
         return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} />;
     }

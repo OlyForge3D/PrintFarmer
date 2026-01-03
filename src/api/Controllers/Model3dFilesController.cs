@@ -36,6 +36,7 @@ public class Model3DFilesController : ControllerBase
     private readonly IFolderManagementService _folderService;
     private readonly IStoredFileOperationsService _fileOperations;
     private readonly IStoragePathService _storagePathService;
+    private readonly I3MFToSTLConversionService _threeMfConverter;
 
     public Model3DFilesController(
         IUnifiedLoggingService logger,
@@ -47,7 +48,8 @@ public class Model3DFilesController : ControllerBase
         IUnitOfWork unitOfWork,
         IFolderManagementService folderService,
         IStoredFileOperationsService fileOperations,
-        IStoragePathService storagePathService)
+        IStoragePathService storagePathService,
+        I3MFToSTLConversionService threeMfConverter)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
@@ -58,6 +60,7 @@ public class Model3DFilesController : ControllerBase
         _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
         _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
         _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+        _threeMfConverter = threeMfConverter ?? throw new ArgumentNullException(nameof(threeMfConverter));
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
         // Ensure path is absolute - if relative, combine with current directory first
@@ -407,6 +410,63 @@ public class Model3DFilesController : ControllerBase
             }
 
             var (fileBytes, safeFileName) = result.Value;
+            string contentType = GetContentType(safeFileName);
+            return File(fileBytes, contentType, safeFileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to download file {path}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to download file");
+        }
+    }
+
+    /// <summary>
+    /// Downloads a 3D model file, converting 3MF files to STL format for viewing
+    /// </summary>
+    /// <param name="path">Path to the model file</param>
+    /// <param name="forceStl">If true, converts 3MF files to STL for viewer compatibility</param>
+    /// <returns>The model file, optionally converted to STL format</returns>
+    [HttpGet("download-for-viewer")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadForViewerAsync([FromQuery] string path, [FromQuery] bool forceStl = true)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return BadRequest("path is required");
+        }
+
+        try
+        {
+            // Get file bytes (validates path internally)
+            (byte[] bytes, string fileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
+            if (result == null)
+            {
+                return NotFound();
+            }
+
+            var (fileBytes, safeFileName) = result.Value;
+            
+            // Check if this is a 3MF file that needs conversion
+            if (forceStl && safeFileName.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation($"Converting 3MF file {safeFileName} to STL for viewer");
+                
+                var stlBytes = await _threeMfConverter.ConvertToSTLAsync(fileBytes, CancellationToken.None);
+                if (stlBytes != null)
+                {
+                    // Return as STL file
+                    var stlFileName = Path.ChangeExtension(safeFileName, ".stl");
+                    return File(stlBytes, "application/octet-stream", stlFileName);
+                }
+                else
+                {
+                    _logger.LogWarning($"Failed to convert 3MF file {safeFileName} to STL");
+                    return StatusCode(StatusCodes.Status500InternalServerError, "Failed to convert 3MF file to STL");
+                }
+            }
+            
+            // Return original file
             string contentType = GetContentType(safeFileName);
             return File(fileBytes, contentType, safeFileName);
         }

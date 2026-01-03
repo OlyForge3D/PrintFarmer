@@ -307,7 +307,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             // Foreign Keys - Use NoAction to avoid cascade conflicts in SQL Server
             _ = b.HasOne(g => g.Folder)
-                .WithMany()
+                .WithMany(f => f.Files)
                 .HasForeignKey(g => g.FolderId)
                 .OnDelete(DeleteBehavior.SetNull);
             _ = b.HasOne(g => g.SourcePrinter)
@@ -661,7 +661,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             // Foreign Keys
             _ = b.HasOne(m => m.Folder)
-                .WithMany()
+                .WithMany(f => f.Models)
                 .HasForeignKey(m => m.FolderId)
                 .OnDelete(DeleteBehavior.SetNull);
             _ = b.HasOne(m => m.UploadedByUser)
@@ -727,6 +727,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             // Index for finding all models with a tag
             _ = b.HasIndex(tm => tm.TagId);
+        });
+
+        // FolderNode Entity Configuration
+        _ = modelBuilder.Entity<FolderNode>(b =>
+        {
+            _ = b.HasKey(f => f.Id);
+            _ = b.Property(f => f.Path).IsRequired().HasMaxLength(1024);
+            _ = b.Property(f => f.FolderType).IsRequired().HasMaxLength(50);
+            _ = b.Property(f => f.CreatedAt).IsRequired();
+
+            // Navigation: FolderNode -> Models (inverse of Model3D.Folder)
+            _ = b.HasMany(f => f.Models)
+                .WithOne(m => m.Folder)
+                .HasForeignKey(m => m.FolderId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Navigation: FolderNode -> Files (inverse of GcodeFile.Folder)
+            _ = b.HasMany(f => f.Files)
+                .WithOne(g => g.Folder)
+                .HasForeignKey(g => g.FolderId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes
+            _ = b.HasIndex(f => f.Path).IsUnique();
+            _ = b.HasIndex(f => f.FolderType);
         });
 
         // ProcessProfile Entity Configuration
