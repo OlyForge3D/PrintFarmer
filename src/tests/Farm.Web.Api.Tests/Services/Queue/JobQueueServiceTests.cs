@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Queue;
 using Farm.Web.Api.Tests.Builders;
 using FluentAssertions;
@@ -22,13 +23,15 @@ public class JobQueueServiceTests
 {
     private readonly Mock<IQueueRepository> _mockRepo;
     private readonly Mock<IQueueDataService> _mockDataService;
+    private readonly Mock<IUnifiedLoggingService> _mockLogger;
     private readonly JobQueueService _sut; // System Under Test
 
     public JobQueueServiceTests()
     {
         _mockRepo = new Mock<IQueueRepository>();
         _mockDataService = new Mock<IQueueDataService>();
-        _sut = new JobQueueService(_mockRepo.Object, _mockDataService.Object);
+        _mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        _sut = new JobQueueService(_mockRepo.Object, _mockDataService.Object, _mockLogger.Object);
     }
 
     #region Constructor Tests
@@ -37,7 +40,7 @@ public class JobQueueServiceTests
     public void Constructor_WithNullRepository_ThrowsArgumentNullException()
     {
         // Act & Assert
-        System.Action act = () => new JobQueueService(null!, _mockDataService.Object);
+        System.Action act = () => new JobQueueService(null!, _mockDataService.Object, _mockLogger.Object);
         act.Should().Throw<ArgumentNullException>();
     }
 
@@ -45,7 +48,15 @@ public class JobQueueServiceTests
     public void Constructor_WithNullDataService_ThrowsArgumentNullException()
     {
         // Act & Assert
-        System.Action act = () => new JobQueueService(_mockRepo.Object, null!);
+        System.Action act = () => new JobQueueService(_mockRepo.Object, null!, _mockLogger.Object);
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void Constructor_WithNullLogger_ThrowsArgumentNullException()
+    {
+        // Act & Assert
+        System.Action act = () => new JobQueueService(_mockRepo.Object, _mockDataService.Object, null!);
         act.Should().Throw<ArgumentNullException>();
     }
 

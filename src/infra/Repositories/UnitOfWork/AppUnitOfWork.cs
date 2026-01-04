@@ -8,6 +8,7 @@ using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.Queue;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork
 {
@@ -24,6 +25,7 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         private IFolderRepository? _folderRepository;
         private IModel3DFileRepository? _model3dFileRepository;
         private ILocationRepository? _locationRepository;
+        private IQueueRepository? _queueRepository;
 
         public AppUnitOfWork(AppDbContext db)
         {
@@ -64,6 +66,12 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         /// Coordinated with printer operations for location-based organization.
         /// </summary>
         public ILocationRepository Locations => _locationRepository ??= new EfLocationRepository(_db);
+
+        /// <summary>
+        /// Lazy-initializes the Queue repository, reusing the same DbContext.
+        /// Coordinated with printer and gcode operations for job queue management.
+        /// </summary>
+        public IQueueRepository Queue => _queueRepository ??= new EfQueueRepository(_db);
 
         /// <summary>
         /// Persists all pending changes from both repositories in a single atomic transaction.

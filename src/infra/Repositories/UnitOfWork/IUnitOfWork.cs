@@ -7,6 +7,7 @@ using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.Queue;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork
 {
@@ -58,6 +59,12 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         /// Coordinated with printer and location-based operations via shared DbContext.
         /// </summary>
         ILocationRepository Locations { get; }
+
+        /// <summary>
+        /// Repository for print job queue and job persistence.
+        /// Coordinated with printer and gcode operations via shared DbContext.
+        /// </summary>
+        IQueueRepository Queue { get; }
 
         /// <summary>
         /// Persists all changes made to entities tracked by any repository in this Unit of Work.

@@ -7,9 +7,9 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Filament;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Filament;
 using Farm.Web.Api.Services.Interfaces;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Filament
 {
@@ -25,17 +25,35 @@ namespace Farm.Web.Api.Services.Filament
     /// - Startup status checking to prevent operations during initialization
     /// Temperature defaults are based on common material profiles for standard printing.
     /// </remarks>
+    /// <remarks>
+    /// Constructor and dependency initialization uses null-coalescing operators
+    /// to ensure all required services are available before service starts.
+    /// </remarks>
     public class FilamentTypeService : IFilamentTypeService
     {
         private readonly IFilamentTypeRepository _repo;
         private readonly IStartupStatus _startupStatus;
         private readonly ISpoolmanService _spoolmanService;
+        private readonly IUnifiedLoggingService _logger;
 
-        public FilamentTypeService(IFilamentTypeRepository repo, IStartupStatus startupStatus, ISpoolmanService spoolmanService)
+        /// <summary>
+        /// Initializes a new instance of the FilamentTypeService with required dependencies.
+        /// </summary>
+        /// <param name="repo">Repository for filament type data persistence and retrieval</param>
+        /// <param name="startupStatus">Service for checking application startup status</param>
+        /// <param name="spoolmanService">Service for integrating with Spoolman inventory system</param>
+        /// <param name="logger">Unified logging service for operation tracking and audit trails</param>
+        /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
+        public FilamentTypeService(
+            IFilamentTypeRepository repo,
+            IStartupStatus startupStatus,
+            ISpoolmanService spoolmanService,
+            IUnifiedLoggingService logger)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
             _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         /// <summary>

@@ -21,7 +21,9 @@ public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
 
     public OrcaSlicerLibrary_v2_3_1()
     {
-        _profilesProvider = new OrcaSlicerProfilesProvider();
+        // Profiles are loaded from the OrcaSlicer worker service (/api/profiles), not from bundled resources
+        // The worker parses profiles from the official OrcaSlicer installation at /opt/orcaslicer/resources/profiles/
+        _profilesProvider = new NullProfilesProvider();
         _assetRegistry = new OrcaSlicerAssetRegistry();
     }
 

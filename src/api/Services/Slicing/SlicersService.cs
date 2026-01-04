@@ -12,11 +12,30 @@ using Farm.Infrastructure.Contracts.Slicing; // shared DTOs for RegisterSlicerDt
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.Slicing
 {
+    /// <summary>
+    /// Service for managing 3D printer slicer workers and their lifecycle, including registration,
+    /// heartbeat monitoring, capacity tracking, and health status management.
+    /// </summary>
+    /// <remarks>
+    /// This service orchestrates all slicer worker operations across the printing farm, including:
+    /// - Worker registration and deregistration with capacity tracking
+    /// - Real-time heartbeat monitoring to detect failed or unresponsive workers
+    /// - Dynamic capacity calculation (total capacity, available slots, active job count)
+    /// - Health status assessment with automatic unhealthy worker identification
+    /// - SignalR broadcast notifications for worker state changes
+    /// - Metrics collection for capacity and worker utilization tracking
+    /// - Integration with process profile repository for worker capability validation
+    /// 
+    /// The service maintains a registry of active slicer workers and their current state,
+    /// enabling the job queue system to intelligently distribute slicing jobs across available
+    /// workers based on their capacity and health status.
+    /// </remarks>
     public class SlicersService : ISlicersService
     {
         private readonly ISlicersRepository _repo;
@@ -25,9 +44,23 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly IHubContext<SlicerHub> _hub;
         private readonly SlicerServiceMetrics _metrics;
         private readonly HttpClient _httpClient;
+        private readonly IUnifiedLoggingService _logger;
 
         private readonly Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> _slicerSettings;
 
+        /// <summary>
+        /// Initializes a new instance of the SlicersService with required dependencies.
+        /// Sets up capacity metrics providers for real-time monitoring of worker capacity.
+        /// </summary>
+        /// <param name="repo">Repository for slicer service data persistence and retrieval</param>
+        /// <param name="workerRepo">Repository for worker data access and management</param>
+        /// <param name="profileRepo">Repository for process profile data access</param>
+        /// <param name="hub">SignalR hub context for broadcasting worker state changes to connected clients</param>
+        /// <param name="metrics">Metrics collection service for capacity and utilization tracking</param>
+        /// <param name="httpClient">HTTP client for external service communication and health checks</param>
+        /// <param name="logger">Unified logging service for audit trails and debugging</param>
+        /// <param name="slicerSettings">Configuration options for slicer service behavior and constraints</param>
+        /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
         public SlicersService(
             ISlicersRepository repo,
             IWorkerRepository workerRepo,
@@ -35,6 +68,7 @@ namespace Farm.Web.Api.Services.Slicing
             IHubContext<SlicerHub> hub,
             SlicerServiceMetrics metrics,
             HttpClient httpClient,
+            IUnifiedLoggingService logger,
             Microsoft.Extensions.Options.IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> slicerSettings)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
@@ -43,6 +77,7 @@ namespace Farm.Web.Api.Services.Slicing
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
             _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _slicerSettings = slicerSettings ?? throw new ArgumentNullException(nameof(slicerSettings));
 
             // Set up observable capacity metrics
@@ -97,11 +132,37 @@ namespace Farm.Web.Api.Services.Slicing
             }
         }
 
+        /// <summary>
+        /// Retrieves all registered slicer worker services from the system.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Read-only list of all registered slicer services with their configuration</returns>
+        /// <remarks>
+        /// This method queries the repository for all slicer services regardless of their health status.
+        /// Use this when you need to inspect all configured slicer workers in the farm.
+        /// </remarks>
         public async Task<IReadOnlyList<SlicerService>> ListAsync(CancellationToken ct)
         {
             return await _repo.ListAsync(ct);
         }
 
+        /// <summary>
+        /// Registers a new slicer worker service with the system and generates an API key for authentication.
+        /// </summary>
+        /// <param name="dto">Registration request containing worker details (name, URL, max concurrent jobs, capabilities)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Tuple containing the assigned worker ID and API key for authentication</returns>
+        /// <remarks>
+        /// This method performs the following operations:
+        /// - Validates the registration request and worker connectivity
+        /// - Generates a unique API key for secure communication
+        /// - Stores the worker configuration in the repository
+        /// - Broadcasts the new worker registration to all connected clients via SignalR
+        /// - Updates capacity metrics to reflect the new worker's available capacity
+        /// 
+        /// The returned API key must be securely transmitted to the worker and used for all subsequent API calls.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">Thrown if worker registration fails or worker is unreachable</exception>
         public async Task<(Guid id, string apiKey)> RegisterAsync(RegisterSlicerDto dto, CancellationToken ct)
         {
             SlicerService svc = new SlicerService
@@ -166,12 +227,14 @@ namespace Farm.Web.Api.Services.Slicing
             {
                 try
                 {
+                    _logger.LogInformation($"OrcaSlicer service registered, attempting to seed profiles from {svc.Host}");
                     await SeedProfilesFromWorkerAsync(svc.Host ?? string.Empty, ct);
+                    _logger.LogInformation("Profile seeding completed");
                 }
                 catch (Exception ex)
                 {
                     // Log but don't fail registration if profile seeding fails
-                    Debug.WriteLine($"Failed to seed profiles from worker: {ex.Message}");
+                    _logger.LogWarning($"Failed to seed profiles from worker: {ex.Message}");
                 }
             }
 
@@ -214,11 +277,39 @@ namespace Farm.Web.Api.Services.Slicing
             };
         }
 
+        /// <summary>
+        /// Retrieves a specific slicer worker service by its unique identifier.
+        /// </summary>
+        /// <param name="id">The unique identifier of the slicer service to retrieve</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>The slicer service if found; otherwise null</returns>
+        /// <remarks>
+        /// This method queries the repository for a specific slicer worker without any filtering.
+        /// Returns null if the worker has been deregistered or does not exist.
+        /// </remarks>
         public async Task<SlicerService?> GetAsync(Guid id, CancellationToken ct)
         {
             return await _repo.GetByIdAsync(id, ct);
         }
 
+        /// <summary>
+        /// Processes a heartbeat signal from a slicer worker and updates its status and metrics.
+        /// </summary>
+        /// <param name="id">The unique identifier of the slicer worker sending the heartbeat</param>
+        /// <param name="dto">Heartbeat data including current status, free slots, and worker health indicators</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if heartbeat was processed successfully; false if worker not found</returns>
+        /// <remarks>
+        /// This method performs the following operations:
+        /// - Updates the slicer service's LastSeen timestamp and status
+        /// - Synchronizes worker status to the Worker table for dispatcher coordination
+        /// - Records heartbeat metrics for monitoring and analysis
+        /// - Broadcasts heartbeat events to connected clients via SignalR
+        /// - Calculates and records latency metrics for performance monitoring
+        /// 
+        /// Heartbeats are critical for health monitoring and worker availability tracking.
+        /// Missing heartbeats indicate worker connectivity issues or failure.
+        /// </remarks>
         public async Task<bool> HeartbeatAsync(Guid id, HeartbeatDto dto, CancellationToken ct)
         {
             DateTime startTime = DateTime.UtcNow;
@@ -311,6 +402,23 @@ namespace Farm.Web.Api.Services.Slicing
             };
         }
 
+        /// <summary>
+        /// Deregisters a slicer worker service and marks it as offline in the system.
+        /// </summary>
+        /// <param name="id">The unique identifier of the slicer worker to deregister</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if deregistration was successful; false if worker not found</returns>
+        /// <remarks>
+        /// This method performs the following operations:
+        /// - Removes the slicer service from active registration
+        /// - Synchronizes worker status to offline in the Worker table
+        /// - Records metrics for service deregistration
+        /// - Broadcasts deregistration events to all connected clients via SignalR
+        /// - Preserves worker history for audit trails
+        /// 
+        /// Deregistered workers are no longer available for job assignment. The system
+        /// automatically fails over any pending jobs from deregistered workers.
+        /// </remarks>
         public async Task<bool> DeregisterAsync(Guid id, CancellationToken ct)
         {
             SlicerService? svc = await _repo.GetByIdAsync(id, ct);
@@ -357,6 +465,26 @@ namespace Farm.Web.Api.Services.Slicing
             return true;
         }
 
+        /// <summary>
+        /// Rotates the API key for a slicer worker service for security purposes.
+        /// </summary>
+        /// <param name="id">The unique identifier of the slicer worker</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <param name="isAdminForced">Whether this rotation is admin-forced for security reasons (true) or routine (false)</param>
+        /// <returns>The new API key if rotation was successful; null if worker not found</returns>
+        /// <remarks>
+        /// This method performs the following operations:
+        /// - Generates a new cryptographically secure API key
+        /// - Replaces the old API key in both SlicerService and Worker tables
+        /// - Persists the new key to the database
+        /// - Broadcasts key rotation notification to connected clients
+        /// - Records metrics for API key rotation events
+        /// 
+        /// API key rotation is recommended for security maintenance. The new key must be
+        /// communicated securely to the worker and updated in its configuration.
+        /// The isAdminForced parameter indicates whether this rotation is mandatory
+        /// due to security concerns (e.g., suspected key compromise).
+        /// </remarks>
         public async Task<string?> RotateApiKeyAsync(Guid id, CancellationToken ct, bool isAdminForced = false)
         {
             SlicerService? svc = await _repo.GetByIdAsync(id, ct);
@@ -427,34 +555,38 @@ namespace Farm.Web.Api.Services.Slicing
                 IReadOnlyList<ProcessProfile> existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
                 if (existingSystemProfiles.Any(p => p.IsSystem))
                 {
-                    Debug.WriteLine("System OrcaSlicer profiles already exist, skipping seed");
+                    _logger.LogInformation("System OrcaSlicer profiles already exist, skipping seed");
                     return;
                 }
 
-                // Call the worker's /profiles endpoint which now returns AllProfilesResponseDto with all three profile types
+                // Call the worker's /api/profiles endpoint which now returns AllProfilesResponseDto with all three profile types
                 string workerUrl = workerHost.TrimEnd('/');
-                HttpResponseMessage response = await _httpClient.GetAsync($"{workerUrl}/profiles", ct);
+                _logger.LogInformation($"[SeedProfilesFromWorker] Fetching profiles from worker at: {workerUrl}/api/profiles");
+                HttpResponseMessage response = await _httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Debug.WriteLine($"Worker /profiles returned {response.StatusCode}");
+                    string errorContent = await response.Content.ReadAsStringAsync(ct);
+                    _logger.LogWarning($"[SeedProfilesFromWorker] Worker /api/profiles returned {response.StatusCode}: {errorContent}");
                     return;
                 }
 
                 string json = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogInformation($"[SeedProfilesFromWorker] Received {json.Length} bytes from worker");
                 AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
                 {
-                    Debug.WriteLine("No profiles available from worker");
+                    _logger.LogWarning($"[SeedProfilesFromWorker] No profiles available from worker (parsed null: {allProfiles == null}, process groups: {allProfiles?.ProcessProfiles?.Count ?? 0}, filament groups: {allProfiles?.FilamentProfiles?.Count ?? 0}, machine groups: {allProfiles?.MachineProfiles?.Count ?? 0})");
                     return;
                 }
 
+                _logger.LogInformation($"[SeedProfilesFromWorker] Deserializing profiles - process groups: {allProfiles?.ProcessProfiles?.Count ?? 0}, filament groups: {allProfiles?.FilamentProfiles?.Count ?? 0}, machine groups: {allProfiles?.MachineProfiles?.Count ?? 0}");
                 int imported = 0;
 
                 // Flatten profiles from the grouped dictionaries
-                List<ProcessProfileDto> flattenedProcessProfiles = allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
-                List<FilamentProfileDto> flattenedFilamentProfiles = allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
+                List<ProcessProfileDto> flattenedProcessProfiles = allProfiles!.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
+                List<FilamentProfileDto> flattenedFilamentProfiles = allProfiles!.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
 
                 // Import process profiles from worker
                 if (flattenedProcessProfiles.Count > 0)
@@ -509,7 +641,7 @@ namespace Farm.Web.Api.Services.Slicing
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error seeding profiles: {ex.Message}");
+                _logger.LogError($"[SeedProfilesFromWorker] Error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
                 // Don't throw - profile seeding is best-effort
             }
         }

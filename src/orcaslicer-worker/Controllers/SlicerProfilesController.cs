@@ -90,14 +90,31 @@ public class ProfilesController : ControllerBase
                     // Find filament and process profiles compatible with any machine in this model
                     List<string> machineProfileNames = modelMachines.Select(m => m.Name ?? "").ToList();
 
-                    // Filter filament profiles: include if compatible_printers contains any machine in this model
+                    // Filter filament profiles: include if:
+                    // 1. compatible_printers contains any machine in this model, OR
+                    // 2. from OrcaFilamentLibrary (universal gallery), OR
+                    // 3. compatible_printers is empty/null (universally available)
                     modelProfiles.FilamentProfiles = filamentProfiles
-                        .Where(f => f.CompatiblePrinters != null && f.CompatiblePrinters.Any(cp => machineProfileNames.Contains(cp)))
+                        .Where(f =>
+                            // Explicitly compatible with a machine in this model
+                            (f.CompatiblePrinters != null && f.CompatiblePrinters.Any(cp => machineProfileNames.Contains(cp))) ||
+                            // From OrcaFilamentLibrary (universal)
+                            (f.Manufacturer ?? "").Equals("OrcaFilamentLibrary", StringComparison.OrdinalIgnoreCase) ||
+                            // No specific compatibility (universally available)
+                            (f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
+                        )
                         .ToList();
 
-                    // Filter process profiles: include if compatible_printers contains any machine in this model
+                    // Filter process profiles: include if:
+                    // 1. compatible_printers contains any machine in this model, OR
+                    // 2. compatible_printers is empty/null (universally available)
                     modelProfiles.ProcessProfiles = processProfiles
-                        .Where(p => p.CompatiblePrinters != null && p.CompatiblePrinters.Any(cp => machineProfileNames.Contains(cp)))
+                        .Where(p =>
+                            // Explicitly compatible with a machine in this model
+                            (p.CompatiblePrinters != null && p.CompatiblePrinters.Any(cp => machineProfileNames.Contains(cp))) ||
+                            // No specific compatibility (universally available)
+                            (p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
+                        )
                         .ToList();
 
                     models[modelId] = modelProfiles;

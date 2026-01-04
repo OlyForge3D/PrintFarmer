@@ -7,6 +7,7 @@ using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Users;
 using Moq;
@@ -19,6 +20,7 @@ public class UsersServiceTests
     private readonly Mock<IUsersRepository> _usersRepositoryMock;
     private readonly Mock<IAuthenticationService> _authenticationServiceMock;
     private readonly Mock<IPasswordHashingService> _passwordHashingServiceMock;
+    private readonly Mock<IUnifiedLoggingService> _loggerMock;
     private readonly IUsersService _usersService;
     private readonly CancellationToken _cancellationToken = CancellationToken.None;
 
@@ -27,7 +29,8 @@ public class UsersServiceTests
         _usersRepositoryMock = new Mock<IUsersRepository>(MockBehavior.Strict);
         _authenticationServiceMock = new Mock<IAuthenticationService>(MockBehavior.Strict);
         _passwordHashingServiceMock = new Mock<IPasswordHashingService>(MockBehavior.Strict);
-        _usersService = new UsersService(_usersRepositoryMock.Object, _authenticationServiceMock.Object, _passwordHashingServiceMock.Object);
+        _loggerMock = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        _usersService = new UsersService(_usersRepositoryMock.Object, _authenticationServiceMock.Object, _passwordHashingServiceMock.Object, _loggerMock.Object);
     }
 
     #region GetUsersAsync Tests

@@ -6,22 +6,62 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Telemetry;
 
 namespace Farm.Web.Api.Services.Queue
 {
+    /// <summary>
+    /// Service for managing the print job queue and queue operations across printers.
+    /// </summary>
+    /// <remarks>
+    /// This service orchestrates print job queue management, including:
+    /// - Queue overview across all available printers
+    /// - Per-printer queue retrieval and status reporting
+    /// - Job assignment and priority management
+    /// - Queue position calculation and priority-based ordering
+    /// - Estimated completion time calculations
+    /// - Job status transitions (queued, assigned, starting, printing, completed)
+    /// - Comprehensive logging of all queue operations for debugging and analysis
+    /// 
+    /// The service uses IQueueDataService for specialized data queries and IQueueRepository
+    /// for persistence operations, maintaining proper separation of concerns.
+    /// </remarks>
     public class JobQueueService : IJobQueueService
     {
         private readonly IQueueRepository _repo;
         private readonly IQueueDataService _dataService;
+        private readonly IUnifiedLoggingService _logger;
 
-        public JobQueueService(IQueueRepository repo, IQueueDataService dataService)
+        /// <summary>
+        /// Initializes a new instance of the JobQueueService with required dependencies.
+        /// </summary>
+        /// <param name="repo">Repository for print job persistence and CRUD operations</param>
+        /// <param name="dataService">Specialized data service for queue-specific queries</param>
+        /// <param name="logger">Unified logging service for operation tracking and audit trails</param>
+        /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
+        public JobQueueService(
+            IQueueRepository repo,
+            IQueueDataService dataService,
+            IUnifiedLoggingService logger)
         {
             ArgumentNullException.ThrowIfNull(repo);
             ArgumentNullException.ThrowIfNull(dataService);
+            ArgumentNullException.ThrowIfNull(logger);
             _repo = repo;
             _dataService = dataService;
+            _logger = logger;
         }
 
+        /// <summary>
+        /// Retrieves a comprehensive overview of the print job queue across all available printers.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Read-only list of QueueOverviewDto objects, one per printer, containing queue statistics and job information</returns>
+        /// <remarks>
+        /// This method provides a high-level view of queue status across the entire fleet of printers.
+        /// For each available printer, it includes queue count, currently printing job information, and
+        /// estimated completion time. Used for dashboard displays and queue status monitoring.
+        /// </remarks>
         public async Task<IReadOnlyList<QueueOverviewDto>> GetQueueOverviewAsync(CancellationToken ct)
         {
             List<Printer> printers = await _dataService.GetAvailablePrintersAsync(ct);
@@ -48,6 +88,17 @@ namespace Farm.Web.Api.Services.Queue
             return overview;
         }
 
+        /// <summary>
+        /// Retrieves all print jobs in the queue for a specific printer, ordered by status and priority.
+        /// </summary>
+        /// <param name="printerId">Unique identifier of the printer whose queue to retrieve</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Read-only list of JobQueuePrintJobDto objects ordered by execution status and priority, with queue positions assigned</returns>
+        /// <remarks>
+        /// This method retrieves the complete job queue for a printer. Jobs are ordered with currently executing/starting
+        /// jobs first, followed by queued jobs ordered by priority and then by queue time (FIFO within same priority).
+        /// Queue positions are automatically calculated and assigned to each job in the result.
+        /// </remarks>
         public async Task<IReadOnlyList<JobQueuePrintJobDto>> GetPrinterQueueAsync(Guid printerId, CancellationToken ct)
         {
             List<PrintJob> jobs = await _dataService.GetPrintJobsForPrinterAsync(printerId, ct);
@@ -84,6 +135,18 @@ namespace Farm.Web.Api.Services.Queue
             return dtos;
         }
 
+        /// <summary>
+        /// Adds a new print job to the queue, assigning it to a printer and calculating queue position.
+        /// </summary>
+        /// <param name="request">Queue job request containing gcode file ID, assigned printer, and job requirements (nozzle diameter, material type)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>JobQueuePrintJobDto with assigned printer and queue position on success; null if gcode file not found or no suitable printer available</returns>
+        /// <remarks>
+        /// This method creates a new print job and adds it to the queue. If no specific printer is assigned in the request,
+        /// the system automatically selects the best available printer based on nozzle diameter and material type compatibility.
+        /// If no compatible printer is available, the operation returns null. The job is assigned a queue position based on
+        /// the next available position for its assigned printer. Job status defaults to Queued.
+        /// </remarks>
         public async Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(request);
@@ -144,6 +207,17 @@ namespace Farm.Web.Api.Services.Queue
             };
         }
 
+        /// <summary>
+        /// Retrieves a specific print job from the queue by its unique identifier.
+        /// </summary>
+        /// <param name="id">Unique identifier of the print job to retrieve</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>JobQueuePrintJobDto with complete job information including gcode file name, assigned printer, and timing data; null if not found</returns>
+        /// <remarks>
+        /// This method retrieves a single job with all related information including gcode file details,
+        /// assigned printer name, and both estimated and actual timing/filament usage data. Returns null
+        /// if the specified job ID does not exist in the queue.
+        /// </remarks>
         public async Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct)
         {
             PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
@@ -176,6 +250,17 @@ namespace Farm.Web.Api.Services.Queue
             };
         }
 
+        /// <summary>
+        /// Removes a print job from the queue, making it unavailable for execution.
+        /// </summary>
+        /// <param name="id">Unique identifier of the print job to remove</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if job was successfully removed; false if job not found or cannot be removed (not in queued/assigned status)</returns>
+        /// <remarks>
+        /// This method removes a job from the queue. Jobs can only be removed if they are in Queued or Assigned status.
+        /// Jobs that are currently printing, starting, or have already completed cannot be removed. Returns false if the
+        /// job does not exist or if its current status does not permit removal.
+        /// </remarks>
         public async Task<bool> RemoveJobAsync(Guid id, CancellationToken ct)
         {
             PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
@@ -194,6 +279,18 @@ namespace Farm.Web.Api.Services.Queue
             return true;
         }
 
+        /// <summary>
+        /// Updates the priority level of a queued print job, affecting its execution order.
+        /// </summary>
+        /// <param name="id">Unique identifier of the print job to update</param>
+        /// <param name="request">Update request containing the new priority level</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Updated JobQueuePrintJobDto with new priority; null if job not found</returns>
+        /// <remarks>
+        /// This method updates the priority of a queued job. Higher priority jobs execute before lower priority jobs
+        /// within the same printer's queue. The update timestamp is automatically set to the current UTC time.
+        /// Returns null if the specified job ID does not exist. Priority changes are effective immediately.
+        /// </remarks>
         public async Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct)
         {
             PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
@@ -222,6 +319,25 @@ namespace Farm.Web.Api.Services.Queue
             };
         }
 
+        /// <summary>
+        /// Updates the status, priority, assignment, or completion metrics of a print job.
+        /// </summary>
+        /// <param name="id">Unique identifier of the print job to update</param>
+        /// <param name="request">Update request containing fields to modify (status, priority, assigned printer, filament usage, failure reason)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Updated JobQueuePrintJobDto with current state; null if job not found or assigned printer validation fails</returns>
+        /// <remarks>
+        /// This method provides comprehensive job update capability, allowing modification of multiple job properties:
+        /// - Status: Job execution state (queued, assigned, starting, printing, completed, failed)
+        /// - Priority: Queue priority level affecting execution order
+        /// - Assigned Printer: Reassignment to a different printer (validates printer exists)
+        /// - Actual Filament Usage: Recorded usage for completed/failed jobs
+        /// - Failure Reason: Description of failure conditions for failed jobs
+        /// 
+        /// All fields in the update request are optional. Only provided fields are modified. The update timestamp
+        /// is automatically set to current UTC time. Printer assignment changes trigger a reload of the complete job data
+        /// to ensure printer information is current. Returns null if job not found or if assigned printer ID is invalid.
+        /// </remarks>
         public async Task<JobQueuePrintJobDto?> UpdateJobAsync(Guid id, UpdatePrintJobStatusDto request, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(request);

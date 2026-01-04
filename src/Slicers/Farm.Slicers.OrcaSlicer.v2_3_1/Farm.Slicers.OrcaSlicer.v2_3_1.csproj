@@ -27,23 +27,6 @@
     </PackageReference>
   </ItemGroup>
 
-  <!-- Embed official profiles as resources -->
-  <ItemGroup>
-    <EmbeddedResource Include="lib/Profiles/index.json">
-      <LogicalName>OrcaSlicer_v2_3_1_Profiles_Index.json</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="lib/Profiles/machines/*.json">
-      <LogicalName>OrcaSlicer_v2_3_1_Profiles_Machines_%(Filename).json</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <!-- Embed universal filaments as resources -->
-  <ItemGroup>
-    <EmbeddedResource Include="lib/Filaments/universal_filaments.json">
-      <LogicalName>OrcaSlicer_v2_3_1_Filaments_Universal.json</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
   <!-- Embed assets as resources -->
   <ItemGroup>
     <EmbeddedResource Include="lib/Assets/**/*">

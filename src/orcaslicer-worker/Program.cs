@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Text.Json;
 using Farm.Infrastructure; // For AllProfilesResponseDto
 using Farm.Infrastructure.Telemetry;
@@ -18,10 +17,7 @@ internal static class WorkerConstants
 
 public static class Program
 {
-    // Cached JsonSerializerOptions for performance (CA1869)
-    private static readonly JsonSerializerOptions s_jsonOptions = new() { PropertyNameCaseInsensitive = true };
-
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -44,6 +40,7 @@ public static class Program
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
         _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
         _ = builder.Services.AddSingleton<ISlicerProfilesService, OrcaProfilesService>(); // generic profiles interface, implemented by OrcaSlicer
+        _ = builder.Services.AddSingleton<IProfilePreloadService, ProfilePreloadService>(); // profile preload before readiness
 
 
         // Telemetry: provide a PrintFarmer telemetry implementation so UnifiedLoggingService can be constructed
@@ -143,114 +140,19 @@ public static class Program
             app.Logger.LogWarning("OrcaSlicer binary not present (stub in use) - readiness will be unhealthy for orca_binary.");
         }
 
-        // Preload profiles for catalog manufacturers at startup and measure timing
-        _ = Task.Run(async () =>
+        // Preload profiles before starting the app
+        // This ensures profiles are cached in memory before the worker registers as ready
+        try
         {
-            try
-            {
-                app.Logger.LogInformation("Starting OrcaSlicer profile preload for catalog manufacturers...");
-                Stopwatch stopwatch = Stopwatch.StartNew();
+            IProfilePreloadService preloadService = app.Services.GetRequiredService<IProfilePreloadService>();
+            await preloadService.PreloadProfilesAsync();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError("Failed to preload profiles at startup: {Exception}", ex.Message);
+            throw; // Fail startup if profiles cannot be preloaded
+        }
 
-                ISlicerProfilesService profileService = app.Services.GetRequiredService<ISlicerProfilesService>();
-
-                // First load all machines to get the list of available manufacturers
-                Stopwatch machineStart = Stopwatch.StartNew();
-                IList<MachineProfileDto> machines = await profileService.ListAvailableMachineProfilesAsync();
-                machineStart.Stop();
-
-                // Get the set of manufacturers available in OrcaSlicer profiles
-                HashSet<string> availableManufacturers = machines
-                    .Where(m => !string.IsNullOrEmpty(m.Manufacturer))
-                    .Select(m => m.Manufacturer!)
-                    .Distinct()
-                    .ToHashSet();
-
-                app.Logger.LogInformation("Found {ManufacturerCount} manufacturers with {MachineCount} machine profiles in {ElapsedMilliseconds}ms", availableManufacturers.Count, machines.Count, machineStart.ElapsedMilliseconds);
-
-                // Load catalog manufacturers via HTTP (call the API)
-                HttpClient httpClient = app.Services.GetRequiredService<IHttpClientFactory>().CreateClient();
-                string catalogUrl = Environment.GetEnvironmentVariable("CATALOG_API_URL") ?? "http://localhost:5245";
-
-                try
-                {
-                    HttpResponseMessage response = await httpClient.GetAsync(new Uri($"{catalogUrl}/api/catalog/manufacturers")).ConfigureAwait(false);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        string content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                        List<ManufacturerDto>? manufacturerDtos = JsonSerializer.Deserialize<List<ManufacturerDto>>(
-                            content,
-                            s_jsonOptions
-                        );
-
-                        HashSet<string> catalogManufacturers = manufacturerDtos?
-                            .Select(m => m.Name)
-                            .ToHashSet() ?? [];
-
-                        app.Logger.LogInformation("Catalog has {CatalogManufacturerCount} manufacturers", catalogManufacturers.Count);
-
-                        // Load filament and process profiles only for manufacturers in catalog
-                        Stopwatch filamentStart = Stopwatch.StartNew();
-                        IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync().ConfigureAwait(false);
-                        int catalogFilaments = filaments
-                            .Count(f => string.IsNullOrEmpty(f.Manufacturer) || catalogManufacturers.Contains(f.Manufacturer));
-                        filamentStart.Stop();
-
-                        Stopwatch processStart = Stopwatch.StartNew();
-                        IList<ProcessProfileDto> processes = await profileService.ListAvailableProcessProfilesAsync();
-                        processStart.Stop();
-
-                        stopwatch.Stop();
-
-                        app.Logger.LogInformation(
-                            "OrcaSlicer profiles preloaded in {TotalElapsed}ms: {MachineCount} machines ({MachineElapsed}ms), {CatalogFilaments}/{TotalFilaments} filaments for catalog ({FilamentElapsed}ms), {ProcessCount} processes ({ProcessElapsed}ms)",
-                            stopwatch.ElapsedMilliseconds,
-                            machines.Count,
-                            machineStart.ElapsedMilliseconds,
-                            catalogFilaments,
-                            filaments.Count,
-                            filamentStart.ElapsedMilliseconds,
-                            processes.Count,
-                            processStart.ElapsedMilliseconds
-                        );
-                    }
-                    else
-                    {
-                        app.Logger.LogWarning("Failed to fetch catalog manufacturers: {StatusCode}. Skipping filtered preload.", response.StatusCode);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    app.Logger.LogWarning("Error fetching catalog manufacturers: {Exception}. Loading all profiles instead.", ex.Message);
-
-                    // Fallback: load all profiles if catalog API is unavailable
-                    Stopwatch filamentStart = Stopwatch.StartNew();
-                    IList<FilamentProfileDto> filaments = await profileService.ListAvailableFilamentProfilesAsync();
-                    filamentStart.Stop();
-
-                    Stopwatch processStart = Stopwatch.StartNew();
-                    IList<ProcessProfileDto> processes = await profileService.ListAvailableProcessProfilesAsync();
-                    processStart.Stop();
-
-                    stopwatch.Stop();
-
-                    app.Logger.LogInformation(
-                        "OrcaSlicer profiles preloaded (fallback) in {TotalElapsed}ms: {MachineCount} machines ({MachineElapsed}ms), {FilamentCount} filaments ({FilamentElapsed}ms), {ProcessCount} processes ({ProcessElapsed}ms)",
-                        stopwatch.ElapsedMilliseconds,
-                        machines.Count,
-                        machineStart.ElapsedMilliseconds,
-                        filaments.Count,
-                        filamentStart.ElapsedMilliseconds,
-                        processes.Count,
-                        processStart.ElapsedMilliseconds
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                app.Logger.LogError("Error preloading OrcaSlicer profiles: {Exception}", ex.Message);
-            }
-        });
-
-        app.Run();
+        await app.RunAsync();
     }
 }

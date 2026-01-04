@@ -6,6 +6,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
+using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Slicing;
 using FluentAssertions;
@@ -62,6 +63,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             return mock;
         }
 
+        private static Mock<IUnifiedLoggingService> CreateMockLogger()
+        {
+            return new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
+        }
+
         [Fact(DisplayName = "RegisterAsync creates Worker with matching capabilities and slots")]
         public async Task RegisterAsync_Should_Create_Worker()
         {
@@ -73,7 +79,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
+            Mock<IUnifiedLoggingService> logger = CreateMockLogger();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -122,7 +129,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
+            Mock<IUnifiedLoggingService> logger = CreateMockLogger();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -167,7 +175,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, settings);
+            Mock<IUnifiedLoggingService> logger = CreateMockLogger();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {

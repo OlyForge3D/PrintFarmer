@@ -8,12 +8,34 @@ using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Slicing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Slicing;
 
+/// <summary>
+/// REST API controller for managing slicer profiles (process, machine, and filament profiles).
+/// Provides endpoints for importing, exporting, listing, and configuring slicer profiles across
+/// different slicer types (PrusaSlicer, OrcaSlicer, SuperSlicer, etc.).
+/// </summary>
+/// <remarks>
+/// This controller handles all profile management operations including:
+/// - Profile import/export with validation and deduplication via hash-based detection
+/// - Listing and searching profiles by type and slicer compatibility
+/// - Process profile management with hierarchy and compatibility condition evaluation
+/// - Machine profile management with nozzle variant support and base model definitions
+/// - Filament profile management with material-specific configurations and temperature presets
+/// - Profile compatibility condition evaluation for printer-specific matching using expression parsing
+/// - Profile hashing to detect and prevent duplicate imports while maintaining system integrity
+/// - Bulk operations and profile synchronization across multiple slicer types
+/// - Default profile configuration for slicer-specific defaults
+/// 
+/// All operations are authenticated and most are admin-restricted to prevent unauthorized
+/// profile modifications that could affect slicing job configuration and printer compatibility.
+/// Profile changes are logged for audit trails and system monitoring.
+/// </remarks>
 [ApiController]
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
@@ -21,6 +43,7 @@ namespace Farm.Web.Api.Controllers.Slicing;
 public class ProfilesController(
     IUnifiedLoggingService logger,
     IProfilesService profilesService,
+    ICatalogService catalogService,
     IProcessProfileRepository processProfileRepo,
     IMachineProfileRepository machineProfileRepo,
     IFilamentProfileRepository filamentProfileRepo,
@@ -29,12 +52,36 @@ public class ProfilesController(
 {
     private readonly IUnifiedLoggingService _logger = logger;
     private readonly IProfilesService _profilesService = profilesService;
+    private readonly ICatalogService _catalogService = catalogService;
     private readonly IProcessProfileRepository _processProfileRepo = processProfileRepo;
     private readonly IMachineProfileRepository _machineProfileRepo = machineProfileRepo;
     private readonly IFilamentProfileRepository _filamentProfileRepo = filamentProfileRepo;
     private readonly IUnitOfWork _unitOfWork = unitOfWork;
     private readonly IWorkerRepository _workerRepository = workerRepository;
 
+    /// <summary>
+    /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
+    /// </summary>
+    /// <param name="request">Import request containing raw profile JSON, slicer type, and optional metadata</param>
+    /// <param name="parsingService">Service for parsing and validating profile configuration</param>
+    /// <param name="repo">Repository for profile persistence</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>
+    /// 201 Created if profile is new; 200 OK if profile already exists and was updated.
+    /// Returns ProcessProfileExtendedDto with full profile details and metadata.
+    /// </returns>
+    /// <remarks>
+    /// This endpoint performs comprehensive profile management:
+    /// - Parses and validates raw JSON profile configuration
+    /// - Extracts metadata (layer height, infill percentage, material type, quality)
+    /// - Generates content hash for deduplication detection
+    /// - Checks for existing profiles with same hash to prevent duplicates
+    /// - Supports optional system profile override by administrators
+    /// - Returns 201 Created for new profiles, 200 OK for updated existing profiles
+    /// - Stores sanitized JSON for long-term storage and audit trails
+    /// 
+    /// Requires farm_admin policy for access. Profile import is logged for audit purposes.
+    /// </remarks>
     [HttpPost("import")]
     [Authorize(Policy = "farm_admin")] // Admin-only: profile import
     [ProducesResponseType(typeof(ProcessProfileExtendedDto), StatusCodes.Status201Created)]
@@ -164,7 +211,23 @@ public class ProfilesController(
         }
     }
 
-    // Export raw JSON for a profile
+    /// <summary>
+    /// Exports the raw slicer configuration JSON for a stored profile with full metadata.
+    /// </summary>
+    /// <param name="id">Unique identifier of the process profile to export</param>
+    /// <param name="repo">Repository for profile data retrieval</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>ProcessProfileExportDto containing the raw JSON and all metadata fields for reimport</returns>
+    /// <remarks>
+    /// This endpoint retrieves a profile and returns its complete configuration including:
+    /// - Raw slicer JSON for reimport to other farm instances
+    /// - Extracted metadata (layer height, infill, material, quality)
+    /// - Profile creation timestamp and version information
+    /// - Hash for integrity verification
+    /// 
+    /// Requires farm_admin policy for access. Exports include all data necessary to
+    /// recreate the profile in another installation.
+    /// </remarks>
     [HttpGet("{id:guid}/export")]
     [Authorize(Policy = "farm_admin")] // Admin-only: profile export
     [ProducesResponseType(typeof(ProcessProfileExportDto), StatusCodes.Status200OK)]
@@ -206,7 +269,20 @@ public class ProfilesController(
         return Ok(dto);
     }
 
-    // Set profile as default (global or user scope)
+    /// <summary>
+    /// Sets a process profile as the default for system-wide usage in slicing jobs.
+    /// </summary>
+    /// <param name="id">Unique identifier of the profile to set as default</param>
+    /// <param name="repo">Repository for profile persistence</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>204 No Content on success; 404 Not Found if profile does not exist</returns>
+    /// <remarks>
+    /// This endpoint marks a profile as the default choice for new slicing jobs.
+    /// When no specific profile is selected, the default profile is automatically used.
+    /// Only one profile per slicer type can be marked as default at a time.
+    /// 
+    /// Requires farm_admin policy for access. Default profile changes are logged for audit trails.
+    /// </remarks>
     [HttpPost("{id:guid}/set-default")]
     [Authorize(Policy = "farm_admin")] // Admin-only: set default profile
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -223,7 +299,17 @@ public class ProfilesController(
         return NoContent();
     }
 
-    // Extended listing of all profile types (process, filament, machine) - user + public + system
+    /// <summary>
+    /// Retrieves an extended listing of all profile types with hierarchical organization and compatibility information.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>ExtendedProfilesResponseDto containing complete profiles by type, hierarchy, and compatibility metadata</returns>
+    /// <remarks>
+    /// This endpoint provides a comprehensive view of all available slicer profiles organized by type and hierarchy.
+    /// Returns process profiles, filament profiles, and machine profiles with their compatibility conditions evaluated.
+    /// Includes public system profiles, user-created profiles, and profile compatibility matrices for intelligent profile selection.
+    /// Used for populating UI selectors and providing detailed profile information for job configuration.
+    /// </remarks>
     [HttpGet("extended")]
     [ProducesResponseType(typeof(ExtendedProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListExtendedAsync(CancellationToken ct)
@@ -298,6 +384,18 @@ public class ProfilesController(
         return Ok(response);
     }
 
+    /// <summary>
+    /// Creates a new process profile from a client-provided configuration.
+    /// </summary>
+    /// <param name="request">Profile creation request containing name, description, slicer type, and configuration parameters</param>
+    /// <returns>201 Created with the newly created profile details; 400 Bad Request if validation fails</returns>
+    /// <remarks>
+    /// This endpoint creates a new process profile with the specified parameters.
+    /// The profile is immediately available for use in slicing jobs.
+    /// 
+    /// Requires farm_admin policy for access. Profile creation is logged for audit purposes.
+    /// All required fields (name, slicer type) must be provided in the request.
+    /// </remarks>
     [HttpPost]
     [Authorize(Policy = "farm_admin")] // Admin-only: create profile
     [ProducesResponseType(typeof(ProcessProfileResponseDto), StatusCodes.Status201Created)]
@@ -350,6 +448,17 @@ public class ProfilesController(
         }
     }
 
+    /// <summary>
+    /// Retrieves a specific process profile by its unique identifier.
+    /// </summary>
+    /// <param name="id">Unique identifier of the profile to retrieve</param>
+    /// <returns>ProcessProfileResponseDto with complete profile details on success; 404 Not Found if profile does not exist</returns>
+    /// <remarks>
+    /// This endpoint retrieves the complete configuration and metadata of a single profile including
+    /// name, description, slicer type, and all configuration parameters. Returns the profile in a format
+    /// suitable for display, editing, or use in job configuration. Returns 404 if the specified profile ID
+    /// does not exist in the system.
+    /// </remarks>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(ProcessProfileResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -363,6 +472,18 @@ public class ProfilesController(
         return Ok(profile);
     }
 
+    /// <summary>
+    /// Deletes a process profile from the system, making it unavailable for future slicing jobs.
+    /// </summary>
+    /// <param name="id">Unique identifier of the profile to delete</param>
+    /// <returns>204 No Content on successful deletion; 404 Not Found if profile does not exist</returns>
+    /// <remarks>
+    /// This endpoint permanently removes a profile from the system. Deleted profiles cannot
+    /// be recovered. Any jobs using the deleted profile may be affected.
+    /// 
+    /// Requires farm_admin policy for access. Profile deletion is logged for audit trails.
+    /// Consider archiving instead of deleting to maintain historical references.
+    /// </remarks>
     [HttpDelete("{id:guid}")]
     [Authorize(Policy = "farm_admin")] // Admin-only: delete profile
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -380,6 +501,22 @@ public class ProfilesController(
         }
     }
 
+    /// <summary>
+    /// Retrieves all process profiles with optional filtering by printer or slicer type.
+    /// </summary>
+    /// <param name="printerId">Optional printer ID to filter profiles by printer-specific compatibility</param>
+    /// <param name="slicerType">Optional slicer type to filter profiles (e.g., PrusaSlicer, OrcaSlicer)</param>
+    /// <returns>Enumerable of profile objects filtered by the specified criteria; empty list if no matches found</returns>
+    /// <remarks>
+    /// This endpoint retrieves process profiles with optional filtering capabilities:
+    /// - If printerId is provided, returns only profiles compatible with that printer
+    /// - If slicerType is provided, returns only profiles for that specific slicer application
+    /// - If both parameters are provided, applies both filters (AND logic)
+    /// - If neither parameter is provided, returns all available profiles
+    /// 
+    /// Used for populating UI profile selectors and providing filtered profile lists based on user context
+    /// and printer capabilities. Returns empty list if no profiles match the filter criteria.
+    /// </remarks>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProfilesAsync([FromQuery] string? printerId = null, [FromQuery] string? slicerType = null)
@@ -452,7 +589,6 @@ public class ProfilesController(
         };
     }
 
-    // --- Phase 6: OrcaSlicer bundle import/preview endpoint ---
     /// <summary>
     /// Parse and preview an OrcaSlicer config bundle without persisting. Returns structured preview of all detected presets.
     /// </summary>
@@ -540,10 +676,16 @@ public class ProfilesController(
         }
     }
 
-    // Lightweight listing of system-seeded OrcaSlicer profiles for UI verification
-    // Returns minimal list item DTOs (Id, Name, Material, Quality, LayerHeight, Infill, Hash flags)
+    /// <summary>
+    /// List all system-seeded OrcaSlicer profiles available in the database.
+    /// Returns profiles that were previously imported via the seed-from-worker endpoint.
+    /// These are read-only system profiles (IsSystem=true) that serve as templates for user-owned profiles.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Collection of system OrcaSlicer profiles with metadata</returns>
+    /// <response code="200">Returns list of system OrcaSlicer profiles</response>
     [HttpGet("system/orca")]
-    [Authorize(Policy = "farm_admin")] // Admin-only: system profile inspection
+    [Authorize(Policy = "farm_admin")] // Admin-only: system profile management
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListSystemOrcaProfilesAsync(CancellationToken ct)
     {
@@ -614,8 +756,8 @@ public class ProfilesController(
                 // Continue - version is optional
             }
 
-            // Call the OrcaSlicer worker /profiles endpoint to get official profiles
-            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+            // Call the OrcaSlicer worker /api/profiles endpoint to get official profiles
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -626,175 +768,208 @@ public class ProfilesController(
             string json = await response.Content.ReadAsStringAsync(ct);
             _logger.LogInformation($"Raw OrcaSlicer worker /profiles response: {json[..Math.Min(1000, json.Length)]}");
 
-            // Deserialize the new AllProfilesResponseDto with three profile types grouped by manufacturer
+            // Deserialize the AllProfilesResponseDto with byHierarchy structure (manufacturer -> model -> profiles)
             AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            // Flatten the grouped profiles for importing
-            int totalProcessCount = allProfiles?.ProcessProfiles?.Values.Sum(list => list.Count) ?? 0;
-            int totalFilamentCount = allProfiles?.FilamentProfiles?.Values.Sum(list => list.Count) ?? 0;
-            int totalMachineCount = allProfiles?.MachineProfiles?.Values.Sum(list => list.Count) ?? 0;
-
-            _logger.LogInformation($"Deserialized {totalProcessCount} process + {totalFilamentCount} filament + {totalMachineCount} machine profiles from worker");
-
-            if (allProfiles == null || (totalProcessCount == 0 && totalFilamentCount == 0 && totalMachineCount == 0))
+            if (allProfiles?.ByHierarchy == null || allProfiles.ByHierarchy.Count == 0)
             {
-                return Ok(new { imported = 0, skipped = 0, message = "No profiles available from worker" });
+                return Ok(new { imported = 0, skipped = 0, message = "No profiles available from worker or invalid hierarchy structure" });
             }
 
             int imported = 0;
             int skipped = 0;
 
-            // Flatten all profiles from the grouped dictionaries
-            List<ProcessProfileDto> processProfiles = (allProfiles.ProcessProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<ProcessProfileDto>()).ToList();
-            List<FilamentProfileDto> filamentProfiles = (allProfiles.FilamentProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<FilamentProfileDto>()).ToList();
-            List<MachineProfileDto> machineProfiles = (allProfiles.MachineProfiles?.SelectMany(kvp => kvp.Value) ?? Enumerable.Empty<MachineProfileDto>()).ToList();
+            // Get catalog manufacturers and models
+            (IReadOnlyList<ManufacturerDto> catalogManufacturers, _) = await _catalogService.GetManufacturersAsync(ct);
+            (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
 
-            _logger.LogInformation($"Seeding {processProfiles.Count} process, {filamentProfiles.Count} filament, {machineProfiles.Count} machine profiles");
+            // Build lookup sets
+            HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+            HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
 
-            // Import process profiles
-            foreach (ProcessProfileDto profile in processProfiles)
+            _logger.LogInformation($"Catalog contains {catalogManufacturerNames.Count} manufacturers and {catalogModelNames.Count} printer models. Filtering worker profiles to match.");
+
+            // Iterate through worker's byHierarchy structure and import profiles for catalog manufacturers/models only
+            foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
             {
-                try
+                // Skip if manufacturer not in catalog
+                if (!catalogManufacturerNames.Contains(manufacturerKey ?? ""))
                 {
-                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    string profileHash = ComputeSha256Hash(profileJson);
+                    _logger.LogDebug($"Skipping manufacturer '{manufacturerKey}' - not in catalog");
+                    continue;
+                }
 
-                    ProcessProfile? existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
-                    if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                // Iterate through models within this manufacturer
+                if (manufacturerProfiles?.Models == null)
+                {
+                    continue;
+                }
+
+                foreach ((string? modelId, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
+                {
+                    // Skip if model not in catalog
+                    if (!catalogModelNames.Contains(modelProfiles?.Name ?? ""))
                     {
-                        skipped++;
+                        _logger.LogDebug($"Skipping model '{modelProfiles?.Name}' under '{manufacturerKey}' - not in catalog");
                         continue;
                     }
 
-                    ProcessProfile systemProfile = new ProcessProfile
+                    _logger.LogInformation($"Processing profiles for {manufacturerKey} > {modelProfiles!.Name}");
+
+                    // 1. Import machine profiles for this model
+                    if (modelProfiles.MachineProfiles != null)
                     {
-                        Id = Guid.NewGuid(),
-                        Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
-                        Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
-                        SlicerType = SlicerType.OrcaSlicer,
-                        Quality = Enum.TryParse(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
-                        LayerHeight = profile.LayerHeight,
-                        InfillPercentage = profile.InfillPercentage,
-                        PrintSpeed = profile.PrintSpeed,
-                        EnableSupports = profile.Supports,
-                        IsSystem = true,
-                        IsPublic = true,
-                        IsDefault = false,
-                        Hash = profileHash,
-                        RawJson = profileJson,
-                        SlicerVersion = orcaVersion,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
+                        foreach (MachineProfileDto machineProfile in modelProfiles.MachineProfiles)
+                        {
+                            try
+                            {
+                                string profileJson = JsonSerializer.Serialize(machineProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                                string profileHash = ComputeSha256Hash(profileJson);
 
-                    await _processProfileRepo.AddAsync(systemProfile, ct);
-                    imported++;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"Failed to import process profile: {ex.Message}");
-                    skipped++;
-                }
-            }
+                                MachineProfile? existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
+                                if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                                {
+                                    skipped++;
+                                    continue;
+                                }
 
-            // Import filament profiles
-            int filamentImported = 0;
-            foreach (FilamentProfileDto profile in filamentProfiles)
-            {
-                try
-                {
-                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    string profileHash = ComputeSha256Hash(profileJson);
+                                MachineProfile systemProfile = new MachineProfile
+                                {
+                                    Id = Guid.NewGuid(),
+                                    Name = machineProfile.Name ?? string.Empty,
+                                    Manufacturer = machineProfile.Manufacturer ?? manufacturerKey ?? string.Empty,
+                                    Description = $"OrcaSlicer machine profile for {modelProfiles.Name}",
+                                    SlicerType = SlicerType.OrcaSlicer,
+                                    IsSystem = true,
+                                    IsPublic = true,
+                                    Hash = profileHash,
+                                    RawJson = profileJson,
+                                    SettingsJson = profileJson,
+                                    SlicerVersion = orcaVersion,
+                                    CreatedAt = DateTime.UtcNow,
+                                    UpdatedAt = DateTime.UtcNow
+                                };
 
-                    FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
-                    if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
-                    {
-                        skipped++;
-                        continue;
+                                await _machineProfileRepo.AddAsync(systemProfile, ct);
+                                imported++;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to import machine profile '{machineProfile.Name}': {ex.Message}");
+                                skipped++;
+                            }
+                        }
                     }
 
-                    FilamentProfile systemProfile = new FilamentProfile
+                    // 2. Import filament profiles for this model
+                    if (modelProfiles.FilamentProfiles != null)
                     {
-                        Id = Guid.NewGuid(),
-                        Name = profile.Name ?? $"{profile.Material}",
-                        Material = profile.Material ?? "PLA",
-                        Manufacturer = profile.Manufacturer,
-                        Description = $"OrcaSlicer filament profile for {profile.Material}",
-                        SlicerType = SlicerType.OrcaSlicer,
-                        PrintSpeed = profile.PrintSpeed,
-                        IsSystem = true,
-                        Hash = profileHash,
-                        RawJson = profileJson,
-                        SlicerVersion = orcaVersion,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
+                        foreach (FilamentProfileDto filamentProfile in modelProfiles.FilamentProfiles)
+                        {
+                            try
+                            {
+                                string profileJson = JsonSerializer.Serialize(filamentProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                                string profileHash = ComputeSha256Hash(profileJson);
 
-                    await _filamentProfileRepo.AddAsync(systemProfile, ct);
-                    filamentImported++;
-                    imported++;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"Failed to import filament profile: {ex.Message}");
-                    skipped++;
-                }
-            }
+                                FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
+                                if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                                {
+                                    skipped++;
+                                    continue;
+                                }
 
-            // Import machine profiles
-            int machineImported = 0;
-            foreach (MachineProfileDto profile in machineProfiles)
-            {
-                try
-                {
-                    string profileJson = JsonSerializer.Serialize(profile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                    string profileHash = ComputeSha256Hash(profileJson);
+                                FilamentProfile systemProfile = new FilamentProfile
+                                {
+                                    Id = Guid.NewGuid(),
+                                    Name = filamentProfile.Name ?? $"{filamentProfile.Material}",
+                                    Material = filamentProfile.Material ?? "PLA",
+                                    Manufacturer = filamentProfile.Manufacturer,
+                                    Description = $"OrcaSlicer filament profile for {modelProfiles.Name} - {filamentProfile.Material}",
+                                    SlicerType = SlicerType.OrcaSlicer,
+                                    PrintSpeed = filamentProfile.PrintSpeed,
+                                    NozzleTemperature = filamentProfile.NozzleTemperature,
+                                    BedTemperature = filamentProfile.BedTemperature,
+                                    IsSystem = true,
+                                    IsPublic = true,
+                                    Hash = profileHash,
+                                    RawJson = profileJson,
+                                    SlicerVersion = orcaVersion,
+                                    CreatedAt = DateTime.UtcNow,
+                                    UpdatedAt = DateTime.UtcNow
+                                };
 
-                    MachineProfile? existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
-                    if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
-                    {
-                        skipped++;
-                        continue;
+                                await _filamentProfileRepo.AddAsync(systemProfile, ct);
+                                imported++;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to import filament profile '{filamentProfile.Name}': {ex.Message}");
+                                skipped++;
+                            }
+                        }
                     }
 
-                    MachineProfile systemProfile = new MachineProfile
+                    // 3. Import process profiles for this model
+                    if (modelProfiles.ProcessProfiles != null)
                     {
-                        Id = Guid.NewGuid(),
-                        Name = profile.Name ?? string.Empty,
-                        Manufacturer = profile.Manufacturer ?? string.Empty,
-                        Description = $"OrcaSlicer machine profile",
-                        SlicerType = SlicerType.OrcaSlicer,
-                        IsSystem = true,
-                        Hash = profileHash,
-                        RawJson = profileJson,
-                        SettingsJson = profileJson,
-                        SlicerVersion = orcaVersion,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
+                        foreach (ProcessProfileDto processProfile in modelProfiles.ProcessProfiles)
+                        {
+                            try
+                            {
+                                string profileJson = JsonSerializer.Serialize(processProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                                string profileHash = ComputeSha256Hash(profileJson);
 
-                    await _machineProfileRepo.AddAsync(systemProfile, ct);
-                    machineImported++;
-                    imported++;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"Failed to import machine profile: {ex.Message}");
-                    skipped++;
+                                ProcessProfile? existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
+                                if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
+                                {
+                                    skipped++;
+                                    continue;
+                                }
+
+                                ProcessProfile systemProfile = new ProcessProfile
+                                {
+                                    Id = Guid.NewGuid(),
+                                    Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
+                                    Description = $"OrcaSlicer process profile for {modelProfiles.Name}: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
+                                    SlicerType = SlicerType.OrcaSlicer,
+                                    Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                                    LayerHeight = processProfile.LayerHeight,
+                                    InfillPercentage = processProfile.InfillPercentage,
+                                    PrintSpeed = processProfile.PrintSpeed,
+                                    EnableSupports = processProfile.Supports,
+                                    IsSystem = true,
+                                    IsPublic = true,
+                                    IsDefault = false,
+                                    Hash = profileHash,
+                                    RawJson = profileJson,
+                                    SlicerVersion = orcaVersion,
+                                    CreatedAt = DateTime.UtcNow,
+                                    UpdatedAt = DateTime.UtcNow
+                                };
+
+                                await _processProfileRepo.AddAsync(systemProfile, ct);
+                                imported++;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to import process profile '{processProfile.Name}': {ex.Message}");
+                                skipped++;
+                            }
+                        }
+                    }
                 }
             }
 
-            _logger.LogInformation($"Seeded {imported} OrcaSlicer profiles ({processProfiles.Count} process, {filamentImported} filament, {machineImported} machine). Skipped: {skipped}. OrcaSlicer v{orcaVersion ?? "unknown"}");
+            _logger.LogInformation($"Seeded {imported} OrcaSlicer profiles from {catalogManufacturerNames.Count} catalog manufacturers and {catalogModelNames.Count} printer models. Skipped: {skipped}. OrcaSlicer v{orcaVersion ?? "unknown"}");
 
             return Ok(new
             {
                 imported,
                 skipped,
-                processProfiles = processProfiles.Count,
-                filamentProfiles = filamentImported,
-                machineProfiles = machineImported,
+                manufacturersProcessed = catalogManufacturerNames.Count,
+                modelsProcessed = catalogModelNames.Count,
                 orcaslicerVersion = orcaVersion,
-                message = $"Seeded {imported} system OrcaSlicer profiles from worker (OrcaSlicer v{orcaVersion ?? "unknown"})"
+                message = $"Seeded {imported} OrcaSlicer profiles for catalog manufacturers/models (OrcaSlicer v{orcaVersion ?? "unknown"})"
             });
         }
         catch (HttpRequestException ex)
@@ -875,12 +1050,12 @@ public class ProfilesController(
                 // Continue - version is optional
             }
 
-            // Call the OrcaSlicer worker /profiles endpoint to get official profiles
-            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+            // Call the OrcaSlicer worker /api/profiles endpoint to get official profiles
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode} from {workerUrl}/profiles");
+                _logger.LogWarning($"OrcaSlicer worker returned {response.StatusCode} from {workerUrl}/api/profiles");
                 string errorContent = await response.Content.ReadAsStringAsync(ct);
                 return StatusCode((int)response.StatusCode, $"OrcaSlicer worker unavailable or returned an error: {errorContent}");
             }
@@ -1085,7 +1260,7 @@ public class ProfilesController(
             {
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry");
             }
-            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/profiles", ct);
+            HttpResponseMessage response = await httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
             {
