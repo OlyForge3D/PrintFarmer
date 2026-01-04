@@ -104,6 +104,23 @@ public class Model3DFilesController : ControllerBase
     }
 
     /// <summary>
+    /// Generates the appropriate viewer URL for a model based on its file type.
+    /// For 3MF files, returns the file endpoint with forceStl=true parameter.
+    /// For other formats, returns the direct file download URL.
+    /// </summary>
+    private string GenerateViewerUrl(Model3D model)
+    {
+        if (model.FileFormat == ModelFileFormat.TMF) // 3MF format
+        {
+            // Return the file endpoint with forceStl=true to trigger conversion
+            return $"/api/3d-models/{model.Id}/file?forceStl=true";
+        }
+        
+        // For STL, PLY, OBJ, STEP - return direct file URL
+        return $"/api/3d-models/{model.Id}/file";
+    }
+
+    /// <summary>
     /// Upload a 3D model file
     /// </summary>
     /// <returns>Model upload result with ID and URL</returns>
@@ -261,7 +278,7 @@ public class Model3DFilesController : ControllerBase
                 FileSize = model.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat),
                 UploadedAt = model.UploadedAt,
-                Url = $"/api/3d-models/{model.Id}/file",
+                Url = GenerateViewerUrl(model),
                 ThumbnailPath = _fileOperations.BuildThumbnailUrl(model, "/api/3d-models/download", _storagePathService.GetModelUploadDirectory()),
                 Description = model.Description,
                 DimensionX = model.DimensionX,
@@ -292,11 +309,12 @@ public class Model3DFilesController : ControllerBase
     /// Download model file
     /// </summary>
     /// <param name="id">Model ID</param>
+    /// <param name="forceStl">Force conversion of 3MF files to STL format</param>
     /// <returns>Model file</returns>
     [HttpGet("{id:guid}/file")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetModelFileAsync(Guid id)
+    public async Task<IActionResult> GetModelFileAsync(Guid id, [FromQuery] bool forceStl = false)
     {
         string? path = await _modelService.GetModelFilePathAsync(id, CancellationToken.None);
         if (string.IsNullOrEmpty(path))
@@ -314,6 +332,51 @@ public class Model3DFilesController : ControllerBase
         }
 
         string fileExtension = Path.GetExtension(fullPath);
+        
+        // Check if this is a 3MF file that needs conversion to STL
+        byte[]? fileData = null;
+        string? fileName = null;
+        if (forceStl && fileExtension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation($"Converting 3MF file {id} to STL for viewer. File path: {fullPath}");
+            try
+            {
+                byte[] inputBytes = await _fileSystem.ReadAllBytesAsync(fullPath);
+                _logger.LogInformation($"Successfully read 3MF file {id}, size: {inputBytes.Length} bytes");
+                
+                byte[]? stlBytes = await _threeMfConverter.ConvertToSTLAsync(inputBytes, CancellationToken.None);
+                _logger.LogInformation($"Conversion result for {id}: {(stlBytes != null ? $"{stlBytes.Length} bytes" : "null")}");
+                
+                if (stlBytes != null)
+                {
+                    // File was successfully converted - set up to return STL
+                    Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
+                    fileName = dto?.FileName ?? Path.GetFileName(fullPath);
+                    fileName = Path.ChangeExtension(fileName, ".stl");
+                    fileExtension = ".stl";
+                    fileData = stlBytes;
+                    _logger.LogInformation($"Converted 3MF file {id} to STL successfully. Output filename: {fileName}");
+                }
+                else
+                {
+                    _logger.LogError($"3MF conversion service returned null for file {id}. The 3MF file may be malformed or missing required data.");
+                    return StatusCode(StatusCodes.Status500InternalServerError, "Failed to convert 3MF file to STL: conversion returned null");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Exception converting 3MF file {id}: {ex.GetType().Name}: {ex.Message}");
+                return StatusCode(StatusCodes.Status500InternalServerError, $"Error converting 3MF file: {ex.GetType().Name}");
+            }
+        }
+
+        // If not converted, fetch original filename
+        if (fileName == null)
+        {
+            Model3DDto? modelDto = await _modelService.GetModelAsync(id, CancellationToken.None);
+            fileName = modelDto?.FileName ?? Path.GetFileName(fullPath);
+        }
+
         string contentType = fileExtension.ToLowerInvariant() switch
         {
             ".stl" => "application/vnd.ms-pki.stl",
@@ -323,10 +386,12 @@ public class Model3DFilesController : ControllerBase
             _ => "application/octet-stream"
         };
 
-        // Lookup original name to set Content-Disposition filename
-        // For performance, fetch model DTO
-        Model3DDto? dto = await _modelService.GetModelAsync(id, CancellationToken.None);
-        string fileName = dto?.FileName ?? Path.GetFileName(fullPath);
+        // Return converted data or original file from disk
+        if (fileData != null)
+        {
+            return File(fileData, contentType, fileName);
+        }
+        
         return PhysicalFile(fullPath, contentType, fileName);
     }
 
@@ -833,7 +898,7 @@ public class Model3DFilesController : ControllerBase
                 FileSize = m.FileSizeBytes,
                 FileType = _fileManagementService.GetModelFileFormatString(m.FileFormat),
                 UploadedAt = m.UploadedAt,
-                Url = $"/api/3d-models/{m.Id}/file",
+                Url = GenerateViewerUrl(m),
                 ThumbnailPath = _fileOperations.BuildThumbnailUrl(m, "/api/3d-models/download", _storagePathService.GetModelUploadDirectory()),
                 Tags = m.TagMappings.Select(tm => new Model3DTagDto
                 {

@@ -139,20 +139,6 @@ export const ModelsPage: React.FC = () => {
     );
   };
 
-  // Helper function to get the appropriate URL for 3D model viewing
-  // For 3MF files, uses the conversion endpoint that automatically converts to STL
-  const getModelUrl = (model: Model) => {
-    if (model.fileType === '3mf') {
-      // Use the conversion endpoint for 3MF files - automatically converts to STL
-      const params = new URLSearchParams({ 
-        path: new URL(model.url).searchParams.get('path') || '',
-        forceStl: 'true'
-      });
-      return `${getApiBaseUrl()}/api/model3d-files/download-for-viewer?${params.toString()}`;
-    }
-    return model.url; // Use original URL for STL, PLY, and other formats
-  };
-
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -539,7 +525,7 @@ export const ModelsPage: React.FC = () => {
               }>
                 {viewerModel.url && viewerModel.fileType && (
                   <ModelViewer
-                    modelUrl={getModelUrl(viewerModel)}
+                    modelUrl={viewerModel.url}
                     fileType={viewerModel.fileType}
                     showGrid={false} // Hide grid on Models page
                     className={isViewerMaximized ? 'h-full w-full' : 'h-[32rem] w-full'}
