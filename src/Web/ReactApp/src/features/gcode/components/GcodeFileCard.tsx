@@ -19,7 +19,7 @@ interface GcodeFileCardProps {
   file: GcodeFile;
   onNavigate?: (path: string) => void;
   onDownload?: (path: string) => void;
-  onDelete?: (path: string) => void;
+  onDelete?: () => void;
   isDeleting?: boolean;
 }
 
@@ -178,7 +178,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <FolderIcon className="w-4 h-4" />
               </Button>
               <Button
-                onClick={() => onDelete?.(file.path)}
+                onClick={() => onDelete?.()}
                 disabled={isDeleting}
                 variant="danger"
                 size="sm"
@@ -201,7 +201,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <ArrowDownTrayIcon className="w-4 h-4" />
               </Button>
               <Button
-                onClick={() => onDelete?.(file.path)}
+                onClick={() => onDelete?.()}
                 disabled={isDeleting}
                 variant="danger"
                 size="sm"

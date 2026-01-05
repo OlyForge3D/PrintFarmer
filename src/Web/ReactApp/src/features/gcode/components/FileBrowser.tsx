@@ -12,6 +12,7 @@ import { UploadIcon } from '@/common/components/icons/MdiIcons';
 
 import { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
+import { ConfirmationDialog } from '@/common/components/dialogs/ConfirmationDialog';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
@@ -71,6 +72,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
+  const [deleteConfirmDialog, setDeleteConfirmDialog] = useState<{ isOpen: boolean; filesToDelete: GcodeFile[]; fileName?: string }>({ isOpen: false, filesToDelete: [] });
   // Restore persisted queue including resumable chunk sessions
   useEffect(() => {
     const raw = localStorage.getItem('pf.uploadQueue');
@@ -408,12 +410,18 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     }
   };
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = () => {
     if (selectedFiles.length === 0) return;
-    
-    if (confirm(`Delete ${selectedFiles.length} selected files?`)) {
-      deleteMutation.mutate(selectedFiles);
-    }
+    setDeleteConfirmDialog({
+      isOpen: true,
+      filesToDelete: selectedFiles,
+      fileName: selectedFiles.length === 1 ? selectedFiles[0].fileName : undefined
+    });
+  };
+
+  const confirmDelete = () => {
+    deleteMutation.mutate(deleteConfirmDialog.filesToDelete);
+    setDeleteConfirmDialog({ isOpen: false, filesToDelete: [] });
   };
 
   const breadcrumbs = currentPath.split('/').filter(Boolean);
@@ -581,10 +589,12 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                   setPage(1);
                 }}
                 onDownload={(path) => downloadMutation.mutate(path)}
-                onDelete={(path) => {
-                  if (confirm(`Delete ${file.fileName}?`)) {
-                    deleteMutation.mutate([file]);
-                  }
+                onDelete={() => {
+                  setDeleteConfirmDialog({
+                    isOpen: true,
+                    filesToDelete: [file],
+                    fileName: file.fileName
+                  });
                 }}
                 isDeleting={deleteMutation.isPending}
               />
@@ -694,9 +704,11 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             </Button>
                             <Button
                               onClick={() => {
-                                if (confirm(`Delete ${file.fileName}?`)) {
-                                  deleteMutation.mutate([file]);
-                                }
+                                setDeleteConfirmDialog({
+                                  isOpen: true,
+                                  filesToDelete: [file],
+                                  fileName: file.fileName
+                                });
                               }}
                               disabled={deleteMutation.isPending}
                               variant="danger"
@@ -710,9 +722,11 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                         {file.isDirectory && (
                           <Button
                             onClick={() => {
-                              if (confirm(`Delete ${file.fileName}?`)) {
-                                deleteMutation.mutate([file]);
-                              }
+                              setDeleteConfirmDialog({
+                                isOpen: true,
+                                filesToDelete: [file],
+                                fileName: file.fileName
+                              });
                             }}
                             disabled={deleteMutation.isPending}
                             variant="danger"
@@ -772,6 +786,21 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
         </div>
       )}
+      <ConfirmationDialog
+        isOpen={deleteConfirmDialog.isOpen}
+        onClose={() => setDeleteConfirmDialog({ isOpen: false, filesToDelete: [] })}
+        title="Confirm Delete"
+        message={
+          deleteConfirmDialog.filesToDelete.length === 1
+            ? `Are you sure you want to delete "${deleteConfirmDialog.fileName}"?`
+            : `Are you sure you want to delete ${deleteConfirmDialog.filesToDelete.length} files?`
+        }
+        confirmButtonText="Delete"
+        cancelButtonText="Cancel"
+        onConfirm={confirmDelete}
+        isDestructive={true}
+        isLoading={deleteMutation.isPending}
+      />
       </div>
     </div>
   );
