@@ -2734,4 +2734,14 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         ArgumentNullException.ThrowIfNull(baseUrl);
         return GetSpoolmanIntegrationsAsync(baseUrl.ToString(), ct);
     }
+
+    /// <summary>
+    /// Response model for thumbnail information from Moonraker API
+    /// </summary>
+    private record ThumbnailInfo(
+        int Width,
+        int Height,
+        long Size,
+        [property: System.Text.Json.Serialization.JsonPropertyName("thumbnail_path")]
+        string RelativePath);
 }

@@ -21,7 +21,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
-  const [hoveredThumbnail, setHoveredThumbnail] = useState<string | null>(null);
+  const [selectedThumbnail, setSelectedThumbnail] = useState<{ fileName: string; url: string } | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
@@ -289,12 +289,13 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                     <div
                       key={file.fileName}
                       className="relative flex items-center justify-between bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
-                      onMouseEnter={() => file.thumbnailUrl && setHoveredThumbnail(file.fileName)}
-                      onMouseLeave={() => setHoveredThumbnail(null)}
                     >
                       <div className="flex items-center flex-1 min-w-0 gap-3">
                         {file.thumbnailUrl ? (
-                          <div className="relative h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border overflow-hidden">
+                          <div 
+                            className="relative h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+                            onClick={() => setSelectedThumbnail({ fileName: file.fileName, url: file.thumbnailUrl! })}
+                          >
                             <img
                               src={file.thumbnailUrl}
                               alt={file.fileName}
@@ -390,20 +391,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           )}
                         </Button>
                       </div>
-
-                      {/* Thumbnail Preview on Hover */}
-                      {hoveredThumbnail === file.fileName && file.thumbnailUrl && (
-                        <div className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 z-10 hidden group-hover:block">
-                          <img
-                            src={file.thumbnailUrl}
-                            alt={file.fileName}
-                            className="max-h-48 max-w-xs rounded shadow-lg border border-pf-border"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -536,6 +523,27 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     <>
       {modalContent}
       {confirmDialogContent}
+      
+      {/* Thumbnail Preview Modal */}
+      {selectedThumbnail && (
+        <Modal
+          isOpen={!!selectedThumbnail}
+          onClose={() => setSelectedThumbnail(null)}
+          title={selectedThumbnail.fileName}
+          width="max-w-2xl"
+        >
+          <div className="flex items-center justify-center bg-pf-bg-2 rounded-lg overflow-hidden max-h-[70vh]">
+            <img
+              src={selectedThumbnail.url}
+              alt={selectedThumbnail.fileName}
+              className="max-w-full max-h-[70vh] object-contain"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          </div>
+        </Modal>
+      )}
     </>,
     document.body
   );

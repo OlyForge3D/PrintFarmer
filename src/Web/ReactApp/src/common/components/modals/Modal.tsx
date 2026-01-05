@@ -67,13 +67,14 @@ export function Modal({
   titleIcon,
   closeAriaLabel = 'Close modal'
 }: ModalProps) {
-  // Handle Escape key globally
+  // Handle Escape key globally with stopPropagation to prevent parent modals from closing
   useEffect(() => {
     if (!isOpen || isDisabled) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
       }
     };
