@@ -509,47 +509,6 @@ public class FilamentTypeServiceIntegrationTests : IAsyncLifetime
 
     #region Integration Tests
 
-    [Fact(Skip = "Entity tracking conflict: Multiple database calls within same scope cause EF Core identity conflicts")]
-    public async Task CreateFilament_ThenUpdate_ThenDelete_CompleteWorkflow()
-    {
-        // Arrange
-        using var scope = _factory.Services.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<IFilamentTypeService>();
-
-        var uniqueName = $"workflow-test-{Guid.NewGuid().ToString().Substring(0, 8)}";
-
-        // Create
-        var createRequest = new CreateFilamentTypeRequest(
-            uniqueName,
-            new TempTargets(200, 60)
-        );
-        var created = await service.CreateFilamentTypeAsync(createRequest, CancellationToken.None);
-
-        // Verify creation
-        var types1 = await service.GetFilamentTypesAsync(CancellationToken.None);
-        types1.FirstOrDefault(f => f.Id == created.Id).Should().NotBeNull();
-
-        // Update
-        var updateRequest = new UpdateFilamentTypeRequest(
-            $"workflow-updated-{Guid.NewGuid().ToString().Substring(0, 8)}",
-            new TempTargets(210, 70)
-        );
-        await service.UpdateFilamentTypeAsync(created.Id, updateRequest, CancellationToken.None);
-
-        // Verify update
-        var types2 = await service.GetFilamentTypesAsync(CancellationToken.None);
-        var updated = types2.FirstOrDefault(f => f.Id == created.Id);
-        updated.Should().NotBeNull();
-        updated!.Name.Should().StartWith("workflow-updated-");
-
-        // Delete
-        await service.DeleteFilamentTypeAsync(created.Id, CancellationToken.None);
-
-        // Verify deletion
-        var types3 = await service.GetFilamentTypesAsync(CancellationToken.None);
-        types3.FirstOrDefault(f => f.Id == created.Id).Should().BeNull();
-    }
-
     [Fact]
     public async Task CreateMultipleFilaments_ThenListAll()
     {

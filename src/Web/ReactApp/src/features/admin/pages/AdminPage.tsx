@@ -7,7 +7,6 @@ import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPa
 import { FileHealthDashboard } from '@/features/gcode/components/file-health/FileHealthDashboard';
 import { TagAdminPage } from './TagAdminPage';
 import { ObservabilityDashboard } from '@/common/components/ObservabilityDashboard';
-import { SlicerDryRunPage } from '@/features/slicer/pages/SlicerDryRunPage';
 import { SlicerJobStatusPage } from '@/features/slicer/pages/SlicerJobStatusPage';
 import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
 
@@ -16,7 +15,6 @@ const adminMenuItems = [
   { name: 'Workers', href: '/admin/workers', icon: GearIcon },
   { name: 'File Health', href: '/admin/file-health', icon: FileIcon },
   { name: 'Observability', href: '/admin/observability', icon: GearIcon },
-  { name: 'Slicer Dry Run', href: '/admin/slicer/dry-run', icon: FileIcon },
   { name: 'Slicer Job Status', href: '/admin/slicer/job-status', icon: FileIcon },
   { name: 'Slicer Profiles', href: '/admin/slicer-profiles', icon: FileIcon },
   { name: 'Tags', href: '/admin/tags', icon: LayersIcon },
@@ -36,8 +34,6 @@ export function AdminPage() {
     content = <ProtectedRoute requiredRole="farm_admin"><FileHealthDashboard /></ProtectedRoute>;
   } else if (path === '/admin/observability') {
     content = <ProtectedRoute requiredRole="farm_admin"><ObservabilityDashboard /></ProtectedRoute>;
-  } else if (path === '/admin/slicer/dry-run') {
-    content = <ProtectedRoute requiredRole="farm_admin"><SlicerDryRunPage /></ProtectedRoute>;
   } else if (path === '/admin/slicer/job-status') {
     content = <ProtectedRoute requiredRole="farm_admin"><SlicerJobStatusPage /></ProtectedRoute>;
   } else if (path === '/admin/slicer-profiles') {

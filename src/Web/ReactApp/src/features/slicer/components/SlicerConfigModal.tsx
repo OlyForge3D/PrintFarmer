@@ -1,7 +1,8 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState } from 'react';
 // No MdiIcons used in this component
-import { CloseIcon, CheckCircleIcon, AlertCircleIcon } from '@/common/components/icons/MdiIcons';
+import { CheckCircleIcon, AlertCircleIcon } from '@/common/components/icons/MdiIcons';
+import { Modal } from '@/common/components/modals/Modal';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
 
 interface AvailablePrinter {
@@ -96,20 +97,6 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
     }
   }, [isOpen, modelFile]);
 
-  // Handle ESC key to close modal
-  React.useEffect(() => {
-    if (!isOpen) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSlicing) {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, isSlicing, onClose]);
-
   const handleSlice = async () => {
     if (!selectedPrinter) return;
 
@@ -173,33 +160,34 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
     setProfile(prev => ({ ...prev, ...updates }));
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div 
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !isSlicing) {
-          onClose();
-        }
-      }}
-    >
-      <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-xl font-semibold">Configure Slicing</h2>
-          <button 
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Configure Slicing"
+      width="max-w-4xl"
+      isDisabled={isSlicing}
+      closeAriaLabel="Close slicing configuration"
+      footer={(
+        <>
+          <button
             onClick={onClose}
             disabled={isSlicing}
-            className="p-1 hover:bg-gray-100 rounded"
-            aria-label="Close slicing configuration"
-            title="Close"
+            className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50"
           >
-            <CloseIcon className="w-5 h-5" />
+            Cancel
           </button>
-        </div>
-
-        <div className="p-6 space-y-6">
+          <button
+            onClick={handleSlice}
+            disabled={!selectedPrinter || isSlicing || (validationResult?.valid === false)}
+            className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
+          >
+            {isSlicing ? 'Slicing...' : 'Slice & Queue Print'}
+          </button>
+        </>
+      )}
+    >
+      <div className="space-y-6">
           {/* Model info */}
           <div className="bg-gray-50 rounded-lg p-4">
             <h4 className="font-medium mb-2">Model Information</h4>
@@ -473,25 +461,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
             </div>
           )}
 
-          {/* Actions */}
-          <div className="flex items-center justify-end space-x-3 pt-4 border-t">
-            <button 
-              onClick={onClose} 
-              disabled={isSlicing}
-              className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSlice}
-              disabled={!selectedPrinter || isSlicing || (validationResult?.valid === false)}
-              className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
-            >
-              {isSlicing ? 'Slicing...' : 'Slice & Queue Print'}
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 };

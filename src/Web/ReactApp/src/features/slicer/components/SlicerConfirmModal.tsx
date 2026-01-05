@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 
 interface SlicerConfirmModalProps {
   isOpen: boolean;
@@ -16,30 +17,34 @@ export function SlicerConfirmModal({
 }: SlicerConfirmModalProps) {
   if (!isOpen || !slicer) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-pf-bg-1 border border-pf-border rounded-lg shadow-lg p-6 max-w-sm">
-        <h2 className="text-lg font-semibold text-pf-text-primary mb-4">
-          Deregister Slicer?
-        </h2>
-        <p className="text-pf-text-secondary mb-6">
-          Are you sure you want to deregister <strong>{slicer.name}</strong>? This action cannot be undone.
-        </p>
-        <div className="flex gap-3 justify-end">
-          <Button
-            variant="outline"
-            onClick={onCancel}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            onClick={onConfirm}
-          >
-            Deregister
-          </Button>
-        </div>
-      </div>
+  const modalFooter = (
+    <div className="flex gap-3">
+      <Button
+        variant="outline"
+        onClick={onCancel}
+      >
+        Cancel
+      </Button>
+      <Button
+        variant="danger"
+        onClick={onConfirm}
+      >
+        Deregister
+      </Button>
     </div>
+  );
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onCancel}
+      title="Deregister Slicer?"
+      width="max-w-sm"
+      footer={modalFooter}
+    >
+      <p className="text-pf-text-secondary">
+        Are you sure you want to deregister <strong>{slicer.name}</strong>? This action cannot be undone.
+      </p>
+    </Modal>
   );
 }

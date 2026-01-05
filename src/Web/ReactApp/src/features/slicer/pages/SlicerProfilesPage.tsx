@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import slicerProfilesService, { 
   SlicerProfileListItem, 
-  ExtendedProfilesResponse,
+  HierarchicalProfilesResponse,
+  PrinterModelProfilesDto,
   ProcessProfileListItem, 
   FilamentProfileListItem,
   MachineProfileListItem,
@@ -23,6 +24,7 @@ import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Textarea } from '@/common/components/ui/Textarea';
+import { Modal } from '@/common/components/modals/Modal';
 
 export const SlicerProfilesPage: React.FC = () => {
   const qc = useQueryClient();
@@ -36,16 +38,25 @@ export const SlicerProfilesPage: React.FC = () => {
   const [allowSystemOverride, setAllowSystemOverride] = useState(false);
   const [setDefault, setSetDefault] = useState(false);
   const [isPublic, setIsPublic] = useState(true);
+  const [showImportForm, setShowImportForm] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
-  // Tab state - 'all', 'machines', 'filaments', 'processes'
-  const [activeTab, setActiveTab] = useState<'all' | 'machines' | 'filaments' | 'processes'>('all');
+  // Tab state - 'machines', 'filaments', 'processes'
+  const [activeTab, setActiveTab] = useState<'machines' | 'filaments' | 'processes'>('machines');
 
   // Filtering and search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMachine, setSelectedMachine] = useState<string>('');
+  const [filterManufacturer, setFilterManufacturer] = useState<string>('all');
+  const [selectedMachineProfileId, setSelectedMachineProfileId] = useState<string>('');
+  const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
+  const [selectedProcessProfileId, setSelectedProcessProfileId] = useState<string>('');
   const [filterEngine, setFilterEngine] = useState<string>('all');
   const [filterSource, setFilterSource] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
+
+  // Paging state
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [pageNumber, setPageNumber] = useState<number>(1);
 
   // UI state
   const [importError, setImportError] = useState<string | null>(null);
@@ -77,13 +88,73 @@ export const SlicerProfilesPage: React.FC = () => {
     }
   }, [slicerNames, slicerType]);
 
-  const { data: profilesData, isLoading, error } = useQuery<ExtendedProfilesResponse, Error>({
-    queryKey: ['slicerProfilesExtended'],
-    queryFn: async () => slicerProfilesService.listExtended(),
+  const { data: profilesData, isLoading, error } = useQuery<HierarchicalProfilesResponse, Error>({
+    queryKey: ['slicerProfilesHierarchy'],
+    queryFn: async () => slicerProfilesService.listHierarchical(),
     staleTime: 10_000
   });
 
-  // Note: Individual profile lists accessed from profilesData for filtered views
+  const allMachineProfiles = useMemo<MachineProfileListItem[]>(() => {
+    if (!profilesData?.byHierarchy) return [];
+    const out: MachineProfileListItem[] = [];
+    for (const mfgData of Object.values(profilesData.byHierarchy)) {
+      for (const modelData of Object.values(mfgData.models)) {
+        out.push(...(modelData.machineProfiles ?? []));
+      }
+    }
+    return out;
+  }, [profilesData]);
+
+  const allFilamentProfiles = useMemo<FilamentProfileListItem[]>(() => {
+    if (!profilesData?.byHierarchy) return [];
+    const out: FilamentProfileListItem[] = [];
+    for (const mfgData of Object.values(profilesData.byHierarchy)) {
+      for (const modelData of Object.values(mfgData.models)) {
+        out.push(...(modelData.filamentProfiles ?? []));
+      }
+    }
+    return out;
+  }, [profilesData]);
+
+  const allProcessProfiles = useMemo<ProcessProfileListItem[]>(() => {
+    if (!profilesData?.byHierarchy) return [];
+    const out: ProcessProfileListItem[] = [];
+    for (const mfgData of Object.values(profilesData.byHierarchy)) {
+      for (const modelData of Object.values(mfgData.models)) {
+        out.push(...(modelData.processProfiles ?? []));
+      }
+    }
+    return out;
+  }, [profilesData]);
+
+  type MachineProfileContext = {
+    manufacturer: string;
+    modelName: string;
+    modelData: PrinterModelProfilesDto;
+  };
+
+  const machineContextById = useMemo<Map<string, MachineProfileContext>>(() => {
+    const map = new Map<string, MachineProfileContext>();
+    if (!profilesData?.byHierarchy) return map;
+
+    for (const [manufacturer, mfgData] of Object.entries(profilesData.byHierarchy)) {
+      for (const modelData of Object.values(mfgData.models)) {
+        for (const machine of modelData.machineProfiles ?? []) {
+          map.set(machine.id, {
+            manufacturer,
+            modelName: modelData.name,
+            modelData,
+          });
+        }
+      }
+    }
+    return map;
+  }, [profilesData]);
+
+  const selectedMachineContext = useMemo<MachineProfileContext | undefined>(() => {
+    if (!selectedMachineProfileId) return undefined;
+    return machineContextById.get(selectedMachineProfileId);
+  }, [machineContextById, selectedMachineProfileId]);
 
   const importMutation = useMutation<SlicerProfileExtended, Error, ImportSlicerProfileRequest>({
     mutationFn: async (payload) => {
@@ -97,7 +168,7 @@ export const SlicerProfilesPage: React.FC = () => {
       setDescription('');
       setAllowSystemOverride(false);
       setSetDefault(false);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
     },
     onError: (err) => {
       setImportError(err.message);
@@ -108,7 +179,7 @@ export const SlicerProfilesPage: React.FC = () => {
     mutationFn: async (id) => slicerProfilesService.setDefault(id),
     onSuccess: () => {
       setMessage('Default profile updated.');
-      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
     },
     onError: (err) => setMessage(`Failed to set default: ${err.message}`)
   });
@@ -156,75 +227,15 @@ export const SlicerProfilesPage: React.FC = () => {
     }
   };
 
-  // Apply filters to process profiles
-  const filteredProcessProfiles = useMemo(() => {
-    if (!profilesData?.processProfiles) return [];
-
-    return profilesData.processProfiles.filter(p => {
-      // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        if (!p.name.toLowerCase().includes(query) && !p.quality.toLowerCase().includes(query)) {
-          return false;
-        }
-      }
-
-      // Engine filter
-      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
-
-      // Source filter
-      if (filterSource !== 'all' && filterSource !== '') {
-        if (filterSource === 'default' && !p.isDefault) return false;
-        if (filterSource === 'system' && !p.isSystem) return false;
-        if (filterSource === 'public' && !p.isPublic) return false;
-        if (filterSource === 'imported' && p.isSystem) return false;
-      }
-
-      // Machine filter (for process profiles)
-      if (selectedMachine && p.nozzleDiameter !== undefined) {
-        const selectedMachineProfile = profilesData.machineProfiles.find(m => m.id === selectedMachine);
-        if (selectedMachineProfile && selectedMachineProfile.nozzleDiameter !== p.nozzleDiameter) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [profilesData, searchQuery, filterEngine, filterSource, selectedMachine]);
-
-  // Apply filters to filament profiles
-  const filteredFilamentProfiles = useMemo(() => {
-    if (!profilesData?.filamentProfiles) return [];
-
-    return profilesData.filamentProfiles.filter(p => {
-      // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        if (!p.name.toLowerCase().includes(query) && !p.material.toLowerCase().includes(query)) {
-          return false;
-        }
-      }
-
-      // Engine filter
-      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
-
-      // Source filter
-      if (filterSource !== 'all' && filterSource !== '') {
-        if (filterSource === 'default' && !p.isDefault) return false;
-        if (filterSource === 'system' && !p.isSystem) return false;
-        if (filterSource === 'public' && !p.isPublic) return false;
-        if (filterSource === 'imported' && p.isSystem) return false;
-      }
-
-      return true;
-    });
-  }, [profilesData, searchQuery, filterEngine, filterSource]);
-
   // Apply filters to machine profiles
   const filteredMachineProfiles = useMemo(() => {
-    if (!profilesData?.machineProfiles) return [];
+    return allMachineProfiles.filter((p) => {
+      const ctx = machineContextById.get(p.id);
+      if (!ctx) return false;
 
-    return profilesData.machineProfiles.filter(p => {
+      // Manufacturer filter
+      if (filterManufacturer !== 'all' && ctx.manufacturer !== filterManufacturer) return false;
+
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -246,7 +257,61 @@ export const SlicerProfilesPage: React.FC = () => {
 
       return true;
     });
-  }, [profilesData, searchQuery, filterEngine, filterSource]);
+  }, [
+    allMachineProfiles,
+    filterEngine,
+    filterManufacturer,
+    filterSource,
+    machineContextById,
+    searchQuery,
+  ]);
+
+  // Filament/process profiles are shown only after selecting a machine profile
+  const filteredFilamentProfiles = useMemo(() => {
+    if (!selectedMachineContext) return [];
+    return (selectedMachineContext.modelData.filamentProfiles ?? []).filter((p) => {
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(query) && !p.material.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
+
+      if (selectedFilamentProfileId && p.id !== selectedFilamentProfileId) return false;
+
+      if (filterSource !== 'all' && filterSource !== '') {
+        if (filterSource === 'default' && !p.isDefault) return false;
+        if (filterSource === 'system' && !p.isSystem) return false;
+        if (filterSource === 'public' && !p.isPublic) return false;
+        if (filterSource === 'imported' && p.isSystem) return false;
+      }
+      return true;
+    });
+  }, [filterEngine, filterSource, searchQuery, selectedFilamentProfileId, selectedMachineContext]);
+
+  const filteredProcessProfiles = useMemo(() => {
+    if (!selectedMachineContext) return [];
+    return (selectedMachineContext.modelData.processProfiles ?? []).filter((p) => {
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!p.name.toLowerCase().includes(query) && !p.quality.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
+
+      if (selectedProcessProfileId && p.id !== selectedProcessProfileId) return false;
+
+      if (filterSource !== 'all' && filterSource !== '') {
+        if (filterSource === 'default' && !p.isDefault) return false;
+        if (filterSource === 'system' && !p.isSystem) return false;
+        if (filterSource === 'public' && !p.isPublic) return false;
+        if (filterSource === 'imported' && p.isSystem) return false;
+      }
+      return true;
+    });
+  }, [filterEngine, filterSource, searchQuery, selectedMachineContext, selectedProcessProfileId]);
 
   const onImport = (e: React.FormEvent) => {
     e.preventDefault();
@@ -300,16 +365,85 @@ export const SlicerProfilesPage: React.FC = () => {
   );
 
   const getTotalCount = () => {
-    if (!profilesData) return 0;
-    return (profilesData.machineProfiles?.length || 0) + (profilesData.filamentProfiles?.length || 0) + (profilesData.processProfiles?.length || 0);
+    return allMachineProfiles.length + allFilamentProfiles.length + allProcessProfiles.length;
   };
 
   const getFilteredCount = () => {
-    return filteredMachineProfiles.length + filteredFilamentProfiles.length + filteredProcessProfiles.length;
+    if (activeTab === 'machines') return filteredMachineProfiles.length;
+    if (activeTab === 'filaments') return filteredFilamentProfiles.length;
+    if (activeTab === 'processes') return filteredProcessProfiles.length;
+    return 0;
   };
 
+  const manufacturerOptions = useMemo(() => {
+    return Object.keys(profilesData?.byHierarchy ?? {}).sort();
+  }, [profilesData]);
 
+  const machineModelOptions = useMemo(() => {
+    if (!filterManufacturer || filterManufacturer === 'all') return [];
+    return filteredMachineProfiles
+      .map(m => m)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [filterManufacturer, filteredMachineProfiles]);
 
+  const filamentOptions = useMemo(() => {
+    if (!selectedMachineContext) return [];
+    return (selectedMachineContext.modelData.filamentProfiles ?? [])
+      .slice()
+      .sort((a, b) => (a.material + a.name).localeCompare(b.material + b.name));
+  }, [selectedMachineContext]);
+
+  const processOptions = useMemo(() => {
+    if (!selectedMachineContext) return [];
+    return (selectedMachineContext.modelData.processProfiles ?? [])
+      .slice()
+      .sort((a, b) => (a.quality + a.name).localeCompare(b.quality + b.name));
+  }, [selectedMachineContext]);
+
+  const visibleProfiles = useMemo<SlicerProfileListItem[]>(() => {
+    if (activeTab === 'machines') return filteredMachineProfiles;
+    if (activeTab === 'filaments') return filteredFilamentProfiles;
+    if (activeTab === 'processes') return filteredProcessProfiles;
+    return [];
+  }, [activeTab, filteredFilamentProfiles, filteredMachineProfiles, filteredProcessProfiles]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(visibleProfiles.length / pageSize));
+  }, [pageSize, visibleProfiles.length]);
+
+  const safePageNumber = Math.min(Math.max(1, pageNumber), totalPages);
+
+  const pagedProfiles = useMemo(() => {
+    const start = (safePageNumber - 1) * pageSize;
+    return visibleProfiles.slice(start, start + pageSize);
+  }, [pageSize, safePageNumber, visibleProfiles]);
+
+  React.useEffect(() => {
+    setPageNumber(1);
+  }, [activeTab, filterEngine, filterManufacturer, filterSource, pageSize, searchQuery, selectedMachineProfileId, selectedFilamentProfileId, selectedProcessProfileId]);
+
+  React.useEffect(() => {
+    // When manufacturer changes, clear dependent selections
+    setSelectedMachineProfileId('');
+    setSelectedFilamentProfileId('');
+    setSelectedProcessProfileId('');
+  }, [filterManufacturer]);
+
+  React.useEffect(() => {
+    // When machine model changes, clear dependent selections
+    setSelectedFilamentProfileId('');
+    setSelectedProcessProfileId('');
+  }, [selectedMachineProfileId]);
+
+  React.useEffect(() => {
+    if (!selectedMachineProfileId) return;
+    const stillVisible = filteredMachineProfiles.some(m => m.id === selectedMachineProfileId);
+    if (!stillVisible) {
+      setSelectedMachineProfileId('');
+    }
+  }, [filteredMachineProfiles, selectedMachineProfileId]);
+
+  
   return (
     <PageTemplate
       title="Slicer Profiles"
@@ -317,136 +451,54 @@ export const SlicerProfilesPage: React.FC = () => {
       icon={GearIcon}
     >
       {/* OrcaSlicer Quick Actions */}
-      <div className="mb-6 bg-pf-panel rounded-lg shadow p-4">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <GearIcon className="w-5 h-5" />
-          OrcaSlicer Integration
-        </h3>
-        <div className="flex flex-wrap gap-3">
-          <Button
-            variant="primary"
-            onClick={() => navigate('/profiles/import/orca')}
-            className="flex items-center gap-2"
-          >
-            <UploadIcon className="w-4 h-4" />
-            Import from OrcaSlicer
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => navigate('/profiles/import/official')}
-            className="flex items-center gap-2"
-          >
-            <DownloadIcon className="w-4 h-4" />
-            Import for Printers
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={exportOrcaBundle}
-            loading={exportingBundle}
-            className="flex items-center gap-2"
-          >
-            <DownloadIcon className="w-4 h-4" />
-            Export to OrcaSlicer
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              setIsReseedingProfiles(true);
-              try {
-                const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
-                if (window.PrintFarmerDebug?.slicing) {
-                  console.log('Force reseed result:', result);
-                }
-                
-                if (result.imported === 0) {
-                  let details = result.message || 'No profiles available from worker';
-                  if (result.orcaslicerVersion) {
-                    details += ` (OrcaSlicer version: ${result.orcaslicerVersion})`;
-                  }
-                  setMessage(`⚠️ ${details}`);
-                } else {
-                  setMessage(`✅ System profiles updated: ${result.imported} profile(s) imported from OrcaSlicer worker${result.orcaslicerVersion ? ` (v${result.orcaslicerVersion})` : ''}.`);
-                  qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
-                }
-              } catch (error) {
-                const errorMsg = error instanceof Error ? error.message : 'Failed to reseed system profiles';
-                console.error('Force reseed error:', error);
-                setMessage(`❌ ${errorMsg}`);
-              } finally {
-                setIsReseedingProfiles(false);
+      <div className="flex flex-wrap gap-3 mb-4">
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            setIsReseedingProfiles(true);
+            try {
+              const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
+              if (window.PrintFarmerDebug?.slicing) {
+                console.log('Force reseed result:', result);
               }
-            }}
-            loading={isReseedingProfiles}
-            className="flex items-center gap-2"
-          >
-            <UploadIcon className="w-4 h-4" />
-            Force Reseed System Profiles
-          </Button>
-          <div className="flex-1" />
-          <p className="text-sm text-pf-text-muted self-center">
-            Import/export profiles directly from OrcaSlicer config bundles or reseed system profiles
-          </p>
-        </div>
+              
+              if (result.imported === 0) {
+                let details = result.message || 'No profiles available from worker';
+                if (result.orcaslicerVersion) {
+                  details += ` (OrcaSlicer version: ${result.orcaslicerVersion})`;
+                }
+                setMessage(`⚠️ ${details}`);
+              } else {
+                setMessage(`✅ System profiles loaded: ${result.imported} profile(s) from OrcaSlicer${result.orcaslicerVersion ? ` (v${result.orcaslicerVersion})` : ''}.`);
+                qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+              }
+            } catch (error) {
+              const errorMsg = error instanceof Error ? error.message : 'Failed to load system profiles';
+              console.error('Force reseed error:', error);
+              setMessage(`❌ ${errorMsg}`);
+            } finally {
+              setIsReseedingProfiles(false);
+            }
+          }}
+          loading={isReseedingProfiles}
+          className="flex items-center gap-2"
+          iconLeft={<UploadIcon className="w-4 h-4" />}
+        >
+          Load System Profiles
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => setIsImportModalOpen(true)}
+          className="flex items-center gap-2"
+          iconLeft={<UploadIcon className="w-4 h-4" />}
+        >
+          Import Profile
+        </Button>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6">
-        <div className="md:col-span-1 space-y-4">
-          <form onSubmit={onImport} className="bg-pf-panel rounded shadow p-4 flex flex-col gap-4">
-            <h3 className="text-lg font-semibold">Import Profile</h3>
-            <FormField label="Raw Profile JSON" required helper="Paste raw slicer profile JSON exported from your slicer.">
-              <Textarea
-                placeholder={'{\n  "layer_height": 0.2, ...\n}'}
-                value={rawJson}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRawJson(e.target.value)}
-                rows={12}
-              />
-            </FormField>
-            <FormField label="Name" helper="Optional; derived automatically if left blank.">
-              <Input
-                type="text"
-                placeholder="Profile name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
-            </FormField>
-            <FormField label="Description">
-              <Input
-                type="text"
-                placeholder="Description"
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-              />
-            </FormField>
-            <FormField label="Slicer Engine" required>
-              <Select
-                aria-label="Slicer engine"
-                value={slicerType}
-                onChange={e => setSlicerType(e.target.value)}
-              >
-                {slicerNames.map(s => <option key={s}>{s}</option>)}
-              </Select>
-            </FormField>
-            <div className="flex flex-col gap-2 text-sm">
-              <label className="inline-flex items-center gap-2">
-                <Checkbox checked={allowSystemOverride} onChange={e => setAllowSystemOverride(e.target.checked)} />
-                <span>Allow system override</span>
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <Checkbox checked={setDefault} onChange={e => setSetDefault(e.target.checked)} />
-                <span>Set as default after import</span>
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <Checkbox checked={isPublic} onChange={e => setIsPublic(e.target.checked)} />
-                <span>Public (visible to other users)</span>
-              </label>
-            </div>
-            {importError && <Alert type="error">{importError}</Alert>}
-            <Button type="submit" loading={importMutation.isPending} variant="primary">Import Profile</Button>
-          </form>
-          {message && <Alert type="success">{message}</Alert>}
-        </div>
-        <div className="md:col-span-2">
-          <div className="bg-pf-panel rounded shadow">
+      <div className="space-y-4">
+        {message && <Alert type="success">{message}</Alert>}
+        <div className="bg-pf-panel rounded shadow">
             {/* Header with Search and Filters */}
             <div className="p-4 border-b border-pf-border">
               <div className="flex items-center gap-4 mb-4">
@@ -465,15 +517,74 @@ export const SlicerProfilesPage: React.FC = () => {
                   onClick={() => setShowFilters(!showFilters)}
                   className="flex items-center gap-2"
                   size="sm"
+                  iconLeft={<FilterIcon className="w-4 h-4" />}
                 >
-                  <FilterIcon className="w-4 h-4" />
                   Filters
                 </Button>
               </div>
 
-              {/* Filter Controls */}
+              {/* Primary selection flow (always visible): Manufacturer -> Machine Model -> Filament/Process */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-pf-background rounded-lg">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Manufacturer</label>
+                  <Select
+                    value={filterManufacturer}
+                    onChange={(e) => setFilterManufacturer(e.target.value)}
+                    aria-label="Select manufacturer"
+                  >
+                    <option value="all">Select a manufacturer</option>
+                    {manufacturerOptions.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Machine Model</label>
+                  <Select
+                    value={selectedMachineProfileId}
+                    onChange={(e) => setSelectedMachineProfileId(e.target.value)}
+                    aria-label="Select machine model"
+                    disabled={filterManufacturer === 'all'}
+                  >
+                    <option value="">Select a machine model</option>
+                    {machineModelOptions.map(m => (
+                      <option key={m.id} value={m.id}>{m.name}{m.nozzleDiameter ? ` (${m.nozzleDiameter}mm nozzle)` : ''}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Filament</label>
+                  <Select
+                    value={selectedFilamentProfileId}
+                    onChange={(e) => setSelectedFilamentProfileId(e.target.value)}
+                    aria-label="Select filament profile"
+                    disabled={!selectedMachineProfileId}
+                  >
+                    <option value="">Select a filament profile</option>
+                    {filamentOptions.map(f => (
+                      <option key={f.id} value={f.id}>{f.material}  {f.name}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Process</label>
+                  <Select
+                    value={selectedProcessProfileId}
+                    onChange={(e) => setSelectedProcessProfileId(e.target.value)}
+                    aria-label="Select process profile"
+                    disabled={!selectedMachineProfileId}
+                  >
+                    <option value="">Select a process profile</option>
+                    {processOptions.map(p => (
+                      <option key={p.id} value={p.id}>{p.quality}  {p.name}</option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+
+              {/* Advanced filters */}
               {showFilters && (
-                <div className="grid grid-cols-3 gap-3 p-3 bg-pf-background rounded-lg">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 p-3 bg-pf-background rounded-lg">
                   <div>
                     <label className="block text-sm font-medium mb-1">Engine</label>
                     <Select
@@ -499,19 +610,6 @@ export const SlicerProfilesPage: React.FC = () => {
                       <option value="imported">Imported</option>
                     </Select>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Machine (for Process profiles)</label>
-                    <Select
-                      value={selectedMachine}
-                      onChange={(e) => setSelectedMachine(e.target.value)}
-                      aria-label="Filter process profiles by machine"
-                    >
-                      <option value="">All Machines</option>
-                      {filteredMachineProfiles.map(m => (
-                        <option key={m.id} value={m.id}>{m.name} ({m.nozzleDiameter}mm)</option>
-                      ))}
-                    </Select>
-                  </div>
                 </div>
               )}
 
@@ -519,18 +617,34 @@ export const SlicerProfilesPage: React.FC = () => {
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-4">
                   <p className="text-sm text-pf-text-muted">
-                    Showing {getFilteredCount()} of {getTotalCount()} profiles
+                    Showing {getFilteredCount()} profile(s)
                   </p>
-                  <Button variant="secondary" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] })}>Refresh</Button>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-pf-text-muted">Rows</span>
+                    <Select
+                      value={String(pageSize)}
+                      onChange={(e) => setPageSize(Number(e.target.value))}
+                      aria-label="Rows per page"
+                    >
+                      <option value="10">10</option>
+                      <option value="25">25</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </Select>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] })}>Refresh</Button>
                 </div>
-                {(searchQuery || filterEngine !== 'all' || filterSource !== 'all' || selectedMachine) && (
+                {(searchQuery || filterManufacturer !== 'all' || filterEngine !== 'all' || filterSource !== 'all' || selectedMachineProfileId || selectedFilamentProfileId || selectedProcessProfileId) && (
                   <Button
                     type="button"
                     onClick={() => {
                       setSearchQuery('');
+                      setFilterManufacturer('all');
                       setFilterEngine('all');
                       setFilterSource('all');
-                      setSelectedMachine('');
+                      setSelectedMachineProfileId('');
+                      setSelectedFilamentProfileId('');
+                      setSelectedProcessProfileId('');
                     }}
                     variant="subtle"
                     size="sm"
@@ -542,15 +656,6 @@ export const SlicerProfilesPage: React.FC = () => {
 
               {/* Profile Type Tabs */}
               <div className="flex gap-2 mt-4 border-b border-pf-border">
-                <Button
-                  type="button"
-                  onClick={() => setActiveTab('all')}
-                  variant="tab"
-                  size="sm"
-                  className={activeTab === 'all' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
-                >
-                  All ({getTotalCount()})
-                </Button>
                 <Button
                   type="button"
                   onClick={() => setActiveTab('machines')}
@@ -567,7 +672,7 @@ export const SlicerProfilesPage: React.FC = () => {
                   size="sm"
                   className={activeTab === 'filaments' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
                 >
-                  Filaments ({filteredFilamentProfiles.length})
+                  Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
                 </Button>
                 <Button
                   type="button"
@@ -576,7 +681,7 @@ export const SlicerProfilesPage: React.FC = () => {
                   size="sm"
                   className={activeTab === 'processes' ? 'border-b-2 border-pf-primary text-pf-text-primary' : ''}
                 >
-                  Processes ({filteredProcessProfiles.length})
+                  Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
                 </Button>
               </div>
             </div>
@@ -588,6 +693,9 @@ export const SlicerProfilesPage: React.FC = () => {
               {!isLoading && getTotalCount() === 0 && <div className="text-pf-text-muted text-sm">No profiles imported yet.</div>}
               {!isLoading && getTotalCount() > 0 && getFilteredCount() === 0 && (
                 <div className="text-pf-text-muted text-sm">No profiles match your filters.</div>
+              )}
+              {!isLoading && (activeTab === 'filaments' || activeTab === 'processes') && !selectedMachineProfileId && (
+                <div className="text-pf-text-muted text-sm">Select a machine model to view filament and process profiles.</div>
               )}
               {!isLoading && getFilteredCount() > 0 && (
                 <div className="overflow-x-auto">
@@ -605,24 +713,121 @@ export const SlicerProfilesPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {activeTab === 'all' && (
-                        <>
-                          {filteredMachineProfiles.map(p => renderProfileRow(p))}
-                          {filteredFilamentProfiles.map(p => renderProfileRow(p))}
-                          {filteredProcessProfiles.map(p => renderProfileRow(p))}
-                        </>
-                      )}
-                      {activeTab === 'machines' && filteredMachineProfiles.map(p => renderProfileRow(p))}
-                      {activeTab === 'filaments' && filteredFilamentProfiles.map(p => renderProfileRow(p))}
-                      {activeTab === 'processes' && filteredProcessProfiles.map(p => renderProfileRow(p))}
+                      {pagedProfiles.map(p => renderProfileRow(p))}
                     </tbody>
                   </table>
+                  <div className="flex items-center justify-between mt-3">
+                    <p className="text-sm text-pf-text-muted">
+                      Page {safePageNumber} of {totalPages}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={safePageNumber <= 1}
+                        onClick={() => setPageNumber((n) => Math.max(1, n - 1))}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={safePageNumber >= totalPages}
+                        onClick={() => setPageNumber((n) => Math.min(totalPages, n + 1))}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-          </div>
         </div>
       </div>
+
+      {/* Import Profile Modal */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Import Profile"
+        isDisabled={importMutation.isPending}
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button
+              variant="secondary"
+              onClick={() => setIsImportModalOpen(false)}
+              disabled={importMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              form="import-profile-form"
+              type="submit"
+              loading={importMutation.isPending}
+              variant="primary"
+            >
+              Import Profile
+            </Button>
+          </div>
+        }
+      >
+        <form id="import-profile-form" onSubmit={onImport} className="space-y-4">
+          <p className="text-sm text-pf-text-secondary mb-4">
+            Paste raw slicer profile JSON exported from your slicer application. This is for advanced users only.
+          </p>
+
+          <FormField label="Raw Profile JSON" required helper="Paste raw slicer profile JSON exported from your slicer.">
+            <Textarea
+              placeholder={'{\n  "layer_height": 0.2, ...\n}'}
+              value={rawJson}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRawJson(e.target.value)}
+              rows={12}
+            />
+          </FormField>
+          <FormField label="Name" helper="Optional; derived automatically if left blank.">
+            <Input
+              type="text"
+              placeholder="Profile name"
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+          </FormField>
+          <FormField label="Description">
+            <Input
+              type="text"
+              placeholder="Description"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+            />
+          </FormField>
+          <FormField label="Slicer Engine" required>
+            <Select
+              aria-label="Slicer engine"
+              value={slicerType}
+              onChange={e => setSlicerType(e.target.value)}
+            >
+              {slicerNames.map(s => <option key={s}>{s}</option>)}
+            </Select>
+          </FormField>
+          <div className="flex flex-col gap-2 text-sm">
+            <label className="inline-flex items-center gap-2">
+              <Checkbox checked={allowSystemOverride} onChange={e => setAllowSystemOverride(e.target.checked)} />
+              <span>Allow system override</span>
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <Checkbox checked={setDefault} onChange={e => setSetDefault(e.target.checked)} />
+              <span>Set as default after import</span>
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <Checkbox checked={isPublic} onChange={e => setIsPublic(e.target.checked)} />
+              <span>Public (visible to other users)</span>
+            </label>
+          </div>
+          {importError && <Alert type="error">{importError}</Alert>}
+        </form>
+      </Modal>
     </PageTemplate>
   );
 };

@@ -5,7 +5,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
+using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Slicing;
 using Moq;
 using Xunit;
@@ -14,6 +17,28 @@ namespace Farm.Web.Api.Tests.Services
 {
     public class ProfilesServiceTests
     {
+        private static ProfilesService CreateService(IProfilesRepository repo, IUnifiedLoggingService logger)
+        {
+            Mock<IProcessProfileRepository> processProfileRepo = new(MockBehavior.Loose);
+            Mock<IMachineProfileRepository> machineProfileRepo = new(MockBehavior.Loose);
+            Mock<IFilamentProfileRepository> filamentProfileRepo = new(MockBehavior.Loose);
+            Mock<IUnitOfWork> unitOfWork = new(MockBehavior.Loose);
+            Mock<IWorkerRepository> workerRepository = new(MockBehavior.Loose);
+            Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
+            Mock<IProfileParsingService> parsingService = new(MockBehavior.Loose);
+
+            return new ProfilesService(
+                repo,
+                logger,
+                processProfileRepo.Object,
+                machineProfileRepo.Object,
+                filamentProfileRepo.Object,
+                unitOfWork.Object,
+                workerRepository.Object,
+                catalogService.Object,
+                parsingService.Object);
+        }
+
         // NOTE: Tests using non-existent CreateSlicerProfileDto DTO have been removed.
         // The DTO structure was refactored to use composite profiles (Machine/Process/Filament).
         // ProfilesService primarily handles database operations - unit tests for DTO creation
@@ -29,7 +54,7 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
 
-            ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
 
             ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, CancellationToken.None);
             Assert.NotNull(dto);
@@ -45,7 +70,7 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((ProcessProfile?)null);
 
-            ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
 
             ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, CancellationToken.None);
             Assert.Null(dto);
@@ -63,7 +88,7 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
             _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(list);
 
-            ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
             IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
             Assert.Equal(2, result.Count);
         }
@@ -75,7 +100,7 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
             _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<ProcessProfile>());
 
-            ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
             IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
             Assert.Empty(result);
         }
@@ -90,7 +115,7 @@ namespace Farm.Web.Api.Tests.Services
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
             _ = mockRepo.Setup(r => r.RemoveAsync(profile, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-            ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
             await svc.DeleteProfileAsync(id, CancellationToken.None);
 
             mockRepo.Verify(r => r.RemoveAsync(profile, It.IsAny<CancellationToken>()), Times.Once);
@@ -104,7 +129,7 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IUnifiedLoggingService> mockLogger = new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
             _ = mockRepo.Setup(r => r.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((ProcessProfile?)null);
 
-            ProfilesService svc = new ProfilesService(mockRepo.Object, mockLogger.Object);
+            ProfilesService svc = CreateService(mockRepo.Object, mockLogger.Object);
 
             _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteProfileAsync(id, CancellationToken.None));
         }

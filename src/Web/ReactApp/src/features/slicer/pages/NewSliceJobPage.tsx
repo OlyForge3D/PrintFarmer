@@ -13,6 +13,7 @@ import { getHubUrl, getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlH
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
+import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 
 // Lazy load the 3D model viewer for better performance
 const ModelViewer3D = React.lazy(() =>
@@ -102,6 +103,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [isPrinterSelectorOpen, setIsPrinterSelectorOpen] = useState(false);
   const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
+  const [isCloneProfilesModalOpen, setIsCloneProfilesModalOpen] = useState(false);
   const stlFile = useSTLFile();
 
   // === Queries ===
@@ -246,6 +248,21 @@ export const NewSliceJobPage: React.FC = () => {
     // Return all process profiles from the extended response
     return processProfilesData?.processProfiles ?? [];
   }, [processProfilesData]);
+
+  // Check if printer has no profiles - show clone suggestion
+  const shouldSuggestCloneProfiles = useMemo(() => {
+    return selectedPrinterId && printerProcessProfiles.length === 0;
+  }, [selectedPrinterId, printerProcessProfiles.length]);
+
+  // Auto-open clone profiles modal if printer selected but has no profiles
+  useEffect(() => {
+    if (shouldSuggestCloneProfiles && !isCloneProfilesModalOpen) {
+      const timer = setTimeout(() => {
+        setIsCloneProfilesModalOpen(true);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [shouldSuggestCloneProfiles, isCloneProfilesModalOpen]);
 
   // Machine profiles for profile selection
   const machineProfiles = useMemo(() => {
@@ -1086,7 +1103,24 @@ export const NewSliceJobPage: React.FC = () => {
             setIsSTLPreviewOpen(false);
           }}
         />
-      )}      {/* Printer Selector Modal */}
+      )}
+      
+      {/* Clone Profiles Modal - shown when printer selected but has no profiles */}
+      {selectedPrinter && (
+        <CloneProfilesModal
+          isOpen={isCloneProfilesModalOpen}
+          onClose={() => setIsCloneProfilesModalOpen(false)}
+          printerId={selectedPrinterId}
+          printerName={selectedPrinter.name}
+          onSuccess={() => {
+            // Invalidate profiles cache to reload when modal closes
+            qc.invalidateQueries({ queryKey: ['slicerProfiles'] });
+            qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+          }}
+        />
+      )}
+
+      {/* Printer Selector Modal */}
       <PrinterSelectorModal
         isOpen={isPrinterSelectorOpen}
         printers={printers}

@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { CloseIcon, FileIcon, UploadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { FileIcon, UploadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { Button, FileUpload } from '@/common/components/ui';
 import { toast } from 'sonner';
+import { Modal } from './Modal';
 
 interface GcodeUploadModalProps {
   isOpen: boolean;
@@ -87,38 +88,16 @@ export const GcodeUploadModal: React.FC<GcodeUploadModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div 
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          onClose();
-        }
-      }}
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Upload G-Code Files"
+      footer={
+        <Button onClick={handleClose} variant="secondary" size="sm">
+          Close
+        </Button>
+      }
     >
-      <div 
-        className="bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border max-w-2xl w-full max-h-[90vh] overflow-y-auto flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-pf-text-primary">Upload G-Code Files</h2>
-          <Button
-            onClick={handleClose}
-            variant="subtle"
-            size="sm"
-            className="!p-0 !h-auto"
-          >
-            <CloseIcon className="w-6 h-6" />
-          </Button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 flex flex-col p-6 space-y-4 overflow-y-auto">
           {/* Drag & Drop Area */}
           <div
             className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
@@ -191,17 +170,8 @@ export const GcodeUploadModal: React.FC<GcodeUploadModalProps> = ({
               Add files above to get started
             </p>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="border-t border-pf-border px-6 py-4 flex gap-2 justify-end">
-          <Button onClick={handleClose} variant="secondary" size="sm">
-            Close
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-};
+        </Modal>
+    );
+  };
 
 GcodeUploadModal.displayName = 'GcodeUploadModal';

@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
-import { CloseIcon, EyeIcon, EyeOffIcon, LoginIcon } from '@/common/components/icons/MdiIcons';
+import { EyeIcon, EyeOffIcon, LoginIcon } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button, Input } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -44,144 +45,111 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
     }
   }, [isLoading, onClose]);
 
-  // Handle ESC key to close modal
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isLoading) {
-        handleClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, isLoading, handleClose]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !isLoading) {
-          handleClose();
-        }
-      }}
-    >
-      <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border">
-        <div className="flex items-center justify-between p-6 border-b border-pf-border">
-          <div className="flex items-center gap-2">
-            <PrintFarmerLogo size={32} className="mr-2" />
-            <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-            <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-              <LoginIcon className="h-5 w-5 mr-2" />Sign In
-            </span>
+  const formContent = (
+    <>
+      {isLoading && (
+        <div className="px-6 pt-4"><FormSkeleton fields={2} /></div>
+      )}
+      <form onSubmit={handleSubmit} className="p-6 space-y-4" aria-live="polite">
+        {error && (
+          <div className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm" style={{ color: 'var(--pf-error)' }}>
+            {error}
           </div>
-          <Button
-            onClick={handleClose}
-            disabled={isLoading}
-            variant="subtle"
-            size="sm"
-            aria-label="Close sign in modal"
-            title="Close"
-            className="!p-0 !h-auto"
-          >
-            <CloseIcon className="h-5 w-5" />
-          </Button>
-        </div>
-        {isLoading && (
-          <div className="p-6"><FormSkeleton fields={2} /></div>
         )}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4" aria-live="polite">
-          {error && (
-            <div className="bg-pf-bg-2 border border-pf-border px-4 py-3 rounded-md text-sm" style={{ color: 'var(--pf-error)' }}>
-              {error}
-            </div>
-          )}
 
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-1">
-              Username or Email
-            </label>
+        <div>
+          <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-1">
+            Username or Email
+          </label>
+          <Input
+            type="text"
+            id="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Enter your username or email"
+            required
+            disabled={isLoading}
+            className="w-full"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-1">
+            Password
+          </label>
+          <div className="relative">
             <Input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter your username or email"
+              type={showPassword ? 'text' : 'password'}
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
               required
               disabled={isLoading}
-              className="w-full"
+              className="w-full pr-10"
             />
-          </div>
-
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-1">
-              Password
-            </label>
-            <div className="relative">
-              <Input
-                type={showPassword ? 'text' : 'password'}
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                required
-                disabled={isLoading}
-                className="w-full pr-10"
-              />
-              <Button
-                onClick={() => setShowPassword(!showPassword)}
-                variant="subtle"
-                size="sm"
-                disabled={isLoading}
-                className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
-              >
-                {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between text-sm">
-            <Link
-              to="/forgot-password"
-              className="text-pf-accent hover:text-pf-accent-hover font-medium"
-              onClick={onClose}
-            >
-              Forgot password?
-            </Link>
-          </div>
-
-          <div className="flex items-center justify-between pt-4">
             <Button
-              type="button"
-              onClick={onSwitchToRegister}
+              onClick={() => setShowPassword(!showPassword)}
               variant="subtle"
+              size="sm"
               disabled={isLoading}
+              className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
             >
-              Need an account? Register
-            </Button>
-            <Button
-              type="submit"
-              disabled={isLoading || !username || !password}
-              variant="primary"
-            >
-              {isLoading ? (
-                <>
-                  <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  <span>Signing In...</span>
-                </>
-              ) : (
-                <>
-                  <LoginIcon className="h-4 w-4" />
-                  <span>Sign In</span>
-                </>
-              )}
+              {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
             </Button>
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+
+        <div className="flex items-center justify-between text-sm">
+          <Link
+            to="/forgot-password"
+            className="text-pf-accent hover:text-pf-accent-hover font-medium"
+            onClick={onClose}
+          >
+            Forgot password?
+          </Link>
+        </div>
+
+        <div className="flex items-center justify-between pt-4">
+          <Button
+            type="button"
+            onClick={onSwitchToRegister}
+            variant="subtle"
+            disabled={isLoading}
+          >
+            Need an account? Register
+          </Button>
+          <Button
+            type="submit"
+            disabled={isLoading || !username || !password}
+            variant="primary"
+          >
+            {isLoading ? (
+              <>
+                <div className="pf-animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <span>Signing In...</span>
+              </>
+            ) : (
+              <>
+                <LoginIcon className="h-4 w-4" />
+                <span>Sign In</span>
+              </>
+            )}
+          </Button>
+        </div>
+      </form>
+    </>
+  );
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Sign In"
+      width="max-w-md"
+      isDisabled={isLoading}
+    >
+      {formContent}
+    </Modal>
   );
 }

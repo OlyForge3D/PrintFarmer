@@ -1,10 +1,9 @@
- 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
-import { CloseIcon, EyeIcon, EyeOffIcon, UserPlusIcon } from '@/common/components/icons/MdiIcons';
-import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
+import { EyeIcon, EyeOffIcon, UserPlusIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -108,56 +107,20 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
     }
   };
 
-  // Handle ESC key to close modal
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isLoading) {
-        handleClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, isLoading, handleClose]);
-
-  if (!isOpen) return null;
-
   const allErrors = [...validationErrors, ...(error ? [error] : [])];
 
   return (
-    <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !isLoading) {
-          handleClose();
-        }
-      }}
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Create Account"
+      width="max-w-md"
+      isDisabled={isLoading}
     >
-      <div className="bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full mx-4 border border-pf-border max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-pf-border">
-          <div className="flex items-center gap-2">
-            <PrintFarmerLogo size={32} className="mr-2" />
-            <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-            <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
-              <UserPlusIcon className="h-5 w-5 mr-2" />Create Account
-            </span>
-          </div>
-          <Button
-            onClick={handleClose}
-            disabled={isLoading}
-            variant="subtle"
-            aria-label="Close registration modal"
-            title="Close"
-          >
-            <CloseIcon className="h-5 w-5" />
-          </Button>
-        </div>
-        {isLoading && (
-          <div className="p-6"><FormSkeleton fields={6} /></div>
-        )}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+      {isLoading && (
+        <div className="px-6 pt-4"><FormSkeleton fields={6} /></div>
+      )}
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="sr-only" role="status" aria-live="polite">
             {isLoading ? 'Creating account...' : 'Form ready'}
           </div>
@@ -297,7 +260,6 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               type="submit"
               disabled={isLoading || !formData.username || !formData.email || !formData.password}
               variant="primary"
-              className="flex items-center gap-2"
             >
               {isLoading ? (
                 <>
@@ -313,7 +275,6 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
             </Button>
           </div>
         </form>
-      </div>
-    </div>
-  );
-}
+      </Modal>
+    );
+  }

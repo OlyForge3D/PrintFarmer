@@ -148,18 +148,4 @@ public class ArtifactCleanupServiceTests : IClassFixture<CustomWebApplicationFac
             _ = newStillExists.Should().NotBeNull("new artifact should remain");
         }
     }
-
-    [Fact(Skip = "Requires factory refactoring")]
-    public async Task ScanAndCleanupAsync_SizeBasedCleanup_DeletesOldestWhenOverThreshold()
-    {
-        // TODO: Refactor to properly use factory pattern for tests
-        await Task.CompletedTask;
-    }
-
-    [Fact(Skip = "Requires factory refactoring")]
-    public async Task ScanAndCleanupAsync_NoCandidates_ReturnsZero()
-    {
-        // TODO: Refactor to properly use factory pattern for tests
-        await Task.CompletedTask;
-    }
 }

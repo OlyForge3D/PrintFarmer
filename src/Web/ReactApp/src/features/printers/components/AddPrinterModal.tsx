@@ -1,12 +1,12 @@
-// ...existing code...
 import React, { useState, useEffect, useCallback } from 'react';
 import styles from './AddPrinterModal.module.css';
-import { LoadingIcon, CloseIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import type { PrinterModelDto, CreatePrinterDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { BackendSelector } from '@/common/components/BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 
 interface ManufacturerDto {
   id: string;
@@ -207,43 +207,55 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
 
   if (!isOpen) return null;
 
+  const modalFooter = (
+    <div className="flex gap-3">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleClose}
+        className="flex-1"
+      >
+        Cancel
+      </Button>
+      <Button
+        type="submit"
+        form="add-printer-form"
+        variant="success"
+        disabled={isLoading}
+        className="flex-1"
+      >
+        {isLoading ? (
+          <>
+            <LoadingIcon className="w-4 h-4 mr-2" />
+            Adding...
+          </>
+        ) : (
+          <>
+            <CheckIcon className="w-4 h-4 mr-2" />
+            Add Printer
+          </>
+        )}
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        {/* Overlay */}
-        <div 
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity" 
-          onClick={handleClose}
-        />
-        
-        {/* Modal */}
-        <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative overflow-visible">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">
-              Add New Printer
-            </h3>
-            <Button
-              variant="subtle"
-              size="sm"
-              onClick={handleClose}
-              aria-label="Close add printer dialog"
-              title="Close"
-              className="!p-1 !h-auto"
-            >
-              <CloseIcon className="w-6 h-6" />
-            </Button>
-          </div>
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Add New Printer"
+      width="max-w-2xl"
+      footer={modalFooter}
+    >
+      {/* Error Message */}
+      {error && (
+        <Alert type="error" className="mb-4">
+          {error}
+        </Alert>
+      )}
 
-          {/* Error Message */}
-          {error && (
-            <Alert type="error" className="mb-4">
-              {error}
-            </Alert>
-          )}
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+      {/* Form */}
+      <form id="add-printer-form" onSubmit={handleSubmit} className="space-y-4">
             {/* Basic Info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Printer Name */}
@@ -421,39 +433,7 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
                 aria-label="Printer notes"
               />
             </FormField>
-
-            {/* Form Actions */}
-            <div className="flex gap-3 pt-4">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleClose}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="success"
-                disabled={isLoading}
-                className="flex-1"
-              >
-                {isLoading ? (
-                  <>
-                    <LoadingIcon className="w-4 h-4 mr-2" />
-                    Adding...
-                  </>
-                ) : (
-                  <>
-                    <CheckIcon className="w-4 h-4 mr-2" />
-                    Add Printer
-                  </>
-                )}
-              </Button>
-            </div>
           </form>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

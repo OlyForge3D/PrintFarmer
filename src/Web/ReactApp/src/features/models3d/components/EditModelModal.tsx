@@ -7,7 +7,7 @@ import type { PrinterModelDto, UpdateModelRequest, MotionTypeString } from '@/ty
 import { toast } from 'sonner';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { BackendSelector } from '@/common/components/BackendSelector';
-import { Modal } from '@/common/components/ui/Modal';
+import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { FormField } from '@/common/components/ui/FormField';
@@ -212,7 +212,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess }: EditModelM
       isOpen={isOpen}
       onClose={handleClose}
       title={`${isAddMode ? 'Add' : 'Edit'} Printer Model`}
-      size="full"
+      width="max-w-4xl"
       footer={footerContent}
     >
       <form onSubmit={handleSubmit} className="space-y-6">

@@ -1,9 +1,10 @@
-import { CloseIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
+import { CheckIcon } from '@/common/components/icons/MdiIcons';
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 // No MdiIcons used in this component
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { Button, Checkbox } from '@/common/components/ui';
+import { Modal } from './Modal';
 
 interface BulkTagAssignmentModalProps {
     isOpen: boolean;
@@ -131,93 +132,86 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
     const canSubmit = selectedModelIds.length > 0 && selectedTagIds.length > 0 && !isLoading;
 
     return (
-        <div 
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={(e) => {
-                if (e.target === e.currentTarget && !isLoading) {
-                    onClose();
-                }
-            }}
-            onKeyDown={(e) => {
-                if (e.key === 'Escape' && !isLoading) {
-                    onClose();
-                }
-            }}
-        >
-            <div 
-                className="bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-                onClick={(e) => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div className="sticky top-0 bg-pf-bg-1 border-b border-pf-border px-6 py-4 flex items-center justify-between">
-                    <h2 className="text-xl font-semibold text-pf-text-primary">Bulk Tag Assignment</h2>
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Bulk Tag Assignment"
+            isDisabled={isLoading}
+            footer={
+                <div className="flex justify-end gap-3 w-full">
                     <Button
                         onClick={onClose}
                         disabled={isLoading}
-                        variant="subtle"
-                        size="sm"
-                        className="!p-0 !h-auto"
+                        variant="secondary"
                     >
-                        <CloseIcon className="w-6 h-6" />
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={() => assignTagsMutation.mutate()}
+                        disabled={!canSubmit}
+                        variant="primary"
+                        loading={isLoading}
+                    >
+                        Assign Tags ({selectedModelIds.length} models, {selectedTagIds.length} tags)
                     </Button>
                 </div>
-
-                {/* Content */}
-                <div className="p-6 space-y-6">
-                    {/* Models Selection */}
-                    <div>
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-lg font-medium text-pf-text-primary">
-                                Select Models ({selectedModelIds.length} selected)
-                            </h3>
-                            <label className="flex items-center gap-2 text-sm text-pf-text-secondary cursor-pointer hover:text-pf-text-primary">
-                            <Checkbox
-                                checked={selectAllModels}
-                                onChange={(e) => handleSelectAllModels(e.target.checked)}
-                                disabled={isLoading}
-                                    className="rounded"
-                                />
-                                Select All
-                            </label>
-                        </div>
-                        <div className="bg-pf-bg-2 rounded-lg border border-pf-border p-4 max-h-48 overflow-y-auto space-y-2">
-                            {models.length > 0 ? (
-                                models.map(model => (
-                                    <label
-                                        key={model.id}
-                                        className="flex items-center gap-3 p-2 hover:bg-pf-bg-1 rounded cursor-pointer"
-                                    >
-                                        <Checkbox
-                                            checked={selectedModelIds.includes(model.id)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setSelectedModelIds(prev => [...prev, model.id]);
-                                                } else {
-                                                    setSelectedModelIds(prev => prev.filter(id => id !== model.id));
-                                                    setSelectAllModels(false);
-                                                }
-                                            }}
-                                            disabled={isLoading}
-                                            className="rounded"
-                                        />
-                                        <div className="flex-1">
-                                            <div className="text-pf-text-primary font-medium">{model.name}</div>
-                                            <div className="text-sm text-pf-text-tertiary">{model.fileName}</div>
-                                        </div>
-                                    </label>
-                                ))
-                            ) : (
-                                <p className="text-pf-text-secondary text-center py-4">No models available</p>
-                            )}
-                        </div>
+            }
+        >
+            {/* Models Selection */}
+            <div className="space-y-6">
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-medium text-pf-text-primary">
+                            Select Models ({selectedModelIds.length} selected)
+                        </h3>
+                        <label className="flex items-center gap-2 text-sm text-pf-text-secondary cursor-pointer hover:text-pf-text-primary">
+                        <Checkbox
+                            checked={selectAllModels}
+                            onChange={(e) => handleSelectAllModels(e.target.checked)}
+                            disabled={isLoading}
+                                className="rounded"
+                            />
+                            Select All
+                        </label>
                     </div>
+                    <div className="bg-pf-bg-2 rounded-lg border border-pf-border p-4 max-h-48 overflow-y-auto space-y-2">
+                        {models.length > 0 ? (
+                            models.map(model => (
+                                <label
+                                    key={model.id}
+                                    className="flex items-center gap-3 p-2 hover:bg-pf-bg-1 rounded cursor-pointer"
+                                >
+                                    <Checkbox
+                                        checked={selectedModelIds.includes(model.id)}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setSelectedModelIds(prev => [...prev, model.id]);
+                                            } else {
+                                                setSelectedModelIds(prev => prev.filter(id => id !== model.id));
+                                                setSelectAllModels(false);
+                                            }
+                                        }}
+                                        disabled={isLoading}
+                                        className="rounded"
+                                    />
+                                    <div className="flex-1">
+                                        <div className="text-pf-text-primary font-medium">{model.name}</div>
+                                        <div className="text-sm text-pf-text-tertiary">{model.fileName}</div>
+                                    </div>
+                                </label>
+                            ))
+                        ) : (
+                            <p className="text-pf-text-secondary text-center py-4">No models available</p>
+                        )}
+                    </div>
+                </div>
 
-                    {/* Tags Selection */}
-                    <div>
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-lg font-medium text-pf-text-primary">
-                                Select Tags ({selectedTagIds.length} selected)
-                            </h3>
+                {/* Tags Selection */}
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-medium text-pf-text-primary">
+                            Select Tags ({selectedTagIds.length} selected)
+                        </h3>
                             <label className="flex items-center gap-2 text-sm text-pf-text-secondary cursor-pointer hover:text-pf-text-primary">
                             <Checkbox
                                 checked={selectAllTags}
@@ -286,26 +280,6 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                         </div>
                     )}
                 </div>
-
-                {/* Footer */}
-                <div className="sticky bottom-0 bg-pf-bg-1 border-t border-pf-border px-6 py-4 flex items-center justify-end gap-3">
-                    <Button
-                        onClick={onClose}
-                        disabled={isLoading}
-                        variant="secondary"
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        onClick={() => assignTagsMutation.mutate()}
-                        disabled={!canSubmit}
-                        variant="primary"
-                        loading={isLoading}
-                    >
-                        Assign Tags ({selectedModelIds.length} models, {selectedTagIds.length} tags)
-                    </Button>
-                </div>
-            </div>
-        </div>
+            </Modal>
     );
 };

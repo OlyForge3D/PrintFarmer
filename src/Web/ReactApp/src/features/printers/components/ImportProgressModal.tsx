@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Modal } from '@/common/components/ui/Modal';
+import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui';
 import { printerHubService, PrinterImportProgress } from '@/services/printerHubService';
 
@@ -136,7 +136,7 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Importing Printers"
-      size="lg"
+      width="max-w-2xl"
     >
       <div className="flex flex-col gap-4">
         {/* File info */}

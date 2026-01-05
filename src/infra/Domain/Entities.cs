@@ -114,6 +114,8 @@ public class Printer
     public Manufacturer? Manufacturer { get; set; }
     public Guid ModelId { get; set; } // No longer nullable - uses default "Unknown Model"
     public PrinterModel? Model { get; set; }
+    public Guid? TemplateMachineProfileId { get; set; } // Optional: reference machine profile for custom printers (e.g., CORE One L using CORE One profiles)
+    public MachineProfile? TemplateMachineProfile { get; set; }
     public Guid? LocationId { get; set; } // Optional location for organizing printers geographically
     public Location? Location { get; set; }
     public DateTime? DateAcquired { get; set; }

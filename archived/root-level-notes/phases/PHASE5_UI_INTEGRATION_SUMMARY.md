@@ -335,9 +335,7 @@ Admin (farm_admin only)
   ├─ Settings
   ├─ Spools
   ├─ User Management
-  ├─ Observability
-  ├─ Slicer Dry Run
-  └─ Slicer Job Status
+  └─ Observability
 ```
 
 ---

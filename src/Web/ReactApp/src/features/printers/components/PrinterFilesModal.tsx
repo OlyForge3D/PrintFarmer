@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { DeleteIcon, CloseIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Select } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import type { Printer, PrinterFileDto } from '@/types/api';
@@ -182,16 +183,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               </p>
             </div>
             
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              onClick={onClose}
-              className="!p-2 !h-auto"
-              title="Close"
-            >
-              <CloseIcon className="h-5 w-5" />
-            </Button>
+            {/* Close handled by Modal */}
           </div>
 
           {/* Content */}
@@ -386,7 +378,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               onClick={() => setConfirmDialog(null)}
               className="!p-2 !h-auto"
             >
-              <CloseIcon className="h-5 w-5" />
+              {/* Close icon removed - using button without icon */}
             </Button>
           </div>
 

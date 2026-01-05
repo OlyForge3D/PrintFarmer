@@ -81,41 +81,6 @@ namespace Farm.Web.Api.Tests.Hubs
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 
-        [Fact(Skip = "Moq/SignalR mock compatibility issue with SendAsync extension method - requires deeper investigation")]
-        public async Task JoinDiscoveryGroupAsync_WithCachedProgress_SendsProgressToCaller()
-        {
-            // Arrange
-            var sessionId = "test-session-id";
-            var cachedProgress = new DiscoveryProgressDto(
-                SessionId: sessionId,
-                CurrentNetwork: "192.168.1.0/24",
-                CurrentIp: "192.168.1.100",
-                TotalIps: 100,
-                ScannedIps: 50,
-                PrintersFound: 2,
-                PrintersExcluded: 0,
-                ProgressPercentage: 50,
-                Status: DiscoveryStatus.Scanning
-            );
-
-            _progressCacheMock
-                .Setup(c => c.TryGet(sessionId, out It.Ref<DiscoveryProgressDto?>.IsAny))
-                .Returns((string sid, out DiscoveryProgressDto? progress) =>
-                {
-                    progress = cachedProgress;
-                    return true;
-                });
-
-            // Act
-            await _hub.JoinDiscoveryGroupAsync(sessionId);
-
-            // Assert
-            _callerMock.Verify(c => c.SendCoreAsync(
-                "discoveryprogress",
-                It.Is<object[]>(args => args.Length == 1 && ReferenceEquals(args[0], cachedProgress)),
-                It.IsAny<CancellationToken>()), Times.Once);
-        }
-
         [Fact]
         public async Task JoinDiscoveryGroupAsync_WithoutCachedProgress_DoesNotSendProgress()
         {

@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { LoadingIcon, RefreshIcon, CloseIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
+import { LoadingIcon, RefreshIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterDetails, useUpdatePrinter, useManufacturers, useModels, useFilamentTypes, useModelDefaultCapabilities } from '@/common/hooks/useApi';
 import { UpdatePrinterDto, PrinterBackend } from '@/types/api';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { FilamentTypeSelector } from '@/features/catalog/components/FilamentTypeSelector';
 import { BackendSelector } from '@/common/components/BackendSelector';
+import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { Button, Input, Select, Textarea, FormField, Alert, Checkbox } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -28,6 +30,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [lastModelId, setLastModelId] = useState<string | undefined>();
   const [isRefreshingCameras, setIsRefreshingCameras] = useState(false);
+  const [showCloneProfilesModal, setShowCloneProfilesModal] = useState(false);
   
   // Fetch default capabilities for the selected model
   const { data: defaultCapabilities, isLoading: isLoadingCapabilities } = useModelDefaultCapabilities(formData?.modelId);
@@ -148,12 +151,19 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       const result = await updateMutation.mutateAsync({ id: printerId, printer: formData });
       toast.success(`Printer "${result.name}" updated`);
       onSuccess?.();
-      onClose();
+      // Show clone profiles modal if printer was just created or updated
+      // (user may want to clone profiles from template machine)
+      setShowCloneProfilesModal(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update printer';
       toast.error(message);
       setError(message);
     }
+  };
+
+  const handleCloneProfilesSuccess = () => {
+    setShowCloneProfilesModal(false);
+    onClose();
   };
 
   const handleRefreshCameraUrls = async () => {
@@ -180,32 +190,42 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
   const filteredModels = models || [];
 
+  const modalFooter = (
+    <div className="flex gap-2">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleClose}
+      >
+        Cancel
+      </Button>
+      <Button
+        type="submit"
+        form="edit-printer-form"
+        variant="primary"
+        disabled={updateMutation.status === 'pending'}
+      >
+        <CheckIcon className="w-4 h-4 mr-1" />
+        {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen px-4 py-8 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
-        <div className="inline-block align-bottom bg-pf-bg-1 rounded-xl px-6 pt-6 pb-6 text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-pf-border relative">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-pf-text-primary font-bebas uppercase">Edit Printer</h3>
-            <Button
-              variant="subtle"
-              size="sm"
-              onClick={handleClose}
-              aria-label="Close edit printer modal"
-              title="Close"
-              className="!p-1 !h-auto"
-            >
-              <CloseIcon className="w-6 h-6" />
-            </Button>
-          </div>
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Edit Printer"
+      width="max-w-2xl"
+      footer={modalFooter}
+    >
+      {error && (
+        <Alert type="error" title="Update Failed" className="mb-4">
+          {error}
+        </Alert>
+      )}
 
-            {error && (
-              <Alert type="error" title="Update Failed" className="mb-4">
-                {error}
-              </Alert>
-            )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
+      <form id="edit-printer-form" onSubmit={handleSubmit} className="space-y-5">
             <FormField
               label="Name"
               required
@@ -516,27 +536,16 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 <RefreshIcon className={`w-4 h-4 mr-1 ${isRefreshingCameras ? 'animate-spin' : ''}`} />
                 {isRefreshingCameras ? 'Detecting...' : 'Detect Cameras'}
               </Button>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleClose}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={updateMutation.status === 'pending'}
-                >
-                  <CheckIcon className="w-4 h-4 mr-1" />
-                  {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
-                </Button>
-              </div>
             </div>
           </form>
-        </div>
-      </div>
-    </div>
+
+          <CloneProfilesModal
+            isOpen={showCloneProfilesModal}
+            onClose={() => setShowCloneProfilesModal(false)}
+            printerId={printerId || ''}
+            printerName={formData?.name || ''}
+            onSuccess={handleCloneProfilesSuccess}
+          />
+    </Modal>
   );
 }
