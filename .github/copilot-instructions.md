@@ -96,7 +96,7 @@ npm run dev  # Development server works fine
 ```powershell
 # .NET API tests
 cd ./src
-dotnet test ./farm-web.sln -c Debug --logger "xunit;LogFileName=test-results.xml" > test-run.log 2>&1
+dotnet test ./farm-web.sln -c Debug --logger "trx;LogFileName=test-results.trx" > test-run.log 2>&1
 
 # React tests (use test:run for non-interactive mode - exits after tests complete)
 cd ./src/Web/ReactApp
