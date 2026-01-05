@@ -464,11 +464,10 @@ public class ProcessProfile
     /// </summary>
     public string? RawJson { get; set; }
     /// <summary>
-    /// Extracted metadata summary stored as flat JSON object for quick querying and display.
-    /// Examples: { "layerHeight": 0.2, "infillPercentage": 20, "printSpeed": 50, "slicerVersion": "1.7.0", ... }
-    /// Version information is extracted here and can be used to track which slicer version this profile is for.
+    /// Extracted settings as key-value pairs for all properties in the raw JSON.
+    /// Used for quick display and NewSliceJob page configuration without parsing full RawJson.
     /// </summary>
-    public string? MetadataJson { get; set; }
+    public string? SettingsJson { get; set; }
     /// <summary>
     /// Stable hash (SHA256) of RawJson used for deduplication and quick matching on import.
     /// Different slicer versions will produce different hashes even for the same profile characteristics,

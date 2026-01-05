@@ -141,7 +141,7 @@ public class EfProcessProfileRepository(AppDbContext db) : IProcessProfileReposi
         existing.Name = imported.Name;
         existing.Description = imported.Description;
         existing.RawJson = imported.RawJson;
-        existing.MetadataJson = imported.MetadataJson;
+        existing.SettingsJson = imported.SettingsJson;
         existing.LayerHeight = imported.LayerHeight;
         existing.InfillPercentage = imported.InfillPercentage;
         existing.PrintSpeed = imported.PrintSpeed;

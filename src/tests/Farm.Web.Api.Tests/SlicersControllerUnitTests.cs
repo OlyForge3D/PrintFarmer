@@ -1,5 +1,8 @@
-﻿using System.Threading;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -8,6 +11,7 @@ using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Hubs;
+using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.SlicerServices;
 using Farm.Web.Api.Services.Slicing;
 using FluentAssertions;
@@ -68,6 +72,35 @@ namespace Farm.Web.Api.Tests
             return new Mock<IProcessProfileRepository>(MockBehavior.Loose);
         }
 
+        private static Mock<IFilamentProfileRepository> CreateMockFilamentProfileRepository()
+        {
+            return new Mock<IFilamentProfileRepository>(MockBehavior.Loose);
+        }
+
+        private static Mock<ICatalogService> CreateMockCatalogService()
+        {
+            Mock<ICatalogService> mock = new Mock<ICatalogService>(MockBehavior.Loose);
+            // Return empty lists for catalog service; tests don't depend on actual catalog data for profile seeding
+            _ = mock.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(((IReadOnlyList<ManufacturerDto>)new List<ManufacturerDto>(), (string?)null));
+            _ = mock.Setup(c => c.GetModelsAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(((IReadOnlyList<PrinterModelDto>)new List<PrinterModelDto>(), (string?)null));
+            return mock;
+        }
+
+        private static Mock<Farm.Infrastructure.Settings.ISettingsService> CreateMockSettingsService()
+        {
+            var mock = new Mock<Farm.Infrastructure.Settings.ISettingsService>(MockBehavior.Loose);
+            // By default, lock operations return success (TryAcquireLockAsync returns true)
+            _ = mock.Setup(s => s.TryAcquireLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            _ = mock.Setup(s => s.CompleteLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            _ = mock.Setup(s => s.ClearLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            return mock;
+        }
+
         private static HttpClient CreateMockHttpClient()
         {
             return new HttpClient();
@@ -82,11 +115,14 @@ namespace Farm.Web.Api.Tests
             EfSlicersRepository repo = new EfSlicersRepository(db);
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             HttpClient httpClient = CreateMockHttpClient();
             SlicerServiceMetrics metrics = CreateMetrics();
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
-            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
             SlicersController controller = new SlicersController(service);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
@@ -125,11 +161,14 @@ namespace Farm.Web.Api.Tests
             EfSlicersRepository repo = new EfSlicersRepository(db);
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             HttpClient httpClient = CreateMockHttpClient();
             SlicerServiceMetrics metrics = CreateMetrics();
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
-            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
             SlicersController controller = new SlicersController(service);
 
             IActionResult res = await controller.ListAsync();
@@ -152,11 +191,14 @@ namespace Farm.Web.Api.Tests
             EfSlicersRepository repo = new EfSlicersRepository(db);
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             HttpClient httpClient = CreateMockHttpClient();
             SlicerServiceMetrics metrics = CreateMetrics();
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
-            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
             SlicersController controller = new SlicersController(service);
 
             HeartbeatDto hb = new HeartbeatDto { Status = "Updated", FreeSlots = 3 };
@@ -187,11 +229,14 @@ namespace Farm.Web.Api.Tests
             EfSlicersRepository repo = new EfSlicersRepository(db);
             EfWorkerRepository workerRepo = new EfWorkerRepository(db);
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             HttpClient httpClient = CreateMockHttpClient();
             SlicerServiceMetrics metrics = CreateMetrics();
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
-            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+            SlicersService service = new SlicersService(repo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
             SlicersController controller = new SlicersController(service);
 
             IActionResult res = await controller.DeregisterAsync(id);

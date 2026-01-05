@@ -124,8 +124,8 @@ public static class ServiceCollectionExtensions
         // Register a lightweight provider for system settings that reads from IConfiguration
         _ = services.AddSingleton<ISystemSettingsProvider, ConfigurationSystemSettingsProvider>();
 
-        // Register SettingsService so DI constructs it with IConfiguration, and IUnifiedLoggingService
-        _ = services.AddScoped<ISettingsService, SettingsService>();
+        // SettingsService registration moved to after repositories (requires IAppSettingsRepository)
+        // See Repositories section below
 
         // Settings initialization from environment variables (scoped to match ISettingsService)
         // Register settings initialization via its interface
@@ -152,6 +152,7 @@ public static class ServiceCollectionExtensions
         // Register services by category
         RegisterCoreInfrastructure(services);
         RegisterRepositories(services);
+        RegisterSettingsService(services);  // Must be after RegisterRepositories (depends on IAppSettingsRepository)
         RegisterTelemetryAndLogging(services);
         RegisterCachingServices(services);
         RegisterAuthenticationServices(services);
@@ -274,11 +275,24 @@ public static class ServiceCollectionExtensions
         // Worker repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Workers.IWorkerRepository, Farm.Infrastructure.Repositories.Workers.EfWorkerRepository>();
 
+        // Settings repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository, Farm.Infrastructure.Repositories.Settings.EfAppSettingsRepository>();
+
         // Gcode repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Gcode.IGcodeRepository, Farm.Infrastructure.Repositories.Gcode.EfGcodeRepository>();
 
         // Authentication audit repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Authentication.IAuthAuditLogRepository, Farm.Infrastructure.Repositories.Authentication.EfAuthAuditLogRepository>();
+    }
+
+    #endregion
+
+    #region Settings Service (Depends on Repositories)
+
+    private static void RegisterSettingsService(IServiceCollection services)
+    {
+        // Register SettingsService AFTER repositories - requires IAppSettingsRepository
+        _ = services.AddScoped<ISettingsService, SettingsService>();
     }
 
     #endregion

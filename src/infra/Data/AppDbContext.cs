@@ -764,7 +764,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(p => p.Quality).HasConversion<int>();
             _ = b.Property(p => p.AdvancedSettings).HasColumnType("TEXT");
             _ = b.Property(p => p.RawJson).HasColumnType("TEXT");
-            _ = b.Property(p => p.MetadataJson).HasColumnType("TEXT");
+            _ = b.Property(p => p.SettingsJson).HasColumnType("TEXT");
             _ = b.Property(p => p.Hash).HasMaxLength(64);
             _ = b.Property(p => p.IsSystem).HasDefaultValue(false);
 

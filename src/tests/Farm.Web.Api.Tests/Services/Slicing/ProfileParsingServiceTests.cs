@@ -48,7 +48,7 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.Equal(invalidJson, result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        Assert.Equal("{}", result.SettingsJson);
         Assert.NotEmpty(result.Hash);
         Assert.Equal(64, result.Hash.Length); // SHA256 is 64 hex chars
     }
@@ -64,7 +64,7 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.Equal(malformedJson, result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        Assert.Equal("{}", result.SettingsJson);
         Assert.NotEmpty(result.Hash);
     }
 
@@ -83,7 +83,7 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.Equal(arrayJson, result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        Assert.Equal("{}", result.SettingsJson);
         Assert.NotEmpty(result.Hash);
     }
 
@@ -98,7 +98,7 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.Equal(stringJson, result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        Assert.Equal("{}", result.SettingsJson);
         Assert.NotEmpty(result.Hash);
     }
 
@@ -113,7 +113,7 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.Equal(numberJson, result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        Assert.Equal("{}", result.SettingsJson);
         Assert.NotEmpty(result.Hash);
     }
 
@@ -132,7 +132,7 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.Equal("{}", result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        Assert.Equal("{}", result.SettingsJson);
         Assert.NotEmpty(result.Hash);
     }
 
@@ -147,7 +147,9 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.NotEmpty(result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        // SettingsJson should include all properties (name and value)
+        Assert.Contains("name", result.SettingsJson);
+        Assert.Contains("value", result.SettingsJson);
         // Hash should be deterministic
         var result2 = _service.ParseAndPrepare(json);
         Assert.Equal(result.Hash, result2.Hash);
@@ -211,7 +213,7 @@ public class ProfileParsingServiceTests
 
         // Assert
         Assert.Equal("{}", result.SanitizedRawJson);
-        Assert.Equal("{}", result.MetadataJson);
+        Assert.Equal("{}", result.SettingsJson);
     }
 
     #endregion
@@ -227,8 +229,8 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("\"layerHeight\":0.2", result.MetadataJson);
+        // Assert - expects original key name "layer_height" not canonical "layerHeight"
+        Assert.Contains("\"layer_height\":0.2", result.SettingsJson);
     }
 
     [Fact]
@@ -240,8 +242,8 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("\"nozzleDiameter\":0.4", result.MetadataJson);
+        // Assert - expects original key name "nozzle_diameter" not canonical "nozzleDiameter"
+        Assert.Contains("\"nozzle_diameter\":0.4", result.SettingsJson);
     }
 
     [Fact]
@@ -253,8 +255,8 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("\"filamentMaterial\":\"PLA\"", result.MetadataJson);
+        // Assert - expects original key name "filament_type" not canonical "filamentMaterial"
+        Assert.Contains("\"filament_type\":\"PLA\"", result.SettingsJson);
     }
 
     [Fact]
@@ -266,8 +268,8 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("\"infillPercentage\":20", result.MetadataJson);
+        // Assert - expects original key name "infill_density" not canonical "infillPercentage"
+        Assert.Contains("\"infill_density\":20", result.SettingsJson);
     }
 
     [Fact]
@@ -279,8 +281,8 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("\"slicerVersion\":\"3.16.0\"", result.MetadataJson);
+        // Assert - expects original key name "slicer_version" not canonical "slicerVersion"
+        Assert.Contains("\"slicer_version\":\"3.16.0\"", result.SettingsJson);
     }
 
     [Fact]
@@ -292,8 +294,8 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("\"profileType\":\"print\"", result.MetadataJson);
+        // Assert - expects original key name "profile_type" not canonical "profileType"
+        Assert.Contains("\"profile_type\":\"print\"", result.SettingsJson);
     }
 
     [Fact]
@@ -306,10 +308,10 @@ public class ProfileParsingServiceTests
         var result = _service.ParseAndPrepare(json);
 
         // Assert
-        Assert.Contains("layerHeight", result.MetadataJson);
-        Assert.Contains("nozzleDiameter", result.MetadataJson);
-        Assert.Contains("filamentMaterial", result.MetadataJson);
-        Assert.Contains("slicerVersion", result.MetadataJson);
+        Assert.Contains("layer_height", result.SettingsJson);
+        Assert.Contains("nozzle_diameter", result.SettingsJson);
+        Assert.Contains("filament_type", result.SettingsJson);
+        Assert.Contains("slicer_version", result.SettingsJson);
     }
 
     [Fact]
@@ -323,16 +325,16 @@ public class ProfileParsingServiceTests
 
         // Assert - metadata keys should be in alphabetical order
         // filamentMaterial comes before layerHeight comes before slicerVersion
-        int filamentPos = result.MetadataJson.IndexOf("filamentMaterial");
-        int layerPos = result.MetadataJson.IndexOf("layerHeight");
-        int slicerPos = result.MetadataJson.IndexOf("slicerVersion");
+        int filamentPos = result.SettingsJson.IndexOf("filament_type");
+        int layerPos = result.SettingsJson.IndexOf("layer_height");
+        int slicerPos = result.SettingsJson.IndexOf("slicer_version");
 
         Assert.True(filamentPos < layerPos);
         Assert.True(layerPos < slicerPos);
     }
 
     [Fact]
-    public void ParseAndPrepare_IgnoresNonPrimitiveValues_ForMetadata()
+    public void ParseAndPrepare_IncludesAllProperties_InSettingsJson()
     {
         // Arrange
         string json = """{"layer_height": [0.2, 0.3], "nozzle_diameter": 0.4, "nested": {"key": "value"}}""";
@@ -340,10 +342,12 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert - only primitive values should be in metadata
-        Assert.Contains("nozzleDiameter", result.MetadataJson);
-        // layer_height is array, so should not be extracted as metadata
-        Assert.DoesNotContain("layerHeight", result.MetadataJson);
+        // Assert - all properties including arrays and nested objects should be in settings
+        Assert.Contains("nozzle_diameter", result.SettingsJson);
+        // layer_height array should be included as JSON string
+        Assert.Contains("layer_height", result.SettingsJson);
+        // nested object should be included as JSON string  
+        Assert.Contains("nested", result.SettingsJson);
     }
 
     [Fact]
@@ -427,12 +431,12 @@ public class ProfileParsingServiceTests
         var result = _service.ParseAndPrepare(complexProfile);
 
         // Assert - metadata should contain recognized keys
-        Assert.Contains("layerHeight", result.MetadataJson);
-        Assert.Contains("nozzleDiameter", result.MetadataJson);
-        Assert.Contains("filamentMaterial", result.MetadataJson);
-        Assert.Contains("infillPercentage", result.MetadataJson);
-        Assert.Contains("slicerVersion", result.MetadataJson);
-        Assert.Contains("profileType", result.MetadataJson);
+        Assert.Contains("layer_height", result.SettingsJson);
+        Assert.Contains("nozzle_diameter", result.SettingsJson);
+        Assert.Contains("filament_type", result.SettingsJson);
+        Assert.Contains("infill_density", result.SettingsJson);
+        Assert.Contains("slicer_version", result.SettingsJson);
+        Assert.Contains("profile_type", result.SettingsJson);
 
         // Volatile keys should be excluded
         Assert.DoesNotContain("uuid", result.SanitizedRawJson);
@@ -561,9 +565,9 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("\"filamentMaterial\":\"PLA\"", result.MetadataJson);
-        Assert.Contains("\"slicerVersion\":\"3.16.0\"", result.MetadataJson);
+        // Assert - expects original key names
+        Assert.Contains("\"filament_type\":\"PLA\"", result.SettingsJson);
+        Assert.Contains("\"slicer_version\":\"3.16.0\"", result.SettingsJson);
     }
 
     [Fact]
@@ -575,11 +579,10 @@ public class ProfileParsingServiceTests
         // Act
         var result = _service.ParseAndPrepare(json);
 
-        // Assert
-        Assert.Contains("layerHeight", result.MetadataJson);
-        Assert.Contains("0.2", result.MetadataJson);
-        Assert.Contains("nozzleDiameter", result.MetadataJson);
-        Assert.Contains("0.4", result.MetadataJson);
+        // Assert - expects original key names
+        Assert.Contains("\"layer_height\":0.2", result.SettingsJson);
+        Assert.Contains("\"nozzle_diameter\":0.4", result.SettingsJson);
+        Assert.Contains("\"infill_density\":20", result.SettingsJson);
     }
 
     [Fact]

@@ -129,8 +129,8 @@ namespace Farm.Web.Api.Services.Slicing
                 throw new ArgumentException("Invalid slicerType", nameof(req));
             }
 
-            (string? sanitizedRaw, string? metadataJson, string? hash) = _parsingService.ParseAndPrepare(req.RawJson);
-            _logger.LogDebug($"[ImportProfileAsync] Profile parsed successfully. Hash: {hash}, MetadataJson length: {metadataJson?.Length ?? 0}");
+            (string? sanitizedRaw, string? settingsJson, string? hash) = _parsingService.ParseAndPrepare(req.RawJson);
+            _logger.LogDebug($"[ImportProfileAsync] Profile parsed successfully. Hash: {hash}, SettingsJson length: {settingsJson?.Length ?? 0}");
             // Attempt to derive basic fields from metadata
             double layerHeight = 0.2;
             int infillPct = 20;
@@ -138,7 +138,7 @@ namespace Farm.Web.Api.Services.Slicing
             string quality = "Standard";
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(metadataJson ?? "{}");
+                using JsonDocument doc = JsonDocument.Parse(settingsJson ?? "{}");
                 JsonElement root = doc.RootElement;
                 if (root.TryGetProperty("layerHeight", out JsonElement lh) && lh.TryGetDouble(out double lhVal))
                 {
@@ -172,13 +172,8 @@ namespace Farm.Web.Api.Services.Slicing
                 Name = string.IsNullOrWhiteSpace(req.Name) ? $"{material} - {qualEnum} ({layerHeight}mm)" : req.Name.Trim(),
                 Description = req.Description,
                 SlicerType = slicerType,
-                LayerHeight = layerHeight,
-                InfillPercentage = infillPct,
-                Quality = qualEnum,
-                PrintSpeed = 50,
-                EnableSupports = false,
                 RawJson = sanitizedRaw,
-                MetadataJson = metadataJson,
+                SettingsJson = settingsJson,
                 Hash = hash,
                 IsSystem = false,
                 IsDefault = req.SetDefault,
@@ -201,11 +196,11 @@ namespace Farm.Web.Api.Services.Slicing
             }
 
             Dictionary<string, object?> metadata = new(StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrWhiteSpace(saved.MetadataJson))
+            if (!string.IsNullOrWhiteSpace(saved.SettingsJson))
             {
                 try
                 {
-                    Dictionary<string, object?>? parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(saved.MetadataJson);
+                    Dictionary<string, object?>? parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(saved.SettingsJson);
                     if (parsed != null)
                     {
                         foreach ((string key, object? value) in parsed)
@@ -271,14 +266,14 @@ namespace Farm.Web.Api.Services.Slicing
                 return null;
             }
 
-            _logger.LogDebug($"[ExportProfileAsync] Found profile: {profile.Name}, parsing metadata...");
-            Dictionary<string, object?> metadataDict = new(StringComparer.OrdinalIgnoreCase);
+            _logger.LogDebug($"[ExportProfileAsync] Found profile: {profile.Name}, parsing settings...");
+            Dictionary<string, object?> settingsDict = new(StringComparer.OrdinalIgnoreCase);
             try
             {
-                using JsonDocument doc = JsonDocument.Parse(profile.MetadataJson ?? "{}");
+                using JsonDocument doc = JsonDocument.Parse(profile.SettingsJson ?? "{}");
                 foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
                 {
-                    metadataDict[prop.Name] = prop.Value.ValueKind switch
+                    settingsDict[prop.Name] = prop.Value.ValueKind switch
                     {
                         JsonValueKind.String => prop.Value.GetString(),
                         JsonValueKind.Number => prop.Value.TryGetInt64(out long l) ? l : (prop.Value.TryGetDouble(out double d) ? d : null),
@@ -287,7 +282,7 @@ namespace Farm.Web.Api.Services.Slicing
                         _ => null
                     };
                 }
-                _logger.LogDebug($"[ExportProfileAsync] Metadata parsed successfully. Keys: {string.Join(", ", metadataDict.Keys)}");
+                _logger.LogDebug($"[ExportProfileAsync] Settings parsed successfully. Keys: {string.Join(", ", settingsDict.Keys)}");
             }
             catch (Exception ex)
             {
@@ -302,7 +297,7 @@ namespace Farm.Web.Api.Services.Slicing
                 SlicerType = profile.SlicerType.ToString(),
                 Hash = profile.Hash ?? string.Empty,
                 RawJson = profile.RawJson ?? string.Empty,
-                Metadata = metadataDict
+                Metadata = settingsDict
             };
         }
 
@@ -815,7 +810,7 @@ namespace Farm.Web.Api.Services.Slicing
                             try
                             {
                                 string profileJson = JsonSerializer.Serialize(machineProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                                string profileHash = ComputeSha256Hash(profileJson);
+                                (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
 
                                 MachineProfile? existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
                                 if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
@@ -834,8 +829,8 @@ namespace Farm.Web.Api.Services.Slicing
                                     IsSystem = true,
                                     IsPublic = true,
                                     Hash = profileHash,
-                                    RawJson = profileJson,
-                                    SettingsJson = profileJson,
+                                    RawJson = sanitizedRaw,
+                                    SettingsJson = settingsJson,
                                     SlicerVersion = orcaVersion,
                                     CreatedAt = DateTime.UtcNow,
                                     UpdatedAt = DateTime.UtcNow
@@ -858,7 +853,7 @@ namespace Farm.Web.Api.Services.Slicing
                             try
                             {
                                 string profileJson = JsonSerializer.Serialize(filamentProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                                string profileHash = ComputeSha256Hash(profileJson);
+                                (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
 
                                 FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
                                 if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
@@ -881,7 +876,8 @@ namespace Farm.Web.Api.Services.Slicing
                                     IsSystem = true,
                                     IsPublic = true,
                                     Hash = profileHash,
-                                    RawJson = profileJson,
+                                    RawJson = sanitizedRaw,
+                                    SettingsJson = settingsJson,
                                     SlicerVersion = orcaVersion,
                                     CreatedAt = DateTime.UtcNow,
                                     UpdatedAt = DateTime.UtcNow
@@ -1050,7 +1046,7 @@ namespace Farm.Web.Api.Services.Slicing
                             try
                             {
                                 string profileJson = JsonSerializer.Serialize(machineProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                                string profileHash = ComputeSha256Hash(profileJson);
+                                (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
 
                                 MachineProfile systemProfile = new MachineProfile
                                 {
@@ -1061,8 +1057,8 @@ namespace Farm.Web.Api.Services.Slicing
                                     SlicerType = SlicerType.OrcaSlicer,
                                     IsSystem = true,
                                     Hash = profileHash,
-                                    RawJson = profileJson,
-                                    SettingsJson = profileJson,
+                                    RawJson = sanitizedRaw,
+                                    SettingsJson = settingsJson,
                                     SlicerVersion = orcaVersion,
                                     CreatedAt = DateTime.UtcNow,
                                     UpdatedAt = DateTime.UtcNow
@@ -1085,7 +1081,7 @@ namespace Farm.Web.Api.Services.Slicing
                             try
                             {
                                 string profileJson = JsonSerializer.Serialize(filamentProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
-                                string profileHash = ComputeSha256Hash(profileJson);
+                                (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
 
                                 FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
                                 if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
@@ -1107,7 +1103,8 @@ namespace Farm.Web.Api.Services.Slicing
                                     BedTemperature = filamentProfile.BedTemperature,
                                     IsSystem = true,
                                     Hash = profileHash,
-                                    RawJson = profileJson,
+                                    RawJson = sanitizedRaw,
+                                    SettingsJson = settingsJson,
                                     SlicerVersion = orcaVersion,
                                     CreatedAt = DateTime.UtcNow,
                                     UpdatedAt = DateTime.UtcNow
@@ -1324,13 +1321,8 @@ namespace Farm.Web.Api.Services.Slicing
                         Name = systemProfile.Name,
                         Description = $"Imported from system profile for {printer.Name}",
                         SlicerType = systemProfile.SlicerType,
-                        LayerHeight = systemProfile.LayerHeight,
-                        InfillPercentage = systemProfile.InfillPercentage,
-                        Quality = systemProfile.Quality,
-                        PrintSpeed = systemProfile.PrintSpeed,
-                        EnableSupports = systemProfile.EnableSupports,
                         RawJson = systemProfile.RawJson,
-                        MetadataJson = systemProfile.MetadataJson,
+                        SettingsJson = systemProfile.SettingsJson,
                         Hash = systemProfile.Hash,
                         IsSystem = false,
                         IsDefault = false,
@@ -1417,13 +1409,8 @@ namespace Farm.Web.Api.Services.Slicing
                         Name = profile.Name,
                         Description = $"Cloned for {targetPrinter.Name}",
                         SlicerType = profile.SlicerType,
-                        LayerHeight = profile.LayerHeight,
-                        InfillPercentage = profile.InfillPercentage,
-                        Quality = profile.Quality,
-                        PrintSpeed = profile.PrintSpeed,
-                        EnableSupports = profile.EnableSupports,
                         RawJson = profile.RawJson,
-                        MetadataJson = profile.MetadataJson,
+                        SettingsJson = profile.SettingsJson,
                         Hash = (profile.Hash ?? string.Empty) + "_clone",
                         IsSystem = false,
                         IsDefault = false,

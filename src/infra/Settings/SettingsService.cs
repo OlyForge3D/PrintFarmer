@@ -60,41 +60,9 @@ namespace Farm.Infrastructure.Settings
             // Persist to DB (AppSettings only)
             string json = JsonSerializer.Serialize(settings);
 
-            using var dbContext = _dbContextFactory.CreateDbContext();
-            AppSettingsEntity? entity = dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
-            if (entity == null)
-            {
-                _logger.LogInformation("[SettingsService] Adding new entity", null, new { Key = appAttr.Key });
-                entity = new AppSettingsEntity
-                {
-                    Key = appAttr.Key,
-                    SettingsJson = json,
-                    UpdatedAt = DateTime.UtcNow
-                };
-                _ = dbContext.AppSettingsEntities.Add(entity);
-            }
-            else
-            {
-                _logger.LogInformation("[SettingsService] Updating existing entity", null, new { Key = entity.Key, Id = entity.Id });
-                _logger.LogDebug("[SettingsService] JSON length change", null, new { OldLen = entity.SettingsJson?.Length ?? 0, NewLen = json.Length });
-
-                EntityEntry<AppSettingsEntity> entry = dbContext.Entry(entity);
-                _logger.LogDebug("[SettingsService] Entity state before changes", null, new { State = entry.State.ToString() });
-
-                entity.SettingsJson = json;
-                entity.UpdatedAt = DateTime.UtcNow;
-
-                // Explicitly mark as modified to ensure EF tracks the changes
-                entry.State = Microsoft.EntityFrameworkCore.EntityState.Modified;
-
-                _logger.LogDebug("[SettingsService] Entity state after marking Modified", null, new { State = entry.State.ToString() });
-            }
-
-            int rowsAffected = dbContext.SaveChanges();
-            _logger.LogInformation("[SettingsService] SaveChanges returned", null, new { RowsAffected = rowsAffected });
-
-            // Clear change tracker to ensure fresh data is loaded on next query
-            dbContext.ChangeTracker.Clear();
+            // Use repository to persist settings
+            _settingsRepo.SetAsync(appAttr.Key, json).ConfigureAwait(false).GetAwaiter().GetResult();
+            _settingsRepo.SaveChangesAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
         private Dictionary<string, object> _settings = new();
         private readonly List<Type> _settingTypes;
@@ -106,7 +74,9 @@ namespace Farm.Infrastructure.Settings
 
         }
 
-        public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, IUnifiedLoggingService logger)
+        private readonly Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository _settingsRepo;
+
+        public SettingsService(IConfiguration config, IDbContextFactory<AppDbContext> dbContextFactory, IUnifiedLoggingService logger, Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo)
         {
             _settingTypes = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
@@ -114,6 +84,7 @@ namespace Farm.Infrastructure.Settings
                 .ToList();
             _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _settingsRepo = settingsRepo ?? throw new ArgumentNullException(nameof(settingsRepo));
             LoadSettings(config);
         }
 
@@ -197,6 +168,42 @@ namespace Farm.Infrastructure.Settings
         public IEnumerable<object> All
         {
             get { return _settings.Values; }
+        }
+
+        /// <summary>
+        /// Attempts to acquire a distributed lock for a given key.
+        /// Returns true if the lock was acquired (key did not exist or was in a completion state).
+        /// </summary>
+        public async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken ct = default)
+        {
+            var existingLock = await _settingsRepo.GetAsync(lockKey, ct);
+            if (existingLock?.SettingsJson == "completed" || existingLock?.SettingsJson == "in-progress")
+            {
+                return false; // Lock already held
+            }
+            
+            // Acquire lock
+            await _settingsRepo.SetAsync(lockKey, "in-progress", ct);
+            await _settingsRepo.SaveChangesAsync(ct);
+            return true;
+        }
+
+        /// <summary>
+        /// Marks a distributed lock as completed.
+        /// </summary>
+        public async Task CompleteLockAsync(string lockKey, CancellationToken ct = default)
+        {
+            await _settingsRepo.SetAsync(lockKey, "completed", ct);
+            await _settingsRepo.SaveChangesAsync(ct);
+        }
+
+        /// <summary>
+        /// Clears a distributed lock to allow retry.
+        /// </summary>
+        public async Task ClearLockAsync(string lockKey, CancellationToken ct = default)
+        {
+            await _settingsRepo.DeleteAsync(lockKey, ct);
+            await _settingsRepo.SaveChangesAsync(ct);
         }
         /// <summary>
         /// Returns metadata for all discovered settings classes for dynamic UI generation.

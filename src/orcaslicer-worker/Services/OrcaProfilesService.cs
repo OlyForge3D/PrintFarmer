@@ -353,8 +353,6 @@ public class OrcaProfilesService : ISlicerProfilesService
                                 ProcessProfileDto? profile = LoadProfileFromFile<ProcessProfileDto>(profilePath);
                                 if (profile != null)
                                 {
-                                    profile.Manufacturer = bundle.Name;
-
                                     // If no explicit compatible_printers, try to evaluate the condition
                                     if ((profile.CompatiblePrinters == null || profile.CompatiblePrinters.Count == 0) &&
                                         !string.IsNullOrEmpty(profile.CompatiblePrintersCondition) &&

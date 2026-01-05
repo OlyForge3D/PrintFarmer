@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -8,6 +10,7 @@ using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
+using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
@@ -68,6 +71,35 @@ namespace Farm.Web.Api.Tests.SlicerServices
             return new Mock<IUnifiedLoggingService>(MockBehavior.Loose);
         }
 
+        private static Mock<IFilamentProfileRepository> CreateMockFilamentProfileRepository()
+        {
+            return new Mock<IFilamentProfileRepository>(MockBehavior.Loose);
+        }
+
+        private static Mock<ICatalogService> CreateMockCatalogService()
+        {
+            Mock<ICatalogService> mock = new Mock<ICatalogService>(MockBehavior.Loose);
+            // Return empty lists for catalog service; tests don't depend on actual catalog data for profile seeding
+            _ = mock.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(((IReadOnlyList<ManufacturerDto>)new List<ManufacturerDto>(), (string?)null));
+            _ = mock.Setup(c => c.GetModelsAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(((IReadOnlyList<PrinterModelDto>)new List<PrinterModelDto>(), (string?)null));
+            return mock;
+        }
+
+        private static Mock<Farm.Infrastructure.Settings.ISettingsService> CreateMockSettingsService()
+        {
+            var mock = new Mock<Farm.Infrastructure.Settings.ISettingsService>(MockBehavior.Loose);
+            // By default, lock operations return success (TryAcquireLockAsync returns true)
+            _ = mock.Setup(s => s.TryAcquireLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            _ = mock.Setup(s => s.CompleteLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            _ = mock.Setup(s => s.ClearLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            return mock;
+        }
+
         [Fact(DisplayName = "RegisterAsync creates Worker with matching capabilities and slots")]
         public async Task RegisterAsync_Should_Create_Worker()
         {
@@ -79,8 +111,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -129,8 +164,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -175,8 +213,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             IOptionsMonitor<Farm.Infrastructure.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
             HttpClient httpClient = CreateMockHttpClient();
             Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+            Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<ICatalogService> catalogService = CreateMockCatalogService();
+            Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {

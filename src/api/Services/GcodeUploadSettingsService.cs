@@ -16,7 +16,7 @@ public class InMemoryGcodeUploadSettings : IGcodeUploadSettings
     {
         // Seed from environment variable or defaults
         string? env = Environment.GetEnvironmentVariable("GCODE_ALLOWED_EXTENSIONS");
-        string[] list = string.IsNullOrWhiteSpace(env) ? [".gcode", ".bgcode"] : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[] list = string.IsNullOrWhiteSpace(env) ? new[] { ".gcode", ".bgcode" } : env.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (string e in list)
         {
             string norm = e.StartsWith('.') ? e : "." + e;

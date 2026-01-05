@@ -12,11 +12,11 @@ namespace Farm.Web.Api.Services.Slicing;
 public interface IProfileParsingService
 {
     /// <summary>
-    /// Parses raw profile JSON, extracts metadata, removes volatile keys and returns:
-    /// SanitizedRawJson (deterministic, serialized), MetadataJson (subset object), Hash (SHA256 hex).
+    /// Parses raw profile JSON, extracts all settings as flat key-value pairs, removes volatile keys and returns:
+    /// SanitizedRawJson (deterministic, serialized), SettingsJson (all properties as flat object), Hash (SHA256 hex).
     /// </summary>
     /// <exception cref="ArgumentException">Thrown when rawJson is null/empty.</exception>
-    (string SanitizedRawJson, string MetadataJson, string Hash) ParseAndPrepare(string rawJson);
+    (string SanitizedRawJson, string SettingsJson, string Hash) ParseAndPrepare(string rawJson);
 }
 
 public sealed class ProfileParsingService : IProfileParsingService
@@ -28,28 +28,7 @@ public sealed class ProfileParsingService : IProfileParsingService
         "profile_id", "creation_date"
     };
 
-    // Canonical metadata key mapping (source key -> canonical metadata name)
-    private static readonly Dictionary<string, string> MetadataKeyMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        { "layer_height", "layerHeight" },
-        { "layerHeight", "layerHeight" },
-        { "nozzle_diameter", "nozzleDiameter" },
-        { "nozzleDiameter", "nozzleDiameter" },
-        { "filament_type", "filamentMaterial" },
-        { "filamentType", "filamentMaterial" },
-        { "filament_material", "filamentMaterial" },
-        { "material", "filamentMaterial" },
-        { "infill_density", "infillPercentage" },
-        { "infillPercent", "infillPercentage" },
-        { "infill_percentage", "infillPercentage" },
-        { "infill", "infillPercentage" },
-        { "slicer_version", "slicerVersion" },
-        { "version", "slicerVersion" },
-        { "profile_type", "profileType" },
-        { "type", "profileType" },
-    };
-
-    public (string SanitizedRawJson, string MetadataJson, string Hash) ParseAndPrepare(string rawJson)
+    public (string SanitizedRawJson, string SettingsJson, string Hash) ParseAndPrepare(string rawJson)
     {
         if (string.IsNullOrWhiteSpace(rawJson))
         {
@@ -63,7 +42,7 @@ public sealed class ProfileParsingService : IProfileParsingService
         }
         catch (Exception)
         {
-            // Treat invalid JSON as opaque: hash original string; metadata empty; sanitized = trimmed original
+            // Treat invalid JSON as opaque: hash original string; settings empty; sanitized = trimmed original
             string trimmed = rawJson.Trim();
             return (trimmed, "{}", ComputeSha256(trimmed));
         }
@@ -82,7 +61,7 @@ public sealed class ProfileParsingService : IProfileParsingService
         }
 
         Dictionary<string, JsonNode?> sanitized = new(StringComparer.Ordinal);
-        Dictionary<string, object?> metadata = new(StringComparer.Ordinal);
+        Dictionary<string, object?> settings = new(StringComparer.Ordinal);
 
         foreach (KeyValuePair<string, JsonNode?> kv in obj)
         {
@@ -95,12 +74,22 @@ public sealed class ProfileParsingService : IProfileParsingService
                 continue;
             }
 
-            // Collect metadata if key recognized and value is primitive/number/string
-            if (value is JsonValue v && MetadataKeyMap.TryGetValue(key, out string? canonicalValue) && canonicalValue is not null)
+            // Collect all non-null values into settings, preserving original key names from raw JSON
+            if (value is not null)
             {
-                // Extract the actual value from JsonValue instead of storing the JsonNode
-                // This avoids the "node already has a parent" error when adding to metadata dict
-                metadata[canonicalValue!] = ExtractPrimitiveValue(v);
+                // For nested objects/arrays, store as JSON string; for primitives, store the value
+                if (value is JsonValue v)
+                {
+                    settings[key] = ExtractPrimitiveValue(v);
+                }
+                else if (value is JsonObject or JsonArray)
+                {
+                    settings[key] = value.ToJsonString();
+                }
+                else
+                {
+                    settings[key] = value.ToString();
+                }
             }
 
             sanitized[key] = value; // Preserve other keys verbatim (without volatile ones)
@@ -114,11 +103,11 @@ public sealed class ProfileParsingService : IProfileParsingService
             sanitizedOrdered[key] = CloneJsonNode(sanitized[key]);
         }
 
-        JsonObject metadataOrdered = new();
-        foreach (var kvp in metadata.OrderBy(k => k.Key, StringComparer.Ordinal))
+        JsonObject settingsOrdered = new();
+        foreach (var kvp in settings.OrderBy(k => k.Key, StringComparer.Ordinal))
         {
-            // Create new JsonValue for each metadata entry to avoid parent conflicts
-            metadataOrdered[kvp.Key] = kvp.Value switch
+            // Create new JsonValue for each settings entry to avoid parent conflicts
+            settingsOrdered[kvp.Key] = kvp.Value switch
             {
                 string s => JsonValue.Create(s),
                 int i => JsonValue.Create(i),
@@ -135,7 +124,7 @@ public sealed class ProfileParsingService : IProfileParsingService
             WriteIndented = false,
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         });
-        string metadataJson = metadataOrdered.ToJsonString(new JsonSerializerOptions
+        string settingsJson = settingsOrdered.ToJsonString(new JsonSerializerOptions
         {
             PropertyNamingPolicy = null,
             WriteIndented = false,
@@ -144,7 +133,7 @@ public sealed class ProfileParsingService : IProfileParsingService
 
         // Compute hash from sanitized JSON (stable canonical form)
         string hash = ComputeSha256(sanitizedJson);
-        return (sanitizedJson, metadataJson, hash);
+        return (sanitizedJson, settingsJson, hash);
     }
 
     private static string ComputeSha256(string input)

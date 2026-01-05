@@ -9,12 +9,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Slicing; // shared DTOs for RegisterSlicerDto, HeartbeatDto
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Slicing;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Hubs;
+using Farm.Web.Api.Services.Catalog;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Slicing
 {
@@ -41,6 +44,9 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly ISlicersRepository _repo;
         private readonly IWorkerRepository _workerRepo;
         private readonly IProcessProfileRepository _profileRepo;
+        private readonly IFilamentProfileRepository _filamentProfileRepo;
+        private readonly ICatalogService _catalogService;
+        private readonly Farm.Infrastructure.Settings.ISettingsService _settingsService;
         private readonly IHubContext<SlicerHub> _hub;
         private readonly SlicerServiceMetrics _metrics;
         private readonly HttpClient _httpClient;
@@ -55,6 +61,9 @@ namespace Farm.Web.Api.Services.Slicing
         /// <param name="repo">Repository for slicer service data persistence and retrieval</param>
         /// <param name="workerRepo">Repository for worker data access and management</param>
         /// <param name="profileRepo">Repository for process profile data access</param>
+        /// <param name="filamentProfileRepo">Repository for filament profile data access</param>
+        /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
+        /// <param name="settingsService">Service for managing application settings and distributed locks</param>
         /// <param name="hub">SignalR hub context for broadcasting worker state changes to connected clients</param>
         /// <param name="metrics">Metrics collection service for capacity and utilization tracking</param>
         /// <param name="httpClient">HTTP client for external service communication and health checks</param>
@@ -65,6 +74,9 @@ namespace Farm.Web.Api.Services.Slicing
             ISlicersRepository repo,
             IWorkerRepository workerRepo,
             IProcessProfileRepository profileRepo,
+            IFilamentProfileRepository filamentProfileRepo,
+            ICatalogService catalogService,
+            Farm.Infrastructure.Settings.ISettingsService settingsService,
             IHubContext<SlicerHub> hub,
             SlicerServiceMetrics metrics,
             HttpClient httpClient,
@@ -74,6 +86,9 @@ namespace Farm.Web.Api.Services.Slicing
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _workerRepo = workerRepo ?? throw new ArgumentNullException(nameof(workerRepo));
             _profileRepo = profileRepo ?? throw new ArgumentNullException(nameof(profileRepo));
+            _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
+            _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
+            _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
             _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -218,8 +233,7 @@ namespace Farm.Web.Api.Services.Slicing
             catch (Exception ex)
             {
                 // Log but don't fail registration if Worker sync fails
-                // In production, you'd want proper logging here
-                Debug.WriteLine($"Failed to sync Worker entity: {ex.Message}");
+                _logger.LogWarning($"[RegisterAsync] Failed to sync Worker entity: {ex.Message}");
             }
 
             // Seed profiles from the worker (OrcaSlicer only)
@@ -354,7 +368,7 @@ namespace Farm.Web.Api.Services.Slicing
             catch (Exception ex)
             {
                 // Log but don't fail heartbeat if Worker sync fails
-                Debug.WriteLine($"Failed to sync Worker heartbeat: {ex.Message}");
+                _logger.LogWarning($"[HeartbeatAsync] Failed to sync Worker heartbeat: {ex.Message}");
             }
 
             // Record heartbeat metrics
@@ -447,7 +461,7 @@ namespace Farm.Web.Api.Services.Slicing
             catch (Exception ex)
             {
                 // Log but don't fail deregistration if Worker sync fails
-                Debug.WriteLine($"Failed to sync Worker deregistration: {ex.Message}");
+                _logger.LogWarning($"[DeregisterAsync] Failed to sync Worker deregistration: {ex.Message}");
             }
 
             // Record metrics
@@ -517,7 +531,7 @@ namespace Farm.Web.Api.Services.Slicing
             catch (Exception ex)
             {
                 // Log but don't fail rotation if Worker sync fails
-                Debug.WriteLine($"Failed to sync Worker API key rotation: {ex.Message}");
+                _logger.LogWarning($"[RotateApiKeyAsync] Failed to sync Worker API key rotation: {ex.Message}");
             }
 
             // Record metrics
@@ -545,17 +559,30 @@ namespace Farm.Web.Api.Services.Slicing
         /// Seed OrcaSlicer profiles from the worker into the database on registration.
         /// This happens automatically when an OrcaSlicer worker registers, so profiles are available immediately.
         /// Only seeds if no system OrcaSlicer profiles exist yet (idempotent - won't reseed on subsequent registrations).
+        /// Uses a distributed lock to ensure seeding happens only once, even with multiple concurrent worker registrations.
+        /// Profiles are filtered to only include those for manufacturers and models in the catalog.
         /// </summary>
         private async Task SeedProfilesFromWorkerAsync(string workerHost, CancellationToken ct)
         {
+            const string SEED_LOCK_KEY = "SystemOrcaSlicerProfilesSeedLock";
+            
             try
             {
-                // Early exit: Only seed if no system profiles exist for OrcaSlicer
-                // This prevents re-seeding on every worker registration
+                // Attempt to acquire distributed lock to prevent concurrent seeding
+                bool lockAcquired = await _settingsService.TryAcquireLockAsync(SEED_LOCK_KEY, ct);
+                if (!lockAcquired)
+                {
+                    _logger.LogInformation("[SeedProfilesFromWorker] System OrcaSlicer profiles already seeded or seeding in progress, skipping");
+                    return;
+                }
+                _logger.LogInformation("[SeedProfilesFromWorker] Acquired distributed lock for profile seeding");
+
+                // Early exit: Verify no system profiles exist (double-check after acquiring lock)
                 IReadOnlyList<ProcessProfile> existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
                 if (existingSystemProfiles.Any(p => p.IsSystem))
                 {
-                    _logger.LogInformation("System OrcaSlicer profiles already exist, skipping seed");
+                    _logger.LogInformation("[SeedProfilesFromWorker] System OrcaSlicer profiles already exist, skipping seed (detected after acquiring lock)");
+                    await _settingsService.CompleteLockAsync(SEED_LOCK_KEY, ct);
                     return;
                 }
 
@@ -568,6 +595,8 @@ namespace Farm.Web.Api.Services.Slicing
                 {
                     string errorContent = await response.Content.ReadAsStringAsync(ct);
                     _logger.LogWarning($"[SeedProfilesFromWorker] Worker /api/profiles returned {response.StatusCode}: {errorContent}");
+                    // Clear lock on error so retry can happen
+                    await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);
                     return;
                 }
 
@@ -578,20 +607,40 @@ namespace Farm.Web.Api.Services.Slicing
                 if (allProfiles == null || (allProfiles.ProcessProfiles?.Count == 0 && allProfiles.FilamentProfiles?.Count == 0 && allProfiles.MachineProfiles?.Count == 0))
                 {
                     _logger.LogWarning($"[SeedProfilesFromWorker] No profiles available from worker (parsed null: {allProfiles == null}, process groups: {allProfiles?.ProcessProfiles?.Count ?? 0}, filament groups: {allProfiles?.FilamentProfiles?.Count ?? 0}, machine groups: {allProfiles?.MachineProfiles?.Count ?? 0})");
+                    // Clear lock on empty response so retry can happen
+                    await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);
                     return;
                 }
 
-                _logger.LogInformation($"[SeedProfilesFromWorker] Deserializing profiles - process groups: {allProfiles?.ProcessProfiles?.Count ?? 0}, filament groups: {allProfiles?.FilamentProfiles?.Count ?? 0}, machine groups: {allProfiles?.MachineProfiles?.Count ?? 0}");
+                // Get catalog manufacturers and models to filter profiles
+                (IReadOnlyList<ManufacturerDto> catalogManufacturers, _) = await _catalogService.GetManufacturersAsync(ct);
+                (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
+
+                HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+                HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+
+                _logger.LogInformation($"[SeedProfilesFromWorker] Filtering profiles for {catalogManufacturerNames.Count} manufacturers and {catalogModelNames.Count} models in catalog");
+
                 int imported = 0;
 
-                // Flatten profiles from the grouped dictionaries
-                List<ProcessProfileDto> flattenedProcessProfiles = allProfiles!.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
-                List<FilamentProfileDto> flattenedFilamentProfiles = allProfiles!.FilamentProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<FilamentProfileDto>();
-
-                // Import process profiles from worker
-                if (flattenedProcessProfiles.Count > 0)
+                // Flatten profiles from the grouped dictionaries, filtering to catalog manufacturers/models only
+                List<ProcessProfileDto> filteredProcessProfiles = new List<ProcessProfileDto>();
+                if (allProfiles?.ProcessProfiles != null)
                 {
-                    foreach (ProcessProfileDto? profile in flattenedProcessProfiles)
+                    foreach (var manufacturerGroup in allProfiles.ProcessProfiles)
+                    {
+                        if (catalogManufacturerNames.Contains(manufacturerGroup.Key ?? ""))
+                        {
+                            filteredProcessProfiles.AddRange(manufacturerGroup.Value ?? new List<ProcessProfileDto>());
+                        }
+                    }
+                }
+
+                // Import process profiles from worker (only for catalog manufacturers)
+                if (filteredProcessProfiles.Count > 0)
+                {
+                    _logger.LogInformation($"[SeedProfilesFromWorker] Importing {filteredProcessProfiles.Count} process profiles for catalog manufacturers");
+                    foreach (ProcessProfileDto? profile in filteredProcessProfiles)
                     {
                         try
                         {
@@ -629,18 +678,37 @@ namespace Farm.Web.Api.Services.Slicing
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine($"Failed to import process profile: {ex.Message}");
+                            _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import process profile: {ex.Message}");
                         }
                     }
                 }
 
+                // Note: FilamentProfile and MachineProfile imports not yet implemented in this lightweight seed method
+                // Only process profiles for catalog manufacturers are imported on worker registration
+                // Use ProfilesService.SeedSystemProfilesFromWorkerAsync() for comprehensive profile seeding
+
                 if (imported > 0)
                 {
-                    Debug.WriteLine($"Seeded {imported} system OrcaSlicer profiles on worker registration");
+                    _logger.LogInformation($"[SeedProfilesFromWorker] Seeded {imported} system OrcaSlicer process profiles on worker registration (filtered to catalog manufacturers)");
+                    await _repo.SaveChangesAsync(ct);
                 }
+
+                // Mark lock as completed
+                await _settingsService.CompleteLockAsync(SEED_LOCK_KEY, ct);
+                _logger.LogInformation("[SeedProfilesFromWorker] Released distributed lock, marking seed as completed");
             }
             catch (Exception ex)
             {
+                // Clear lock on error so retry can happen
+                try
+                {
+                    await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);
+                }
+                catch (Exception lockEx)
+                {
+                    _logger.LogWarning($"[SeedProfilesFromWorker] Failed to clear lock on error: {lockEx.Message}");
+                }
+
                 _logger.LogError($"[SeedProfilesFromWorker] Error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
                 // Don't throw - profile seeding is best-effort
             }
