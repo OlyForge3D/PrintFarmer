@@ -924,183 +924,78 @@ public class GcodeHarvestService(
                 }
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved file to disk: {filePath}");
 
-                // CRITICAL: Calculate file hash for deduplication
-                // This MUST be done after download/save so we hash actual file content
-                // Not doing this causes all files to have empty hash → duplicate constraint violations
-                string fileHash = "";
-                try
-                {
-                    gcodeContent.Position = 0;
-                    fileHash = await CalculateFileHashAsync(gcodeContent, ct);
-                    discoveredFile.FileHash = fileHash;
-                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Calculated file hash for {discoveredFile.FileName}: {fileHash}");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to calculate hash for {FileName}, using empty hash (will not deduplicate)", discoveredFile.FileName);
-                    discoveredFile.FileHash = "";
-                    fileHash = "";
-                }
+                // Use shared helper methods for consistency with single file harvest
+                var (fileHash, existingFile) = await CalculateHashAndCheckDuplicateAsync(gcodeContent.ToArray(), ct);
+                discoveredFile.FileHash = fileHash;
+                
+                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Calculated file hash: {fileHash}");
 
-                // Extract metadata from gcode as fallback for incomplete API data
+                // Extract metadata and process thumbnail using shared approach
                 GcodeMetadataExtracted? extractedMetadata = null;
                 string? thumbnailPath = null;
                 if (gcodeContent.Length > 0)
                 {
+                    gcodeContent.Position = 0;
+                    // Extract metadata directly from gcode content
                     try
                     {
-                        gcodeContent.Position = 0;
                         using StreamReader reader = new(gcodeContent, Encoding.UTF8, leaveOpen: true);
                         string gcodeText = await reader.ReadToEndAsync(ct);
                         extractedMetadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
-
-                        // Save extracted metadata back to discovered file so UI can display it immediately
-                        if (extractedMetadata != null)
-                        {
-                            // Only overwrite if discovered file doesn't already have the value from API
-                            if (!discoveredFile.ExtractedNozzleDiameter.HasValue && extractedMetadata.NozzleDiameter.HasValue)
-                            {
-                                discoveredFile.ExtractedNozzleDiameter = extractedMetadata.NozzleDiameter;
-                            }
-
-                            if (string.IsNullOrEmpty(discoveredFile.ExtractedMaterial) && !string.IsNullOrEmpty(extractedMetadata.Material))
-                            {
-                                discoveredFile.ExtractedMaterial = extractedMetadata.Material;
-                            }
-
-                            if (!discoveredFile.ExtractedPrintTime.HasValue && extractedMetadata.EstimatedPrintTimeMinutes.HasValue)
-                            {
-                                discoveredFile.ExtractedPrintTime = extractedMetadata.EstimatedPrintTimeMinutes;
-                            }
-
-                            if (!discoveredFile.ExtractedFilamentLength.HasValue && extractedMetadata.FilamentLengthMm.HasValue)
-                            {
-                                discoveredFile.ExtractedFilamentLength = extractedMetadata.FilamentLengthMm;
-                            }
-
-                            if (string.IsNullOrEmpty(discoveredFile.ExtractedSlicerName) && !string.IsNullOrEmpty(extractedMetadata.SlicerName))
-                            {
-                                discoveredFile.ExtractedSlicerName = extractedMetadata.SlicerName;
-                            }
-
-                            if (string.IsNullOrEmpty(discoveredFile.ExtractedSlicerVersion) && !string.IsNullOrEmpty(extractedMetadata.SlicerVersion))
-                            {
-                                discoveredFile.ExtractedSlicerVersion = extractedMetadata.SlicerVersion;
-                            }
-
-                            _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Updated discovered file metadata: nozzle={discoveredFile.ExtractedNozzleDiameter}, material={discoveredFile.ExtractedMaterial}, slicer={discoveredFile.ExtractedSlicerName}");
-
-                            // Save metadata updates to database and broadcast to UI immediately
-                            await scopedHarvestRepo.SaveChangesAsync(ct);
-                            await _harvestEventBroadcaster.BroadcastToGroupAsync(operation.Id, "harvestfileupdated", MapToEventDto(discoveredFile), ct);
-                            _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Sent harvestfileupdated event with extracted metadata for {discoveredFile.FileName}");
-                        }
-
-                        // Download thumbnail from printer API if available (preferred over extraction)
-                        if (!string.IsNullOrEmpty(discoveredFile.ThumbnailUrl))
-                        {
-                            try
-                            {
-                                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Downloading thumbnail from API: {discoveredFile.ThumbnailUrl}");
-                                thumbnailPath = await DownloadThumbnailFromUrlAsync(discoveredFile.ThumbnailUrl, ct);
-                                if (thumbnailPath != null)
-                                {
-                                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Successfully downloaded thumbnail from API to: {thumbnailPath}");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to download thumbnail from API for {FileName}, will try extraction", discoveredFile.FileName);
-                                thumbnailPath = null;
-                            }
-                        }
-
-                        // Fall back to extracting thumbnail from gcode content if not downloaded from API
-                        if (thumbnailPath == null && extractedMetadata?.ThumbnailData != null && extractedMetadata.ThumbnailData.Length > 0)
-                        {
-                            try
-                            {
-                                _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Extracting thumbnail from gcode content for {discoveredFile.FileName}");
-                                gcodeContent.Position = 0;
-                                thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(gcodeContent, ct);
-                                if (thumbnailPath != null)
-                                {
-                                    _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Successfully extracted thumbnail to: {thumbnailPath}");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to extract thumbnail from gcode for {FileName}", discoveredFile.FileName);
-                                // Continue anyway - thumbnail is optional
-                                thumbnailPath = null;
-                            }
-                        }
+                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Extracted metadata from {discoveredFile.FileName}");
                     }
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Failed to extract metadata from gcode file {FileName}", discoveredFile.FileName);
-                        // Continue anyway - metadata extraction is optional
                     }
-                }
 
-                // Check if a file with this hash already exists in the library
-                // If it does, reuse it instead of creating a duplicate
-                GcodeFile? existingFile = null;
-                if (!string.IsNullOrEmpty(discoveredFile.FileHash))
-                {
-                    existingFile = await scopedGcodeRepo.FindByHashAsync(discoveredFile.FileHash, ct);
-                    if (existingFile != null)
+                    // Process thumbnail with fallback strategy (URL → extraction)
+                    gcodeContent.Position = 0;
+                    thumbnailPath = await ProcessThumbnailWithFallbackAsync(discoveredFile.ThumbnailUrl, gcodeContent.ToArray(), ct);
+                    if (!string.IsNullOrEmpty(thumbnailPath))
                     {
-                        _logger.LogInformationWithSource($"[IMPORT-LIFECYCLE] Found existing GcodeFile with same hash: {existingFile.Id} ({existingFile.FileName})");
+                        _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Processed thumbnail: {thumbnailPath}");
                     }
                 }
 
                 GcodeFile gcodeFile;
                 if (existingFile != null)
                 {
-                    // Reuse the existing file - no need to create a new one
                     gcodeFile = existingFile;
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Reusing existing GcodeFile for duplicate content: Id={gcodeFile.Id}");
                 }
                 else
                 {
-                    // Get or create root folder for gcode files (use "/" as root, not the physical path)
-                    // This ensures folder paths are relative and don't include "/app" prefix
+                    // Get or create root folder for gcode files
                     var targetFolder = await _unitOfWork.Folders.GetOrCreateFolderAsync("/", "gcode", ct);
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Got or created folder: {targetFolder.Path}, Id={targetFolder.Id}");
 
-                    // Create library entry
-                    // Note: We use TargetModelId instead of SourcePrinterId so the file is usable on ANY printer
-                    // of the same model, not just the one it was harvested from
-                    gcodeFile = new()
-                    {
-                        Id = Guid.NewGuid(),
-                        FileName = discoveredFile.FileName,
-                        FolderId = targetFolder.Id,
-                        FilePath = filePath,
-                        FileSizeBytes = discoveredFile.Size,
-                        FileHash = discoveredFile.FileHash ?? "",
-                        UploadedAt = DateTime.UtcNow,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow,
-                        Source = GcodeSource.Harvested,
-                        SourcePrinterId = operation.PrinterId, // Keep for reference/audit trail
-                        OriginalPrinterPath = discoveredFile.FilePath,
-                        LastSeenOnPrinter = DateTime.UtcNow,
-                        TargetModelId = operation.Printer?.ModelId, // Make available to all printers of this model
-                        RequiredNozzleDiameter = discoveredFile.ExtractedNozzleDiameter ?? extractedMetadata?.NozzleDiameter,
-                        RequiredMaterial = discoveredFile.ExtractedMaterial ?? extractedMetadata?.Material,
-                        EstimatedPrintTimeMinutes = discoveredFile.ExtractedPrintTime ?? extractedMetadata?.EstimatedPrintTimeMinutes,
-                        EstimatedFilamentLengthMm = discoveredFile.ExtractedFilamentLength ?? extractedMetadata?.FilamentLengthMm,
-                        SlicerName = discoveredFile.ExtractedSlicerName ?? extractedMetadata?.SlicerName,
-                        SlicerVersion = discoveredFile.ExtractedSlicerVersion ?? extractedMetadata?.SlicerVersion,
-                        ThumbnailFileName = thumbnailPath, // This should be JUST The filename, not file path + filename.
-                        Tags = request.DefaultTags != null ? JsonSerializer.Serialize(request.DefaultTags) : null
-                    };
+                    // Build entity using shared helper with extracted metadata
+                    gcodeFile = BuildGcodeFileEntity(
+                        discoveredFile.FileName,
+                        fileHash,
+                        discoveredFile.Size,
+                        thumbnailPath,
+                        new GcodeMetadataDto
+                        {
+                            NozzleDiameter = extractedMetadata?.NozzleDiameter,
+                            Material = extractedMetadata?.Material,
+                            PrintTimeMinutes = extractedMetadata?.EstimatedPrintTimeMinutes,
+                            FilamentLengthMm = extractedMetadata?.FilamentLengthMm,
+                            SlicerName = extractedMetadata?.SlicerName,
+                            SlicerVersion = extractedMetadata?.SlicerVersion
+                        },
+                        sourcePrinterId: operation.PrinterId,
+                        targetModelId: operation.Printer?.ModelId,
+                        originalPrinterPath: discoveredFile.FilePath,
+                        defaultTags: request.DefaultTags
+                    );
+
+                    gcodeFile.FilePath = filePath; // Set the physical file path after entity creation
+                    gcodeFile.FolderId = targetFolder.Id; // Set the folder reference
 
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created GcodeFile object: Id={gcodeFile.Id}, FolderId={targetFolder.Id}, TargetModelId={gcodeFile.TargetModelId}");
 
-                    // Add the gcode file to the database
                     await scopedGcodeRepo.AddAsync(gcodeFile, ct);
                     await scopedGcodeRepo.SaveChangesAsync(ct);
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Saved GcodeFile to database: {gcodeFile.Id}");
@@ -1575,6 +1470,324 @@ public class GcodeHarvestService(
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Error waiting for harvest tasks to complete");
+        }
+    }
+
+    /// <summary>
+    /// Helper method to process thumbnail with fallback strategy:
+    /// 1. Try downloading from URL if provided
+    /// 2. Fall back to extracting from G-code if available
+    /// Returns just the thumbnail filename (not full path)
+    /// </summary>
+    private async Task<string?> ProcessThumbnailWithFallbackAsync(
+        string? thumbnailUrl, 
+        byte[] gcodeContent, 
+        CancellationToken ct)
+    {
+        // Try downloading from URL first (preferred)
+        if (!string.IsNullOrEmpty(thumbnailUrl))
+        {
+            try
+            {
+                _logger.LogDebug($"Downloading thumbnail from URL: {thumbnailUrl}");
+                var fullPath = await DownloadThumbnailFromUrlAsync(thumbnailUrl, ct);
+                if (!string.IsNullOrEmpty(fullPath))
+                {
+                    var fileName = Path.GetFileName(fullPath);
+                    _logger.LogInformation($"Downloaded thumbnail from API: {fileName}");
+                    return fileName;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to download thumbnail from URL, will try extraction");
+            }
+        }
+
+        // Fall back to extraction from G-code
+        try
+        {
+            _logger.LogDebug("Extracting thumbnail from G-code content");
+            using var thumbnailStream = new MemoryStream(gcodeContent);
+            var fullPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(thumbnailStream, ct);
+            if (!string.IsNullOrEmpty(fullPath))
+            {
+                var fileName = Path.GetFileName(fullPath);
+                _logger.LogInformation($"Extracted thumbnail from G-code: {fileName}");
+                return fileName;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to extract thumbnail from G-code - continuing without thumbnail");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Helper method to extract metadata and thumbnail from downloaded G-code file
+    /// Returns a tuple of (metadata, thumbnailFileName)
+    /// </summary>
+    private async Task<(GcodeMetadataDto metadata, string? thumbnailFileName)> ExtractMetadataAndThumbnailAsync(
+        byte[] gcodeContent,
+        string? thumbnailUrl = null,
+        CancellationToken ct = default)
+    {
+        // Extract metadata from G-code
+        GcodeMetadataDto metadata;
+        try
+        {
+            using var metadataStream = new MemoryStream(gcodeContent);
+            metadata = await ExtractMetadataAsync(metadataStream, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to extract metadata from G-code");
+            metadata = new GcodeMetadataDto();
+        }
+
+        // Process thumbnail (URL first, then extraction)
+        string? thumbnailFileName = null;
+        try
+        {
+            thumbnailFileName = await ProcessThumbnailWithFallbackAsync(thumbnailUrl, gcodeContent, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error processing thumbnail");
+        }
+
+        return (metadata, thumbnailFileName);
+    }
+
+    /// <summary>
+    /// Helper method to calculate file hash and check for duplicates
+    /// Returns the hash and the existing file (if duplicate found)
+    /// </summary>
+    private async Task<(string hash, GcodeFile? existingFile)> CalculateHashAndCheckDuplicateAsync(
+        byte[] fileContent,
+        CancellationToken ct)
+    {
+        // Calculate hash
+        string fileHash;
+        try
+        {
+            using var hashStream = new MemoryStream(fileContent);
+            fileHash = await CalculateFileHashAsync(hashStream, ct);
+            _logger.LogInformation($"Calculated file hash: {fileHash.Substring(0, 8)}...");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to calculate file hash - using empty hash");
+            fileHash = "";
+        }
+
+        // Check for duplicates
+        GcodeFile? existingFile = null;
+        if (!string.IsNullOrEmpty(fileHash))
+        {
+            try
+            {
+                existingFile = await _unitOfWork.GcodeFiles.FindByHashAsync(fileHash, ct);
+                if (existingFile != null)
+                {
+                    _logger.LogWarning($"Found duplicate file: {existingFile.Name} (hash: {fileHash.Substring(0, 8)}...)");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error checking for duplicate files");
+            }
+        }
+
+        return (fileHash, existingFile);
+    }
+
+    /// <summary>
+    /// Helper method to build a complete GcodeFile entity from extracted data
+    /// Consolidates all the entity creation logic used by both harvest methods
+    /// </summary>
+    private GcodeFile BuildGcodeFileEntity(
+        string filename,
+        string fileHash,
+        long fileSizeBytes,
+        string? thumbnailFileName,
+        GcodeMetadataDto metadata,
+        Guid? sourcePrinterId = null,
+        Guid? targetModelId = null,
+        string? originalPrinterPath = null,
+        string[]? defaultTags = null)
+    {
+        return new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = filename,
+            FileName = $"{Guid.NewGuid()}.gcode", // GUID-based filename internally
+            FilePath = "/harvested", // Default path for harvested files
+            FileHash = fileHash,
+            FileSizeBytes = fileSizeBytes,
+            ThumbnailFileName = thumbnailFileName,
+            SlicerName = metadata.SlicerName,
+            SlicerVersion = metadata.SlicerVersion,
+            CreatedAt = DateTime.UtcNow,
+            UploadedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Source = GcodeSource.Harvested,
+            SourcePrinterId = sourcePrinterId,
+            OriginalPrinterPath = originalPrinterPath,
+            LastSeenOnPrinter = DateTime.UtcNow,
+            RequiredNozzleDiameter = metadata.NozzleDiameter,
+            RequiredMaterial = metadata.Material,
+            EstimatedPrintTimeMinutes = metadata.PrintTimeMinutes,
+            EstimatedFilamentLengthMm = metadata.FilamentLengthMm,
+            EstimatedFilamentWeightG = metadata.FilamentWeightG,
+            LayerHeight = metadata.LayerHeight,
+            InfillPercentage = double.TryParse(metadata.InfillPercentage, out var infill) ? infill : null,
+            PrintTemperature = metadata.HotendTemperature,
+            BedTemperature = metadata.BedTemperature,
+            PrintSpeed = metadata.PrintSpeed,
+            TargetModelId = targetModelId,
+            Tags = defaultTags != null ? JsonSerializer.Serialize(defaultTags) : null
+        };
+    }
+
+    /// <summary>
+    /// Helper method to validate printer exists and is accessible
+    /// </summary>
+    private async Task<Printer?> ValidatePrinterAsync(Guid printerId, CancellationToken ct)
+    {
+        var printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
+        if (printer == null)
+        {
+            _logger.LogWarning($"Printer with ID {printerId} not found");
+        }
+        return printer;
+    }
+
+    /// <summary>
+    /// Helper method to download file from printer using IPrintersService
+    /// </summary>
+    private async Task<byte[]?> DownloadFileFromPrinterAsync(Guid printerId, string filename, CancellationToken ct)
+    {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
+        
+        var fileContent = await printersService.DownloadPrinterFileAsync(printerId, filename, ct);
+        if (fileContent == null || fileContent.Length == 0)
+        {
+            _logger.LogWarning($"Failed to download file '{filename}' - empty or not found");
+            return null;
+        }
+
+        _logger.LogInformation($"Downloaded file '{filename}': {fileContent.Length} bytes");
+        return fileContent;
+    }
+
+    /// <summary>
+    /// Harvest a single file directly - download, extract metadata, add to library
+    /// This bypasses the complex queue system for simple single-file operations
+    /// Uses shared helper methods to avoid code duplication with ImportSelectedFilesAsync
+    /// </summary>
+    public async Task<GcodeHarvestResultDto> HarvestSingleFileDirectAsync(Guid printerId, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            _logger.LogInformation($"Starting direct harvest for file '{filename}' from printer {printerId}");
+
+            // Step 1: Validate printer exists
+            var printer = await ValidatePrinterAsync(printerId, ct);
+            if (printer == null)
+            {
+                return new GcodeHarvestResultDto(
+                    Guid.NewGuid(),
+                    false,
+                    $"Printer with ID {printerId} not found",
+                    0, 0,
+                    new[] { "Printer not found" });
+            }
+
+            // Step 2: Download file from printer
+            var fileContent = await DownloadFileFromPrinterAsync(printerId, filename, ct);
+            if (fileContent == null)
+            {
+                return new GcodeHarvestResultDto(
+                    Guid.NewGuid(),
+                    false,
+                    $"Failed to download file '{filename}' from printer",
+                    0, 0,
+                    new[] { "File download failed or returned empty content" });
+            }
+
+            // Step 3: Calculate hash and check for duplicates (shared helper)
+            var (fileHash, existingFile) = await CalculateHashAndCheckDuplicateAsync(fileContent, ct);
+            if (existingFile != null)
+            {
+                return new GcodeHarvestResultDto(
+                    Guid.NewGuid(),
+                    false,
+                    $"File already exists in library: {existingFile.Name}",
+                    0, 0,
+                    new[] { $"Duplicate file detected: {existingFile.Name}" });
+            }
+
+            // Step 4: Save file to disk with GUID-based name
+            _logger.LogInformation($"Saving file '{filename}' to disk");
+            string gcodeName = Path.GetFileNameWithoutExtension(filename);
+            string guidBasedFileName = $"{Guid.NewGuid()}.gcode";
+            string storageDir = _storagePathService.GetGcodeStorageDirectory();
+            string filePath = Path.Combine(storageDir, guidBasedFileName);
+            
+            // Ensure storage directory exists
+            Directory.CreateDirectory(storageDir);
+            await File.WriteAllBytesAsync(filePath, fileContent, ct);
+            _logger.LogInformation($"File saved to disk: {filePath}");
+
+            // Step 5: Extract metadata and process thumbnail (shared helper)
+            var (metadata, thumbnailFileName) = await ExtractMetadataAndThumbnailAsync(fileContent, null, ct);
+
+            // Step 6: Create GcodeFile entity (shared helper)
+            _logger.LogInformation($"Creating GcodeFile entity for '{filename}'");
+            var gcodeFile = BuildGcodeFileEntity(
+                gcodeName,
+                fileHash,
+                fileContent.Length,
+                thumbnailFileName,
+                metadata,
+                sourcePrinterId: printerId,
+                originalPrinterPath: filename);
+
+            // Set the actual file path where the file was saved
+            gcodeFile.FileName = guidBasedFileName;
+            gcodeFile.FilePath = storageDir;
+
+            // Step 7: Add to database
+            _logger.LogInformation($"Adding file to GcodeFiles database");
+            await _unitOfWork.GcodeFiles.AddAsync(gcodeFile, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            _logger.LogInformation($"Successfully harvested file '{filename}' with ID {gcodeFile.Id}");
+
+            return new GcodeHarvestResultDto(
+                Guid.NewGuid(),
+                true,
+                $"File '{filename}' harvested successfully",
+                discoveredFiles: 1,
+                importedFiles: 1,
+                errors: null)
+            {
+                ImportedFileIds = new[] { gcodeFile.Id.ToString() }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Error harvesting single file '{filename}' from printer {printerId}");
+            return new GcodeHarvestResultDto(
+                Guid.NewGuid(),
+                false,
+                $"Error harvesting file: {ex.Message}",
+                0, 0,
+                new[] { ex.Message });
         }
     }
 

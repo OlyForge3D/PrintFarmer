@@ -8,7 +8,7 @@ namespace Farm.Infrastructure.Services.Models;
 /// <summary>
 /// Service for converting 3MF files to STL format for viewing
 /// </summary>
-public interface I3MFToSTLConversionService
+public interface I3MfToStlConversionService
 {
     /// <summary>
     /// Converts a 3MF file to STL format
@@ -27,11 +27,11 @@ public interface I3MFToSTLConversionService
 /// 3. Applying transformations to vertices
 /// 4. Merging into a single coherent mesh
 /// </summary>
-public class ThreeMFToSTLConversionService : I3MFToSTLConversionService
+public class ThreeMfToStlConversionService : I3MfToStlConversionService
 {
     private readonly IUnifiedLoggingService _logger;
 
-    public ThreeMFToSTLConversionService(IUnifiedLoggingService logger)
+    public ThreeMfToStlConversionService(IUnifiedLoggingService logger)
     {
         _logger = logger;
     }

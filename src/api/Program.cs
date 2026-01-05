@@ -361,7 +361,7 @@ builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IFileManagementS
 builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOperationsService, Farm.Web.Api.Services.FileManagement.StoredFileOperationsService>();
 
 // 3MF to STL Conversion Service
-builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MFToSTLConversionService, Farm.Infrastructure.Services.Models.ThreeMFToSTLConversionService>();
+builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
 
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";

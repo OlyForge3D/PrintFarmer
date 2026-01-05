@@ -89,10 +89,14 @@ public interface IGcodeHarvestService
     IDictionary<Guid, bool> GetActiveTasksStatus();
 
     /// <summary>
+    /// Harvest a single file directly - download, extract metadata, add to library
+    /// </summary>
+    Task<GcodeHarvestResultDto> HarvestSingleFileDirectAsync(Guid printerId, string filename, CancellationToken ct = default);
+
+    /// <summary>
     /// Wait for all active tasks to complete or cancel them after timeout
     /// </summary>
     /// <param name="timeout">Maximum time to wait</param>
     /// <param name="ct">Cancellation token</param>
     Task WaitForAllTasksAsync(TimeSpan timeout, CancellationToken ct = default);
 }
-

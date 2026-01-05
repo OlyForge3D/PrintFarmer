@@ -825,30 +825,108 @@ namespace Farm.Web.Api.Services.Gcode
         /// Failed deletions are logged but don't stop the operation - partial success is possible.
         /// Database records should be cleaned up separately (not handled by this method).
         /// </remarks>
-        public Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, CancellationToken ct)
+        public async Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, CancellationToken ct)
         {
             string storageRoot = _storagePathService.GetGcodeStorageDirectory();
-            int deleted = 0;
-
-            foreach (string virtualPath in virtualPaths)
+            List<string> virtualPathsList = virtualPaths.ToList();
+            
+            // Step 1: Resolve all virtual paths to full file paths
+            List<(string virtualPath, string fullPath)> resolvedPaths = new();
+            foreach (string virtualPath in virtualPathsList)
             {
                 try
                 {
-                    // Resolve path using IStoragePathService
                     (_, string fullFilePath, _) = ResolveVirtualPath(virtualPath, storageRoot);
+                    resolvedPaths.Add((virtualPath, fullFilePath));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to resolve path {virtualPath}: {ex.Message}");
+                }
+            }
 
-                    if (Directory.Exists(fullFilePath))
+            if (resolvedPaths.Count == 0)
+            {
+                return false;
+            }
+
+            // Step 2: Collect all full paths and file records
+            List<string> fullPathsToDelete = new();
+            List<GcodeFile> filesToDelete = new();
+            
+            foreach (var (virtualPath, fullPath) in resolvedPaths)
+            {
+                if (Directory.Exists(fullPath))
+                {
+                    if (recursive)
+                    {
+                        // For directories, find all files within them
+                        var filesInDir = await _gcodeRepo.ListByDirectoryPrefixAsync(fullPath, ct);
+                        fullPathsToDelete.AddRange(filesInDir.Select(f => Path.Combine(f.FilePath, f.FileName)));
+                        filesToDelete.AddRange(filesInDir);
+                    }
+                }
+                else if (File.Exists(fullPath))
+                {
+                    fullPathsToDelete.Add(fullPath);
+                }
+            }
+
+            // Step 3: Get remaining file records from database (for files queried by path)
+            if (fullPathsToDelete.Count > 0 && filesToDelete.Count == 0)
+            {
+                filesToDelete = await _gcodeRepo.GetByFullPathsAsync(fullPathsToDelete, ct);
+            }
+
+            // Step 4: Delete database records first (before deleting physical files)
+            if (filesToDelete.Count > 0)
+            {
+                foreach (var file in filesToDelete)
+                {
+                    await _gcodeRepo.RemoveAsync(file, ct);
+                }
+                await _gcodeRepo.SaveChangesAsync(ct);
+            }
+
+            // Step 5: Delete physical files (gcode + thumbnails) and directories in one pass
+            int deleted = 0;
+            foreach (var (virtualPath, fullPath) in resolvedPaths)
+            {
+                try
+                {
+                    if (Directory.Exists(fullPath))
                     {
                         if (recursive)
                         {
-                            Directory.Delete(fullFilePath, true);
+                            Directory.Delete(fullPath, true);
                             deleted++;
                         }
                     }
-                    else if (File.Exists(fullFilePath))
+                    else if (File.Exists(fullPath))
                     {
-                        File.Delete(fullFilePath);
+                        File.Delete(fullPath);
                         deleted++;
+                        
+                        // Also delete associated thumbnail if it exists
+                        var fileRecord = filesToDelete.FirstOrDefault(f => 
+                            Path.Combine(f.FilePath, f.FileName).Equals(fullPath, StringComparison.Ordinal));
+                        
+                        if (fileRecord?.ThumbnailFileName != null)
+                        {
+                            string thumbnailPath = Path.Combine(fileRecord.FilePath, fileRecord.ThumbnailFileName);
+                            try
+                            {
+                                if (File.Exists(thumbnailPath))
+                                {
+                                    File.Delete(thumbnailPath);
+                                    _logger.LogInformation($"Deleted thumbnail: {thumbnailPath}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to delete thumbnail for {fileRecord.Name}: {ex.Message}");
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -857,7 +935,7 @@ namespace Farm.Web.Api.Services.Gcode
                 }
             }
 
-            return Task.FromResult(deleted > 0);
+            return deleted > 0;
         }
 
         /// <summary>

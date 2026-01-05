@@ -61,8 +61,14 @@ namespace Farm.Infrastructure.Settings
             string json = JsonSerializer.Serialize(settings);
 
             // Use repository to persist settings
-            _settingsRepo.SetAsync(appAttr.Key, json).ConfigureAwait(false).GetAwaiter().GetResult();
-            _settingsRepo.SaveChangesAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            // Note: This is called from non-async context, so we use sync over async as a workaround
+            // Ideally this method should be async
+#pragma warning disable VSTHRD002
+            Task setTask = _settingsRepo.SetAsync(appAttr.Key, json);
+            setTask.Wait();
+            Task saveTask = _settingsRepo.SaveChangesAsync();
+            saveTask.Wait();
+#pragma warning restore VSTHRD002
         }
 
         private Dictionary<string, object> _settings = new();

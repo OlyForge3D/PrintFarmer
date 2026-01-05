@@ -615,7 +615,7 @@ namespace Farm.Web.Api.Services.Slicing
 
             foreach ((Guid modelId, List<MachineProfileListItemDto> modelMachines) in machinesByModelId)
             {
-                string manufacturerName = manufacturerFilter ?? modelMachines.First().Manufacturer;
+                string manufacturerName = manufacturerFilter ?? modelMachines[0].Manufacturer;
                 if (string.IsNullOrWhiteSpace(manufacturerName) && manufacturerIdByModelId.TryGetValue(modelId, out Guid mid) && manufacturerNameById.TryGetValue(mid, out string? mName))
                 {
                     if (!string.IsNullOrWhiteSpace(mName))
@@ -638,13 +638,15 @@ namespace Farm.Web.Api.Services.Slicing
                     response.ByHierarchy[manufacturerName] = mfgDto;
                 }
 
-                string modelName = modelNameById.TryGetValue(modelId, out string? n) ? n : modelMachines.First().Name;
+                string modelName = modelNameById.TryGetValue(modelId, out string? n) ? n : modelMachines[0].Name;
 
                 List<ProcessProfileListItemDto> modelProcesses = processDtos
                     .Where(p =>
                     {
                         ProcessProfile? ent = processProfiles.FirstOrDefault(x => x.Id == p.Id);
+#pragma warning disable S2589 // Unnecessary check is valid here for logical OR conditions
                         return ent?.PrinterModelId == null || ent?.PrinterModelId == modelId;
+#pragma warning restore S2589
                     })
                     .ToList();
 
@@ -1641,7 +1643,7 @@ namespace Farm.Web.Api.Services.Slicing
                 return null;
             }
             _logger.LogDebug($"[GetProfileAsync] Retrieved profile: {profile.Name}");
-            return profile is null ? null : ToResponseDto(profile);
+            return ToResponseDto(profile);
         }
 
         /// <summary>

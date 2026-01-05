@@ -72,9 +72,9 @@ namespace Farm.Web.Api.Tests.Controllers
             return mock;
         }
 
-        private Mock<I3MFToSTLConversionService> CreateMock3MFConversionService()
+        private Mock<I3MfToStlConversionService> CreateMock3MFConversionService()
         {
-            var mock = new Mock<I3MFToSTLConversionService>(MockBehavior.Loose);
+            var mock = new Mock<I3MfToStlConversionService>(MockBehavior.Loose);
             // Default behavior: return null (conversion failed)
             mock.Setup(x => x.ConvertToSTLAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((byte[]?)null);

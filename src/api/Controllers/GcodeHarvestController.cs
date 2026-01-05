@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.GcodeHarvest;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
 
@@ -552,31 +553,25 @@ public class GcodeHarvestController(
 
         try
         {
-            _logger.LogInformation($"Queueing harvest for single file '{filename}' on printer {printerId}");
+            _logger.LogInformation($"Harvesting single file '{filename}' on printer {printerId}");
 
-            // Create a harvest request for the specific file
-            var request = new StartGcodeHarvestDto
+            // Call the harvest service to download, process, and add file to library
+            var result = await _harvestService.HarvestSingleFileDirectAsync(printerId, filename, ct);
+
+            if (!result.Success)
             {
-                PrinterId = printerId,
-                IncludeSubdirectories = false,
-                FileExtensions = new[] { Path.GetExtension(filename).TrimStart('.').ToLowerInvariant() },
-                DuplicateHandling = "skip"
-            };
+                _logger.LogWarning($"Failed to harvest file '{filename}': {result.Message}");
+                return BadRequest(result);
+            }
 
-            // Queue the harvest operation for background processing
-            var queueItem = await _harvestQueue.EnqueueAsync(printerId, request);
+            _logger.LogInformation($"Successfully harvested file '{filename}' with ID {result.ImportedFileIds.FirstOrDefault()}");
 
-            var response = new QueueHarvestResponseDto(
-                queueItem.Id,
-                $"Harvest operation queued for file '{filename}'. Queue item ID: {queueItem.Id}",
-                (GcodeHarvestQueueItemStatus)(int)queueItem.Status);
-
-            return Accepted(response);
+            return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to queue harvest for file '{filename}' on printer {printerId}: {ex.Message}");
-            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to queue harvest operation");
+            _logger.LogError(ex, $"Failed to harvest file '{filename}' on printer {printerId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to harvest file");
         }
     }
 

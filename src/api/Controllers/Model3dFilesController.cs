@@ -36,7 +36,7 @@ public class Model3DFilesController : ControllerBase
     private readonly IFolderManagementService _folderService;
     private readonly IStoredFileOperationsService _fileOperations;
     private readonly IStoragePathService _storagePathService;
-    private readonly I3MFToSTLConversionService _threeMfConverter;
+    private readonly I3MfToStlConversionService _threeMfConverter;
 
     public Model3DFilesController(
         IUnifiedLoggingService logger,
@@ -49,7 +49,7 @@ public class Model3DFilesController : ControllerBase
         IFolderManagementService folderService,
         IStoredFileOperationsService fileOperations,
         IStoragePathService storagePathService,
-        I3MFToSTLConversionService threeMfConverter)
+        I3MfToStlConversionService threeMfConverter)
     {
         _logger = logger;
         _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));

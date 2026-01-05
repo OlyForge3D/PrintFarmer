@@ -252,4 +252,208 @@ public class GcodeFilesServiceTests
         fileEntry.HarvestOperationId.Should().Be(harvestId);
         fileEntry.ThumbnailPath.Should().Be("/api/gcode-files/download?path=thumbs%2Fmodel1.png");
     }
+
+    [Fact]
+    public async Task DeleteFilesAsync_DeletesFileFromDiskAndDatabase()
+    {
+        // Arrange
+        string storageDir = Path.Combine(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(storageDir);
+        
+        // Create a test file
+        string testFileName = "test.gcode";
+        string fullPath = Path.Combine(storageDir, testFileName);
+        await File.WriteAllTextAsync(fullPath, "G1 X1 Y1");
+        
+        // Create a GcodeFile entity with matching path
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = testFileName,
+            FileName = testFileName,
+            FilePath = storageDir,
+            FileHash = "testhash",
+            FileSizeBytes = 9,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Source = GcodeSource.Upload
+        };
+
+        // Setup mocks
+        var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Strict);
+        var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
+        var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+        var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
+        logger.Setup(x => x.LogWarning(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
+        
+        // Mock repository to return the file when querying by path
+        repo.Setup(x => x.GetByFullPathsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GcodeFile> { gcodeFile });
+        repo.Setup(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, 
+            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+
+        // Act
+        bool result = await service.DeleteFilesAsync(new[] { $"/{testFileName}" }, false, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        File.Exists(fullPath).Should().BeFalse("file should be deleted from disk");
+        repo.Verify(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()), Times.Once, "file should be removed from database");
+        repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_DeletesFileAndThumbnailFromDiskAndDatabase()
+    {
+        // Arrange
+        string storageDir = Path.Combine(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(storageDir);
+        
+        // Create a test file and thumbnail
+        string testFileName = "test.gcode";
+        string thumbnailFileName = "test_thumb.png";
+        string fullPath = Path.Combine(storageDir, testFileName);
+        string thumbnailPath = Path.Combine(storageDir, thumbnailFileName);
+        
+        await File.WriteAllTextAsync(fullPath, "G1 X1 Y1");
+        await File.WriteAllBytesAsync(thumbnailPath, new byte[] { 1, 2, 3, 4 });
+        
+        // Create a GcodeFile entity with thumbnail
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = testFileName,
+            FileName = testFileName,
+            FilePath = storageDir,
+            ThumbnailFileName = thumbnailFileName,
+            FileHash = "testhash",
+            FileSizeBytes = 9,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Source = GcodeSource.Upload
+        };
+
+        // Setup mocks
+        var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Strict);
+        var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
+        var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+        var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
+        logger.Setup(x => x.LogWarning(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
+        logger.Setup(x => x.LogInformation(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
+        
+        // Mock repository to return the file when querying by path
+        repo.Setup(x => x.GetByFullPathsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GcodeFile> { gcodeFile });
+        repo.Setup(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, 
+            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+
+        // Act
+        bool result = await service.DeleteFilesAsync(new[] { $"/{testFileName}" }, false, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        File.Exists(fullPath).Should().BeFalse("file should be deleted from disk");
+        File.Exists(thumbnailPath).Should().BeFalse("thumbnail should be deleted from disk");
+        repo.Verify(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()), Times.Once, "file should be removed from database");
+        repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
+    }
+
+    [Fact]
+    public async Task DeleteFilesAsync_DeletesDirectoryRecursivelyFromDiskAndDatabase()
+    {
+        // Arrange
+        string storageDir = Path.Combine(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        string subDir = Path.Combine(storageDir, "subfolder");
+        Directory.CreateDirectory(subDir);
+        
+        // Create test files in subdirectory
+        string file1Path = Path.Combine(subDir, "file1.gcode");
+        string file2Path = Path.Combine(subDir, "file2.gcode");
+        await File.WriteAllTextAsync(file1Path, "G1 X1 Y1");
+        await File.WriteAllTextAsync(file2Path, "G1 X2 Y2");
+        
+        // Create GcodeFile entities
+        var gcodeFile1 = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "file1.gcode",
+            FileName = "file1.gcode",
+            FilePath = subDir,
+            FileHash = "hash1",
+            FileSizeBytes = 9,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Source = GcodeSource.Upload
+        };
+
+        var gcodeFile2 = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "file2.gcode",
+            FileName = "file2.gcode",
+            FilePath = subDir,
+            FileHash = "hash2",
+            FileSizeBytes = 9,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Source = GcodeSource.Upload
+        };
+
+        // Setup mocks
+        var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+        var logger = new Mock<IUnifiedLoggingService>(MockBehavior.Strict);
+        var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
+        var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+        var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
+        logger.Setup(x => x.LogWarning(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<object?>()));
+        
+        // Mock repository to find files in directory
+        repo.Setup(x => x.ListByDirectoryPrefixAsync(subDir, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GcodeFile> { gcodeFile1, gcodeFile2 });
+        repo.Setup(x => x.GetByFullPathsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GcodeFile> { gcodeFile1, gcodeFile2 });
+        repo.Setup(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, 
+            thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+
+        // Act
+        bool result = await service.DeleteFilesAsync(new[] { "/subfolder" }, recursive: true, CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        Directory.Exists(subDir).Should().BeFalse("directory should be deleted from disk");
+        repo.Verify(x => x.ListByDirectoryPrefixAsync(subDir, It.IsAny<CancellationToken>()), Times.Once, "should find files in directory");
+        repo.Verify(x => x.RemoveAsync(It.IsAny<GcodeFile>(), It.IsAny<CancellationToken>()), Times.Exactly(2), "both files should be removed from database");
+        repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once, "changes should be saved to database");
+    }
 }
+

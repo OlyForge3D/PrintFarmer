@@ -25,14 +25,14 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
 
-[ApiController]
-[Route("api/printers")]
 /// <summary>
 /// API controller for managing printers and printer-related operations.
 /// Provides endpoints for CRUD operations, printer status monitoring, file management,
 /// job control, history tracking, and discovery of new printers.
 /// Integrates with multiple printer backend types (Moonraker, PrusaLink, OctoPrint, SDCP).
 /// </summary>
+[ApiController]
+[Route("api/printers")]
 public class PrintersController(
     IUnifiedLoggingService logger,
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,

@@ -122,6 +122,12 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       // Start a harvest operation for this specific file
       const operation = await apiClient.harvestSingleFile(printer.id, fileName);
       toast.success(`Started harvesting: ${fileName}`);
+      
+      // Reload files after a brief delay to allow harvest to complete
+      // The harvest is queued for background processing
+      setTimeout(() => {
+        loadFiles();
+      }, 2000);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to start harvest';
       toast.error(errorMessage);
