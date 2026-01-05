@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui';
@@ -24,6 +24,7 @@ export const HarvestPage: React.FC = () => {
   const [perFileProgressMap, setPerFileProgressMap] = useState<
     Record<string, Record<string, import('@/services/harvest-signalr').HarvestFileProgress>>
   >({});
+  const queryClient = useQueryClient();
   const cancelHarvestMutation = useCancelHarvestOperation();
   const restartHarvestDiscoveryMutation = useRestartHarvestDiscovery();
   const { hasPermission } = useAuth();
@@ -104,8 +105,22 @@ export const HarvestPage: React.FC = () => {
       if (activeOps.length === 0 && wizardStep === 'operations') {
         setWizardStep('wizard');
       }
+
+      // Invalidate gcode-files queries when any operation completes (status changed from Running)
+      const completedOps = harvestOperations.filter(op => 
+        op.status === GcodeHarvestStatus.Completed ||
+        op.status === GcodeHarvestStatus.Cancelled ||
+        op.status === GcodeHarvestStatus.Failed
+      );
+      
+      if (completedOps.length > 0) {
+        // Invalidate all gcode-files related queries to ensure views refresh with new files
+        queryClient.invalidateQueries({ queryKey: ['gcode-files'] });
+        queryClient.invalidateQueries({ queryKey: ['gcode-files-hierarchy'] });
+        queryClient.invalidateQueries({ queryKey: ['gcode-files-all-folders'] });
+      }
     }
-  }, [harvestOperations, wizardStep]);
+  }, [harvestOperations, wizardStep, queryClient]);
 
   // Early return for permission check (must be after all hooks)
   if (!hasPermission('gcode_harvest', 'execute')) {
