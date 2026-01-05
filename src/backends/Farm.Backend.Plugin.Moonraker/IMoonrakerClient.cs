@@ -372,6 +372,17 @@ public interface IMoonrakerClient : IBackendClient
     Task<bool> StartMetadataScanAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets thumbnail information for a G-code file using Moonraker's dedicated thumbnails API endpoint.
+    /// This is more efficient than GetFileMetadataAsync when only thumbnails are needed.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server</param>
+    /// <param name="filename">The name of the G-code file</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing thumbnail metadata list, or empty list if no thumbnails are available</returns>
+    Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(string baseUrl, string filename, CancellationToken ct = default);
+    Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(Uri baseUrl, string filename, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets a thumbnail image embedded in a G-code file.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server</param>
@@ -380,6 +391,17 @@ public interface IMoonrakerClient : IBackendClient
     /// <returns>A task containing the thumbnail image as byte array, or null if no thumbnail is available</returns>
     Task<byte[]?> GetFileThumbnailAsync(string baseUrl, string filename, CancellationToken ct = default);
     Task<byte[]?> GetFileThumbnailAsync(Uri baseUrl, string filename, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the URL of the largest available thumbnail for a G-code file using the Moonraker thumbnails API.
+    /// This endpoint is more efficient than GetFileMetadataAsync when only thumbnail information is needed.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the Moonraker server</param>
+    /// <param name="filename">The name of the G-code file</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A task containing the thumbnail URL relative path, or null if no thumbnail is available</returns>
+    Task<string?> GetFileThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default);
+    Task<string?> GetFileThumbnailUrlAsync(Uri baseUrl, string filename, CancellationToken ct = default);
 
     /// <summary>
     /// Downloads the complete contents of a file.

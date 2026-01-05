@@ -7,75 +7,421 @@ using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Services.Printers
 {
+    /// <summary>
+    /// Service interface for printer management and operations.
+    /// Provides CRUD operations, status retrieval, file management, printer control operations,
+    /// and integration with multiple printer backend types (Moonraker, PrusaLink, OctoPrint, SDCP).
+    /// Encapsulates all high-level printer orchestration and business logic.
+    /// </summary>
     public interface IPrintersService
     {
+        /// <summary>
+        /// Retrieves all printers without related entities.
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>List of all printers in the database</returns>
         Task<List<Printer>> GetAllAsync(CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves all printers with related entities loaded (includes manufacturer, model, etc.).
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>List of printers with eagerly loaded relationships</returns>
         Task<List<Printer>> GetAllWithIncludesAsync(CancellationToken ct);
+
+        /// <summary>
+        /// Finds a single printer by ID without loading relationships.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>The printer if found, null otherwise</returns>
         Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Finds a printer by ID with all related entities eagerly loaded.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>The printer with relationships loaded, or null if not found</returns>
         Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Adds a new printer to the database.
+        /// </summary>
+        /// <param name="p">The printer entity to add</param>
+        /// <param name="ct">Cancellation token</param>
         Task AddAsync(Printer p, CancellationToken ct);
+
+        /// <summary>
+        /// Removes a printer from the database.
+        /// </summary>
+        /// <param name="p">The printer entity to remove</param>
+        /// <param name="ct">Cancellation token</param>
         Task RemoveAsync(Printer p, CancellationToken ct);
+
+        /// <summary>
+        /// Saves all pending changes to the database.
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
         Task SaveChangesAsync(CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves printers for export operations, optionally filtered by IDs.
+        /// </summary>
+        /// <param name="ids">Array of printer IDs to export, or null to export all</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>List of printers ready for export</returns>
         Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct);
+
+        /// <summary>
+        /// Checks if a printer exists with the given name or server URL.
+        /// Used to prevent duplicate printer configurations.
+        /// </summary>
+        /// <param name="name">The printer name to check</param>
+        /// <param name="serverUrl">The server URL to check</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if a printer exists with this name or URL, false otherwise</returns>
         Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct);
+
+        /// <summary>
+        /// Finds a printer by its resolved IP address.
+        /// </summary>
+        /// <param name="serverUrl">The server URL (resolved IP) to search for</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>The printer with matching IP, or null if not found</returns>
         Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct);
-        // Higher-level orchestration methods that encapsulate external client calls and status aggregation
+        /// <summary>
+        /// Retrieves all printers with current status information (online/offline, printer state).
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Array of printer DTOs with live status</returns>
         Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves the current status of a specific printer.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Printer status DTO with current state information</returns>
         Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves a single printer as a DTO for API responses.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Printer DTO with configured properties</returns>
         Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves camera URLs for all printers from configured storage.
+        /// Does NOT make external API calls - uses cached values.
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Array of printer camera URLs</returns>
         Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves all printers in a fast DTO format for list operations.
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Array of fast printer DTOs</returns>
         Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct);
-        // Get complete printer DTOs with live status merged in (replaces GetAllFastDtosAsync for new API)
+
+        /// <summary>
+        /// Retrieves all printers with complete status and configuration data.
+        /// Replaces GetAllFastDtosAsync for comprehensive printer data in new API endpoints.
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Array of complete printer DTOs with live status merged in</returns>
         Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct);
-        // Export helpers: return bytes instead of streaming to HTTP response (HTTP handling done in API layer)
+
+        /// <summary>
+        /// Builds a CSV export of printer data.
+        /// </summary>
+        /// <param name="ids">Array of printer IDs to export, or null to export all</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>CSV data as byte array</returns>
         Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct);
+
+        /// <summary>
+        /// Builds a JSON export of printer data.
+        /// </summary>
+        /// <param name="ids">Array of printer IDs to export, or null to export all</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>JSON data as byte array</returns>
         Task<byte[]> BuildExportJsonAsync(Guid[]? ids, CancellationToken ct);
-        // Return ready-to-serialize DTOs combining printer identity and capabilities
+
+        /// <summary>
+        /// Retrieves printers with their supported capabilities grouped by backend type.
+        /// </summary>
+        /// <param name="ids">Array of printer IDs, or null to include all</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Array of printers with capability information</returns>
         Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct);
-        // Create a printer from DTO (resolves manufacturer/model, normalizes host, persists printer and returns DTO)
+
+        /// <summary>
+        /// Creates a new printer from a DTO, resolving manufacturer/model and persisting to database.
+        /// </summary>
+        /// <param name="dto">The printer creation DTO with configuration</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>The created printer as a DTO</returns>
         Task<PrinterDto> CreatePrinterFromDtoAsync(CreatePrinterDto dto, CancellationToken ct);
 
-        // Resolve hostname: returns normalized base url and resolved IP when available
+        /// <summary>
+        /// Resolves a printer hostname to its base URL and IP address.
+        /// </summary>
+        /// <param name="serverUrl">The server URL or hostname to resolve</param>
+        /// <param name="backend">The printer backend type</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Response containing normalized URL and resolved IP</returns>
         Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct);
 
-        // Extract a thumbnail URL from provider metadata given the base printer server URL
+        /// <summary>
+        /// Extracts a thumbnail URL from printer metadata.
+        /// </summary>
+        /// <param name="metadata">Metadata dictionary from printer backend</param>
+        /// <param name="printerServerUrl">The printer server URL for constructing absolute paths</param>
+        /// <returns>Thumbnail URL if available, null otherwise</returns>
         string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl);
 
-        // Return normalized server URLs for all printers (for discovery exclusion checks)
-
-        // High-level printer operations that previously lived in controllers
+        /// <summary>
+        /// Retrieves a camera snapshot image from a printer.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Image data as byte array, or null if no camera or retrieval fails</returns>
         Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves camera stream and snapshot URLs for a printer.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Tuple of (streamUrl, snapshotUrl), either or both may be null</returns>
         Task<(string? streamUrl, string? snapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct);
-        // History related operations (wrap Moonraker client and return shared DTOs)
+        /// <summary>
+        /// Retrieves the history of print jobs for a printer.
+        /// </summary>
+        /// <param name="printerId">The printer ID</param>
+        /// <param name="limit">Maximum number of jobs to return, or null for no limit</param>
+        /// <param name="start">Starting index for pagination, or null to start from beginning</param>
+        /// <param name="since">Return jobs after this date, or null for no date filter</param>
+        /// <param name="before">Return jobs before this date, or null for no date filter</param>
+        /// <param name="order">Sort order for results (asc/desc), or null for default</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Paginated history list with job records and total count</returns>
         Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves details for a specific print job from printer history.
+        /// </summary>
+        /// <param name="printerId">The printer ID</param>
+        /// <param name="jobId">The backend-specific job identifier</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Complete job details including print time, filament used, and outcome</returns>
         Task<HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves aggregate statistics for all print jobs in printer history.
+        /// </summary>
+        /// <param name="printerId">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Aggregated totals including total jobs, time, filament, and longest job</returns>
         Task<HistoryTotals> GetHistoryTotalsAsync(Guid printerId, CancellationToken ct);
+
+        /// <summary>
+        /// Deletes a specific print job from the printer's history.
+        /// </summary>
+        /// <param name="printerId">The printer ID</param>
+        /// <param name="jobId">The backend-specific job identifier to delete</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if deletion succeeded, false if job not found or deletion failed</returns>
         Task<bool> DeleteHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
+
+        /// <summary>
+        /// Enables the camera for a printer (if supported by backend).
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if camera enabled successfully, false if not supported or failed</returns>
         Task<bool> EnableCameraAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Disables the camera for a printer (if supported by backend).
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if camera disabled successfully, false if not supported or failed</returns>
         Task<bool> DisableCameraAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Sends a home command for all axes (X, Y, Z).
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if home command sent successfully, false if operation not supported</returns>
         Task<bool> SendHomeAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Sends a home command for X and Y axes only (horizontal movement).
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if home command sent successfully, false if operation not supported</returns>
         Task<bool> HomeXYAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Sends a home command for Z axis only (vertical movement).
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if home command sent successfully, false if operation not supported</returns>
         Task<bool> HomeZAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Sets target temperatures for hotend and/or bed heaters.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="hotend">Target hotend temperature in Celsius, or null to leave unchanged</param>
+        /// <param name="bed">Target bed temperature in Celsius, or null to leave unchanged</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if temperature command succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct);
+
+        /// <summary>
+        /// Moves the print head by specified offsets from current position (relative movement).
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="x">X-axis offset in millimeters, or null to skip X movement</param>
+        /// <param name="y">Y-axis offset in millimeters, or null to skip Y movement</param>
+        /// <param name="z">Z-axis offset in millimeters, or null to skip Z movement</param>
+        /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if movement succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+
+        /// <summary>
+        /// Moves the print head to specified absolute position coordinates.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="x">Target X-axis position in millimeters, or null to skip X movement</param>
+        /// <param name="y">Target Y-axis position in millimeters, or null to skip Y movement</param>
+        /// <param name="z">Target Z-axis position in millimeters, or null to skip Z movement</param>
+        /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if positioning succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+
+        /// <summary>
+        /// Pauses the currently running print job without canceling it.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if pause succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> PauseAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Resumes a paused print job from where it was paused.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if resume succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> ResumeAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Immediately stops and cancels the currently running print job.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if stop succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Reboots the printer's microcontroller (MCU).
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if restart succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> FirmwareRestartAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Disables all stepper motors on the printer.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if motors disabled successfully, false if backend unavailable or unsupported</returns>
         Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct);
+
+        /// <summary>
+        /// Starts printing a gcode file that exists on the printer's storage.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="filename">Filename of gcode file on printer (backend-specific path format)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if print started successfully, false if backend unavailable or file not found</returns>
         Task<bool> StartPrintFromFileAsync(Guid id, string filename, CancellationToken ct);
+        /// <summary>
+        /// Deletes a gcode file from the printer's storage.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="filename">The filename to delete (backend-specific path format)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if deletion succeeded, false if not supported or file not found</returns>
         Task<bool> DeletePrinterFileAsync(Guid id, string filename, CancellationToken ct);
+
+        /// <summary>
+        /// Uploads a gcode file to the printer's storage.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="filename">The desired filename on printer storage (backend-specific path format)</param>
+        /// <param name="stream">The file stream to upload (not closed by this method)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if upload succeeded, false if backend unavailable or unsupported</returns>
         Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves the list of gcode files stored on the printer.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Array of file DTOs representing files on printer storage, or empty array if none found</returns>
         Task<PrinterFileDto[]> GetFileListAsync(Guid id, CancellationToken ct);
 
-        // Get current print job status for a printer
+        /// <summary>
+        /// Downloads a gcode file from the printer's storage.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="filename">The filename to download (backend-specific path format)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>File contents as byte array, or null if download failed or not supported</returns>
+        Task<byte[]?> DownloadPrinterFileAsync(Guid id, string filename, CancellationToken ct);
+
+        /// <summary>
+        /// Retrieves the current print job status for a printer.
+        /// </summary>
+        /// <param name="id">The printer ID</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Current print job status DTO, or null if no job running or status unavailable</returns>
         Task<PrintJobStatusDto?> GetPrintJobStatusAsync(Guid id, CancellationToken ct);
 
-        // Bulk operations - domain logic that works with domain objects, not HTTP uploads
+        /// <summary>
+        /// Creates multiple printers in bulk, with configurable handling of duplicates.
+        /// </summary>
+        /// <param name="printers">Array of printer creation DTOs</param>
+        /// <param name="duplicateHandling">How to handle duplicates: "skip", "overwrite", or "error" (default: "skip")</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Object containing creation results and status (successful count, failed items, etc.)</returns>
         Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default);
 
-        // File-based import - accepts Stream instead of IFormFile (HTTP abstraction removed)
+        /// <summary>
+        /// Imports printers from a file stream (CSV or JSON format).
+        /// </summary>
+        /// <param name="stream">The file stream to import from (CSV or JSON format)</param>
+        /// <param name="fileName">The filename (used to detect format: .csv or .json)</param>
+        /// <param name="duplicateHandling">How to handle duplicates: "skip", "overwrite", or "error" (default: "skip")</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Object containing import results and status (successful count, failed items, etc.)</returns>
         Task<object> ImportFromStreamAsync(Stream stream, string fileName, string duplicateHandling = "skip", CancellationToken ct = default);
 
         /// <summary>

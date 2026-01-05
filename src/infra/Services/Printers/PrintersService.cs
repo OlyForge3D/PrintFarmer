@@ -62,6 +62,24 @@ namespace Farm.Infrastructure.Services.Printers
         private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _statusCache;
         private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService;
 
+        /// <summary>
+        /// Initializes a new instance of the PrintersService with all required dependencies.
+        /// </summary>
+        /// <param name="unitOfWork">Unit of Work for database operations</param>
+        /// <param name="backendFactory">Factory for creating backend clients</param>
+        /// <param name="capabilityFactory">Factory for checking backend capabilities</param>
+        /// <param name="circuitBreaker">Circuit breaker for fault tolerance</param>
+        /// <param name="catalogService">Service for manufacturer/model lookups</param>
+        /// <param name="httpClientFactory">Factory for HTTP clients</param>
+        /// <param name="logger">Logging service for diagnostics</param>
+        /// <param name="mapper">AutoMapper for DTO transformations</param>
+        /// <param name="broadcaster">SignalR broadcaster for real-time updates</param>
+        /// <param name="coordinator">Coordinator for parallel status queries</param>
+        /// <param name="fallbackService">Fallback service for offline status</param>
+        /// <param name="statusClientFactory">Factory for backend-specific status clients</param>
+        /// <param name="statusCache">Cache reader for SignalR-updated status</param>
+        /// <param name="locationService">Service for location management</param>
+        /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
         public PrintersService(
             IUnitOfWork unitOfWork,
             IBackendClientFactory backendFactory,
@@ -218,6 +236,18 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Retrieves aggregate statistics for all print jobs in printer history.
+        /// </summary>
+        /// <param name="printerId">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Job totals including total count, time spent printing, filament used</returns>
+        /// <exception cref="KeyNotFoundException">Thrown when printer not found</exception>
+        /// <remarks>
+        /// Calculates aggregate job statistics across all history entries.
+        /// Falls back to calculating totals from full history if backend doesn't provide aggregates.
+        /// Handles backends that don't support history gracefully (returns empty totals).
+        /// </remarks>
         public async Task<HistoryTotals> GetHistoryTotalsAsync(Guid printerId, CancellationToken ct)
         {
             Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
@@ -255,6 +285,20 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Deletes a specific print job from the printer's history.
+        /// </summary>
+        /// <param name="printerId">Unique printer identifier (GUID)</param>
+        /// <param name="jobId">Backend-specific job identifier to delete</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if deletion succeeded, false if job not found or deletion failed</returns>
+        /// <exception cref="KeyNotFoundException">Thrown when printer not found</exception>
+        /// <exception cref="InvalidOperationException">Thrown when backend does not support history deletion</exception>
+        /// <remarks>
+        /// Permanently removes a job from the printer's history.
+        /// Operation is immediate and non-reversible.
+        /// Requires backend to support history capability.
+        /// </remarks>
         public async Task<bool> DeleteHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct)
         {
             Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
@@ -274,13 +318,13 @@ namespace Farm.Infrastructure.Services.Printers
         }
 
         /// <summary>
-        /// Retrieves all printers without related entities.
+        /// Retrieves all printers in the database.
         /// </summary>
         /// <param name="ct">Cancellation token for async operation</param>
         /// <returns>List of all printer entities</returns>
         /// <remarks>
-        /// Does not include related entities like Manufacturer or Model.
-        /// Use GetAllWithIncludesAsync for complete printer data with relationships.
+        /// Returns basic printer entities without related navigation properties.
+        /// Use GetAllWithIncludesAsync for scenarios requiring manufacturer, model, or location information.
         /// </remarks>
         public async Task<List<Printer>> GetAllAsync(CancellationToken ct)
         {
@@ -301,34 +345,77 @@ namespace Farm.Infrastructure.Services.Printers
             return await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
         }
 
+        /// <summary>
+        /// Retrieves a single printer by its unique identifier.
+        /// </summary>
+        /// <param name="id">The printer ID (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Printer entity if found; otherwise null</returns>
+        /// <remarks>
+        /// Returns basic printer entity without related navigation properties.
+        /// Use FindByIdWithIncludesAsync for scenarios requiring manufacturer or model information.
+        /// </remarks>
         public async Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct)
         {
             return await _unitOfWork.Printers.FindByIdAsync(id, ct);
         }
 
+        /// <summary>
+        /// Retrieves a single printer with related entities (Manufacturer, Model, Location).
+        /// </summary>
+        /// <param name="id">The printer ID (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Printer entity with eager-loaded relationships if found; otherwise null</returns>
+        /// <remarks>
+        /// Includes Manufacturer, Model, and Location navigation properties.
+        /// Use for display scenarios requiring complete printer information.
+        /// </remarks>
         public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct)
         {
             return await _unitOfWork.Printers.FindByIdWithIncludesAsync(id, ct);
         }
 
+        /// <summary>
+        /// Adds a new printer to the database context (not committed until SaveChangesAsync is called).
+        /// </summary>
+        /// <param name="p">Printer entity to add</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <remarks>
+        /// This method adds the printer to the EF Core context but does not commit the transaction.
+        /// Call SaveChangesAsync to persist changes to the database.
+        /// </remarks>
         public async Task AddAsync(Printer p, CancellationToken ct)
         {
             await _unitOfWork.Printers.AddAsync(p, ct);
         }
 
+        /// <summary>
+        /// Removes a printer from the database context (not committed until SaveChangesAsync is called).
+        /// </summary>
+        /// <param name="p">Printer entity to remove</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <remarks>
+        /// This method marks the printer for deletion in the EF Core context but does not commit the transaction.
+        /// Call SaveChangesAsync to persist the deletion to the database.
+        /// </remarks>
         public async Task RemoveAsync(Printer p, CancellationToken ct)
         {
             await _unitOfWork.Printers.RemoveAsync(p, ct);
         }
 
+        /// <summary>
+        /// Persists all pending changes to the database.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <remarks>
+        /// Commits any pending changes made via AddAsync, RemoveAsync, or direct entity modifications.
+        /// This is the only method that actually writes changes to the database.
+        /// </remarks>
         public async Task SaveChangesAsync(CancellationToken ct)
         {
             await _unitOfWork.SaveChangesAsync(ct);
         }
 
-        // DEPRECATED: PrinterCapabilities methods removed - hardware specs now on Printer entity
-
-        // ----- Orchestration methods -----
         public async Task<PrinterDto[]> GetAllWithStatusDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
@@ -370,7 +457,7 @@ namespace Farm.Infrastructure.Services.Printers
         /// Handles backend-specific status retrieval and DTO construction.
         /// Never returns null - always returns PrinterDto (offline on error).
         /// </summary>
-#pragma warning disable CS8603 // Possible null reference return - client methods are annotated as non-nullable
+#pragma warning disable CS8603 
         private async Task<PrinterDto> GetStatusDtoInternalAsync(Printer p, CancellationToken ct)
         {
             try
@@ -398,7 +485,7 @@ namespace Farm.Infrastructure.Services.Printers
         }
 #pragma warning restore CS8603
 
-#pragma warning disable CS8603 // Possible null reference return - PrinterStatusDto constructor returns non-nullable
+#pragma warning disable CS8603 
         /// <summary>
         /// Retrieves real-time status for a printer including temperatures, position, and job progress.
         /// </summary>
@@ -449,6 +536,17 @@ namespace Farm.Infrastructure.Services.Printers
         }
 #pragma warning restore CS8603
 
+        /// <summary>
+        /// Retrieves a printer DTO with full details including current real-time status.
+        /// </summary>
+        /// <param name="id">The printer ID (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Complete printer DTO with status information</returns>
+        /// <exception cref="KeyNotFoundException">Thrown when printer not found</exception>
+        /// <remarks>
+        /// Delegates status retrieval to the appropriate backend status client based on printer backend type.
+        /// Uses cached status when available for improved performance.
+        /// </remarks>
         public async Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await _unitOfWork.Printers.FindByIdWithIncludesAsync(id, ct);
@@ -464,6 +562,16 @@ namespace Farm.Infrastructure.Services.Printers
             return await statusClient.GetPrinterDtoAsync(p, ct);
         }
 
+        /// <summary>
+        /// Retrieves camera URLs (stream and snapshot) for all printers that support camera functionality.
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Array of DTOs containing printer camera URLs (may be null if camera not supported)</returns>
+        /// <remarks>
+        /// Queries each printer's backend to retrieve camera stream and snapshot URLs.
+        /// Handles backends that don't support camera operations gracefully (returns null URLs).
+        /// URLs are returned as-is without validation; frontend handles accessibility checks.
+        /// </remarks>
         public async Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
         {
             List<Printer> items = await _unitOfWork.Printers.GetAllAsync(ct);
@@ -499,28 +607,65 @@ namespace Farm.Infrastructure.Services.Printers
             return dtos;
         }
 
-        // DEPRECATED: SaveCapabilitiesAsync removed - hardware specs now on Printer entity
-
+        /// <summary>
+        /// Retrieves printers for bulk export operations.
+        /// </summary>
+        /// <param name="ids">Optional array of printer IDs to export; if null, exports all printers</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>List of printer entities for export with related data</returns>
+        /// <remarks>
+        /// Returns printers suitable for CSV or JSON export with all necessary related information.
+        /// If ids array is provided, returns only those printers; otherwise returns all printers.
+        /// </remarks>
         public async Task<List<Printer>> GetPrintersForExportAsync(Guid[]? ids, CancellationToken ct)
         {
             return await _unitOfWork.Printers.GetPrintersForExportAsync(ids, ct);
         }
 
+        /// <summary>
+        /// Checks if a printer with the given name or server URL already exists.
+        /// </summary>
+        /// <param name="name">The printer name to check</param>
+        /// <param name="serverUrl">The server URL to check</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if a printer with the name or URL exists; otherwise false</returns>
+        /// <remarks>
+        /// Used during printer creation to prevent duplicate printer registrations.
+        /// Checks for exact matches on either name or server URL.
+        /// </remarks>
         public async Task<bool> ExistsByNameOrServerUrlAsync(string name, string serverUrl, CancellationToken ct)
         {
             return await _unitOfWork.Printers.ExistsByNameOrServerUrlAsync(name, serverUrl, ct);
         }
 
         /// <summary>
-        /// Check if a printer with the same IP address already exists.
-        /// Extracts IP from ServerUrl input and compares against stored IpAddress.
+        /// Finds a printer by its IP address (extracted from server URL).
         /// </summary>
+        /// <param name="serverUrl">The server URL containing an IP address</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Printer with matching IP address if found; otherwise null</returns>
+        /// <remarks>
+        /// Extracts IP from ServerUrl input and compares against stored IpAddress.
+        /// Uses efficient direct database query instead of loading all printers.
+        /// Useful for discovering existing printers during network scanning.
+        /// </remarks>
         public async Task<Printer?> FindByIpAddressAsync(string serverUrl, CancellationToken ct)
         {
             // Use the repository's efficient direct database query instead of loading all printers
             return await _unitOfWork.Printers.FindByIpAddressAsync(serverUrl, ct);
         }
 
+        /// <summary>
+        /// Retrieves all printers with their current status as fast DTOs (minimal payload).
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Array of fast DTOs containing printer info and current real-time status</returns>
+        /// <remarks>
+        /// Fast DTOs provide essential printer information and real-time status with minimal payload size.
+        /// Used for dashboard and list views where full detail is not needed.
+        /// Includes fallback to offline status if status retrieval fails for a printer.
+        /// Camera URLs are retrieved from database (discovered at registration with frontend port).
+        /// </remarks>
         public async Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
@@ -585,6 +730,20 @@ namespace Farm.Infrastructure.Services.Printers
             return dtos.ToArray();
         }
 
+        /// <summary>
+        /// Retrieves all printers with complete status and hardware information (full detail DTOs).
+        /// </summary>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Array of complete DTOs with all printer and status information</returns>
+        /// <remarks>
+        /// Returns comprehensive printer details including real-time status, hardware specs, 
+        /// build volume, capabilities, and live temperature/position data.
+        /// Uses cached status from SignalR updates for performance when available.
+        /// Falls back to placeholder "Loading" status if not cached yet.
+        /// Camera URLs prioritize database values (with correct frontend port) over status values.
+        /// Includes fallback to offline status if DTO building fails for a printer.
+        /// Used for detailed printer views and full-featured dashboards.
+        /// </remarks>
         public async Task<CompletePrinterDto[]> GetAllCompleteDtosAsync(CancellationToken ct)
         {
             List<Printer> items = await _unitOfWork.Printers.GetAllWithIncludesAsync(ct);
@@ -708,6 +867,17 @@ namespace Farm.Infrastructure.Services.Printers
             WriteIndented = true,
         };
 
+        /// <summary>
+        /// Builds a CSV export of printer configurations.
+        /// </summary>
+        /// <param name="ids">Optional array of printer IDs to export; if null, exports all printers</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>CSV content as UTF-8 encoded byte array</returns>
+        /// <remarks>
+        /// CSV format includes: Name, IpAddress, Backend, BackendPort, FrontendPort, ManufacturerName, ModelName, Notes, ApiKey, IsEnabled, CameraStreamUrl, CameraSnapshotUrl, DateAcquired, LocationName.
+        /// Format matches AdminCli CSV format for consistency across tools.
+        /// Properly escapes CSV values to handle commas and quotes in string fields.
+        /// </remarks>
         public async Task<byte[]> BuildExportCsvAsync(Guid[]? ids, CancellationToken ct)
         {
             // Delegate to StreamExportToResponseAsync using a memory stream wrapper
@@ -743,9 +913,17 @@ namespace Farm.Infrastructure.Services.Printers
         }
 
         /// <summary>
-        /// Exports printers to JSON format and returns the bytes.
-        /// HTTP response handling is done by the controller.
+        /// Builds a JSON export of printer configurations.
         /// </summary>
+        /// <param name="ids">Optional array of printer IDs to export; if null, exports all printers</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>JSON content as UTF-8 encoded byte array</returns>
+        /// <remarks>
+        /// Exports printers with all configuration details including toolhead information.
+        /// Output is formatted as a JSON array suitable for re-import or documentation.
+        /// Each printer includes: configuration, manufacturer/model info, camera URLs, locations.
+        /// </remarks>
+        /// <exception cref="JsonException">Thrown if JSON serialization fails</exception>
         public async Task<byte[]> BuildExportJsonAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
@@ -778,6 +956,18 @@ namespace Farm.Infrastructure.Services.Printers
             return ms.ToArray();
         }
 
+        /// <summary>
+        /// Retrieves printers with complete capability information for capability-aware operations.
+        /// </summary>
+        /// <param name="ids">Optional array of printer IDs; if null, returns all printers with capabilities</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Array of DTOs containing printer configuration and capabilities</returns>
+        /// <remarks>
+        /// Includes hardware specifications (build volume, heated bed, enclosure, multi-material support).
+        /// Includes material and spool tracking information.
+        /// Used by UI components to show printer capabilities and supported operations.
+        /// Toolhead information is populated from the printer model at creation time.
+        /// </remarks>
         public async Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct)
         {
             List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
@@ -892,7 +1082,6 @@ namespace Farm.Infrastructure.Services.Printers
             return dict;
         }
 
-
         private static PrinterDto CreateOfflinePrinterDto(Printer p)
         {
             return new PrinterDto(
@@ -926,8 +1115,6 @@ namespace Farm.Infrastructure.Services.Printers
                 FrontendUrl: p.FrontendUrl
             );
         }
-
-        // Reuse controller's GetSpoolInfoAsync logic adapted for service
 
         /// <summary>
         /// Creates a new printer from DTO with automatic URL normalization, validation, and camera discovery.
@@ -1133,8 +1320,6 @@ namespace Farm.Infrastructure.Services.Printers
             return CreateOfflinePrinterDto(p);
         }
 
-        // Camera discovery methods removed - handled by RefreshCameraUrlsAsync called from status polling services
-
         /// <summary>
         /// Retrieves a camera snapshot image from the printer.
         /// </summary>
@@ -1288,6 +1473,18 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Sends a home command for X and Y axes only (horizontal movement).
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if command sent successfully, false if operation not supported or printer not found</returns>
+        /// <remarks>
+        /// Homes the X and Y axes while leaving Z axis in current position.
+        /// Useful for nozzle centering without raising the bed.
+        /// Requires backend to implement ISupportsMovement capability.
+        /// Returns false if printer not found or backend doesn't support movement.
+        /// </remarks>
         public async Task<bool> HomeXYAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1316,6 +1513,18 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Sends a home command for Z axis only (vertical movement).
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if command sent successfully, false if operation not supported or printer not found</returns>
+        /// <remarks>
+        /// Homes the Z axis independently, useful for bed leveling or nozzle adjustment.
+        /// Does not affect X/Y axis position.
+        /// Requires backend to implement ISupportsMovement capability.
+        /// Returns false if printer not found or backend doesn't support movement.
+        /// </remarks>
         public async Task<bool> HomeZAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1415,6 +1624,22 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Moves the print head by specified offsets from current position.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="x">X-axis offset in millimeters, or null to skip X movement</param>
+        /// <param name="y">Y-axis offset in millimeters, or null to skip Y movement</param>
+        /// <param name="z">Z-axis offset in millimeters, or null to skip Z movement</param>
+        /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if movement command succeeded, false if printer not found or backend unavailable</returns>
+        /// <remarks>
+        /// This is a relative movement command (moves from current position by specified amount).
+        /// Requires backend to implement ISupportsMovement capability.
+        /// At least one axis parameter should be provided; null values are ignored.
+        /// Movement is queued and executed immediately by the printer.
+        /// </remarks>
         public async Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1443,6 +1668,23 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Moves the print head to specified absolute position coordinates.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="x">Target X-axis position in millimeters, or null to skip X movement</param>
+        /// <param name="y">Target Y-axis position in millimeters, or null to skip Y movement</param>
+        /// <param name="z">Target Z-axis position in millimeters, or null to skip Z movement</param>
+        /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if positioning command succeeded, false if printer not found or backend unavailable</returns>
+        /// <remarks>
+        /// This is an absolute movement command (moves to exact coordinate, unlike MoveAsync which is relative).
+        /// Requires backend to implement ISupportsMovement capability.
+        /// At least one axis parameter should be provided; null values are ignored.
+        /// Coordinates are typically limited to printer build volume (e.g., 0-250mm for Prusa).
+        /// Movement is queued and executed immediately by the printer.
+        /// </remarks>
         public async Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1471,6 +1713,19 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Pauses the currently running print job.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if pause command succeeded, false if printer not found or backend unavailable</returns>
+        /// <remarks>
+        /// Pauses the current print job without canceling it.
+        /// The job can be resumed with ResumeAsync.
+        /// Requires backend to support print control capability.
+        /// Print head and heaters remain active during pause.
+        /// Useful for inspecting part quality, clearing jams, or adjusting nozzle height.
+        /// </remarks>
         public async Task<bool> PauseAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1498,6 +1753,18 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Resumes a paused print job.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if resume command succeeded, false if printer not found or backend unavailable</returns>
+        /// <remarks>
+        /// Continues a print that was previously paused.
+        /// Only works if print is in paused state (use GetStatusAsync to verify state).
+        /// Resumes from the exact point where print was paused.
+        /// Print head positions and temperatures are maintained during pause/resume cycle.
+        /// </remarks>
         public async Task<bool> ResumeAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1525,6 +1792,19 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Immediately stops and cancels the currently running print job.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if stop command succeeded, false if printer not found or backend unavailable</returns>
+        /// <remarks>
+        /// Cancels the current print job completely (cannot be resumed).
+        /// Print head stays at current position; heaters cool down after stop.
+        /// This is an emergency stop - irreversible and immediate.
+        /// Use PauseAsync if you want to resume later.
+        /// Requires backend to support print control capability.
+        /// </remarks>
         public async Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1552,6 +1832,19 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Reboots the printer's microcontroller (MCU).
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if restart command succeeded, false if printer not found or backend unavailable</returns>
+        /// <remarks>
+        /// Restarts the printer's main microcontroller (MCU).
+        /// Requires backend to support control capability.
+        /// Useful after firmware updates or to clear MCU errors.
+        /// Connection may be temporarily lost during restart.
+        /// API will be unavailable for a few seconds while MCU reboots.
+        /// </remarks>
         public async Task<bool> FirmwareRestartAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1580,6 +1873,18 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Disables all stepper motors on the printer.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if disable command succeeded, false if printer not found or backend unavailable</returns>
+        /// <remarks>
+        /// Sends M84 gcode command to disable all stepper motors.
+        /// Useful for manual bed leveling, nozzle cleaning, or manual adjustment when print is complete.
+        /// Motors will be re-engaged with next movement command.
+        /// Requires backend to support gcode execution capability.
+        /// </remarks>
         public async Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1651,6 +1956,19 @@ namespace Farm.Infrastructure.Services.Printers
 
 
 
+        /// <summary>
+        /// Deletes a gcode file from the printer's storage.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="filename">Filename of gcode file to delete (backend-specific path format)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if file deletion succeeded, false if not currently supported</returns>
+        /// <remarks>
+        /// File deletion is not currently exposed through capability interfaces.
+        /// This would require adding ISupportsFileDelete capability interface.
+        /// Currently returns false regardless of input parameters.
+        /// TODO: Implement file deletion capability when interface is available.
+        /// </remarks>
         public async Task<bool> DeletePrinterFileAsync(Guid id, string filename, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1664,6 +1982,18 @@ namespace Farm.Infrastructure.Services.Printers
             return false;
         }
 
+        /// <summary>
+        /// Enables camera for a printer.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if camera was enabled, false if not currently supported</returns>
+        /// <remarks>
+        /// Camera enable/disable is not currently supported via capability interfaces.
+        /// This would need to be implemented as a new capability interface.
+        /// Currently returns false regardless of input parameters.
+        /// TODO: Implement camera control capability when interface is available.
+        /// </remarks>
         public async Task<bool> EnableCameraAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1678,9 +2008,16 @@ namespace Farm.Infrastructure.Services.Printers
         }
 
         /// <summary>
-        /// Disables camera for a printer. Currently not supported via capability interfaces.
-        /// Delegates to the same logic as EnableCameraAsync pending implementation.
+        /// Disables camera for a printer.
         /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if camera was disabled, false if not currently supported</returns>
+        /// <remarks>
+        /// Camera enable/disable is not currently supported via capability interfaces.
+        /// Currently delegates to EnableCameraAsync as placeholder implementation.
+        /// TODO: Implement camera control capability when interface is available.
+        /// </remarks>
         public Task<bool> DisableCameraAsync(Guid id, CancellationToken ct)
         {
             // Delegate to EnableCameraAsync as they have identical implementation
@@ -1688,6 +2025,20 @@ namespace Farm.Infrastructure.Services.Printers
             return EnableCameraAsync(id, ct);
         }
 
+        /// <summary>
+        /// Uploads a gcode file to the printer's storage.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="filename">Desired filename on printer storage (backend-specific path format)</param>
+        /// <param name="stream">File stream to upload</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>True if upload succeeded, false if backend unavailable or unsupported</returns>
+        /// <remarks>
+        /// Requires backend to support file upload capability.
+        /// Filename format varies by backend (Moonraker: "gcodes/file.gcode", PrusaLink: "file.gcode").
+        /// Stream should be open and readable; method will not close the stream.
+        /// Large files may take several seconds to upload depending on network speed.
+        /// </remarks>
         public async Task<bool> UploadGcodeAsync(Guid id, string filename, Stream stream, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1712,6 +2063,19 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Retrieves the list of gcode files stored on the printer.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Array of PrinterFileDto objects representing files on printer storage, or empty array if none found</returns>
+        /// <remarks>
+        /// Requires backend to support file list capability.
+        /// Returns empty array if printer not found, backend unavailable, or no files present.
+        /// File paths and formats vary by backend (Moonraker: "gcodes/", PrusaLink: flat structure).
+        /// File information includes name, size, modification timestamp, and thumbnail URL (if available).
+        /// Backend implementations are responsible for retrieving complete metadata including thumbnails.
+        /// </remarks>
         public async Task<PrinterFileDto[]> GetFileListAsync(Guid id, CancellationToken ct)
         {
             Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -1736,6 +2100,7 @@ namespace Farm.Infrastructure.Services.Printers
                     : p.BackendUrl;
 
                 // Get file list with standardized PrinterFileInfo objects
+                // Backend clients are responsible for retrieving thumbnails and converting timestamps to Unix format
                 List<PrinterFileInfo> fileInfos = await fileListClient.GetFileListAsync(baseUrl, p.ApiKey, ct).ConfigureAwait(false);
 
                 if (fileInfos.Count == 0)
@@ -1743,33 +2108,10 @@ namespace Farm.Infrastructure.Services.Printers
                     return Array.Empty<PrinterFileDto>();
                 }
 
-                // For Moonraker, try to get additional metadata
-                if (backend == PrinterBackend.Moonraker && client is ISupportsFileMetadata metadataClient)
-                {
-                    List<PrinterFileDto> result = new();
-                    foreach (var fileInfo in fileInfos)
-                    {
-                        // For now, return file info without metadata details
-                        // TODO: Extend PrinterFileMetadata or ISupportsFileMetadata to support thumbnails
-                        result.Add(new PrinterFileDto(fileInfo.Name, null, fileInfo.Modified?.Ticks, fileInfo.Size));
-                    }
-
-                    return result.ToArray();
-                }
-
-                // For other backends, convert PrinterFileInfo to PrinterFileDto
+                // Simply convert PrinterFileInfo to PrinterFileDto - backend has already provided all metadata
                 return fileInfos
-                    .Select(f => new PrinterFileDto(f.Name, null, f.Modified?.Ticks, f.Size))
+                    .Select(f => new PrinterFileDto(f.Name, f.ThumbnailUrl, f.Modified, f.Size))
                     .ToArray();
-
-                // For PrusaLink and SDCP, no metadata available currently
-                // PrusaLink: thumbnail retrieval requires Digest Authentication
-                // According to PrusaLink OpenAPI spec, v1 endpoints (/api/v1/files/{storage}/{path})
-                // require Digest Auth, NOT X-Api-Key header authentication.
-                // The legacy /api/files endpoint (OctoPrint compatible) works with X-Api-Key
-                // but doesn't include thumbnail metadata in the response.
-                // TODO: Implement Digest Authentication support for PrusaLink to enable v1 API access
-                // SDCP: no metadata API currently exposed
             }
             catch (Exception ex)
             {
@@ -1778,6 +2120,69 @@ namespace Farm.Infrastructure.Services.Printers
             }
         }
 
+        /// <summary>
+        /// Downloads a gcode file from the printer's storage.
+        /// </summary>
+        /// <param name="id">Unique printer identifier (GUID)</param>
+        /// <param name="filename">Filename of gcode file to download (backend-specific path format)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Byte array containing file contents, or null if download failed or not supported</returns>
+        /// <remarks>
+        /// Requires backend to support file download capability.
+        /// Returns null if printer not found, backend unavailable, or file not found.
+        /// File path format varies by backend (Moonraker: "gcodes/file.gcode", PrusaLink: "file.gcode").
+        /// Downloaded file contents are returned as byte array in memory.
+        /// Suitable for small to medium files; large files may consume significant memory.
+        /// </remarks>
+        public async Task<byte[]?> DownloadPrinterFileAsync(Guid id, string filename, CancellationToken ct)
+        {
+            Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+            if (p == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var backend = (PrinterBackend)p.Backend;
+                var client = GetBackendClient(backend);
+
+                // Check if backend supports file download
+                if (client is not ISupportsFileDownload downloadClient)
+                {
+                    _logger.LogWarning($"Backend {backend} does not support file downloads");
+                    return null;
+                }
+
+                string baseUrl = backend == PrinterBackend.Moonraker
+                    ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
+                    : p.BackendUrl;
+
+                // Download the file
+                byte[]? fileContent = await downloadClient.DownloadFileAsync(baseUrl, filename, ct).ConfigureAwait(false);
+                return fileContent;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to download file {filename} from printer {id}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Resolves printer hostname to IP address and normalizes URLs for API access.
+        /// </summary>
+        /// <param name="serverUrl">Server URL with hostname (e.g., "http://printername.local:7125")</param>
+        /// <param name="backend">Backend type (Moonraker, PrusaLink, OctoPrint, or SDCP)</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>ResolveHostnameResponse containing normalized URL, resolved IP, and base URL with IP</returns>
+        /// <remarks>
+        /// Performs DNS resolution of hostname to IPv4 address.
+        /// Adds ".local" suffix if hostname is not an IP (mDNS/Bonjour support).
+        /// Returns both URL variants: original hostname-based and IP-based.
+        /// Gracefully handles resolution failures; returns original URL if DNS fails.
+        /// Port information should be handled separately via BackendPort field.
+        /// </remarks>
         public async Task<ResolveHostnameResponse> ResolveHostnameAsync(string serverUrl, PrinterBackend backend, CancellationToken ct)
         {
             // Normalize the input: ensure scheme and remove port (port is stored separately in BackendPort)
@@ -1812,6 +2217,19 @@ namespace Farm.Infrastructure.Services.Printers
             return new ResolveHostnameResponse(normalizedInputUrl, resolvedIp, resolvedBase);
         }
 
+        /// <summary>
+        /// Extracts thumbnail URL from gcode file metadata.
+        /// </summary>
+        /// <param name="metadata">Metadata dictionary from gcode file (contains thumbnail paths)</param>
+        /// <param name="printerServerUrl">Base server URL for constructing absolute thumbnail URL</param>
+        /// <returns>Absolute thumbnail URL if found, or null if no thumbnail available</returns>
+        /// <remarks>
+        /// Searches metadata for common thumbnail keys: "thumbnail", "thumbnails", "gcode_thumbnail".
+        /// Supports both string and JSON array thumbnail formats.
+        /// For arrays, selects the largest thumbnail by resolution (width × height).
+        /// Combines relative path with server base URL to create absolute URL.
+        /// Returns null if metadata is null, no thumbnail found, or all thumbnails empty.
+        /// </remarks>
         public string? ExtractThumbnailUrl(Dictionary<string, object> metadata, string printerServerUrl)
         {
             if (metadata == null)
@@ -1885,15 +2303,24 @@ namespace Farm.Infrastructure.Services.Printers
                 host.Contains('.', StringComparison.Ordinal) ? host : host + ".local";
         }
 
-
-
         /// <summary>
-        /// Bulk creates multiple printers with duplicate handling.
+        /// Creates multiple printers in bulk with configurable duplicate handling.
         /// </summary>
         /// <param name="printers">Array of printer DTOs to create</param>
-        /// <param name="duplicateHandling">How to handle duplicates: 'skip', 'overwrite', or 'error'</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Response object with import counts and results</returns>
+        /// <param name="duplicateHandling">Duplicate handling strategy: "skip" (default), "overwrite", or "error"</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Object containing counts (imported, skipped, failures) and detailed result array with status per printer</returns>
+        /// <remarks>
+        /// Processes printers sequentially to avoid DbContext concurrency issues.
+        /// Duplicate detection is based on IP address extracted from ServerUrl.
+        /// Duplicate handling modes:
+        /// - "skip": Skips duplicate printers and continues with next
+        /// - "overwrite": Removes existing printer with same IP and creates new one
+        /// - "error": Treats duplicates as errors and stops processing that printer
+        /// Broadcasts progress updates via SignalR for each printer.
+        /// Camera discovery deferred to next status poll to avoid threading issues.
+        /// Returns comprehensive error details for failed printers.
+        /// </remarks>
         public async Task<object> BulkCreatePrintersAsync(CreatePrinterDto[] printers, string duplicateHandling = "skip", CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(printers);
@@ -2095,14 +2522,23 @@ namespace Farm.Infrastructure.Services.Printers
         }
 
         /// <summary>
-        /// Imports printers from a stream containing CSV or JSON data.
-        /// This is the core import logic that works with any Stream, not just HTTP uploads.
+        /// Imports printers from a CSV or JSON file stream.
         /// </summary>
-        /// <param name="stream">The stream containing CSV or JSON data</param>
-        /// <param name="fileName">The filename (used to detect format via extension)</param>
-        /// <param name="duplicateHandling">How to handle duplicates: 'skip', 'overwrite', or 'error'</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Import result with counts and error details</returns>
+        /// <param name="stream">The file stream containing printer data (CSV or JSON format)</param>
+        /// <param name="fileName">The file name with extension (.csv or .json) for format detection</param>
+        /// <param name="duplicateHandling">Duplicate handling strategy: "skip" (default), "overwrite", or "error"</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Object containing import results with counts and detailed per-printer status</returns>
+        /// <remarks>
+        /// Supports CSV and JSON import formats.
+        /// CSV format requires columns: Name, IpAddress, Backend (plus optional columns for other fields).
+        /// JSON format requires array of printer objects matching CreatePrinterDto schema.
+        /// IDs are not portable between systems; import uses names and IP addresses for matching.
+        /// Delegates to BulkCreatePrintersAsync for actual printer creation and duplicate handling.
+        /// Broadcasts progress updates via SignalR during import.
+        /// </remarks>
+        /// <exception cref="ArgumentException">Thrown if file extension is not .csv or .json, or stream is empty</exception>
+        /// <exception cref="InvalidOperationException">Thrown if file contains no valid printer entries</exception>
         public async Task<object> ImportFromStreamAsync(Stream stream, string fileName, string duplicateHandling = "skip", CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(stream);

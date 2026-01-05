@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
@@ -25,6 +25,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState<string | null>(null);
+  const [isHarvesting, setIsHarvesting] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'print' | 'delete'; file: PrinterFileDto } | null>(null);
 
   const loadFiles = useCallback(async () => {
@@ -43,10 +45,10 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   }, [printer.id]);
 
   useEffect(() => {
-    if (isOpen && printer) {
+    if (isOpen) {
       loadFiles();
     }
-  }, [isOpen, printer, loadFiles]);
+  }, [isOpen, printer.id, loadFiles]);
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -90,6 +92,43 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     navigator.clipboard.writeText(fileName);
     setCopiedFile(fileName);
     setTimeout(() => setCopiedFile(null), 2000);
+  };
+
+  const handleDownloadFile = async (fileName: string) => {
+    try {
+      setIsDownloading(fileName);
+      // Create a download link for the file
+      // The API should provide a file download endpoint
+      const downloadUrl = `/api/printers/${printer.id}/files/download?filename=${encodeURIComponent(fileName)}`;
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = fileName.split('/').pop() || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast.success(`Downloading: ${fileName}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to download file';
+      toast.error(errorMessage);
+      console.error('Error downloading file:', err);
+    } finally {
+      setIsDownloading(null);
+    }
+  };
+
+  const handleHarvestFile = async (fileName: string) => {
+    try {
+      setIsHarvesting(fileName);
+      // Start a harvest operation for this specific file
+      const operation = await apiClient.harvestSingleFile(printer.id, fileName);
+      toast.success(`Started harvesting: ${fileName}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to start harvest';
+      toast.error(errorMessage);
+      console.error('Error harvesting file:', err);
+    } finally {
+      setIsHarvesting(null);
+    }
   };
 
   const handleDeleteFile = async (fileName: string) => {
@@ -301,6 +340,38 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           title={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
                         >
                           <CopyIcon className="h-4 w-4" />
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => handleDownloadFile(file.fileName)}
+                          disabled={isDownloading === file.fileName}
+                          className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
+                        >
+                          {isDownloading === file.fileName ? (
+                            <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <DownloadIcon className="h-4 w-4" />
+                          )}
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => handleHarvestFile(file.fileName)}
+                          disabled={isHarvesting === file.fileName}
+                          className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={isHarvesting === file.fileName ? 'Harvesting...' : 'Harvest file metadata'}
+                        >
+                          {isHarvesting === file.fileName ? (
+                            <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <SaveIcon className="h-4 w-4" />
+                          )}
                         </Button>
 
                         <Button

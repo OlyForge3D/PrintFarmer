@@ -850,6 +850,9 @@ public sealed class SdcpClient(HttpClient httpClient, IUnifiedLoggingService log
         {
             Name = f,
             Path = f,
+            Size = null,
+            Modified = null,
+            ThumbnailUrl = null
             // Size and Modified should be extracted from SDCP protocol response
             // when proper implementation is added
         }).ToList() ?? new();

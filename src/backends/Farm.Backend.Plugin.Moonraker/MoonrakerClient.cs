@@ -900,21 +900,25 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
                             size = sizeElement.GetInt64();
                         }
 
-                        // Extract modified timestamp if available
-                        DateTime? modified = null;
+                        // Extract modified timestamp if available (convert to Unix timestamp in seconds)
+                        long? modified = null;
                         if (file.TryGetProperty("modified", out JsonElement modifiedElement) &&
                             modifiedElement.ValueKind == JsonValueKind.Number)
                         {
                             double timestamp = modifiedElement.GetDouble();
-                            modified = DateTimeOffset.FromUnixTimeSeconds((long)timestamp).UtcDateTime;
+                            modified = (long)timestamp;
                         }
+
+                        // Get thumbnail URL for this file
+                        string? thumbnailUrl = await GetThumbnailUrlAsync(baseUrl, fileName, cts.Token);
 
                         files.Add(new PrinterFileInfo
                         {
                             Name = fileName,
                             Path = fileName,
                             Size = size,
-                            Modified = modified
+                            Modified = modified,
+                            ThumbnailUrl = thumbnailUrl
                         });
                     }
                 }
@@ -925,6 +929,33 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         {
             return new List<PrinterFileInfo>();
         }
+    }
+
+    /// <summary>
+    /// Gets the thumbnail URL for a gcode file if available.
+    /// Returns null if no thumbnail is found.
+    /// </summary>
+    private async Task<string?> GetThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            var thumbnails = await GetFileThumbnailsAsync(baseUrl, filename, ct);
+            if (thumbnails != null && thumbnails.Count > 0)
+            {
+                // Use the largest thumbnail available
+                var largestThumbnail = thumbnails.OrderByDescending(t => t.Width * t.Height).FirstOrDefault();
+                if (!string.IsNullOrEmpty(largestThumbnail.RelativePath))
+                {
+                    // Build absolute thumbnail URL
+                    return $"{baseUrl}/server/files/gcodes/{Uri.EscapeDataString(largestThumbnail.RelativePath)}";
+                }
+            }
+        }
+        catch
+        {
+            // Silently fail if thumbnail retrieval fails
+        }
+        return null;
     }
 
     // ===== FILE OPERATIONS API =====
@@ -1219,6 +1250,42 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     }
 
     /// <summary>
+    /// Gets thumbnail information for a G-code file using Moonraker's dedicated thumbnails API endpoint.
+    /// This is more efficient than GetFileMetadataAsync when only thumbnails are needed.
+    /// </summary>
+    public async Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/thumbnails?filename={encodedFilename}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return new List<(int, int, string)>();
+            }
+
+            MoonrakerResponse<List<ThumbnailInfo>>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<List<ThumbnailInfo>>>(cancellationToken: cts.Token);
+            if (response?.Result == null || response.Result.Count == 0)
+            {
+                return new List<(int, int, string)>();
+            }
+
+            return response.Result
+                .Select(t => (t.Width, t.Height, t.RelativePath))
+                .ToList();
+        }
+        catch
+        {
+            return new List<(int, int, string)>();
+        }
+    }
+
+    /// <summary>
     /// Start a metadata scan for a file
     /// </summary>
     public async Task<bool> StartMetadataScanAsync(string baseUrl, string filename, CancellationToken ct = default)
@@ -1276,6 +1343,47 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             }
 
             return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the URL of the largest available thumbnail for a G-code file using the Moonraker thumbnails API.
+    /// This endpoint is more efficient than GetFileMetadataAsync when only thumbnail information is needed.
+    /// The response returns thumbnail metadata including relative paths, allowing efficient direct construction of URLs.
+    /// </summary>
+    public async Task<string?> GetFileThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            string encodedFilename = Uri.EscapeDataString(filename);
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, $"server/files/thumbnails?filename={encodedFilename}");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            // Parse the response which contains thumbnail metadata array
+            MoonrakerResponse<ThumbnailInfo[]>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<ThumbnailInfo[]>>(cancellationToken: cts.Token);
+            if (response?.Result == null || response.Result.Length == 0)
+            {
+                return null;
+            }
+
+            // Find the largest thumbnail by pixel count
+            var largestThumbnail = response.Result
+                .OrderByDescending(t => t.Width * t.Height)
+                .FirstOrDefault();
+
+            return largestThumbnail?.RelativePath;
         }
         catch
         {
@@ -2088,7 +2196,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             return null;
         }
 
-        return new PrinterFileMetadata
+        var result = new PrinterFileMetadata
         {
             FilePath = filePath,
             PrintTime = metadata.EstimatedTime != null ? metadata.EstimatedTime.Value / 60.0 : null,
@@ -2098,6 +2206,17 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             ObjectHeight = metadata.ObjectHeight,
             ExtrUsedFilament = metadata.FilamentTotal
         };
+        
+        // Extract thumbnail information
+        if (metadata.Thumbnails != null && metadata.Thumbnails.Length > 0)
+        {
+            result.Thumbnails = metadata.Thumbnails
+                .Where(t => !string.IsNullOrEmpty(t.RelativePath))
+                .Select(t => (t.Width, t.Height, t.RelativePath))
+                .ToList();
+        }
+
+        return result;
     }
 
 
@@ -2342,11 +2461,25 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
         return StartMetadataScanAsync(baseUrl.ToString(), filename, ct);
     }
 
+    public Task<List<(int Width, int Height, string RelativePath)>> GetFileThumbnailsAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return GetFileThumbnailsAsync(baseUrl.ToString(), filename, ct);
+    }
+
     public Task<byte[]?> GetFileThumbnailAsync(Uri baseUrl, string filename, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         ArgumentNullException.ThrowIfNull(filename);
         return GetFileThumbnailAsync(baseUrl.ToString(), filename, ct);
+    }
+
+    public Task<string?> GetFileThumbnailUrlAsync(Uri baseUrl, string filename, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(filename);
+        return GetFileThumbnailUrlAsync(baseUrl.ToString(), filename, ct);
     }
 
     public Task<byte[]?> DownloadFileAsync(Uri baseUrl, string filename, CancellationToken ct = default)

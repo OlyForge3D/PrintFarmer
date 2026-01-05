@@ -27,6 +27,12 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/printers")]
+/// <summary>
+/// API controller for managing printers and printer-related operations.
+/// Provides endpoints for CRUD operations, printer status monitoring, file management,
+/// job control, history tracking, and discovery of new printers.
+/// Integrates with multiple printer backend types (Moonraker, PrusaLink, OctoPrint, SDCP).
+/// </summary>
 public class PrintersController(
     IUnifiedLoggingService logger,
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
@@ -1104,7 +1110,7 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Homes all axes of the specified printer.
+    /// Homes all axes (X, Y, Z) of the specified printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer</param>
     /// <param name="ct">Cancellation token for the operation</param>
@@ -1149,6 +1155,15 @@ public class PrintersController(
         return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Homes the Z axis of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the Z-axis homing operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the homing command</response>
     [HttpPost("{id:guid}/homez")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1262,6 +1277,19 @@ public class PrintersController(
         return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Stops the print on the specified printer (alias for emergency-stop for frontend compatibility).
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the stop operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the stop command</response>
+    /// <remarks>
+    /// This endpoint is an alias for /emergency-stop provided for frontend compatibility.
+    /// Both endpoints execute the same emergency-stop operation.
+    /// </remarks>
     [HttpPost("{id:guid}/stop")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1272,6 +1300,19 @@ public class PrintersController(
         return await EmergencyStopAsync(id, ct);
     }
 
+    /// <summary>
+    /// Restarts the firmware/MCU of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the firmware restart operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the restart command</response>
+    /// <remarks>
+    /// Restarts the printer's firmware/MCU without a full power cycle.
+    /// This operation is typically used to recover from firmware issues.
+    /// </remarks>
     [HttpPost("{id:guid}/firmware-restart")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1286,6 +1327,19 @@ public class PrintersController(
         return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Disables the stepper motors of the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the disable motors operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error executing the disable motors command</response>
+    /// <remarks>
+    /// Disables all stepper motors, allowing manual movement of printer axes.
+    /// Motors will remain disabled until explicitly re-enabled via homing or other operations.
+    /// </remarks>
     [HttpPost("{id:guid}/disable-motors")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1301,6 +1355,19 @@ public class PrintersController(
     }
 
     // Camera control endpoints
+    /// <summary>
+    /// Enables camera functionality on the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the enable camera operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error enabling the camera</response>
+    /// <remarks>
+    /// Enables camera streaming and snapshot functionality on the printer.
+    /// Camera must be physically connected and configured in the printer backend for this to work.
+    /// </remarks>
     [HttpPost("{id:guid}/camera/enable")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1315,6 +1382,19 @@ public class PrintersController(
         return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Disables camera functionality on the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Result indicating success or failure of the disable camera operation</returns>
+    /// <response code="200">Returns the command execution result</response>
+    /// <response code="404">If the printer with the specified ID was not found</response>
+    /// <response code="500">If there was an error disabling the camera</response>
+    /// <remarks>
+    /// Disables camera streaming and snapshot functionality on the printer.
+    /// Can be used to reduce network load or disable camera access temporarily.
+    /// </remarks>
     [HttpPost("{id:guid}/camera/disable")]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
@@ -1329,6 +1409,19 @@ public class PrintersController(
         return new CommandResult(true, null);
     }
 
+    /// <summary>
+    /// Retrieves the camera stream and snapshot URLs for the specified printer.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>Object containing stream and snapshot URLs (may be null if camera not supported)</returns>
+    /// <response code="200">Returns the camera URLs</response>
+    /// <response code="404">If the printer with the specified ID was not found or camera is not available</response>
+    /// <remarks>
+    /// Returns the URLs for live camera streaming and snapshot capture.
+    /// Either or both URLs may be null depending on printer capabilities and configuration.
+    /// Frontend should validate URL accessibility before attempting to load.
+    /// </remarks>
     [HttpGet("{id:guid}/camera/url")]
     [ProducesResponseType(typeof(CameraUrlResult), 200)]
     [ProducesResponseType(404)]
@@ -1395,6 +1488,58 @@ public class PrintersController(
         catch (Exception ex)
         {
             return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get file list: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Downloads a file from a printer's storage
+    /// </summary>
+    /// <param name="id">Printer ID</param>
+    /// <param name="filename">The filename to download (filename query parameter)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>File content</returns>
+    /// <response code="200">File content</response>
+    /// <response code="400">Invalid filename</response>
+    /// <response code="404">Printer or file not found</response>
+    /// <response code="500">Download failed</response>
+    [HttpGet("{id:guid}/files/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> DownloadFileAsync(Guid id, [FromQuery] string filename, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            return BadRequest(new { error = "filename query parameter is required" });
+        }
+
+        try
+        {
+            byte[]? fileContent = await _printersService.DownloadPrinterFileAsync(id, filename, ct);
+            if (fileContent == null)
+            {
+                return NotFound(new { error = $"File not found: {filename}" });
+            }
+
+            // Return the file with appropriate content type
+            string contentType = "application/octet-stream";
+            if (filename.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) ||
+                filename.EndsWith(".gco", StringComparison.OrdinalIgnoreCase))
+            {
+                contentType = "text/plain"; // Or "application/x-gcode" if needed
+            }
+
+            return File(fileContent, contentType, filename);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { error = "Printer not found" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to download file {filename} from printer {id}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = $"Download failed: {ex.Message}" });
         }
     }
 

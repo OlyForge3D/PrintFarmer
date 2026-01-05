@@ -840,6 +840,22 @@ export class ApiClient {
     return response.data as { queueItemId: string };
   }
 
+  async harvestSingleFile(
+    printerId: string,
+    filename: string
+  ): Promise<{ queueItemId: string }> {
+    const response = await this.client.post(
+      `/gcode-harvest/printers/${printerId}/files/harvest`,
+      null,
+      {
+        params: {
+          filename,
+        },
+      }
+    );
+    return response.data as { queueItemId: string };
+  }
+
   async startBulkHarvest(
     printerIds: string[],
     options: {

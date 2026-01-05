@@ -527,6 +527,60 @@ public class GcodeHarvestController(
     }
 
     /// <summary>
+    /// Queue a harvest operation for a single G-code file on a printer
+    /// </summary>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="filename">The filename of the G-code file to harvest (e.g., "gcodes/model.gcode")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <response code="202">Harvest operation queued successfully</response>
+    /// <response code="400">Invalid request parameters</response>
+    /// <response code="404">Printer not found</response>
+    [HttpPost("printers/{printerId:guid}/files/harvest")]
+    [ProducesResponseType(typeof(QueueHarvestResponseDto), 202)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<QueueHarvestResponseDto>> HarvestSingleFileAsync(
+        Guid printerId,
+        [FromQuery] string filename,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            return BadRequest("Filename is required");
+        }
+
+        try
+        {
+            _logger.LogInformation($"Queueing harvest for single file '{filename}' on printer {printerId}");
+
+            // Create a harvest request for the specific file
+            var request = new StartGcodeHarvestDto
+            {
+                PrinterId = printerId,
+                IncludeSubdirectories = false,
+                FileExtensions = new[] { Path.GetExtension(filename).TrimStart('.').ToLowerInvariant() },
+                DuplicateHandling = "skip"
+            };
+
+            // Queue the harvest operation for background processing
+            var queueItem = await _harvestQueue.EnqueueAsync(printerId, request);
+
+            var response = new QueueHarvestResponseDto(
+                queueItem.Id,
+                $"Harvest operation queued for file '{filename}'. Queue item ID: {queueItem.Id}",
+                (GcodeHarvestQueueItemStatus)(int)queueItem.Status);
+
+            return Accepted(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to queue harvest for file '{filename}' on printer {printerId}: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to queue harvest operation");
+        }
+    }
+
+    /// <summary>
     /// Cancel a queued harvest operation
     /// </summary>
     /// <param name="queueItemId">The queue item ID to cancel</param>

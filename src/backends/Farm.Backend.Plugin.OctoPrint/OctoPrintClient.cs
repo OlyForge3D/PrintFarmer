@@ -1713,12 +1713,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                             size = sizeEl.GetInt64();
                         }
 
-                        // Extract modified timestamp if available (OctoPrint uses "date" field with Unix timestamp)
-                        DateTime? modified = null;
+                        // Extract modified timestamp if available (OctoPrint uses "date" field with Unix timestamp in seconds)
+                        long? modified = null;
                         if (item.TryGetProperty("date", out JsonElement dateEl) && dateEl.ValueKind == JsonValueKind.Number)
                         {
-                            double timestamp = dateEl.GetDouble();
-                            modified = DateTimeOffset.FromUnixTimeSeconds((long)timestamp).UtcDateTime;
+                            long timestamp = (long)dateEl.GetDouble();
+                            modified = timestamp;
                         }
 
                         files.Add(new PrinterFileInfo
@@ -1726,7 +1726,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                             Name = Path.GetFileName(fullPath),
                             Path = fullPath,
                             Size = size,
-                            Modified = modified
+                            Modified = modified,
+                            ThumbnailUrl = null // OctoPrint doesn't expose thumbnail URLs
                         });
                     }
                 }

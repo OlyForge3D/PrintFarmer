@@ -51,7 +51,7 @@ namespace Farm.Web.Api.Tests.Services.Gcode
                     {
                         Name = "test.gcode",
                         Path = "/test.gcode",
-                        Modified = DateTime.UtcNow,
+                        Modified = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         Size = 1024
                     }
                 });

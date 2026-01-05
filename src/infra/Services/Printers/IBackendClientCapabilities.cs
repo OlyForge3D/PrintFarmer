@@ -2,223 +2,555 @@
 
 /// <summary>
 /// Capability marker interface for backend clients that support file download functionality.
+/// Backends implementing this interface can retrieve the complete contents of files stored on the printer.
 /// </summary>
 public interface ISupportsFileDownload
 {
+    /// <summary>
+    /// Downloads the complete contents of a file from the printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
+    /// <param name="filePath">The path to the file to download (e.g., "gcodes/model.gcode")</param>
+    /// <param name="ct">Cancellation token to cancel the download operation</param>
+    /// <returns>The file contents as a byte array, or null if the file does not exist or download fails</returns>
     Task<byte[]?> DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support file list retrieval.
+/// Backends implementing this interface can enumerate and retrieve information about files stored on the printer.
 /// </summary>
 public interface ISupportsFileList
 {
+    /// <summary>
+    /// Retrieves a list of files stored on the printer with basic information (name, size, modification date).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>A list of PrinterFileInfo objects containing file metadata, or empty list if no files found</returns>
     Task<List<PrinterFileInfo>> GetFileListAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support file upload functionality.
+/// Backends implementing this interface can receive and store G-code files on the printer.
 /// </summary>
 public interface ISupportsFileUpload
 {
+    /// <summary>
+    /// Uploads a G-code file to the printer's storage.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
+    /// <param name="fileName">The name for the uploaded file (e.g., "model.gcode")</param>
+    /// <param name="fileContent">The file content stream to upload</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the upload operation</param>
+    /// <returns>True if upload succeeded, false if it failed</returns>
     Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support starting print jobs.
+/// Backends implementing this interface can initiate printing of a G-code file stored on the printer.
 /// </summary>
 public interface ISupportsStartPrint
 {
+    /// <summary>
+    /// Starts a print job using a G-code file stored on the printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server (e.g., http://printer-ip)</param>
+    /// <param name="fileName">The path/name of the G-code file to print (e.g., "gcodes/model.gcode")</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if print started successfully, false if the file was not found or printer was not ready</returns>
     Task<bool> StartPrintAsync(string baseUrl, string fileName, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support printer control operations.
+/// Provides pause, resume, and cancel operations for managing active print jobs.
 /// </summary>
 public interface ISupportsControlOperations
 {
+    /// <summary>
+    /// Pauses the currently executing print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if pause command succeeded, false if no job is active or pause failed</returns>
     Task<bool> PauseAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Resumes a paused print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if resume command succeeded, false if no paused job exists or resume failed</returns>
     Task<bool> ResumeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Cancels the currently executing print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if cancel command succeeded, false if no job is active or cancel failed</returns>
     Task<bool> CancelAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support camera operations.
+/// Provides methods to retrieve camera stream and snapshot URLs for displaying live printer footage.
 /// </summary>
 public interface ISupportsCamera
 {
+    /// <summary>
+    /// Gets the URL for a live camera stream from the printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="frontendPort">Optional frontend port number if different from the backend port</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>The camera stream URL, or null if no camera is available or stream cannot be retrieved</returns>
     Task<string?> GetCameraStreamUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the URL for a camera snapshot (still image) from the printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="frontendPort">Optional frontend port number if different from the backend port</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>The camera snapshot URL, or null if no camera is available or snapshot cannot be retrieved</returns>
     Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support detecting configured cameras.
-/// This interface detects ONLY cameras that are actually configured on the printer.
-/// Returns null if no cameras are configured, preventing false positives.
-/// Implementations MUST validate camera existence before returning URLs.
+/// This interface detects ONLY cameras that are actually configured on the printer, preventing false positives.
+/// Returns null for both stream and snapshot if no cameras are found.
+/// Implementations MUST validate camera existence before returning URLs to avoid saving camera URLs for printers without cameras.
 /// </summary>
 public interface ISupportsConfiguredCameraDetection
 {
     /// <summary>
     /// Detects and returns camera URLs for cameras actually configured on the printer.
-    /// MUST return null for both stream and snapshot if no cameras are found.
-    /// This prevents saving camera URLs for printers that don't have cameras.
+    /// This method performs validation to ensure cameras exist before returning URLs.
     /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="frontendPort">Optional frontend port number if different from the backend port</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>
+    /// A tuple containing (streamUrl, snapshotUrl). Both values are null if no cameras are configured.
+    /// Only non-null values represent actually configured and accessible cameras.
+    /// </returns>
     Task<(string? streamUrl, string? snapshotUrl)> DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support file metadata extraction.
-/// Moonraker-specific but designed as a capability interface.
+/// Extracts detailed information from G-code files including print time estimates, layer information, thumbnails, and slicer settings.
 /// </summary>
 public interface ISupportsFileMetadata
 {
+    /// <summary>
+    /// Extracts metadata from a G-code file stored on the printer.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="filePath">The path to the G-code file (e.g., "gcodes/model.gcode")</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>PrinterFileMetadata containing print time, layer height, temperatures, and thumbnail information, or null if metadata cannot be extracted</returns>
     Task<PrinterFileMetadata?> GetFileMetadataAsync(string baseUrl, string filePath, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
-/// Capability marker interface for backend clients that support printer movement/positioning operations.
-/// Backends implement whatever movement methods they support; API uses capability checking to call appropriate methods.
+/// Capability marker interface for backend clients that support printer movement and positioning operations.
+/// Backends implement whatever movement methods they support; the API uses capability checking to call appropriate methods.
+/// All distances are in millimeters, feed rate (f) is in mm/min.
 /// </summary>
 public interface ISupportsMovement
 {
-    // Core movement operations - backends implement the ones they support
+    /// <summary>
+    /// Sends the printer to home position for all axes (X, Y, Z).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if home command succeeded, false if operation failed</returns>
     Task<bool> HomeAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sends the printer to home position for all axes (alternative implementation).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if home command succeeded, false if operation failed</returns>
     Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Homes the X and Y axes only, leaving Z position unchanged.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if home XY command succeeded, false if operation failed</returns>
     Task<bool> HomeXYAsync(string baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Homes the Z axis only, leaving X and Y positions unchanged.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if home Z command succeeded, false if operation failed</returns>
     Task<bool> HomeZAsync(string baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Moves the printer by the specified distances (relative movement).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="x">Relative X distance in millimeters, or null to not move X axis</param>
+    /// <param name="y">Relative Y distance in millimeters, or null to not move Y axis</param>
+    /// <param name="z">Relative Z distance in millimeters, or null to not move Z axis</param>
+    /// <param name="f">Feed rate in mm/min, or null to use default speed</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if move command succeeded, false if operation failed</returns>
     Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Moves the printer to an absolute position (absolute positioning).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="x">Absolute X position in millimeters, or null to not move X axis</param>
+    /// <param name="y">Absolute Y position in millimeters, or null to not move Y axis</param>
+    /// <param name="z">Absolute Z position in millimeters, or null to not move Z axis</param>
+    /// <param name="f">Feed rate in mm/min, or null to use default speed</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if move command succeeded, false if operation failed</returns>
     Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support temperature control.
-/// Provides basic temperature control supported across backends.
+/// Provides basic temperature control supported across multiple backends for setting hotend and bed temperatures.
 /// </summary>
 public interface ISupportsTemperatureControl
 {
-    // Core temperature control - all implementing backends should support this
+    /// <summary>
+    /// Sets target temperatures for the hotend and/or bed heaters.
+    /// Pass null for a heater to leave it unchanged (e.g., hotendTemp=210, bedTemp=null sets only hotend).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="hotendTemp">Target hotend temperature in Celsius, or null to leave unchanged</param>
+    /// <param name="bedTemp">Target bed temperature in Celsius, or null to leave unchanged</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if temperature commands succeeded, false if operation failed</returns>
     Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support advanced printer information retrieval.
+/// Provides access to printer name, firmware version, and model information.
 /// </summary>
 public interface ISupportsPrinterInformation
 {
+    /// <summary>
+    /// Retrieves detailed printer information including name, firmware version, and model.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>StandardPrinterInfo containing printer name, firmware, and model information</returns>
     Task<StandardPrinterInfo> GetPrinterInformationAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support job history retrieval.
+/// Provides access to completed and failed print jobs, history statistics, and history management.
 /// </summary>
 public interface ISupportsHistory
 {
+    /// <summary>
+    /// Retrieves a paginated list of completed or failed print jobs from history.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="limit">Maximum number of history entries to return, or null for default limit</param>
+    /// <param name="start">Starting index for pagination, or null to start from beginning</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>HistoryListResponse containing paginated history entries, or null if history cannot be retrieved</returns>
     Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves detailed information about a specific historical print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="jobId">The unique identifier of the history job to retrieve</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>HistoryJob containing detailed job information, or null if job not found</returns>
     Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves aggregated statistics about all historical print jobs (total prints, total time, etc.).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>HistoryTotals containing aggregated statistics, or null if statistics cannot be retrieved</returns>
     Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes a specific print job from the history.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="jobId">The unique identifier of the history job to delete</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if deletion succeeded, false if job not found or deletion failed</returns>
     Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
-/// Capability marker interface for backend clients that support basic printer status.
-/// Provides standardized printer status information.
+/// Capability marker interface for backend clients that support basic printer status retrieval.
+/// Provides standardized online/offline status and printer state information.
 /// </summary>
 public interface ISupportsStatus
 {
+    /// <summary>
+    /// Retrieves the current status of the printer (online/offline state).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>PrinterStatus containing online status and current printer state</returns>
     Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default);
 }
 
 /// <summary>
-/// Capability marker interface for backend clients that support composite status (Moonraker, SDCP).
-/// Provides detailed status including position, temperatures, and camera URLs.
+/// Capability marker interface for backend clients that support composite status retrieval.
+/// Provides detailed status including printer position, temperatures, active job info, camera URLs, and build state.
+/// Typically supported by Moonraker and SDCP backends.
 /// </summary>
 public interface ISupportsCompositeStatus
 {
+    /// <summary>
+    /// Retrieves comprehensive printer status including position, temperatures, job progress, and media streams.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>PrinterCompositeStatus containing detailed printer state, position, temperatures, job info, and camera URLs</returns>
     Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default);
 }
 
 /// <summary>
-/// Capability marker interface for backend clients that support job status retrieval.
-/// Provides information about the current or last print job.
+/// Capability marker interface for backend clients that support current job status retrieval.
+/// Provides detailed information about the currently active or last completed print job.
 /// </summary>
 public interface ISupportsJobControl
 {
+    /// <summary>
+    /// Retrieves information about the current or last print job.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="apiKey">Optional API key for authentication if required by the backend</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>PrinterJob containing current/last job information, or null if no job exists</returns>
     Task<PrinterJob?> GetJobAsync(string baseUrl, string? apiKey = null, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backend clients that support Moonraker spoolman integration.
-/// Provides access to spoolman spool information and active spool tracking.
+/// Provides access to spool information and tracking for material management.
+/// Spoolman is a companion service for Moonraker that tracks filament spools and usage.
 /// </summary>
 public interface ISupportsSpoolman
 {
+    /// <summary>
+    /// Retrieves the ID of the currently active/loaded spool in Spoolman.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>The ID of the active spool, or null if no spool is active or Spoolman is unavailable</returns>
     Task<int?> GetSpoolmanActiveSpoolAsync(string baseUrl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves detailed information about a specific spool by ID.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="spoolId">The unique ID of the spool to retrieve</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>JSON string containing spool information, or null if spool not found</returns>
     Task<string?> GetSpoolmanSpoolByIdAsync(string baseUrl, int spoolId, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backends that support raw G-code execution.
-/// Allows sending arbitrary G-code commands to the printer (Moonraker).
+/// Allows sending arbitrary G-code commands directly to the printer firmware.
+/// Useful for executing specialized commands not covered by standard capabilities.
 /// </summary>
 public interface ISupportsGcodeExecution
 {
+    /// <summary>
+    /// Sends a raw G-code command to the printer firmware.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="gcode">The G-code command string to execute (e.g., "M84" to disable motors)</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if G-code command was sent and executed successfully, false if send/execution failed</returns>
     Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default);
 }
 
 /// <summary>
-/// Capability marker interface for backends that support firmware/system restart operations.
+/// Capability marker interface for backends that support firmware and system restart operations.
+/// Used for restarting the printer firmware or associated services.
 /// </summary>
 public interface ISupportsControlRestart
 {
+    /// <summary>
+    /// Restarts the printer firmware.
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the backend printer server</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if restart command was sent successfully, false if restart failed</returns>
     Task<bool> FirmwareRestartAsync(string baseUrl, CancellationToken ct = default);
 }
 
 /// <summary>
 /// Capability marker interface for backends that support OctoPrint-specific temperature operations.
-/// Extends basic temperature control with OctoPrint's additional methods.
+/// Extends basic temperature control with OctoPrint's granular hotend/tool targeting and required API key handling.
 /// </summary>
 public interface ISupportsOctoPrintTemperature
 {
+    /// <summary>
+    /// Sets the target bed temperature (OctoPrint-specific implementation).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the OctoPrint server</param>
+    /// <param name="apiKey">Required API key for OctoPrint authentication</param>
+    /// <param name="bedTemp">Target bed temperature in Celsius</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if temperature was set successfully, false if operation failed</returns>
     Task<bool> SetBedTempAsync(string baseUrl, string apiKey, double bedTemp, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets the target hotend/tool temperature (OctoPrint-specific implementation).
+    /// </summary>
+    /// <param name="baseUrl">The base URL of the OctoPrint server</param>
+    /// <param name="apiKey">Required API key for OctoPrint authentication</param>
+    /// <param name="hotendTemp">Target hotend temperature in Celsius</param>
+    /// <param name="tool">The tool identifier to target (e.g., "tool0", "tool1"), defaults to "tool0"</param>
+    /// <param name="ct">Cancellation token to cancel the operation</param>
+    /// <returns>True if temperature was set successfully, false if operation failed</returns>
     Task<bool> SetHotendTempAsync(string baseUrl, string apiKey, double hotendTemp, string tool = "tool0", CancellationToken ct = default);
 }
 
-// ========== STANDARDIZED DATA TYPES FOR CAPABILITY INTERFACES ==========
-// These types normalize responses from different printer backends into common structures
-
 /// <summary>
 /// Standardized printer file information across all backend implementations.
+/// Provides consistent file metadata regardless of the backend printer type.
 /// </summary>
 public class PrinterFileInfo
 {
+    /// <summary>
+    /// The filename of the file (e.g., "model.gcode").
+    /// </summary>
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The full path to the file on the printer (e.g., "gcodes/model.gcode").
+    /// </summary>
     public string Path { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The size of the file in bytes, or null if not available.
+    /// </summary>
     public long? Size { get; set; }
-    public DateTime? Modified { get; set; }
+
+    /// <summary>
+    /// Unix timestamp (seconds since 1970-01-01 UTC) when the file was last modified, or null if not available.
+    /// Backend implementations are responsible for converting from DateTime to Unix timestamp format.
+    /// </summary>
+    public long? Modified { get; set; }
+
+    /// <summary>
+    /// Absolute URL to the file's thumbnail image, or null if no thumbnail available.
+    /// Backend implementations are responsible for constructing the complete URL if thumbnails are supported.
+    /// </summary>
+    public string? ThumbnailUrl { get; set; }
 }
 
 /// <summary>
 /// Standardized printer file metadata across all backend implementations.
+/// Provides detailed information extracted from G-code files including estimated print time,
+/// layer information, temperature settings, and embedded thumbnails.
 /// </summary>
 public class PrinterFileMetadata
 {
+    /// <summary>
+    /// The full path to the file on the printer (e.g., "gcodes/model.gcode").
+    /// </summary>
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Estimated total print time in seconds, or null if not available.
+    /// </summary>
     public double? PrintTime { get; set; }
+
+    /// <summary>
+    /// Layer height in millimeters used for the print, or null if not available.
+    /// </summary>
     public double? LayerHeight { get; set; }
+
+    /// <summary>
+    /// First layer extrusion temperature in Celsius, or null if not available.
+    /// </summary>
     public double? FirstLayerExtrTemp { get; set; }
+
+    /// <summary>
+    /// First layer bed temperature in Celsius, or null if not available.
+    /// </summary>
     public double? FirstLayerBedTemp { get; set; }
+
+    /// <summary>
+    /// Total object height in millimeters, or null if not available.
+    /// </summary>
     public double? ObjectHeight { get; set; }
+
+    /// <summary>
+    /// Estimated filament used in grams, or null if not available.
+    /// </summary>
     public double? ExtrUsedFilament { get; set; }
+    
+    /// <summary>
+    /// Thumbnail images embedded in the G-code file.
+    /// Each tuple contains (Width in pixels, Height in pixels, Relative path to thumbnail file).
+    /// The list is empty if no thumbnails are embedded in the file.
+    /// </summary>
+    public List<(int Width, int Height, string RelativePath)> Thumbnails { get; set; } = new();
 }
 
 /// <summary>
 /// Standardized printer information across all backend implementations.
+/// Provides consistent printer metadata regardless of backend type.
 /// Avoids naming conflicts with backend-specific PrinterInfo types.
 /// </summary>
 public class StandardPrinterInfo
 {
+    /// <summary>
+    /// The configured name of the printer.
+    /// </summary>
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The firmware version running on the printer (e.g., "v0.11.0", "Marlin 2.1.1").
+    /// </summary>
     public string Firmware { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The printer model or hardware type (e.g., "Prusa i3 MK3S+", "Voron 2.4").
+    /// </summary>
     public string Model { get; set; } = string.Empty;
 }

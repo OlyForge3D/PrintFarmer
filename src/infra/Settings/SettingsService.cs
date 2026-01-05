@@ -64,6 +64,7 @@ namespace Farm.Infrastructure.Settings
             _settingsRepo.SetAsync(appAttr.Key, json).ConfigureAwait(false).GetAwaiter().GetResult();
             _settingsRepo.SaveChangesAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
+
         private Dictionary<string, object> _settings = new();
         private readonly List<Type> _settingTypes;
 

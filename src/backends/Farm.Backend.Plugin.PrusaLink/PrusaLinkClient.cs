@@ -629,7 +629,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                             Name = f.Name,
                             Path = f.Name,
                             Size = f.Size,
-                            Modified = f.MTimestamp > 0 ? DateTimeOffset.FromUnixTimeSeconds(f.MTimestamp).UtcDateTime : null
+                            Modified = f.MTimestamp > 0 ? f.MTimestamp : null,
+                            ThumbnailUrl = null // PrusaLink doesn't expose thumbnail URLs yet
                         })
                         .ToList();
                 }
@@ -650,8 +651,11 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                     .Select(f => new PrinterFileInfo
                     {
                         Name = f.Display,
-                        Path = f.Display
-                        // Legacy API (FileChild model) doesn't provide size or modified timestamp
+                        Path = f.Display,
+                        // Legacy API (FileChild model) doesn't provide size, modified timestamp, or thumbnails
+                        Size = null,
+                        Modified = null,
+                        ThumbnailUrl = null
                     })
                     .ToList();
             }
