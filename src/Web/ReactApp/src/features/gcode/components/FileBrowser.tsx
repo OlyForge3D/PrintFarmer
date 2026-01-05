@@ -62,7 +62,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const [currentPath, setCurrentPath] = useState(initialPath);
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<GcodeFile[]>([]);
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'date'>('name');
@@ -165,7 +165,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (filePaths: string[]) => apiClient.deleteGcodeFiles(filePaths),
+    mutationFn: (files: GcodeFile[]) => apiClient.deleteGcodeFiles(files.map(f => f.id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gcode-files'] });
       setSelectedFiles([]);
@@ -404,7 +404,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     if (selectedFiles.length === (files?.files?.length ?? 0)) {
       setSelectedFiles([]);
     } else {
-      setSelectedFiles(files?.files?.map((f: GcodeFile) => f.path) || []);
+      setSelectedFiles(files?.files?.filter((f: GcodeFile) => !f.isDirectory) || []);
     }
   };
 
@@ -583,7 +583,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 onDownload={(path) => downloadMutation.mutate(path)}
                 onDelete={(path) => {
                   if (confirm(`Delete ${file.fileName}?`)) {
-                    deleteMutation.mutate([path]);
+                    deleteMutation.mutate([file]);
                   }
                 }}
                 isDeleting={deleteMutation.isPending}
@@ -695,7 +695,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             <Button
                               onClick={() => {
                                 if (confirm(`Delete ${file.fileName}?`)) {
-                                  deleteMutation.mutate([file.path]);
+                                  deleteMutation.mutate([file]);
                                 }
                               }}
                               disabled={deleteMutation.isPending}
@@ -711,7 +711,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                           <Button
                             onClick={() => {
                               if (confirm(`Delete ${file.fileName}?`)) {
-                                deleteMutation.mutate([file.path]);
+                                deleteMutation.mutate([file]);
                               }
                             }}
                             disabled={deleteMutation.isPending}

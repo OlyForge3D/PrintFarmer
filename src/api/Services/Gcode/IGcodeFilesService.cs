@@ -143,17 +143,17 @@ namespace Farm.Web.Api.Services.Gcode
         Task<GcodeFileEntryDto> MakeDirectoryAsync(string? path, string? name, CancellationToken ct);
 
         /// <summary>
-        /// Deletes one or more G-code files or directories from the virtual filesystem.
+        /// Deletes one or more G-code files by ID from the database and filesystem.
         /// </summary>
-        /// <param name="virtualPaths">Collection of virtual paths to delete (files or directories).</param>
-        /// <param name="recursive">If true, deletes directories and all contents. If false, only empty directories are deleted.</param>
+        /// <param name="fileIds">Collection of file IDs (GUIDs) to delete.</param>
         /// <param name="ct">Cancellation token.</param>
-        /// <returns>True if all deletions succeeded, false if any deletion failed.</returns>
+        /// <returns>True if at least one file was deleted successfully; false if no files were found or deleted.</returns>
         /// <remarks>
-        /// Physical files are deleted from disk while database records are removed. Directories can only be
-        /// deleted if empty (unless recursive=true). Non-existent paths are silently skipped.
+        /// Deletes files by their unique ID rather than path resolution. This allows deletion of orphaned files
+        /// (database records with missing physical files). Database records are deleted first, then physical files.
+        /// Missing physical files are counted as successful deletions since the database record was cleaned up.
         /// </remarks>
-        Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, CancellationToken ct);
+        Task<bool> DeleteFilesAsync(IEnumerable<Guid> fileIds, CancellationToken ct);
 
         /// <summary>
         /// Downloads a G-code file by its virtual path.

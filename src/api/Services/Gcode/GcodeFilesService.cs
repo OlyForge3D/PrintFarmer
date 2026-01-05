@@ -814,127 +814,115 @@ namespace Farm.Web.Api.Services.Gcode
         }
 
         /// <summary>
-        /// Deletes one or more G-code files or directories from the virtual file system.
+        /// Deletes one or more G-code files by ID from the virtual file system and database.
         /// </summary>
-        /// <param name="virtualPaths">Collection of virtual paths to delete</param>
-        /// <param name="recursive">If true, recursively deletes directories and their contents</param>
+        /// <param name="fileIds">Collection of file IDs (GUIDs) to delete</param>
         /// <param name="ct">Cancellation token</param>
         /// <returns>True if at least one file was deleted successfully; false otherwise</returns>
         /// <remarks>
-        /// This method resolves virtual paths to physical locations and deletes the actual files.
-        /// Failed deletions are logged but don't stop the operation - partial success is possible.
-        /// Database records should be cleaned up separately (not handled by this method).
+        /// This method deletes by file ID (GUID) rather than path resolution, ensuring orphaned files
+        /// (database records with missing physical files) can be properly cleaned up.
+        /// Database records are deleted first, then physical files (with exception handling for missing files).
         /// </remarks>
-        public async Task<bool> DeleteFilesAsync(IEnumerable<string> virtualPaths, bool recursive, CancellationToken ct)
+        public async Task<bool> DeleteFilesAsync(IEnumerable<Guid> fileIds, CancellationToken ct)
         {
-            string storageRoot = _storagePathService.GetGcodeStorageDirectory();
-            List<string> virtualPathsList = virtualPaths.ToList();
+            List<Guid> fileIdsList = fileIds.ToList();
             
-            // Step 1: Resolve all virtual paths to full file paths
-            List<(string virtualPath, string fullPath)> resolvedPaths = new();
-            foreach (string virtualPath in virtualPathsList)
+            _logger.LogInformation($"[DeleteFilesAsync] Starting deletion of {fileIdsList.Count} file(s) by ID");
+            
+            // Step 1: Get all file records from database by ID
+            List<GcodeFile> filesToDelete = new();
+            foreach (var fileId in fileIdsList)
             {
                 try
                 {
-                    (_, string fullFilePath, _) = ResolveVirtualPath(virtualPath, storageRoot);
-                    resolvedPaths.Add((virtualPath, fullFilePath));
+                    var file = await _gcodeRepo.GetByIdWithIncludesAsync(fileId, ct);
+                    if (file != null)
+                    {
+                        filesToDelete.Add(file);
+                        _logger.LogInformation($"[DeleteFilesAsync] Found file {file.FileName} (ID: {fileId})");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[DeleteFilesAsync] File not found in database: {fileId}");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to resolve path {virtualPath}: {ex.Message}");
+                    _logger.LogWarning($"[DeleteFilesAsync] Failed to retrieve file {fileId}: {ex.Message}");
                 }
             }
 
-            if (resolvedPaths.Count == 0)
+            if (filesToDelete.Count == 0)
             {
+                _logger.LogWarning($"[DeleteFilesAsync] No files found in database, returning false");
                 return false;
             }
 
-            // Step 2: Collect all full paths and file records
-            List<string> fullPathsToDelete = new();
-            List<GcodeFile> filesToDelete = new();
+            // Step 2: Delete database records first (before deleting physical files)
+            _logger.LogInformation($"[DeleteFilesAsync] Deleting {filesToDelete.Count} record(s) from database");
             
-            foreach (var (virtualPath, fullPath) in resolvedPaths)
+            foreach (var file in filesToDelete)
             {
-                if (Directory.Exists(fullPath))
-                {
-                    if (recursive)
-                    {
-                        // For directories, find all files within them
-                        var filesInDir = await _gcodeRepo.ListByDirectoryPrefixAsync(fullPath, ct);
-                        fullPathsToDelete.AddRange(filesInDir.Select(f => Path.Combine(f.FilePath, f.FileName)));
-                        filesToDelete.AddRange(filesInDir);
-                    }
-                }
-                else if (File.Exists(fullPath))
-                {
-                    fullPathsToDelete.Add(fullPath);
-                }
+                _logger.LogInformation($"[DeleteFilesAsync]   - Removing from DB: {file.FileName} (ID: {file.Id})");
+                await _gcodeRepo.RemoveAsync(file, ct);
             }
+            
+            await _gcodeRepo.SaveChangesAsync(ct);
+            _logger.LogInformation($"[DeleteFilesAsync] Successfully saved database changes, {filesToDelete.Count} record(s) deleted from DB");
 
-            // Step 3: Get remaining file records from database (for files queried by path)
-            if (fullPathsToDelete.Count > 0 && filesToDelete.Count == 0)
-            {
-                filesToDelete = await _gcodeRepo.GetByFullPathsAsync(fullPathsToDelete, ct);
-            }
-
-            // Step 4: Delete database records first (before deleting physical files)
-            if (filesToDelete.Count > 0)
-            {
-                foreach (var file in filesToDelete)
-                {
-                    await _gcodeRepo.RemoveAsync(file, ct);
-                }
-                await _gcodeRepo.SaveChangesAsync(ct);
-            }
-
-            // Step 5: Delete physical files (gcode + thumbnails) and directories in one pass
+            // Step 3: Delete physical files (gcode + thumbnails)
+            // If a physical file is missing, we still count it as deleted since the DB record was removed
             int deleted = 0;
-            foreach (var (virtualPath, fullPath) in resolvedPaths)
+            foreach (var file in filesToDelete)
             {
                 try
                 {
-                    if (Directory.Exists(fullPath))
+                    string fullPath = Path.Combine(file.FilePath, file.FileName);
+                    
+                    if (File.Exists(fullPath))
                     {
-                        if (recursive)
-                        {
-                            Directory.Delete(fullPath, true);
-                            deleted++;
-                        }
-                    }
-                    else if (File.Exists(fullPath))
-                    {
+                        _logger.LogInformation($"[DeleteFilesAsync] Deleting file from disk: {fullPath}");
                         File.Delete(fullPath);
                         deleted++;
-                        
-                        // Also delete associated thumbnail if it exists
-                        var fileRecord = filesToDelete.FirstOrDefault(f => 
-                            Path.Combine(f.FilePath, f.FileName).Equals(fullPath, StringComparison.Ordinal));
-                        
-                        if (fileRecord?.ThumbnailFileName != null)
+                        _logger.LogInformation($"[DeleteFilesAsync] ✓ Successfully deleted file from disk: {file.FileName}");
+                    }
+                    else
+                    {
+                        deleted++;
+                        _logger.LogInformation($"[DeleteFilesAsync] ✓ File not on disk (DB record already deleted): {file.FileName}");
+                    }
+                    
+                    // Delete associated thumbnail if it exists
+                    if (!string.IsNullOrEmpty(file.ThumbnailFileName))
+                    {
+                        string thumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+                        _logger.LogInformation($"[DeleteFilesAsync] Checking for thumbnail: {thumbnailPath}");
+                        try
                         {
-                            string thumbnailPath = Path.Combine(fileRecord.FilePath, fileRecord.ThumbnailFileName);
-                            try
+                            if (File.Exists(thumbnailPath))
                             {
-                                if (File.Exists(thumbnailPath))
-                                {
-                                    File.Delete(thumbnailPath);
-                                    _logger.LogInformation($"Deleted thumbnail: {thumbnailPath}");
-                                }
+                                File.Delete(thumbnailPath);
+                                _logger.LogInformation($"[DeleteFilesAsync] ✓ Deleted thumbnail: {thumbnailPath}");
                             }
-                            catch (Exception ex)
+                            else
                             {
-                                _logger.LogWarning($"Failed to delete thumbnail for {fileRecord.Name}: {ex.Message}");
+                                _logger.LogInformation($"[DeleteFilesAsync] Thumbnail file not found on disk: {thumbnailPath}");
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning($"[DeleteFilesAsync] Failed to delete thumbnail: {ex.Message}");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to delete file {virtualPath}: {ex.Message}");
+                    _logger.LogWarning($"[DeleteFilesAsync] ✗ Exception while deleting {file.FileName} (ID: {file.Id}): {ex.GetType().Name}: {ex.Message}");
                 }
             }
 
+            _logger.LogInformation($"[DeleteFilesAsync] Deletion complete: {deleted}/{filesToDelete.Count} file(s) successfully processed, returning {(deleted > 0)}");
             return deleted > 0;
         }
 

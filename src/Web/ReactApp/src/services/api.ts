@@ -1012,8 +1012,8 @@ export class ApiClient {
     return response.data;
   }
 
-  async deleteGcodeFiles(filePaths: string[]): Promise<void> {
-    await this.client.delete("/gcode-files", { data: { filePaths } });
+  async deleteGcodeFiles(fileIds: string[]): Promise<void> {
+    await this.client.delete("/gcode-files", { data: { fileIds } });
   }
 
   async downloadGcodeFile(filePath: string): Promise<void> {

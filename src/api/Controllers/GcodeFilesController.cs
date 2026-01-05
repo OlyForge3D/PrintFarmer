@@ -479,28 +479,27 @@ public class GcodeFilesController(
     }
 
     /// <summary>
-    /// Delete G-code files by file paths (for hierarchical browser)
+    /// Delete G-code files by file IDs
     /// </summary>
-    /// <param name="request">Request with list of file paths to delete</param>
-    /// <param name="recursive">Whether to recursively delete directories (not currently supported)</param>
+    /// <param name="request">Request with list of file IDs (GUIDs) to delete</param>
     /// <returns>Deletion result with count</returns>
     [HttpDelete]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult> DeleteAsync([FromBody] DeleteFilesRequest request, [FromQuery] bool recursive = false)
+    public async Task<ActionResult> DeleteAsync([FromBody] DeleteFilesRequest request)
     {
-        if (request?.FilePaths == null || request.FilePaths.Count == 0)
+        if (request?.FileIds == null || request.FileIds.Count == 0)
         {
-            return BadRequest("filePaths is required");
+            return BadRequest("fileIds is required");
         }
 
         try
         {
-            bool success = await gcodeFilesService.DeleteFilesAsync(request.FilePaths, recursive, HttpContext.RequestAborted);
+            bool success = await gcodeFilesService.DeleteFilesAsync(request.FileIds, HttpContext.RequestAborted);
             return Ok(new
             {
-                deleted = success ? request.FilePaths.Count : 0,
-                totalRequested = request.FilePaths.Count
+                deleted = success ? request.FileIds.Count : 0,
+                totalRequested = request.FileIds.Count
             });
         }
         catch (Exception ex)
@@ -1025,7 +1024,7 @@ public sealed record UpdateSettingsRequest(
 /// <summary>Request body for bulk deletion of virtual G-code files.</summary>
 public sealed class DeleteFilesRequest
 {
-    [JsonPropertyName("filePaths")] public IList<string> FilePaths { get; init; } = Array.Empty<string>();
+    [JsonPropertyName("fileIds")] public IList<Guid> FileIds { get; init; } = Array.Empty<Guid>();
 }
 
 // ---------------- Chunk Upload DTOs ----------------
