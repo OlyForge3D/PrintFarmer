@@ -76,6 +76,11 @@ namespace Farm.Web.Api.Tests.SlicerServices
             return new Mock<IFilamentProfileRepository>(MockBehavior.Loose);
         }
 
+        private static Mock<IMachineProfileRepository> CreateMockMachineProfileRepository()
+        {
+            return new Mock<IMachineProfileRepository>(MockBehavior.Loose);
+        }
+
         private static Mock<ICatalogService> CreateMockCatalogService()
         {
             Mock<ICatalogService> mock = new Mock<ICatalogService>(MockBehavior.Loose);
@@ -115,7 +120,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -168,7 +174,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {
@@ -217,7 +224,8 @@ namespace Farm.Web.Api.Tests.SlicerServices
             Mock<IUnifiedLoggingService> logger = CreateMockLogger();
             Mock<ICatalogService> catalogService = CreateMockCatalogService();
             Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
-            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
+            Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+            SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, catalogService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger.Object, settings);
 
             RegisterSlicerDto dto = new RegisterSlicerDto
             {

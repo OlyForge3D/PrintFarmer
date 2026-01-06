@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Contracts.Slicing;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -62,7 +63,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             RegisterSlicerDto registrationDto = new RegisterSlicerDto
             {
                 Name = _serviceName,
-                SlicerType = 0, // OrcaSlicer enum value
+                SlicerType = (int)SlicerType.OrcaSlicer,
                 Version = _serviceVersion,
                 Host = _serviceHost,
                 UiManifestUrl = null, // Optional: can be added later for embedded UI

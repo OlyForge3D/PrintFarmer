@@ -45,6 +45,7 @@ namespace Farm.Web.Api.Services.Slicing
         private readonly IWorkerRepository _workerRepo;
         private readonly IProcessProfileRepository _profileRepo;
         private readonly IFilamentProfileRepository _filamentProfileRepo;
+        private readonly IMachineProfileRepository _machineProfileRepo;
         private readonly ICatalogService _catalogService;
         private readonly Farm.Infrastructure.Settings.ISettingsService _settingsService;
         private readonly IHubContext<SlicerHub> _hub;
@@ -62,6 +63,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// <param name="workerRepo">Repository for worker data access and management</param>
         /// <param name="profileRepo">Repository for process profile data access</param>
         /// <param name="filamentProfileRepo">Repository for filament profile data access</param>
+        /// <param name="machineProfileRepo">Repository for machine profile data access</param>
         /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
         /// <param name="settingsService">Service for managing application settings and distributed locks</param>
         /// <param name="hub">SignalR hub context for broadcasting worker state changes to connected clients</param>
@@ -75,6 +77,7 @@ namespace Farm.Web.Api.Services.Slicing
             IWorkerRepository workerRepo,
             IProcessProfileRepository profileRepo,
             IFilamentProfileRepository filamentProfileRepo,
+            IMachineProfileRepository machineProfileRepo,
             ICatalogService catalogService,
             Farm.Infrastructure.Settings.ISettingsService settingsService,
             IHubContext<SlicerHub> hub,
@@ -87,6 +90,7 @@ namespace Farm.Web.Api.Services.Slicing
             _workerRepo = workerRepo ?? throw new ArgumentNullException(nameof(workerRepo));
             _profileRepo = profileRepo ?? throw new ArgumentNullException(nameof(profileRepo));
             _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
+            _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
             _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -619,77 +623,206 @@ namespace Farm.Web.Api.Services.Slicing
                 HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
                 HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
 
-                _logger.LogInformation($"[SeedProfilesFromWorker] Filtering profiles for {catalogManufacturerNames.Count} manufacturers and {catalogModelNames.Count} models in catalog");
+                _logger.LogInformation($"[SeedProfilesFromWorker] Filtering profiles for {catalogManufacturerNames.Count} manufacturers and {catalogModels.Count} models in catalog");
 
                 int imported = 0;
 
-                // Flatten profiles from the grouped dictionaries, filtering to catalog manufacturers/models only
-                List<ProcessProfileDto> filteredProcessProfiles = new List<ProcessProfileDto>();
-                if (allProfiles?.ProcessProfiles != null)
+                // Use the hierarchical structure from the worker: Manufacturer -> Model -> Profiles
+                if (allProfiles?.ByHierarchy != null && allProfiles.ByHierarchy.Count > 0)
                 {
-                    foreach (var manufacturerGroup in allProfiles.ProcessProfiles)
+                    _logger.LogInformation($"[SeedProfilesFromWorker] Processing {allProfiles.ByHierarchy.Count} manufacturers from worker hierarchy");
+                    foreach (var manufacturerEntry in allProfiles.ByHierarchy)
                     {
-                        if (catalogManufacturerNames.Contains(manufacturerGroup.Key ?? ""))
+                        string manufacturerName = manufacturerEntry.Key;
+                        ManufacturerProfilesDto manufacturerProfiles = manufacturerEntry.Value;
+
+                        // Check if manufacturer is in catalog
+                        if (!catalogManufacturerNames.Contains(manufacturerName))
                         {
-                            filteredProcessProfiles.AddRange(manufacturerGroup.Value ?? new List<ProcessProfileDto>());
+                            _logger.LogDebug($"[SeedProfilesFromWorker] Skipping manufacturer '{manufacturerName}' - not in catalog (catalog has: {string.Join(", ", catalogManufacturerNames.Where(m => m.StartsWith(manufacturerName.Substring(0, Math.Min(3, manufacturerName.Length)), StringComparison.OrdinalIgnoreCase)))})");
+                            continue;
                         }
-                    }
-                }
 
-                // Import process profiles from worker (only for catalog manufacturers)
-                if (filteredProcessProfiles.Count > 0)
-                {
-                    _logger.LogInformation($"[SeedProfilesFromWorker] Importing {filteredProcessProfiles.Count} process profiles for catalog manufacturers");
-                    foreach (ProcessProfileDto? profile in filteredProcessProfiles)
-                    {
-                        try
+                        _logger.LogInformation($"[SeedProfilesFromWorker] Processing manufacturer '{manufacturerName}' with {manufacturerProfiles.Models?.Count ?? 0} models");
+
+                        // Process each model for this manufacturer
+                        if (manufacturerProfiles.Models == null || manufacturerProfiles.Models.Count == 0)
                         {
-                            string profileJson = JsonSerializer.Serialize(profile);
-                            string profileHash = ComputeProfileHash(profileJson);
+                            _logger.LogWarning($"[SeedProfilesFromWorker] Manufacturer '{manufacturerName}' has no models!");
+                            continue;
+                        }
 
-                            ProcessProfile? existing = await _profileRepo.GetByHashAsync(profileHash, ct);
-                            if (existing != null && existing.IsSystem)
+                        foreach (var modelEntry in manufacturerProfiles.Models)
+                        {
+                            string modelId = modelEntry.Key;
+                            PrinterModelProfilesDto modelProfiles = modelEntry.Value;
+                            string displayName = modelProfiles.Name;
+
+                            // Check if this model is in the catalog
+                            if (!catalogModelNames.Contains(displayName))
                             {
+                                _logger.LogDebug($"[SeedProfilesFromWorker] Skipping model '{displayName}' - not in catalog");
                                 continue;
                             }
 
-                            ProcessProfile systemProfile = new ProcessProfile
+                            // STEP 1: Import machine profiles for this model FIRST (they're the foundation)
+                            // Only import profiles with instantiation=true (user-selectable profiles)
+                            if (modelProfiles.MachineProfiles != null && modelProfiles.MachineProfiles.Count > 0)
                             {
-                                Id = Guid.NewGuid(),
-                                Name = string.IsNullOrEmpty(profile.Name) ? $"{profile.Quality} ({profile.LayerHeight}mm)" : profile.Name,
-                                Description = $"OrcaSlicer process profile: {profile.Quality} quality at {profile.LayerHeight}mm layer height",
-                                SlicerType = SlicerType.OrcaSlicer,
-                                Quality = Enum.TryParse(profile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
-                                LayerHeight = profile.LayerHeight,
-                                InfillPercentage = profile.InfillPercentage,
-                                PrintSpeed = profile.PrintSpeed,
-                                EnableSupports = profile.Supports,
-                                IsSystem = true,
-                                IsPublic = true,
-                                IsDefault = false,
-                                Hash = profileHash,
-                                RawJson = profileJson,
-                                CreatedAt = DateTime.UtcNow,
-                                UpdatedAt = DateTime.UtcNow
-                            };
+                                var instantiableMachineProfiles = modelProfiles.MachineProfiles.Where(p => p.Instantiation).ToList();
+                                _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableMachineProfiles.Count} instantiable machine profiles (out of {modelProfiles.MachineProfiles.Count} total) for {displayName}");
+                                
+                                foreach (var machineProfile in instantiableMachineProfiles)
+                                {
+                                    try
+                                    {
+                                        string profileJson = JsonSerializer.Serialize(machineProfile);
+                                        string profileHash = ComputeProfileHash(profileJson);
 
-                            await _profileRepo.AddAsync(systemProfile, ct);
-                            imported++;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import process profile: {ex.Message}");
+                                        MachineProfile? existing = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
+                                        if (existing != null && existing.IsSystem)
+                                        {
+                                            continue;
+                                        }
+
+                                        MachineProfile systemProfile = new MachineProfile
+                                        {
+                                            Id = Guid.NewGuid(),
+                                            Name = !string.IsNullOrEmpty(machineProfile.Name) ? machineProfile.Name : displayName,
+                                            Manufacturer = manufacturerName,
+                                            Description = $"OrcaSlicer machine profile for {displayName}" + (machineProfile.NozzleDiameter.HasValue ? $" ({machineProfile.NozzleDiameter}mm nozzle)" : ""),
+                                            SlicerType = SlicerType.OrcaSlicer,
+                                            IsSystem = true,
+                                            IsPublic = true,
+                                            IsDefault = false,
+                                            Hash = profileHash,
+                                            RawJson = profileJson,
+                                            CreatedAt = DateTime.UtcNow,
+                                            UpdatedAt = DateTime.UtcNow
+                                        };
+
+                                        await _machineProfileRepo.AddAsync(systemProfile, ct);
+                                        imported++;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import machine profile {machineProfile.Name} for {displayName}: {ex.Message}");
+                                    }
+                                }
+                            }
+
+                            // STEP 2: Import filament profiles for this model (they're compatible with the model)
+                            // Only import profiles with instantiation=true (user-selectable profiles)
+                            if (modelProfiles.FilamentProfiles != null && modelProfiles.FilamentProfiles.Count > 0)
+                            {
+                                var instantiableFilamentProfiles = modelProfiles.FilamentProfiles.Where(p => p.Instantiation).ToList();
+                                _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableFilamentProfiles.Count} instantiable filament profiles (out of {modelProfiles.FilamentProfiles.Count} total) for {displayName}");
+                                
+                                foreach (var filamentProfile in instantiableFilamentProfiles)
+                                {
+                                    try
+                                    {
+                                        string profileJson = JsonSerializer.Serialize(filamentProfile);
+                                        string profileHash = ComputeProfileHash(profileJson);
+
+                                        FilamentProfile? existing = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
+                                        if (existing != null && existing.IsSystem)
+                                        {
+                                            continue;
+                                        }
+
+                                        FilamentProfile systemProfile = new FilamentProfile
+                                        {
+                                            Id = Guid.NewGuid(),
+                                            Name = string.IsNullOrEmpty(filamentProfile.Name) ? filamentProfile.Material : filamentProfile.Name,
+                                            Material = filamentProfile.Material,
+                                            Manufacturer = filamentProfile.Manufacturer ?? manufacturerName,
+                                            Description = filamentProfile.Description ?? $"OrcaSlicer filament profile: {filamentProfile.Material}",
+                                            SlicerType = SlicerType.OrcaSlicer,
+                                            NozzleTemperature = filamentProfile.NozzleTemperature,
+                                            BedTemperature = filamentProfile.BedTemperature,
+                                            PrintSpeed = filamentProfile.PrintSpeed,
+                                            IsSystem = true,
+                                            IsPublic = true,
+                                            IsDefault = false,
+                                            Hash = profileHash,
+                                            RawJson = profileJson,
+                                            CreatedAt = DateTime.UtcNow,
+                                            UpdatedAt = DateTime.UtcNow
+                                        };
+
+                                        await _filamentProfileRepo.AddAsync(systemProfile, ct);
+                                        imported++;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import filament profile for {displayName}: {ex.Message}");
+                                    }
+                                }
+                            }
+
+                            // STEP 3: Import process profiles for this model (they're compatible with the model)
+                            // STEP 3: Import process/quality profiles for this model
+                            // Only import profiles with instantiation=true (user-selectable profiles)
+                            if (modelProfiles.ProcessProfiles != null && modelProfiles.ProcessProfiles.Count > 0)
+                            {
+                                var instantiableProcessProfiles = modelProfiles.ProcessProfiles.Where(p => p.Instantiation).ToList();
+                                _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableProcessProfiles.Count} instantiable process profiles (out of {modelProfiles.ProcessProfiles.Count} total) for {displayName}");
+                                
+                                foreach (var processProfile in instantiableProcessProfiles)
+                                {
+                                    try
+                                    {
+                                        string profileJson = JsonSerializer.Serialize(processProfile);
+                                        string profileHash = ComputeProfileHash(profileJson);
+
+                                        ProcessProfile? existing = await _profileRepo.GetByHashAsync(profileHash, ct);
+                                        if (existing != null && existing.IsSystem)
+                                        {
+                                            continue;
+                                        }
+
+                                        ProcessProfile systemProfile = new ProcessProfile
+                                        {
+                                            Id = Guid.NewGuid(),
+                                            Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
+                                            Description = processProfile.Description ?? $"OrcaSlicer process profile: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
+                                            SlicerType = SlicerType.OrcaSlicer,
+                                            Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                                            LayerHeight = processProfile.LayerHeight,
+                                            InfillPercentage = processProfile.InfillPercentage,
+                                            PrintSpeed = processProfile.PrintSpeed,
+                                            EnableSupports = processProfile.Supports,
+                                            IsSystem = true,
+                                            IsPublic = true,
+                                            IsDefault = false,
+                                            Hash = profileHash,
+                                            RawJson = profileJson,
+                                            CreatedAt = DateTime.UtcNow,
+                                            UpdatedAt = DateTime.UtcNow
+                                        };
+
+                                        await _profileRepo.AddAsync(systemProfile, ct);
+                                        imported++;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning($"[SeedProfilesFromWorker] Failed to import process profile for {displayName}: {ex.Message}");
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-
-                // Note: FilamentProfile and MachineProfile imports not yet implemented in this lightweight seed method
-                // Only process profiles for catalog manufacturers are imported on worker registration
-                // Use ProfilesService.SeedSystemProfilesFromWorkerAsync() for comprehensive profile seeding
+                else
+                {
+                    // Fallback to flat structures if ByHierarchy is not available
+                    _logger.LogWarning("[SeedProfilesFromWorker] ByHierarchy not available, falling back to flat profile structures");
+                }
 
                 if (imported > 0)
                 {
-                    _logger.LogInformation($"[SeedProfilesFromWorker] Seeded {imported} system OrcaSlicer process profiles on worker registration (filtered to catalog manufacturers)");
+                    _logger.LogInformation($"[SeedProfilesFromWorker] Seeded {imported} system OrcaSlicer profiles (machine, filament, and process) on worker registration (filtered to catalog manufacturers and models)");
                     await _repo.SaveChangesAsync(ct);
                 }
 

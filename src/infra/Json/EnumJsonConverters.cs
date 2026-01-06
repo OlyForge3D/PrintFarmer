@@ -105,3 +105,47 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
         writer.WriteStringValue(value.ToString());
     }
 }
+
+/// <summary>
+/// Permissive converter for bool that accepts string representations ("true", "false", "True", "False", "1", "0").
+/// Used for OrcaSlicer profile JSON where "instantiation": "true" is a string value.
+/// </summary>
+public sealed class StringToBoolJsonConverter : JsonConverter<bool>
+{
+    public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        try
+        {
+            return reader.TokenType switch
+            {
+                JsonTokenType.True => true,
+                JsonTokenType.False => false,
+                JsonTokenType.String => ParseString(reader.GetString()),
+                JsonTokenType.Number => reader.TryGetInt32(out int i) ? i != 0 : false,
+                _ => false
+            };
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ParseString(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("1", StringComparison.Ordinal) ||
+               value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        writer.WriteBooleanValue(value);
+    }
+}

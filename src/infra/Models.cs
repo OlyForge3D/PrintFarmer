@@ -1739,6 +1739,17 @@ public class MachineProfileDto
     public string Manufacturer { get; set; } = string.Empty;
     public string? Description { get; set; }
     public double? NozzleDiameter { get; set; } // e.g., 0.4, 0.6, 0.8 mm
+    /// <summary>
+    /// Whether this profile can be instantiated (used) in the slicer.
+    /// true = user-selectable, false = base/template profile for inheritance only.
+    /// </summary>
+    [JsonConverter(typeof(Json.StringToBoolJsonConverter))]
+    public bool Instantiation { get; set; } = true;
+    /// <summary>
+    /// Parent profile name to inherit settings from (used during seeding for inheritance resolution).
+    /// </summary>
+    [JsonPropertyName("inherits")]
+    public string? Inherits { get; set; }
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -1759,6 +1770,17 @@ public class FilamentProfileDto
     public IList<string> CompatiblePrinters { get; set; } = new List<string>();
     [JsonIgnore]
     public string? CompatiblePrintersCondition { get; set; }
+    /// <summary>
+    /// Whether this profile can be instantiated (used) in the slicer.
+    /// true = user-selectable, false = base/template profile for inheritance only.
+    /// </summary>
+    [JsonConverter(typeof(Json.StringToBoolJsonConverter))]
+    public bool Instantiation { get; set; } = true;
+    /// <summary>
+    /// Parent profile name to inherit settings from (used during seeding for inheritance resolution).
+    /// </summary>
+    [JsonPropertyName("inherits")]
+    public string? Inherits { get; set; }
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 
@@ -1779,6 +1801,17 @@ public class ProcessProfileDto
     public IList<string> CompatiblePrinters { get; set; } = new List<string>();
     [JsonIgnore]
     public string? CompatiblePrintersCondition { get; set; }
+    /// <summary>
+    /// Whether this profile can be instantiated (used) in the slicer.
+    /// true = user-selectable, false = base/template profile for inheritance only.
+    /// </summary>
+    [JsonConverter(typeof(Json.StringToBoolJsonConverter))]
+    public bool Instantiation { get; set; } = true;
+    /// <summary>
+    /// Parent profile name to inherit settings from (used during seeding for inheritance resolution).
+    /// </summary>
+    [JsonPropertyName("inherits")]
+    public string? Inherits { get; set; }
     public Dictionary<string, object> Settings { get; set; } = new();
 }
 

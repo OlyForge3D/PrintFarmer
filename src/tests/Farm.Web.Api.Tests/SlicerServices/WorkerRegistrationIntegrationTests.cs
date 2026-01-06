@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Contracts.Slicing;
+using Farm.Infrastructure.Domain;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -45,7 +46,7 @@ public class WorkerRegistrationIntegrationTests : IAsyncLifetime
         RegisterSlicerDto registrationDto = new RegisterSlicerDto
         {
             Name = "test-orca-worker",
-            SlicerType = 0, // OrcaSlicer
+            SlicerType = (int)SlicerType.OrcaSlicer,
             Version = "1.0.0-test",
             Host = "http://test-worker:8080",
             CapabilitiesJson = JsonSerializer.Serialize(new
