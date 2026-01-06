@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/services/api';
 import { CloseIcon, EditIcon, DeleteIcon, SaveIcon, DatabaseIcon, ImageIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import type { ManufacturerDto, PrinterModelDto, MotionTypeString } from '@/types/api';
 import { EditModelModal } from '@/features/models3d/components/EditModelModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -21,6 +22,8 @@ export function CatalogPage() {
   const [modelToEdit, setModelToEdit] = useState<PrinterModelDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'manufacturer' | 'model'; id: string; name: string } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -138,31 +141,38 @@ export function CatalogPage() {
     setEditModelModalOpen(false);
   };
 
-  const deleteManufacturer = async (id: string) => {
-    if (!confirm('Are you sure? This will also delete all associated models.')) return;
-
-    try {
-      await apiClient.deleteManufacturer(id);
-      setManufacturers(manufacturers.filter(m => m.id !== id));
-      setModels(models.filter(m => m.manufacturerId !== id));
-      if (selectedManufacturer?.id === id) {
-        setSelectedManufacturer(null);
-      }
-    } catch (err) {
-      setError('Failed to delete manufacturer');
-      console.error('Error deleting manufacturer:', err);
-    }
+  const deleteManufacturer = (id: string, name: string) => {
+    setDeleteTarget({ type: 'manufacturer', id, name });
+    setShowDeleteConfirmation(true);
   };
 
-  const deleteModel = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this model?')) return;
+  const deleteModel = (id: string, name: string) => {
+    setDeleteTarget({ type: 'model', id, name });
+    setShowDeleteConfirmation(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
 
     try {
-      await apiClient.deleteModel(id);
-      setModels(models.filter(m => m.id !== id));
+      if (deleteTarget.type === 'manufacturer') {
+        await apiClient.deleteManufacturer(deleteTarget.id);
+        setManufacturers(manufacturers.filter(m => m.id !== deleteTarget.id));
+        setModels(models.filter(m => m.manufacturerId !== deleteTarget.id));
+        if (selectedManufacturer?.id === deleteTarget.id) {
+          setSelectedManufacturer(null);
+        }
+      } else {
+        await apiClient.deleteModel(deleteTarget.id);
+        setModels(models.filter(m => m.id !== deleteTarget.id));
+      }
+      setShowDeleteConfirmation(false);
+      setDeleteTarget(null);
     } catch (err) {
-      setError('Failed to delete model');
-      console.error('Error deleting model:', err);
+      setError('Failed to delete');
+      console.error('Error deleting:', err);
+      setShowDeleteConfirmation(false);
+      setDeleteTarget(null);
     }
   };
   if (loading) {
@@ -279,7 +289,7 @@ export function CatalogPage() {
                         <Button
                           onClick={(e) => {
                             e.stopPropagation();
-                            deleteManufacturer(manufacturer.id);
+                            deleteManufacturer(manufacturer.id, manufacturer.name);
                           }}
                           variant="subtle"
                           size="sm"
@@ -392,7 +402,7 @@ export function CatalogPage() {
                               <EditIcon className="h-4 w-4 text-blue-400" />
                             </Button>
                             <Button
-                              onClick={() => deleteModel(model.id)}
+                              onClick={() => deleteModel(model.id, model.name)}
                               variant="subtle"
                               size="sm"
                               title="Delete model"
@@ -428,6 +438,24 @@ export function CatalogPage() {
         onSuccess={() => {
           loadData();
           closeEditModal();
+        }}
+      />
+
+      <ConfirmationModal
+        isOpen={showDeleteConfirmation}
+        title={deleteTarget?.type === 'manufacturer' ? 'Delete Manufacturer' : 'Delete Model'}
+        message={
+          deleteTarget?.type === 'manufacturer'
+            ? `Are you sure? This will also delete all associated models for "${deleteTarget.name}".`
+            : `Are you sure you want to delete this model "${deleteTarget?.name}"?`
+        }
+        confirmButtonText="Delete"
+        cancelButtonText="Cancel"
+        isDangerous={true}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          setShowDeleteConfirmation(false);
+          setDeleteTarget(null);
         }}
       />
     </PageTemplate>

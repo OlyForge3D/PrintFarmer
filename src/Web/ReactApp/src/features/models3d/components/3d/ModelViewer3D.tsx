@@ -1,4 +1,4 @@
-import React, { Suspense, useRef, useState, useEffect } from 'react';
+import React, { Suspense, useRef, useState, useEffect, MutableRefObject } from 'react';
 // (renderUnknown not required here)
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import {
@@ -15,6 +15,7 @@ import { PLYLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
 import { PerspectiveIcon, OrthographicIcon, RecenterIcon } from '../../../../common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui/Button';
 
 export interface ModelViewerProps {
   modelUrl: string;
@@ -425,12 +426,10 @@ function PLYModel({ url, color = "#0066cc", viewMode = 'solid', onDimensionsChan
  */
 function CameraController({ 
   viewDirection,
-  isPerspective,
-  onRecenter
+  isPerspective
 }: { 
   viewDirection: string | null;
   isPerspective: boolean;
-  onRecenter: () => void;
 }) {
   const { camera, gl } = useThree();
 
@@ -494,10 +493,14 @@ function CameraController({
       perspectiveCamera.up.set(0, 0, 1);
       
       // This would require changing the camera reference which is complex in R3F
-      console.log('Perspective camera switch requested');
+      if (window.PrintFarmerDebug?.models3d) {
+        console.log('Perspective camera switch requested');
+      }
     } else if (!isPerspective && !(currentCamera instanceof THREE.OrthographicCamera)) {
       // Switch to orthographic camera
-      console.log('Orthographic camera switch requested');
+      if (window.PrintFarmerDebug?.models3d) {
+        console.log('Orthographic camera switch requested');
+      }
     }
   }, [isPerspective, camera, gl]);
 
@@ -571,7 +574,9 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
   const [isPerspective, setIsPerspective] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('solid');
   const [isGridVisible, setIsGridVisible] = useState(showGrid);
-  const orbitControlsRef = useRef<any>(null);
+  // orbitControlsRef holds the R3F OrbitControls instance. Use `any` here to avoid importing three internals.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const orbitControlsRef = useRef<any>(null) as MutableRefObject<any>;
 
   // Update grid visibility when prop changes
   useEffect(() => {
@@ -710,7 +715,6 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         <CameraController 
           viewDirection={viewDirection} 
           isPerspective={isPerspective}
-          onRecenter={handleRecenter}
         />
 
         {/* Grid properly positioned on XY plane (slightly below Z=0) */}
@@ -744,28 +748,34 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
 
       {/* Camera Controls */}
       <div className="absolute top-4 right-4 flex gap-2">
-        <button
+        <Button
           onClick={handleToggleGrid}
+          variant="subtle"
+          size="sm"
           className={`${isGridVisible ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur hover:bg-pf-bg-3 rounded-lg p-2 transition-colors`}
           title={isGridVisible ? "Hide Grid" : "Show Grid"}
         >
-          <span className="text-xs font-medium text-pf-text-primary">
-            📐
-          </span>
-        </button>
-        <button
+          <span className="text-xs font-medium text-pf-text-primary">📐</span>
+        </Button>
+
+        <Button
           onClick={handleViewModeChange}
+          variant="subtle"
+          size="sm"
           className="bg-pf-bg-2/95 backdrop-blur hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
           title={`Switch to ${viewMode === 'solid' ? 'Wireframe' : viewMode === 'wireframe' ? 'X-ray' : 'Solid'} View`}
         >
           <span className="text-xs font-medium text-pf-text-primary uppercase">
             {viewMode === 'solid' && '🎯'}
-            {viewMode === 'wireframe' && '🔲'} 
+            {viewMode === 'wireframe' && '🔲'}
             {viewMode === 'xray' && '👻'}
           </span>
-        </button>
-        <button
+        </Button>
+
+        <Button
           onClick={handleToggleProjection}
+          variant="subtle"
+          size="sm"
           className="bg-pf-bg-2/95 backdrop-blur hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
           title={isPerspective ? "Switch to Orthographic View" : "Switch to Perspective View"}
         >
@@ -774,14 +784,17 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           ) : (
             <PerspectiveIcon className="w-5 h-5 text-pf-text-primary" />
           )}
-        </button>
-        <button
+        </Button>
+
+        <Button
           onClick={handleRecenter}
+          variant="subtle"
+          size="sm"
           className="bg-pf-bg-2/95 backdrop-blur hover:bg-pf-bg-3 border border-pf-border rounded-lg p-2 transition-colors"
           title="Recenter View"
         >
           <RecenterIcon className="w-5 h-5 text-pf-text-primary" />
-        </button>
+        </Button>
       </div>
 
       {/* Model Information Panel */}

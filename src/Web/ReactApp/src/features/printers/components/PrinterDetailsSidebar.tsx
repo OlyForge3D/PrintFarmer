@@ -12,9 +12,9 @@ import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesMo
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureInput, MovementInput, Select } from '@/common/components/ui';
 import type { Printer } from '@/types/api';
-import { 
-  NozzleIcon, 
-  BedIcon, 
+import {
+  NozzleIcon,
+  BedIcon,
   DisableMotorsIcon,
   HomeIcon,
   PlayIcon,
@@ -30,7 +30,7 @@ import {
   CloseIcon,
   MinusIcon,
   SnowflakeIcon,
-  StopIcon
+  // StopIcon removed - unused in this file
 } from '@/common/components/icons/MdiIcons';
 
 // Animation styles
@@ -84,7 +84,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const { data: apiPrinter, isLoading, refetch } = usePrinter(printerId || '');
   // Merge with realtime SignalR updates
   const printer = usePrinterDisplay((apiPrinter || {}) as Printer);
-  
+
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [hotendTemp, setHotendTemp] = useState<number | ''>('');
@@ -121,10 +121,10 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   if (!printerId) {
     return null;
   }
-  
+
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
-  
+
   // Update refs when display printer changes - refs don't trigger re-renders
   if (displayPrinter) {
     if (displayPrinter.hotendTemp !== undefined) lastKnownHotendTempRef.current = displayPrinter.hotendTemp;
@@ -163,7 +163,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   // Check if axes are homed based on homedAxes string from Moonraker
   // homedAxes is a string like "xyz", "xy", "z", or "" if not homed
   const homedAxes = (displayPrinter?.homedAxes ?? '').toLowerCase();
-  
+
   // Guarded debug logging - only log if enabled in window.PrintFarmerDebug
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
     console.log('PrinterDetailsSidebar - Status update:', {
@@ -176,16 +176,16 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
       z: displayPrinter?.z
     });
   }
-  
+
   // Determine if each axis is homed
   const isXHomed = homedAxes.includes('x');
   const isYHomed = homedAxes.includes('y');
   const isZHomed = homedAxes.includes('z');
-  
+
   if ((window as unknown as { PrintFarmerDebug?: { printerDetailsSidebar?: boolean } }).PrintFarmerDebug?.printerDetailsSidebar) {
     console.log('Homing state:', { isXHomed, isYHomed, isZHomed, homedAxes });
   }
-  
+
   // Printer is fully homed if all axes are homed
   const isAllHomed = isXHomed && isYHomed && isZHomed;
 
@@ -254,14 +254,14 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
   const handleHotendTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || hotendTemp === '') return;
-    
+
     try {
       const currentBedTemp = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : bedTemp;
-      const result = await apiClient.setTemperatures(printer.id, { 
+      const result = await apiClient.setTemperatures(printer.id, {
         hotend: Number(hotendTemp),
         bed: Number(currentBedTemp)
       });
-      
+
       if (!result.success) {
         console.error('Failed to set hotend temperature:', result.error);
       }
@@ -272,14 +272,14 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
 
   const handleBedTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || bedTemp === '') return;
-    
+
     try {
       const currentHotendTemp = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : hotendTemp;
-      const result = await apiClient.setTemperatures(printer.id, { 
+      const result = await apiClient.setTemperatures(printer.id, {
         hotend: Number(currentHotendTemp),
         bed: Number(bedTemp)
       });
-      
+
       if (!result.success) {
         console.error('Failed to set bed temperature:', result.error);
       }
@@ -291,7 +291,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
   const handleApplyPreset = async (preset: string) => {
     try {
       let targets: TempTargets;
-      
+
       switch (preset.toLowerCase()) {
         case 'abs':
           targets = { hotend: 250, bed: 100 };
@@ -318,9 +318,9 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           console.warn(`Unknown preset: ${preset}`);
           return;
       }
-      
+
       const result = await apiClient.setTemperatures(printer.id, targets);
-      
+
       if (result.success) {
         setHotendTemp(targets.hotend);
         setBedTemp(targets.bed);
@@ -591,7 +591,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
             <div className="flex items-center justify-center">
               <span className="text-xs font-bold text-pf-text-secondary">[ {(lastKnownZRef.current ?? 0).toFixed(1)} ]</span>
             </div>
-            
+
             {/* Row 2: Input Fields */}
             <MovementInput
               axis="X"
@@ -713,7 +713,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 <div className="flex justify-between items-center">
                   <span className="text-pf-text-secondary">Color:</span>
                   <div className="flex items-center gap-2">
-                    <div 
+                    <div
                       className="w-3 h-3 rounded border border-pf-border"
                       style={{ backgroundColor: displayPrinter.spoolInfo.colorHex }}
                       title={displayPrinter.spoolInfo.colorHex}

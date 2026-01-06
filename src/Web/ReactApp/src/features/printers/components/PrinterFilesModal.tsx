@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
 import { apiClient } from '@/services/api';
@@ -120,9 +120,9 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     try {
       setIsHarvesting(fileName);
       // Start a harvest operation for this specific file
-      const operation = await apiClient.harvestSingleFile(printer.id, fileName);
+        await apiClient.harvestSingleFile(printer.id, fileName);
       toast.success(`Started harvesting: ${fileName}`);
-      
+
       // Reload files after a brief delay to allow harvest to complete
       // The harvest is queued for background processing
       setTimeout(() => {
@@ -163,11 +163,11 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     } finally {
       setIsDeleting(null);
     }
-  };;
+    };
 
   const getSortedFiles = () => {
     const sorted = [...files];
-    
+
     sorted.sort((a, b) => {
       let aValue: string | number;
       let bValue: string | number;
@@ -217,7 +217,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
-        
+
         <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
@@ -227,7 +227,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                 {printer.name} - Available G-code files
               </p>
             </div>
-            
+
             {/* Close handled by Modal */}
           </div>
 
@@ -298,7 +298,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                     >
                       <div className="flex items-center flex-1 min-w-0 gap-3">
                         {file.thumbnailUrl ? (
-                          <div 
+                          <div
                             className="relative h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
                             onClick={() => setSelectedThumbnail({ fileName: file.fileName, url: file.thumbnailUrl! })}
                           >
@@ -409,7 +409,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
             <p className="text-sm text-pf-text-secondary">
               {files.length} file{files.length !== 1 ? 's' : ''} available on printer
             </p>
-            
+
             <Button
               type="button"
               variant="secondary"
@@ -430,7 +430,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   return createPortal(
     <>
       {modalContent}
-      
+
       {/* Print Confirmation */}
       {printConfirmDialog && (
         <ConfirmationModal
@@ -474,7 +474,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           </div>
         </ConfirmationModal>
       )}
-      
+
       {/* Delete Confirmation */}
       {deleteConfirmDialog && (
         <ConfirmationModal
@@ -507,7 +507,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           </div>
         </ConfirmationModal>
       )}
-      
+
       {/* Thumbnail Preview Modal */}
       {selectedThumbnail && (
         <Modal

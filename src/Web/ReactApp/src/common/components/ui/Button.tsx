@@ -31,39 +31,23 @@ const sizeClasses: Record<ButtonSize, string> = {
   lg: 'text-base px-6 py-3'
 };
 
-export const Button: React.FC<ButtonProps> = ({
-  variant = 'primary',
-  size = 'md',
-  loading = false,
-  disabled,
-  className,
-  iconLeft,
-  iconRight,
-  iconCenter,
-  children,
-  ...rest
-}) => {
-  // Icon-only button with iconCenter
-  if (iconCenter) {
-    return (
-      <button
-        className={clsx(
-          'rounded-sm font-medium inline-flex items-center justify-center whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
-          variantClasses[variant],
-          sizeClasses[size],
-          className
-        )}
-        disabled={disabled || loading}
-        {...rest}
-      >
-        <span className="flex items-center" aria-hidden>{loading ? 'Loading...' : iconCenter}</span>
-      </button>
-    );
-  }
-
-  // Regular button with text and optional left/right icons
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  {
+    variant = 'primary',
+    size = 'md',
+    loading = false,
+    disabled,
+    className,
+    iconLeft,
+    iconRight,
+    children,
+    ...rest
+  },
+  ref
+) {
   return (
     <button
+      ref={ref}
       className={clsx(
         'rounded-sm font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
         variantClasses[variant],
@@ -78,6 +62,8 @@ export const Button: React.FC<ButtonProps> = ({
       {iconRight && <span className="flex items-center" aria-hidden>{iconRight}</span>}
     </button>
   );
-};
+});
+
+Button.displayName = 'Button';
 
 export default Button;

@@ -8,6 +8,7 @@ import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewMo
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { Button, Input } from '@/common/components/ui';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
 // Lazy load heavy three.js based viewers with manual preload support
@@ -274,7 +275,7 @@ export const ModelsPage: React.FC = () => {
           ) : viewMode === 'grid' ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto">
               {models.map((model: Model) => (
-                <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group">
+                <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:bg-pf-bg-secondary hover:shadow-lg transition-colors flex flex-col group">
                   {/* Model Preview */}
                   <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
                     {model.thumbnailPath ? (
@@ -378,8 +379,8 @@ export const ModelsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-pf-border">
-                  {models.map((model: Model) => (
-                    <tr key={model.id} className="hover:bg-pf-bg-2 transition-colors">
+                    {models.map((model: Model) => (
+                      <SelectableRow key={model.id} isSelected={false}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3 min-w-0">
                           {/* Thumbnail */}
@@ -472,7 +473,7 @@ export const ModelsPage: React.FC = () => {
                           </Button>
                         </div>
                       </td>
-                    </tr>
+                    </SelectableRow>
                   ))}
                 </tbody>
               </table>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sliceJobService, SliceJobStatusResponse, SliceJobStatus } from '@/services/sliceJobService';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
@@ -11,6 +12,8 @@ export function JobQueueDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'my' | SliceJobStatus>('all');
   const [showQueue, setShowQueue] = useState(false);
+  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
+  const [jobToCancel, setJobToCancel] = useState<string | null>(null);
 
   useEffect(() => {
     loadJobs();
@@ -44,14 +47,23 @@ export function JobQueueDashboardPage() {
     }
   };
 
-  const handleCancelJob = async (jobId: string) => {
-    if (!confirm('Are you sure you want to cancel this job?')) return;
+  const handleCancelJob = (jobId: string) => {
+    setJobToCancel(jobId);
+    setShowCancelConfirmation(true);
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!jobToCancel) return;
     
     try {
-      await sliceJobService.cancelJob(jobId);
+      await sliceJobService.cancelJob(jobToCancel);
       loadJobs();
+      setShowCancelConfirmation(false);
+      setJobToCancel(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to cancel job');
+      setShowCancelConfirmation(false);
+      setJobToCancel(null);
     }
   };
 
@@ -222,6 +234,20 @@ export function JobQueueDashboardPage() {
           </div>
         )}
       </div>
+
+      <ConfirmationModal
+        isOpen={showCancelConfirmation}
+        title="Cancel Job"
+        message="Are you sure you want to cancel this job?"
+        confirmButtonText="Cancel Job"
+        cancelButtonText="Keep Job"
+        isDangerous={true}
+        onConfirm={handleConfirmCancel}
+        onCancel={() => {
+          setShowCancelConfirmation(false);
+          setJobToCancel(null);
+        }}
+      />
     </PageTemplate>
   );
 }

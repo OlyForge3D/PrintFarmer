@@ -6,7 +6,7 @@ import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-import { 
+import {
   ChevronDown, ChevronUp, Cog, Square as StopIcon, Home, Upload, RefreshCw,
   Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, FileText
 } from 'lucide-react';
@@ -49,7 +49,7 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
 
   const progressNow = typeof currentStatus.progress === 'number' ? Math.round(currentStatus.progress) : 0;
   const widthClass = (pct: number) => `pf-w-${Math.min(100, Math.max(0, Math.round(pct / 5) * 5))}`;
-  const getStatusColor = (online: boolean, state?: string) => !online ? 'bg-gray-100 text-gray-800 border-gray-300' : ({ printing: 'bg-green-100 text-green-800 border-green-300', paused: 'bg-yellow-100 text-yellow-800 border-yellow-300', error: 'bg-red-100 text-red-800 border-red-300', ready: 'bg-blue-100 text-blue-800 border-blue-300', idle: 'bg-blue-100 text-blue-800 border-blue-300', operational: 'bg-blue-100 text-blue-800 border-blue-300' } as Record<string, string>)[(state||'').toLowerCase()] || 'bg-gray-100 text-gray-800 border-gray-300';
+  const getStatusColor = (online: boolean, state?: string) => !online ? 'bg-gray-100 text-gray-800 border-gray-300' : ({ printing: 'bg-green-100 text-green-800 border-green-300', paused: 'bg-yellow-100 text-yellow-800 border-yellow-300', error: 'bg-red-100 text-red-800 border-red-300', ready: 'bg-blue-100 text-blue-800 border-blue-300', idle: 'bg-blue-100 text-blue-800 border-blue-300', operational: 'bg-blue-100 text-blue-800 border-blue-300' } as Record<string, string>)[(state || '').toLowerCase()] || 'bg-gray-100 text-gray-800 border-gray-300';
   const getBackendIcon = (b: PrinterBackend) => {
     if (b === PrinterBackend.Moonraker) return <img src={moonrakerIcon} alt="Moonraker" title="Moonraker" className="inline h-5 w-5 align-middle" />;
     if (b === PrinterBackend.PrusaLink) return <span title="PrusaLink" aria-label="PrusaLink" role="img">🔗</span>;
@@ -252,37 +252,37 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
           <div><label className="block text-xs text-gray-500 mb-1" htmlFor={`hotend-${printer.id}`}>Hotend</label><div className="relative"><Input id={`hotend-${printer.id}`} type="number" value={tempInputs.hotend} onChange={(e) => setTempInputs(p => ({ ...p, hotend: Number(e.target.value) }))} disabled={isPrinting} aria-label="Hotend target temperature" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">°C</span></div><div className="text-xs text-gray-500 mt-1">[{formatTemperature(currentStatus.hotendTemp, currentStatus.hotendTarget)}]</div></div>
           <div><label className="block text-xs text-gray-500 mb-1" htmlFor={`bed-${printer.id}`}>Bed</label><div className="relative"><Input id={`bed-${printer.id}`} type="number" value={tempInputs.bed} onChange={(e) => setTempInputs(p => ({ ...p, bed: Number(e.target.value) }))} disabled={isPrinting} aria-label="Bed target temperature" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">°C</span></div><div className="text-xs text-gray-500 mt-1">[{formatTemperature(currentStatus.bedTemp, currentStatus.bedTarget)}]</div></div>
           <div className="flex items-end"><Button
-                type="button"
-                variant="primary"
-                size="sm"
-                onClick={handleSetTemperatures}
-                disabled={isPrinting}
-                className="w-full"
-              >
-                SET
-              </Button></div>
-        </div>
-  <div className="flex flex-wrap gap-2">{Object.keys(DEFAULT_PRESETS).map(m => <Button
-              type="button"
-              key={m}
-              variant="secondary"
-              size="sm"
-              onClick={() => handleApplyPreset(m as keyof TempPresets)}
-              disabled={isPrinting}
-              title={`${DEFAULT_PRESETS[m].hotend}°/${DEFAULT_PRESETS[m].bed}°`}
-            >
-              {m.toUpperCase()}
-            </Button>)}<Button
             type="button"
             variant="primary"
             size="sm"
-            onClick={() => handleApplyPreset('pla')}
+            onClick={handleSetTemperatures}
             disabled={isPrinting}
-            title="Cooldown (0°/0°)"
-            aria-label="Cooldown (0°/0°)"
-            iconCenter={<SnowflakeIcon className="h-4 w-4" />}
+            className="w-full"
           >
-        </Button></div>
+            SET
+          </Button></div>
+        </div>
+        <div className="flex flex-wrap gap-2">{Object.keys(DEFAULT_PRESETS).map(m => <Button
+          type="button"
+          key={m}
+          variant="secondary"
+          size="sm"
+          onClick={() => handleApplyPreset(m as keyof TempPresets)}
+          disabled={isPrinting}
+          title={`${DEFAULT_PRESETS[m].hotend}°/${DEFAULT_PRESETS[m].bed}°`}
+        >
+          {m.toUpperCase()}
+        </Button>)}<Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={() => handleApplyPreset('pla')}
+          disabled={isPrinting}
+          title="Cooldown (0°/0°)"
+          aria-label="Cooldown (0°/0°)"
+          iconCenter={<SnowflakeIcon className="h-4 w-4" />}
+        >
+          </Button></div>
       </div>
       <div className="p-4 border-b border-gray-200">
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center">
@@ -349,57 +349,56 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
         </Button><div /></div><div className="text-center text-xs text-gray-500">X: {formatPosition(currentStatus.x)} Y: {formatPosition(currentStatus.y)}</div></div>
           <div className="text-center"><div className="space-y-1 mb-2">
             <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => handleMove(null, null, moveStep)}
-                disabled={isPrinting}
-                className="w-full"
-              >
-                Z+
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleHomeZ}
-                disabled={isPrinting}
-                title="Home Z"
-                aria-label="Home Z"
-                className="w-full"
-                iconCenter={<Home className="h-3 w-3" />}
-              >
-        </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => handleMove(null, null, -moveStep)}
-                disabled={isPrinting}
-                className="w-full"
-              >
-                Z-
-              </Button></div><div className="text-xs text-gray-500">Z: {formatPosition(currentStatus.z)}</div></div>
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => handleMove(null, null, moveStep)}
+              disabled={isPrinting}
+              className="w-full"
+            >
+              Z+
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleHomeZ}
+              disabled={isPrinting}
+              title="Home Z"
+              className="w-full"
+              iconCenter={<Home className="h-3 w-3" />}
+            >
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => handleMove(null, null, -moveStep)}
+              disabled={isPrinting}
+              className="w-full"
+            >
+              Z-
+            </Button></div><div className="text-xs text-gray-500">Z: {formatPosition(currentStatus.z)}</div></div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-4">
           <div><label className="block text-xs text-gray-500 mb-1">Step Size</label><div className="flex space-x-1">{[1, 10, 50].map(step => <Button
-                type="button"
-                key={step}
-                variant={moveStep === step ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setMoveStep(step)}
-              >
-                {step}
-              </Button>)}</div></div>
+            type="button"
+            key={step}
+            variant={moveStep === step ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setMoveStep(step)}
+          >
+            {step}
+          </Button>)}</div></div>
           <div><label className="block text-xs text-gray-500 mb-1">Go To</label><div className="flex space-x-1"><Input type="number" placeholder="X" value={moveInputs.x} onChange={(e) => setMoveInputs(p => ({ ...p, x: Number(e.target.value) }))} disabled={isPrinting} aria-label="Go to X" className="w-12" /><Input type="number" placeholder="Y" value={moveInputs.y} onChange={(e) => setMoveInputs(p => ({ ...p, y: Number(e.target.value) }))} disabled={isPrinting} aria-label="Go to Y" className="w-12" /><Input type="number" placeholder="Z" value={moveInputs.z} onChange={(e) => setMoveInputs(p => ({ ...p, z: Number(e.target.value) }))} disabled={isPrinting} aria-label="Go to Z" className="w-12" /><Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={handleMoveTo}
-              disabled={isPrinting}
-            >
-              GO
-            </Button></div></div>
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={handleMoveTo}
+            disabled={isPrinting}
+          >
+            GO
+          </Button></div></div>
         </div>
       </div>
       <div className="p-4 border-b border-gray-200">
@@ -459,7 +458,10 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
       </div>
       <div className="p-4">
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><FileText className="h-4 w-4 mr-2" />Files</h4>
-          <div className="flex items-center space-x-2"><div className="flex-1"><FileUpload accept=".gcode" aria-label="Upload GCode file" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} disabled={isPrinting || isUploading} /></div>
+        <div className="flex items-center space-x-2">
+          <div className="flex-1">
+            <FileUpload accept=".gcode" aria-label="Upload GCode file" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} disabled={isPrinting || isUploading} />
+          </div>
           <Button
             type="button"
             variant="primary"
@@ -469,7 +471,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
             iconLeft={isUploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
           >
             Upload
-          </Button></div>
+          </Button>
+        </div>
       </div>
     </div>
   );

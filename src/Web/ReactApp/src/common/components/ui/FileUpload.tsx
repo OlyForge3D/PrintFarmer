@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useRef, ReactNode } from 'react';
 import { Label } from './Label';
+import { Button } from './Button';
 
 export interface FileUploadProps {
   /**
@@ -108,7 +109,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
       multiple = false,
       disabled = false,
       onChange,
-      className = '',
+      className,
       buttonText,
       buttonIcon,
       buttonVariant = 'primary',
@@ -187,7 +188,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
     };
 
     return (
-      <div className={`flex flex-col gap-1 ${className}`}>
+      <div className={`flex flex-col gap-1 ${className ?? ''}`}>
         {label && (
           <Label htmlFor={inputId} className="text-sm font-medium">
             {label}
@@ -209,16 +210,18 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
         />
 
         {buttonText && (
-          <button
+          <Button
             type="button"
             onClick={handleButtonClick}
             disabled={disabled}
+            variant={buttonVariant as 'primary' | 'secondary' | 'danger' | 'success' | 'subtle'}
+            size="md"
             className={buttonVariantClasses[buttonVariant]}
             aria-label={`${buttonText} (file upload)`}
           >
             {buttonIcon && <span className="inline-block mr-2">{buttonIcon}</span>}
             {buttonText}
-          </button>
+          </Button>
         )}
 
         {(helperText || error) && (

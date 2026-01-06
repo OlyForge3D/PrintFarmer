@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  Clock, 
-  Package, 
-  ArrowUp, 
-  ArrowDown, 
-  MoreHorizontal, 
-  AlertCircle 
+import {
+  Clock,
+  Package,
+  ArrowUp,
+  ArrowDown,
+  MoreHorizontal,
+  AlertCircle
 } from 'lucide-react';
 import { DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+// ConfirmationModal not used in JobCard
 import { PrintJob, queueService } from '@/services/queueService';
 
 interface JobCardProps {
@@ -18,10 +19,10 @@ interface JobCardProps {
   onJobUpdate?: () => void;
 }
 
-export const JobCard: React.FC<JobCardProps> = ({ 
-  job, 
+export const JobCard: React.FC<JobCardProps> = ({
+  job,
   showPrinterInfo = false,
-  onJobUpdate 
+  onJobUpdate
 }) => {
   const [showActions, setShowActions] = useState(false);
   const queryClient = useQueryClient();
@@ -46,13 +47,12 @@ export const JobCard: React.FC<JobCardProps> = ({
   });
 
   const handleRemoveJob = async () => {
-    if (window.confirm('Are you sure you want to remove this job from the queue?')) {
-      try {
-        await removeMutation.mutateAsync(job.id);
-      } catch (error) {
-        console.error('Failed to remove job:', error);
-        alert('Failed to remove job. Please try again.');
-      }
+    try {
+      await removeMutation.mutateAsync(job.id);
+      setShowRemoveConfirmation(false);
+    } catch (error) {
+      console.error('Failed to remove job:', error);
+      setShowRemoveConfirmation(false);
     }
   };
 
@@ -72,8 +72,9 @@ export const JobCard: React.FC<JobCardProps> = ({
   return (
     <div className={`
       bg-white rounded-lg border p-4 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col min-h-0
-      ${isActive ? 'border-pf-accent bg-pf-accent-bg/10' : ''}
+      ${isActive ? 'border-pf-accent bg-pf-bg-2' : ''}
       ${isCompleted ? 'border-gray-200 opacity-75' : ''}
+      hover:bg-pf-bg-secondary transition-colors
     `}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
@@ -86,7 +87,7 @@ export const JobCard: React.FC<JobCardProps> = ({
               {job.status}
             </span>
           </div>
-          
+
           {showPrinterInfo && job.assignedPrinterName && (
             <p className="text-sm text-gray-600 mb-1">
               → {job.assignedPrinterName}
@@ -102,7 +103,7 @@ export const JobCard: React.FC<JobCardProps> = ({
                 Position
               </span>
             )}
-            
+
             <span className={`
               inline-flex items-center px-2 py-1 rounded-full text-xs
               ${queueService.getPriorityColor(job.priority)}
@@ -116,19 +117,19 @@ export const JobCard: React.FC<JobCardProps> = ({
           {isActive && (
             <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
           )}
-          
+
           {canModify && (
             <div className="relative">
-            <Button
-              onClick={() => setShowActions(!showActions)}
-              variant="subtle"
-              size="sm"
-              disabled={removeMutation.isPending || priorityMutation.isPending}
-              aria-label="Toggle job actions menu"
-              title="Job actions"
-              className="!p-1"
-              iconCenter={<MoreHorizontal className="w-4 h-4 text-gray-400" />}
-            ></Button>
+              <Button
+                onClick={() => setShowActions(!showActions)}
+                variant="subtle"
+                size="sm"
+                disabled={removeMutation.isPending || priorityMutation.isPending}
+                aria-label="Toggle job actions menu"
+                title="Job actions"
+                className="!p-1"
+                iconCenter={<MoreHorizontal className="w-4 h-4 text-gray-400" />}
+              ></Button>
 
               {showActions && (
                 <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10 min-w-32">
@@ -197,7 +198,7 @@ export const JobCard: React.FC<JobCardProps> = ({
             {queueService.formatDuration(job.estimatedPrintTime)}
           </div>
         )}
-        
+
         {job.estimatedFilamentUsage && (
           <div className="flex items-center text-gray-600">
             <Package className="w-4 h-4 mr-2" />

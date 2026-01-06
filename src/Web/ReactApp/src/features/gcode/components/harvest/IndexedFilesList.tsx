@@ -5,9 +5,9 @@ import type { HarvestFileDiscoveredEvent, HarvestFileProgress, HarvestFileUpdate
 import { toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';
+import { Select } from '@/common/components/ui/Select';
 import { Modal } from '@/common/components/ui/Modal';
 import { ArrowLeftIcon, ArrowRightIcon, ChevronsLeftIcon, ChevronsRightIcon } from '@/common/components/icons/MdiIcons';
-import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -60,12 +60,12 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
         harvestOperationId: operationId,
         fileIds,
       }, { timeout: 300000 }); // 5-minute timeout for import operations
-      
+
       // Check if the operation was successful or had failures
       const importedCount = result.importedFiles ?? 0;
       const skippedCount = (result.skippedFileIds?.length ?? 0);
       const failedCount = (result.failedFileIds?.length ?? 0);
-      
+
       // Update file statuses from the result - preserve all existing file data including extracted metadata
       setFiles(prev => prev.map(f => {
         const imported = Array.isArray(result.importedFileIds) && result.importedFileIds.includes(f.id);
@@ -73,45 +73,45 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
         const failed = Array.isArray(result.failedFileIds) && result.failedFileIds.includes(f.id);
         if (imported) {
           // Keep ALL existing file data including extracted metadata (slicer, material, nozzle, etc.)
-          return { 
-            ...f, 
-            status: HarvestFileStatus.Complete, 
-            error: '', 
-            progress: undefined 
+          return {
+            ...f,
+            status: HarvestFileStatus.Complete,
+            error: '',
+            progress: undefined
           };
         }
-        if (skipped) return { 
-          ...f, 
-          status: HarvestFileStatus.Skipped, 
-          error: '', 
-          progress: undefined 
+        if (skipped) return {
+          ...f,
+          status: HarvestFileStatus.Skipped,
+          error: '',
+          progress: undefined
         };
-        if (failed) return { 
-          ...f, 
-          status: HarvestFileStatus.Failed, 
-          error: result.errorDetails?.[f.id] || f.error, 
-          progress: undefined 
+        if (failed) return {
+          ...f,
+          status: HarvestFileStatus.Failed,
+          error: result.errorDetails?.[f.id] || f.error,
+          progress: undefined
         };
         return f;
       }));
-      
+
       filesRef.current = files;
-      
+
       setSelected(new Set());
-      
+
       // Show appropriate toast based on results
       if (!result.success || failedCount > 0) {
         // Show error toast with details about what happened
-        const failedFiles = filesRef.current.filter(f => 
+        const failedFiles = filesRef.current.filter(f =>
           Array.isArray(result.failedFileIds) && result.failedFileIds.includes(f.id)
         );
         const failedFileNames = failedFiles.map(f => f.fileName).join(', ');
-        
+
         // Build comprehensive error message
         const summaryMsg = `Import completed with issues. Imported: ${importedCount}, Skipped: ${skippedCount}, Failed: ${failedCount}`;
         const detailMsg = failedCount > 0 ? `Failed files: ${failedFileNames}` : '';
         toast.error(`${summaryMsg}. ${detailMsg}`, { duration: 8000 });
-        
+
         // Also show specific error details for each failed file
         failedFiles.slice(0, 5).forEach(file => {
           const errorDetail = result.errorDetails?.[file.id];
@@ -119,7 +119,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
             toast.error(`❌ ${file.fileName}: ${errorDetail}`, { duration: 6000 });
           }
         });
-        
+
         // If there's a general operation error, show that too
         const operationError = result.errorDetails?.['_operation'];
         if (operationError) {
@@ -174,118 +174,118 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
   useEffect(() => {
     setLoading(true);
 
-  const unsubDiscovered = harvestSignalRService.onHarvestFileDiscovered((evt: HarvestFileDiscoveredEvent) => {
-    if (evt.operationId !== operationId) return;
-    setFiles(prev => {
-      const idx = prev.findIndex(f => f.id === evt.fileId || f.filePath === evt.filePath);
-      // Map evt.status string to HarvestFileStatus enum if needed
-      let status: HarvestFileStatus | undefined = undefined;
-      if (typeof evt.status === 'string') {
-        // Map evt.status string to HarvestFileStatus enum
-        status = ((HarvestFileStatus as unknown) as Record<string, HarvestFileStatus>)[evt.status] ?? undefined;
-      } else if (typeof evt.status === 'number') {
-        status = evt.status;
-      }
-      const updated: Partial<DiscoveredGcodeFileDto> = {
-        id: evt.fileId,
-        filePath: evt.filePath,
-        printerPath: evt.filePath,
-        fileName: evt.fileName,
-        fileSizeBytes: evt.fileSize,
-        modifiedAt: evt.modifiedAt,
-        status,
-        error: evt.error,
-        thumbnailUrl: evt.thumbnailUrl,
-        extractedSlicerName: evt.extractedSlicer,
-        extractedSlicerVersion: evt.extractedSlicerVersion,
-        extractedMaterial: evt.extractedMaterial,
-        extractedNozzleDiameter: evt.extractedNozzleDiameter,
-        extractedPrintTime: evt.extractedPrintTime,
-        extractedFilamentLength: evt.extractedFilamentLength
-      };
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], ...updated };
-        return next;
-      } else {
-        return [...prev, { ...updated } as DiscoveredGcodeFileDto];
-      }
-    });
-  });
-
-  const unsubProgress = harvestSignalRService.onHarvestFileProgress((progress: HarvestFileProgress) => {
-    if (progress.operationId !== operationId) return;
-    setFiles(prev => {
-      const idx = prev.findIndex(f => f.fileName === progress.fileName);
-      if (idx === -1) return prev;
-      const next = [...prev];
-      const isComplete = progress.percent === 100;
-      next[idx] = {
-        ...next[idx],
-        status: isComplete ? HarvestFileStatus.Complete : HarvestFileStatus.InProgress,
-        progress: {
-          bytesCopied: progress.bytesCopied,
-          totalBytes: progress.totalBytes,
-          percent: progress.percent
+    const unsubDiscovered = harvestSignalRService.onHarvestFileDiscovered((evt: HarvestFileDiscoveredEvent) => {
+      if (evt.operationId !== operationId) return;
+      setFiles(prev => {
+        const idx = prev.findIndex(f => f.id === evt.fileId || f.filePath === evt.filePath);
+        // Map evt.status string to HarvestFileStatus enum if needed
+        let status: HarvestFileStatus | undefined = undefined;
+        if (typeof evt.status === 'string') {
+          // Map evt.status string to HarvestFileStatus enum
+          status = ((HarvestFileStatus as unknown) as Record<string, HarvestFileStatus>)[evt.status] ?? undefined;
+        } else if (typeof evt.status === 'number') {
+          status = evt.status;
         }
-      };
-      
-      // Auto-unselect when complete
-      if (isComplete) {
-        setSelected(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(next[idx].id);
-          return newSet;
-        });
-      }
-      
-      return next;
+        const updated: Partial<DiscoveredGcodeFileDto> = {
+          id: evt.fileId,
+          filePath: evt.filePath,
+          printerPath: evt.filePath,
+          fileName: evt.fileName,
+          fileSizeBytes: evt.fileSize,
+          modifiedAt: evt.modifiedAt,
+          status,
+          error: evt.error,
+          thumbnailUrl: evt.thumbnailUrl,
+          extractedSlicerName: evt.extractedSlicer,
+          extractedSlicerVersion: evt.extractedSlicerVersion,
+          extractedMaterial: evt.extractedMaterial,
+          extractedNozzleDiameter: evt.extractedNozzleDiameter,
+          extractedPrintTime: evt.extractedPrintTime,
+          extractedFilamentLength: evt.extractedFilamentLength
+        };
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...updated };
+          return next;
+        } else {
+          return [...prev, { ...updated } as DiscoveredGcodeFileDto];
+        }
+      });
     });
-  });
 
-  const unsubFileUpdated = harvestSignalRService.onHarvestFileUpdated((evt: HarvestFileUpdatedEvent) => {
-    if (evt.operationId !== operationId) return;
-    setFiles(prev => {
-      const idx = prev.findIndex(f => f.id === evt.id);
-      if (idx === -1) return prev;
-      const next = [...prev];
-      
-      // Parse status string to enum
-      let status: HarvestFileStatus | undefined = undefined;
-      if (typeof evt.status === 'string') {
-        status = ((HarvestFileStatus as unknown) as Record<string, HarvestFileStatus>)[evt.status] ?? undefined;
-      } else if (typeof evt.status === 'number') {
-        status = evt.status;
-      }
-      
-      // Update file with ALL fields from the event (use ?? to preserve existing only if event field is null/undefined)
-      next[idx] = {
-        ...next[idx],
-        status: status ?? next[idx].status,
-        error: evt.error,
-        completedAt: evt.completedAt,
-        thumbnailUrl: evt.thumbnailUrl ?? next[idx].thumbnailUrl,
-        extractedSlicerName: evt.extractedSlicerName ?? next[idx].extractedSlicerName,
-        extractedSlicerVersion: evt.extractedSlicerVersion ?? next[idx].extractedSlicerVersion,
-        extractedMaterial: evt.extractedMaterial ?? next[idx].extractedMaterial,
-        extractedNozzleDiameter: evt.extractedNozzleDiameter ?? next[idx].extractedNozzleDiameter,
-        extractedPrintTime: evt.extractedPrintTime ?? next[idx].extractedPrintTime,
-        extractedFilamentLength: evt.extractedFilamentLength ?? next[idx].extractedFilamentLength
-      };
-      
-      return next;
+    const unsubProgress = harvestSignalRService.onHarvestFileProgress((progress: HarvestFileProgress) => {
+      if (progress.operationId !== operationId) return;
+      setFiles(prev => {
+        const idx = prev.findIndex(f => f.fileName === progress.fileName);
+        if (idx === -1) return prev;
+        const next = [...prev];
+        const isComplete = progress.percent === 100;
+        next[idx] = {
+          ...next[idx],
+          status: isComplete ? HarvestFileStatus.Complete : HarvestFileStatus.InProgress,
+          progress: {
+            bytesCopied: progress.bytesCopied,
+            totalBytes: progress.totalBytes,
+            percent: progress.percent
+          }
+        };
+
+        // Auto-unselect when complete
+        if (isComplete) {
+          setSelected(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(next[idx].id);
+            return newSet;
+          });
+        }
+
+        return next;
+      });
     });
-  });
+
+    const unsubFileUpdated = harvestSignalRService.onHarvestFileUpdated((evt: HarvestFileUpdatedEvent) => {
+      if (evt.operationId !== operationId) return;
+      setFiles(prev => {
+        const idx = prev.findIndex(f => f.id === evt.id);
+        if (idx === -1) return prev;
+        const next = [...prev];
+
+        // Parse status string to enum
+        let status: HarvestFileStatus | undefined = undefined;
+        if (typeof evt.status === 'string') {
+          status = ((HarvestFileStatus as unknown) as Record<string, HarvestFileStatus>)[evt.status] ?? undefined;
+        } else if (typeof evt.status === 'number') {
+          status = evt.status;
+        }
+
+        // Update file with ALL fields from the event (use ?? to preserve existing only if event field is null/undefined)
+        next[idx] = {
+          ...next[idx],
+          status: status ?? next[idx].status,
+          error: evt.error,
+          completedAt: evt.completedAt,
+          thumbnailUrl: evt.thumbnailUrl ?? next[idx].thumbnailUrl,
+          extractedSlicerName: evt.extractedSlicerName ?? next[idx].extractedSlicerName,
+          extractedSlicerVersion: evt.extractedSlicerVersion ?? next[idx].extractedSlicerVersion,
+          extractedMaterial: evt.extractedMaterial ?? next[idx].extractedMaterial,
+          extractedNozzleDiameter: evt.extractedNozzleDiameter ?? next[idx].extractedNozzleDiameter,
+          extractedPrintTime: evt.extractedPrintTime ?? next[idx].extractedPrintTime,
+          extractedFilamentLength: evt.extractedFilamentLength ?? next[idx].extractedFilamentLength
+        };
+
+        return next;
+      });
+    });
 
 
-  apiClient.getDiscoveredGcodeFiles(operationId)
+    apiClient.getDiscoveredGcodeFiles(operationId)
       .then(res => {
         // Merge API results with any files that arrived via SignalR
         // This prevents losing files that arrived while the API call was in flight
         setFiles(prev => {
           // Create a map of existing files by ID for efficient lookup
           const existingMap = new Map(prev.map(f => [f.id, f]));
-          
+
           // Add/update files from API response
           const merged = new Map(existingMap);
           res.forEach(apiFile => {
@@ -303,7 +303,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
               merged.set(apiFile.id, apiFile);
             }
           });
-          
+
           const result = Array.from(merged.values());
           filesRef.current = result;
           return result;
@@ -348,7 +348,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
   if (error) {
     return (
       <div className="flex items-center gap-2 text-pf-error bg-pf-error-bg rounded px-3 py-2">
-        <svg className="w-5 h-5 text-pf-error" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeWidth="2" d="M12 9v4m0 4h.01M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9Z"/></svg>
+        <svg className="w-5 h-5 text-pf-error" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeWidth="2" d="M12 9v4m0 4h.01M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9Z" /></svg>
         {error}
       </div>
     );
@@ -398,9 +398,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
               return (
                 <tr
                   key={key}
-                  className={
-                    `${selected.has(file.id) ? 'bg-pf-accent-bg' : 'hover:bg-pf-hover transition'} ${error ? 'border-l-4 border-pf-error' : ''}`
-                  }
+                  className={`transition-colors ${selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'} ${error ? 'border-l-4 border-pf-error' : ''}`}
                   tabIndex={0}
                   aria-label={`File ${file.fileName}, status: ${status}${error ? ', error: ' + error : ''}`}
                 >
@@ -443,18 +441,20 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
                   </td>
                   <td className="p-2 border-b border-pf-border text-center">
                     {status !== undefined && (
-                      <button
+                      <Button
                         onClick={() => status === HarvestFileStatus.Failed && error && setErrorModalFile(file)}
                         disabled={status !== HarvestFileStatus.Failed || !error}
-                        className={
-                          status === HarvestFileStatus.Complete ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-success-bg text-pf-success' :
-                          status === HarvestFileStatus.InProgress ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-accent-bg text-pf-accent' :
-                          status === HarvestFileStatus.Failed && error ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-error-bg text-pf-error cursor-pointer hover:opacity-80 transition' :
-                          status === HarvestFileStatus.Failed ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-error-bg text-pf-error' :
-                          status === HarvestFileStatus.Skipped ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted' :
-                          status === HarvestFileStatus.Cancelled ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-muted-bg text-pf-muted' :
-                          'inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pf-bg-2 text-pf-muted'
+                        variant={
+                          status === HarvestFileStatus.Complete ? 'success' :
+                            status === HarvestFileStatus.InProgress ? 'subtle' :
+                              status === HarvestFileStatus.Failed && error ? 'danger' :
+                                status === HarvestFileStatus.Failed ? 'danger' :
+                                  status === HarvestFileStatus.Skipped ? 'subtle' :
+                                    status === HarvestFileStatus.Cancelled ? 'subtle' :
+                                      'subtle'
                         }
+                        size="sm"
+                        className="inline-flex items-center gap-1 px-2 py-0.5"
                         title={status === HarvestFileStatus.Failed && error ? 'Click to view error details' : getStatusString(status)}
                         aria-label={getStatusString(status)}
                       >
@@ -465,7 +465,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
                         {status === HarvestFileStatus.Cancelled && <span title="Cancelled" aria-label="Cancelled">🚫</span>}
                         {status === HarvestFileStatus.Pending && <span title="Pending" aria-label="Pending">⏸️</span>}
                         {getStatusString(status)}
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>
@@ -480,16 +480,19 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
             <label htmlFor="pageSize" className="text-sm text-pf-text-secondary">
               Items per page:
             </label>
-            <select
-              id="pageSize"
-              value={itemsPerPage}
-              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-              className="px-2 py-1 text-sm border border-pf-border rounded bg-pf-bg-secondary text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent min-w-[75px]"
-            >
-              {PAGE_SIZE_OPTIONS.map(size => (
-                <option key={size} value={size}>{size}</option>
-              ))}
-            </select>
+            <div>
+              <Select
+                id="pageSize"
+                value={itemsPerPage}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handlePageSizeChange(Number(e.target.value))}
+                aria-label="Items per page"
+                className="min-w-[75px]"
+              >
+                {PAGE_SIZE_OPTIONS.map(size => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </Select>
+            </div>
           </div>
           <span className="text-pf-muted text-xs">
             Showing {files.length === 0 ? 0 : startIdx + 1}-{Math.min(endIdx, files.length)} of {files.length} files

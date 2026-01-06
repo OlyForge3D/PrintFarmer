@@ -154,10 +154,10 @@ function STLModel({ geometry, autoRotate = false, onMeshLoaded }: STLModelProps)
  * Camera Controller Component
  * Animates camera to preset views and auto-fits to geometry bounds
  */
-function CameraController({ 
-  viewDirection, 
-  geometry 
-}: { 
+function CameraController({
+  viewDirection,
+  geometry
+}: {
   viewDirection: string | null;
   geometry: THREE.BufferGeometry | null;
 }) {
@@ -235,6 +235,7 @@ function CameraController({
     let progress = 0;
     const duration = 600; // ms
 
+    let rafId: number | null = null;
     const animate = (timestamp: number) => {
       if (!progress) progress = timestamp;
       const elapsed = timestamp - progress;
@@ -248,11 +249,15 @@ function CameraController({
       camera.lookAt(center);
 
       if (t < 1) {
-        requestAnimationFrame(animate);
+        rafId = requestAnimationFrame(animate);
       }
     };
 
-    requestAnimationFrame(animate);
+    rafId = requestAnimationFrame(animate);
+
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, [viewDirection, camera, geometry]);
 
   return null;
@@ -281,13 +286,36 @@ export const STLViewer: React.FC<STLViewerProps> = ({
 
     setLoading(true);
     setError(null);
+    let cancelled = false;
 
     const loadSTL = async () => {
       try {
         let arrayBuffer: ArrayBuffer;
 
         if (file instanceof File) {
-          arrayBuffer = await file.arrayBuffer();
+          // Some test environments or older Browsers may not implement File.arrayBuffer()
+          // Prefer the modern API when available, otherwise use Response() fallback or FileReader.
+          // Use runtime checks instead of unsafe casts.
+          // runtime check for arrayBuffer availability on the File object
+          if (typeof (file as unknown as { arrayBuffer?: () => Promise<ArrayBuffer> }).arrayBuffer === 'function') {
+            // modern environments - call the arrayBuffer function
+            arrayBuffer = await (file as unknown as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer();
+          } else if (typeof Response !== 'undefined') {
+            const resp = new Response(file as unknown as Blob);
+            arrayBuffer = await resp.arrayBuffer();
+          } else {
+            // Last resort: FileReader path
+            arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+              try {
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error('FileReader failed'));
+                reader.onload = () => resolve(reader.result as ArrayBuffer);
+                reader.readAsArrayBuffer(file as unknown as Blob);
+              } catch (e) {
+                reject(e);
+              }
+            });
+          }
         } else if (typeof file === 'string') {
           // File is a URL - fetch it
           const response = await fetch(file);
@@ -296,20 +324,29 @@ export const STLViewer: React.FC<STLViewerProps> = ({
           }
           arrayBuffer = await response.arrayBuffer();
         } else {
-          arrayBuffer = file;
+          arrayBuffer = file as ArrayBuffer;
         }
 
+        if (cancelled) return;
+
         const parsedGeometry = parseSTL(arrayBuffer);
+        if (cancelled) return;
         setGeometry(parsedGeometry);
       } catch (err) {
-        setError(`Failed to load STL file: ${err instanceof Error ? err.message : String(err)}`);
-        console.error('STL loading error:', err);
+        if (!cancelled) {
+          setError(`Failed to load STL file: ${err instanceof Error ? err.message : String(err)}`);
+          console.error('STL loading error:', err);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     loadSTL();
+
+    return () => {
+      cancelled = true;
+    };
   }, [file]);
 
   if (loading) {

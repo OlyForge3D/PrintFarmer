@@ -18,6 +18,7 @@ import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
 import { prefetchFileHash } from '@/features/gcode/hooks/useFileHash';
@@ -602,8 +603,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
         ) : (
           // List view (default)
-          <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-hidden">
-            <table className="w-full">
+          <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-x-auto">
+            <table className="w-full min-w-max">
               <thead>
                 <tr className="border-b border-pf-border bg-pf-bg-2">
                   <th className="px-4 py-3 text-left">
@@ -624,8 +625,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               </thead>
               <tbody className="divide-y divide-pf-border">
                 {files.files?.map((file: GcodeFile) => (
-                  <tr key={file.path} className="hover:bg-pf-bg-2 transition-colors">
-                    <td className="px-4 py-3">
+                    <SelectableRow key={file.path} className="border-t border-pf-border" isSelected={selectedFiles.includes(file.path)}>
+                      <td className="px-4 py-3">
                       <Checkbox
                         checked={selectedFiles.includes(file.path)}
                         onChange={(e) => {
@@ -738,7 +739,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                         )}
                       </div>
                     </td>
-                  </tr>
+                  </SelectableRow>
                 ))}
               </tbody>
             </table>

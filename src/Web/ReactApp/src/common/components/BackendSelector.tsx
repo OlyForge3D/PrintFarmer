@@ -21,7 +21,7 @@ interface BackendSelectorProps {
 export function BackendSelector({
   value,
   onChange,
-  className = '',
+    className,
   placeholder = 'Select backend...',
   required = false,
   disabled = false,

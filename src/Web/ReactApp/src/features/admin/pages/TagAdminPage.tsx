@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -286,8 +287,8 @@ export const TagAdminPage: React.FC = () => {
                 </div>
 
                 {/* Tags List */}
-                <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden">
-                    <table className="w-full">
+                <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto">
+                    <table className="w-full min-w-max">
                         <thead>
                             <tr className="border-b border-pf-border bg-pf-bg-2">
                                 <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
@@ -310,9 +311,10 @@ export const TagAdminPage: React.FC = () => {
                         <tbody>
                             {tags.length > 0 ? (
                                 tags.map((tag) => (
-                                    <tr
+                                    <SelectableRow
                                         key={tag.id}
-                                        className="border-b border-pf-border hover:bg-pf-bg-2 transition-colors"
+                                        className="border-b border-pf-border"
+                                        isSelected={false}
                                     >
                                         <td className="px-6 py-4">
                                             <div
@@ -415,7 +417,7 @@ export const TagAdminPage: React.FC = () => {
                                                 </div>
                                             )}
                                         </td>
-                                    </tr>
+                                    </SelectableRow>
                                 ))
                             ) : (
                                 <tr>

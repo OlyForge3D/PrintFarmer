@@ -5,7 +5,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui';
 // Sparkles icon - using ActivityIcon as close substitute
 import { ActivityIcon } from '@/common/components/icons/MdiIcons';
-import { 
+import {
   GcodeHarvestStatus,
   GcodeHarvestOperation,
 } from '@/types/api';
@@ -21,15 +21,13 @@ export const HarvestPage: React.FC = () => {
   // State management
   const [selectedOperation, setSelectedOperation] = useState<GcodeHarvestOperation | null>(null);
   const [wizardStep, setWizardStep] = useState<'wizard' | 'operations'>('wizard');
-  const [perFileProgressMap, setPerFileProgressMap] = useState<
-    Record<string, Record<string, import('@/services/harvest-signalr').HarvestFileProgress>>
-  >({});
+  const perFileProgressMapRef = React.useRef<Record<string, Record<string, import('@/services/harvest-signalr').HarvestFileProgress>>>({});
   const queryClient = useQueryClient();
   const cancelHarvestMutation = useCancelHarvestOperation();
   const restartHarvestDiscoveryMutation = useRestartHarvestDiscovery();
   const { hasPermission } = useAuth();
   const { data: printers, isLoading: printersLoading } = usePrinters();
-  
+
   const { data: harvestOperations, refetch: refetchOperations } = useQuery({
     queryKey: ['harvest-operations'],
     queryFn: () => apiClient.getHarvestOperations(),
@@ -60,13 +58,12 @@ export const HarvestPage: React.FC = () => {
     const joinedOps = new Set<string>();
     setupSignalR();
 
-    // Subscribe to per-file progress events
+    // Subscribe to per-file progress events and store in ref
     const unsubscribeFileProgress = signalRService.onHarvestFileProgress((progress) => {
-      setPerFileProgressMap(prev => {
-        const opMap = prev[progress.operationId] ? { ...prev[progress.operationId] } : {};
-        opMap[progress.fileName] = progress;
-        return { ...prev, [progress.operationId]: opMap };
-      });
+      const prev = perFileProgressMapRef.current ?? {};
+      const opMap = prev[progress.operationId] ? { ...prev[progress.operationId] } : {};
+      opMap[progress.fileName] = progress;
+      perFileProgressMapRef.current = { ...prev, [progress.operationId]: opMap };
     });
 
     // Subscribe to operation progress events
@@ -107,12 +104,12 @@ export const HarvestPage: React.FC = () => {
       }
 
       // Invalidate gcode-files queries when any operation completes (status changed from Running)
-      const completedOps = harvestOperations.filter(op => 
+      const completedOps = harvestOperations.filter(op =>
         op.status === GcodeHarvestStatus.Completed ||
         op.status === GcodeHarvestStatus.Cancelled ||
         op.status === GcodeHarvestStatus.Failed
       );
-      
+
       if (completedOps.length > 0) {
         // Invalidate all gcode-files related queries to ensure views refresh with new files
         queryClient.invalidateQueries({ queryKey: ['gcode-files'] });
@@ -127,7 +124,7 @@ export const HarvestPage: React.FC = () => {
     return <AccessDenied />;
   }
 
-  const activeOperations = harvestOperations?.filter(op => 
+  const activeOperations = harvestOperations?.filter(op =>
     op.status === GcodeHarvestStatus.Running
   ) || [];
 

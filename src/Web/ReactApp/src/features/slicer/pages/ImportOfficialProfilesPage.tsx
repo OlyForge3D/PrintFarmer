@@ -290,7 +290,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                                             {profiles.map(profile => (
                                                 <div
                                                     key={profile.id}
-                                                    className="flex items-center gap-3 p-2 hover:bg-pf-hover rounded cursor-pointer transition-colors"
+                                                    className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${selectedProfileIds.has(profile.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}
                                                 >
                                                     <Checkbox
                                                         id={`profile-${profile.id}`}

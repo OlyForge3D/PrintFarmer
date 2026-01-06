@@ -10,9 +10,11 @@ import { Label } from '@/common/components/ui/Label';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
-import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon } from '@/common/components/icons/MdiIcons';
+import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
+import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 
 export function WorkerManagementPage() {
+  const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>('workers');
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -256,14 +258,20 @@ export function WorkerManagementPage() {
       subtitle="Monitor and manage your Slicer workers"
       icon={WrenchIcon}
       actions={
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={loadWorkers}
-          iconLeft={<RefreshIcon className="h-4 w-4" />}
-        >
-          Refresh
-        </Button>
+        <div className="w-full min-w-max flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('workers')}>Workers</Button>
+            <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
+          </div>
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={loadWorkers}
+            iconLeft={<RefreshIcon className="h-4 w-4" />}
+          >
+            Refresh
+          </Button>
+        </div>
       }
     >
       {/* Connection status */}
@@ -301,8 +309,9 @@ export function WorkerManagementPage() {
         ))}
       </div>
 
-      {/* Workers table */}
-      <div className="bg-pf-bg-1 rounded border border-pf-border overflow-hidden">
+      {/* Workers table (shown on Workers tab) */}
+      {activeTab === 'workers' && (
+        <div className="bg-pf-bg-1 rounded border border-pf-border overflow-hidden">
         <table className="w-full">
           <thead className="bg-pf-bg-2 border-b border-pf-border">
             <tr>
@@ -490,7 +499,13 @@ export function WorkerManagementPage() {
             No workers found
           </div>
         )}
-      </div>
+        </div>
+      )}
+      {activeTab === 'jobs' && (
+        <div className="mt-4">
+          <SlicerJobStatus />
+        </div>
+      )}
 
       {/* Disable Worker Dialog */}
       {showDisableDialog && selectedWorker && (

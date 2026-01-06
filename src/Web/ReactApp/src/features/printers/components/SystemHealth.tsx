@@ -38,15 +38,15 @@ interface DetailedSystemHealthProps {
   className?: string;
 }
 
-export function DetailedSystemHealth({ className = '' }: DetailedSystemHealthProps) {
+export function DetailedSystemHealth({ className }: DetailedSystemHealthProps) {
   const { data: health, isLoading, error } = useHealthStatus();
   const detailedHealth = isDetailedHealthStatus(health) ? health : undefined;
 
-  if (isLoading) return <SystemHealthSkeleton className={className} />;
+  if (isLoading) return <SystemHealthSkeleton className={className ?? ''} />;
 
   if (error || !detailedHealth) {
     return (
-      <div className={`bg-pf-bg-1 rounded-lg shadow p-4 ${className}`}>
+      <div className={`bg-pf-bg-1 rounded-lg shadow p-4 ${className ?? ''}`}>
         <h3 className="text-lg font-medium mb-4 text-pf-text-primary">System Health</h3>
         <div className="flex items-center space-x-3 p-4 bg-pf-error-bg rounded-lg">
           <XCircleIcon className="h-6 w-6 text-pf-error" />

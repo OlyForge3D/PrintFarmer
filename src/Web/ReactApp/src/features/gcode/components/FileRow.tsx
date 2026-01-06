@@ -76,7 +76,7 @@ export const FileRow: React.FC<FileRowProps> = ({
   };
 
   return (
-  <div className="px-4 py-3 hover:bg-pf-hover flex items-center" onContextMenu={onContextMenu}>
+  <div className={`px-4 py-3 flex items-center transition-colors ${selected ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`} onContextMenu={onContextMenu}>
       <Checkbox
         checked={selected}
         onChange={(e) => onSelect(e.target.checked)}
