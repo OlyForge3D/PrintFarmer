@@ -93,7 +93,7 @@ import {
   mdiPrinterSearch,
   mdiSkipForward,
   mdiSnowflake,
-  mdiArrowAllDirections,
+  mdiArrowAll,
 } from '@mdi/js';
 
 interface IconProps {
@@ -335,7 +335,7 @@ export function ArrowsAllDirectionsIcon({ className = 'w-4 h-4', ariaLabel = 'Ar
       aria-label={ariaLabel}
       role="img"
     >
-      <path fill="currentColor" d={mdiArrowAllDirections} />
+      <path fill="currentColor" d={mdiArrowAll} />
     </svg>
   );
 }
