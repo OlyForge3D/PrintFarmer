@@ -71,7 +71,7 @@ export const JobCard: React.FC<JobCardProps> = ({
 
   return (
     <div className={`
-      bg-white rounded-lg border p-4 shadow-sm hover:shadow-md transition-shadow
+      bg-white rounded-lg border p-4 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col min-h-0
       ${isActive ? 'border-pf-accent bg-pf-accent-bg/10' : ''}
       ${isCompleted ? 'border-gray-200 opacity-75' : ''}
     `}>

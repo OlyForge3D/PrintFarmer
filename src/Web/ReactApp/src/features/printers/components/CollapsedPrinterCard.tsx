@@ -90,7 +90,7 @@ export function CollapsedPrinterCard({
   };
 
   return (
-    <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors w-full max-w-sm">
+    <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors w-full max-w-sm overflow-hidden flex flex-col min-h-0">
       {/* Top row: Name + Status Pill */}
       <div className="flex justify-between items-center mb-2 gap-2">
         <div className="flex-1 min-w-0">

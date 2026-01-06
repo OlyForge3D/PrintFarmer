@@ -460,7 +460,7 @@ export function PrintersPage() {
               <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
             </div>
           ) : viewMode === 'compact' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
               {userPrinters.map((p: Printer) => (
                 <PrinterCompactCard
                   key={p.id}
@@ -471,8 +471,8 @@ export function PrintersPage() {
               ))}
             </div>
           ) : viewMode === 'collapsed' ? (
-            <div className="flex gap-6 items-start">
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 transition-opacity duration-200">
+            <div className="flex gap-6 items-start min-w-0">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 transition-opacity duration-200 min-w-0">
                 {userPrinters.map((printer) => (
                   <CollapsedPrinterCard
                     key={printer.id}
@@ -493,7 +493,7 @@ export function PrintersPage() {
               )}
             </div>
           ) : viewMode === 'expandable' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
               {userPrinters.map((p) => (
                 <DetailedPrinterCard
                   key={p.id}

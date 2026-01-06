@@ -44,9 +44,9 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
   isDeleting = false
 }) => {
   return (
-    <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group">
+    <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group min-h-0">
       {/* Thumbnail */}
-      <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
+      <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden flex-shrink-0">
         {!file.isDirectory && file.thumbnailUrl ? (
           <img
             src={file.thumbnailUrl}

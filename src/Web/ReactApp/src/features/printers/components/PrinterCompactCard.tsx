@@ -20,8 +20,8 @@ export function PrinterCompactCard({
   const isPrinting = state.toLowerCase().includes('printing');
 
   return (
-    <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors">
-      <div className="mb-3">
+    <div className="bg-pf-bg-1 rounded-lg p-3 shadow border border-pf-border hover:border-pf-primary transition-colors overflow-hidden flex flex-col min-h-0">
+      <div className="mb-3 min-w-0">
         {p.thumbnailUrl && !imageError ? (
           <div className="w-full h-32 bg-pf-border flex items-center justify-center rounded overflow-hidden mb-3">
             <img
@@ -33,10 +33,10 @@ export function PrinterCompactCard({
             />
           </div>
         ) : null}
-        <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1">
+        <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase mb-1 truncate">
           {p.name}
         </div>
-        <div className="text-pf-text-secondary text-xs">
+        <div className="text-pf-text-secondary text-xs truncate">
           {p.manufacturerName ? `${p.manufacturerName} ${p.modelName ?? ''}` : (p.modelName ?? '')}
         </div>
       </div>

@@ -91,7 +91,22 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    function({ addUtilities }) {
+      const newUtilities = {
+        '.card-container': {
+          '@apply overflow-hidden flex flex-col min-h-0': {},
+        },
+        '.text-ellipsis': {
+          '@apply truncate': {},
+        },
+        '.no-shrink-content': {
+          '@apply min-w-0': {},
+        },
+      };
+      addUtilities(newUtilities);
+    },
+  ],
   safelist: [
     // PrintFarmer specific colors - Backgrounds
     'bg-pf-bg-0', 'bg-pf-bg-1', 'bg-pf-bg-2', 'bg-pf-panel',
@@ -164,7 +179,19 @@ module.exports = {
     
     // Flexbox and grid
     'flex', 'inline-flex', 'grid', 'flex-col', 'items-center', 'justify-center',
-    'justify-between', 'gap-2', 'gap-3', 'gap-4',
+    'justify-between', 'gap-2', 'gap-3', 'gap-4', 'gap-6',
+    'min-w-0', 'min-h-0', 'overflow-hidden', 'flex-1', 'flex-shrink-0',
+    
+    // Responsive grid columns
+    'md:grid-cols-2', 'md:grid-cols-3', 'lg:grid-cols-3', 'lg:grid-cols-4', 'lg:grid-cols-5',
+    'xl:grid-cols-3', 'xl:grid-cols-4', 'xl:grid-cols-5',
+    
+    // Text truncation and ellipsis
+    'truncate', 'line-clamp-1', 'line-clamp-2', 'line-clamp-3',
+    'whitespace-nowrap', 'break-words',
+    
+    // Custom utilities
+    'card-container', 'text-ellipsis', 'no-shrink-content',
     
     // Font weights and sizes
     'font-medium', 'font-semibold', 'font-bold', 'font-inter', 'font-bebas',
