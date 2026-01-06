@@ -12,59 +12,15 @@ import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
-import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
 
 export function WorkerManagementPage() {
   const [activeTab, setActiveTab] = useState<'workers' | 'jobs'>('workers');
-
-  // Jobs tab state
-  const [jobId, setJobId] = useState('');
-  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
-  const [jobLoading, setJobLoading] = useState(false);
-  const [jobError, setJobError] = useState<string | null>(null);
-
-  interface JobStatus {
-    id: string;
-    status: 'pending' | 'processing' | 'completed' | 'failed';
-    createdAt: string;
-    completedAt?: string;
-    scheduledAt?: string;
-    progress?: number;
-    retryCount?: number;
-    workerId?: string;
-    errorMessage?: string;
-    result?: {
-      gcodeUrl: string;
-      printTime: number;
-      filamentUsed: number;
-    };
-  }
-
-  const fetchStatus = async () => {
-    setJobError(null);
-    setJobLoading(true);
-    setJobStatus(null);
-    try {
-      const res = await fetch(`${getApiBaseUrl()}/slicer/jobs/${encodeURIComponent(jobId)}/status`, { headers: getAuthHeaders() });
-      if (!res.ok) {
-        if (res.status === 404) throw new Error('Job not found');
-        throw new Error('Failed to fetch job status');
-      }
-      setJobStatus(await res.json());
-    } catch (err: unknown) {
-      setJobError(err instanceof Error ? err.message : String(err));
-    } finally { setJobLoading(false); }
-  };
-
   const [workers, setWorkers] = useState<WorkerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWorker, setSelectedWorker] = useState<WorkerResponse | null>(null);
   const [showDisableDialog, setShowDisableDialog] = useState(false);
   const [disableReason, setDisableReason] = useState('');
-  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
-  const [workerToDelete, setWorkerToDelete] = useState<WorkerResponse | null>(null);
   const [showEditSlotsDialog, setShowEditSlotsDialog] = useState(false);
   const [editSlotsValue, setEditSlotsValue] = useState('');
   const [filter, setFilter] = useState<'all' | WorkerStatus>('all');
@@ -204,23 +160,14 @@ export function WorkerManagementPage() {
     }
   };
 
-  const handleDeleteWorker = (worker: WorkerResponse) => {
-    setWorkerToDelete(worker);
-    setShowDeleteConfirmation(true);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!workerToDelete) return;
+  const handleDeleteWorker = async (worker: WorkerResponse) => {
+    if (!confirm(`Are you sure you want to delete worker "${worker.name}"?`)) return;
 
     try {
-      await workerService.deleteWorker(workerToDelete.id);
+      await workerService.deleteWorker(worker.id);
       loadWorkers();
-      setShowDeleteConfirmation(false);
-      setWorkerToDelete(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete worker');
-      setShowDeleteConfirmation(false);
-      setWorkerToDelete(null);
     }
   };
 
@@ -311,7 +258,7 @@ export function WorkerManagementPage() {
       subtitle="Monitor and manage your Slicer workers"
       icon={WrenchIcon}
       actions={
-            <table className="w-full min-w-max">
+        <div className="w-full min-w-max flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Button variant={activeTab === 'workers' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('workers')}>Workers</Button>
             <Button variant={activeTab === 'jobs' ? 'primary' : 'secondary'} size="sm" onClick={() => setActiveTab('jobs')} iconLeft={<ListIcon className="h-4 w-4" />}>Jobs</Button>
@@ -334,23 +281,57 @@ export function WorkerManagementPage() {
           {isConnected ? 'Real-time updates active' : 'Polling mode (SignalR disconnected)'}
         </span>
       </div>
+
       {error && (
         <Alert type="error" className="mb-4" onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {activeTab === 'workers' ? (
-        <>
-          {/* Filter tabs */}
-          <div className="mb-4 flex gap-2 flex-wrap">
-            <Button
-              variant={filter === 'all' ? 'primary' : 'secondary'}
-              size="sm"
-      ) : (
-        <SlicerJobStatus />
-      )}
-    </PageTemplate>
+      {/* Filter tabs */}
+      <div className="mb-4 flex gap-2 flex-wrap">
+        <Button
+          variant={filter === 'all' ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => setFilter('all')}
+        >
+          All ({workers.length})
+        </Button>
+        {Object.values(WorkerStatus).map(status => (
+          <Button
+            key={status}
+            variant={filter === status ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setFilter(status as WorkerStatus)}
+          >
+            {status} ({workers.filter(w => w.status === status).length})
+          </Button>
+        ))}
+      </div>
+
+      {/* Workers table (shown on Workers tab) */}
+      {activeTab === 'workers' && (
+        <div className="bg-pf-bg-1 rounded border border-pf-border overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-pf-bg-2 border-b border-pf-border">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Worker</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Capacity</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Statistics</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Performance</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-pf-border">
+            {workers.map(worker => (
+              <>
+                <tr key={worker.id} className="hover:bg-pf-bg-2 transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-start gap-2">
+                      <Button
+                        onClick={() => handleToggleExpanded(worker.id)}
+                        variant="subtle"
                       >
                         {expandedWorker === worker.id ? (
                           <ChevronDownIcon className="w-5 h-5" />
@@ -367,154 +348,148 @@ export function WorkerManagementPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <Badge variant={getStatusBadgeVariant(worker.status)}>
-                      {worker.status}
-                    </Badge>
-                    {worker.isDisabled && (
-                      <div className="text-xs text-pf-error mt-1">
-                        Disabled: {worker.disabledReason}
-                      </div>
-                    )}
-                    {workerService.isHeartbeatStale(worker) && (
-                      <div className="text-xs text-pf-warning mt-1">
-                        ⚠️ Stale heartbeat
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-pf-text-primary">
-                      {worker.totalSlots - worker.freeSlots} / {worker.totalSlots} slots used
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <Badge variant={getStatusBadgeVariant(worker.status)}>
+                    {worker.status}
+                  </Badge>
+                  {worker.isDisabled && (
+                    <div className="text-xs text-pf-error mt-1">
+                      Disabled: {worker.disabledReason}
                     </div>
-                    <div className="text-xs text-pf-text-secondary">
-                      {workerService.calculateUtilization(worker).toFixed(0)}% utilization
+                  )}
+                  {workerService.isHeartbeatStale(worker) && (
+                    <div className="text-xs text-pf-warning mt-1">
+                      ⚠️ Stale heartbeat
                     </div>
-                    <ProgressBar
-                      value={workerService.calculateUtilization(worker)}
-                      size="xs"
-                      showPercent={false}
-                      className="mt-1"
-                    />
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-pf-text-primary">
-                      Active: {worker.activeJobs}
-                    </div>
-                    <div className="text-xs text-pf-success">
-                      ✓ Completed: {worker.completedJobs}
-                    </div>
-                    <div className="text-xs text-pf-error">
-                      ✗ Failed: {worker.failedJobs}
-                    </div>
-                    <div className="text-xs text-pf-text-secondary">
-                      Success: {(workerService.calculateSuccessRate(worker) ?? 0).toFixed(1)}%
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-pf-text-primary">
-                      Avg: {(worker.averageProcessingTimeSeconds ?? 0).toFixed(0)}s
-                    </div>
-                    <div className="text-xs text-pf-text-secondary">
-                      Uptime: {workerService.getUptime(worker)}
-                    </div>
-                    <div className="text-xs text-pf-text-tertiary">
-                      v{worker.version}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <div className="flex gap-2">
-                      {worker.isDisabled ? (
-                        <Button
-                          variant="success"
-                          size="sm"
-                          onClick={() => handleEnableWorker(worker)}
-                        >
-                          Enable
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedWorker(worker);
-                            setShowDisableDialog(true);
-                          }}
-                        >
-                          Disable
-                        </Button>
-                      )}
+                  )}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-pf-text-primary">
+                    {worker.totalSlots - worker.freeSlots} / {worker.totalSlots} slots used
+                  </div>
+                  <div className="text-xs text-pf-text-secondary">
+                    {workerService.calculateUtilization(worker).toFixed(0)}% utilization
+                  </div>
+                  <ProgressBar
+                    value={workerService.calculateUtilization(worker)}
+                    size="xs"
+                    showPercent={false}
+                    className="mt-1"
+                  />
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-pf-text-primary">
+                    Active: {worker.activeJobs}
+                  </div>
+                  <div className="text-xs text-pf-success">
+                    ✓ Completed: {worker.completedJobs}
+                  </div>
+                  <div className="text-xs text-pf-error">
+                    ✗ Failed: {worker.failedJobs}
+                  </div>
+                  <div className="text-xs text-pf-text-secondary">
+                    Success: {(workerService.calculateSuccessRate(worker) ?? 0).toFixed(1)}%
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-pf-text-primary">
+                    Avg: {(worker.averageProcessingTimeSeconds ?? 0).toFixed(0)}s
+                  </div>
+                  <div className="text-xs text-pf-text-secondary">
+                    Uptime: {workerService.getUptime(worker)}
+                  </div>
+                  <div className="text-xs text-pf-text-tertiary">
+                    v{worker.version}
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  <div className="flex gap-2">
+                    {worker.isDisabled ? (
                       <Button
-                        variant="primary"
+                        variant="success"
                         size="sm"
-                        onClick={() => handleEditSlots(worker)}
+                        onClick={() => handleEnableWorker(worker)}
                       >
-                        Edit Slots
+                        Enable
                       </Button>
+                    ) : (
                       <Button
-                        variant="danger"
+                        variant="subtle"
                         size="sm"
-                        onClick={() => handleDeleteWorker(worker)}
+                        onClick={() => {
+                          setSelectedWorker(worker);
+                          setShowDisableDialog(true);
+                        }}
                       >
-                        Delete
+                        Disable
                       </Button>
-                    </div>
-                  </td>
-                </SelectableRow>
+                    )}
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleDeleteWorker(worker)}
+                    >
+                      Delete
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleEditSlots(worker)}
+                    >
+                      Edit Slots
+                    </Button>
+                  </div>
+                </td>
+              </tr>
 
-                {/* Jobs expansion row */}
-                {expandedWorker === worker.id && (
-                  <tr className="bg-pf-bg-2">
-                    <td colSpan={6} className="px-6 py-4">
-                      <div className="ml-8">
-                        {loadingJobs.has(worker.id) ? (
-                          <div className="text-sm text-pf-text-secondary">Loading jobs...</div>
-                        ) : workerJobs.get(worker.id)?.length === 0 ? (
-                          <div className="text-sm text-pf-text-secondary">No active jobs</div>
-                        ) : (
+              {/* Jobs expansion row */}
+              {expandedWorker === worker.id && (
+                <tr className="bg-pf-bg-2">
+                  <td colSpan={6} className="px-6 py-4">
+                    <div className="ml-8">
+                      {loadingJobs.has(worker.id) ? (
+                        <div className="text-sm text-pf-text-secondary">Loading jobs...</div>
+                      ) : workerJobs.get(worker.id)?.length === 0 ? (
+                        <div className="text-sm text-pf-text-secondary">No active jobs</div>
+                      ) : (
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-medium text-pf-text-primary mb-3">Active Slicing Jobs:</h4>
                           <div className="space-y-2">
-                            <h4 className="text-sm font-medium text-pf-text-primary mb-3">Active Slicing Jobs:</h4>
-                            <div className="space-y-2">
-                              {workerJobs.get(worker.id)?.map(job => (
-                                <div key={job.jobId} className="bg-pf-bg-1 rounded p-3 border border-pf-border">
-                                  <div className="flex justify-between items-start mb-2">
-                                    <div className="flex-1">
-                                      <div className="text-sm font-medium text-pf-text-primary">
-                                        <a href={`/admin/slicer/job-status/${encodeURIComponent(job.jobId)}`} target="_blank" rel="noopener noreferrer" className="text-pf-link">
-                                          {job.modelFileName}
-                                        </a>
-                                      </div>
-                                      <div className="text-xs text-pf-text-secondary">
-                                        Job ID: <a href={`/admin/slicer/job-status/${encodeURIComponent(job.jobId)}`} target="_blank" rel="noopener noreferrer" className="text-pf-link">{job.jobId}</a>
-                                      </div>
-                                    </div>
-                                    <Badge variant={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'error' : 'default'}>
-                                      {job.status}
-                                    </Badge>
+                            {workerJobs.get(worker.id)?.map(job => (
+                              <div key={job.jobId} className="bg-pf-bg-1 rounded p-3 border border-pf-border">
+                                <div className="flex justify-between items-start mb-2">
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-pf-text-primary">{job.modelFileName}</div>
+                                    <div className="text-xs text-pf-text-secondary">Job ID: {job.jobId}</div>
                                   </div>
-                                  <div className="mb-2">
-                                    <div className="text-xs text-pf-text-secondary mb-1">
-                                      Progress: {job.progressPercent}%
-                                    </div>
-                                    <ProgressBar value={job.progressPercent} size="sm" showPercent={false} />
-                                  </div>
-                                  {job.progressMessage && (
-                                    <div className="text-xs text-pf-text-secondary">{job.progressMessage}</div>
-                                  )}
-                                  {job.startedAt && (
-                                    <div className="text-xs text-pf-text-tertiary mt-1">
-                                      Started: {new Date(job.startedAt).toLocaleString()}
-                                    </div>
-                                  )}
+                                  <Badge variant={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'error' : 'default'}>
+                                    {job.status}
+                                  </Badge>
                                 </div>
-                              ))}
-                            </div>
+                                <div className="mb-2">
+                                  <div className="text-xs text-pf-text-secondary mb-1">
+                                    Progress: {job.progressPercent}%
+                                  </div>
+                                  <ProgressBar value={job.progressPercent} size="sm" showPercent={false} />
+                                </div>
+                                {job.progressMessage && (
+                                  <div className="text-xs text-pf-text-secondary">{job.progressMessage}</div>
+                                )}
+                                {job.startedAt && (
+                                  <div className="text-xs text-pf-text-tertiary mt-1">
+                                    Started: {new Date(job.startedAt).toLocaleString()}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                           </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </>
             ))}
           </tbody>
         </table>
@@ -524,23 +499,15 @@ export function WorkerManagementPage() {
             No workers found
           </div>
         )}
-      </div>
+        </div>
+      )}
+      {activeTab === 'jobs' && (
+        <div className="mt-4">
+          <SlicerJobStatus />
+        </div>
+      )}
 
       {/* Disable Worker Dialog */}
-      <ConfirmationModal
-        isOpen={showDeleteConfirmation}
-        title="Delete Worker"
-        message={`Are you sure you want to delete worker "${workerToDelete?.name}"? This action cannot be undone.`}
-        confirmButtonText="Delete"
-        cancelButtonText="Cancel"
-        isDangerous={true}
-        onConfirm={handleConfirmDelete}
-        onCancel={() => {
-          setShowDeleteConfirmation(false);
-          setWorkerToDelete(null);
-        }}
-      />
-
       {showDisableDialog && selectedWorker && (
         <Modal
           isOpen={true}
