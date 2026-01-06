@@ -515,10 +515,10 @@ export function PrintersAdminPage() {
                     <div className="text-sm text-pf-text-secondary">{printers.length} printers</div>
                     <div className="flex items-center gap-1">
                       <Tooltip content="Select all">
-                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds(printers.map(p => p.id)); }} iconLeft={<CheckCircleIcon className="w-4 h-4" />}></Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds(printers.map(p => p.id)); }} iconCenter={<CheckCircleIcon className="w-4 h-4" />}></Button>
                       </Tooltip>
                       <Tooltip content="Select none">
-                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds([]); }} iconLeft={<CircleIcon className="w-4 h-4" />}></Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds([]); }} iconCenter={<CircleIcon className="w-4 h-4" />}></Button>
                       </Tooltip>
                     </div>
                   </div>

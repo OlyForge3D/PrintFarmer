@@ -11,6 +11,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   loading?: boolean;
   iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
+  iconCenter?: React.ReactNode;
   children?: React.ReactNode;
 }
 
@@ -38,9 +39,29 @@ export const Button: React.FC<ButtonProps> = ({
   className,
   iconLeft,
   iconRight,
+  iconCenter,
   children,
   ...rest
 }) => {
+  // Icon-only button with iconCenter
+  if (iconCenter) {
+    return (
+      <button
+        className={clsx(
+          'rounded-sm font-medium inline-flex items-center justify-center whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
+          variantClasses[variant],
+          sizeClasses[size],
+          className
+        )}
+        disabled={disabled || loading}
+        {...rest}
+      >
+        <span className="flex items-center" aria-hidden>{loading ? 'Loading...' : iconCenter}</span>
+      </button>
+    );
+  }
+
+  // Regular button with text and optional left/right icons
   return (
     <button
       className={clsx(
@@ -53,7 +74,7 @@ export const Button: React.FC<ButtonProps> = ({
       {...rest}
     >
       {iconLeft && <span className="flex items-center" aria-hidden>{iconLeft}</span>}
-      <span>{loading ? 'Please wait…' : children}</span>
+      {children && <span>{loading ? 'Please wait…' : children}</span>}
       {iconRight && <span className="flex items-center" aria-hidden>{iconRight}</span>}
     </button>
   );

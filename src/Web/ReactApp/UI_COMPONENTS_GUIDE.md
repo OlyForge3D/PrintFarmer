@@ -94,15 +94,21 @@ import { Button } from '@/components/ui/Button';
 <Button iconLeft={<SaveIcon />} variant="primary">
   Save Changes
 </Button>
+
+// Icon-only button (no text)
+<Button iconCenter={<DeleteIcon />} variant="danger" aria-label="Delete" />
 ```
 
 **Props**:
-- `variant?: 'primary' | 'secondary' | 'danger' | 'subtle' | 'success'` (default: `'primary'`)
-- `size?: 'sm' | 'md'` (default: `'md'`)
+- `variant?: 'primary' | 'secondary' | 'danger' | 'subtle' | 'success' | 'tab' | 'toggle'` (default: `'primary'`)
+- `size?: 'sm' | 'md' | 'lg'` (default: `'md'`)
 - `loading?: boolean` - Shows loading text and disables button
 - `iconLeft?: React.ReactNode` - Icon before text
 - `iconRight?: React.ReactNode` - Icon after text
+- `iconCenter?: React.ReactNode` - Icon-only button with no text (centered)
 - All standard `HTMLButtonElement` attributes
+
+**Note**: When using `iconCenter`, any children (text) will be ignored. This prop is specifically for icon-only buttons and ensures proper centering without extra whitespace.
 
 **Styling**:
 - Uses `pf-gradient-*` for primary/secondary/success variants
