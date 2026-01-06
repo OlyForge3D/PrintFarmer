@@ -276,7 +276,7 @@ export function PrinterCard({
                     variant="subtle"
                     size="sm"
                     className="!p-2 !h-auto text-pf-warning"
-                    iconLeft={<PauseIcon className="h-4 w-4" />}
+                    iconCenter={<PauseIcon className="h-4 w-4" />}
                   >
                   </Button>
                 )}
@@ -288,7 +288,7 @@ export function PrinterCard({
                     variant="subtle"
                     size="sm"
                     className="!p-2 !h-auto text-pf-success"
-                    iconLeft={<PlayIcon className="h-4 w-4" />}
+                    iconCenter={<PlayIcon className="h-4 w-4" />}
                   >
                   </Button>
                 )}
@@ -299,7 +299,7 @@ export function PrinterCard({
                   variant="subtle"
                   size="sm"
                   className="!p-2 !h-auto text-pf-error"
-                  iconLeft={<StopIcon className="h-4 w-4" />}
+                  iconCenter={<StopIcon className="h-4 w-4" />}
                 >
                 </Button>
               </>
@@ -313,7 +313,7 @@ export function PrinterCard({
                 variant="subtle"
                 size="sm"
                 className="!p-2 !h-auto text-pf-accent"
-                iconLeft={<GearIcon className="h-4 w-4" />}
+                iconCenter={<GearIcon className="h-4 w-4" />}
               >
               </Button>
             )}

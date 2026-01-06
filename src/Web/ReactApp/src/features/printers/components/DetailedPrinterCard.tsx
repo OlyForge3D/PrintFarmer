@@ -258,9 +258,9 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 className="!p-1 !h-auto"
                 aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                 title={hasCameraUrls ? `Camera available` : 'No camera configured'}
-                iconLeft={<CameraIcon className="h-4 w-4" />}
+                iconCenter={<CameraIcon className="h-4 w-4" />}
               >
-              </Button>
+        </Button>
             </div>
             {showCamera && (
               <div className="mt-2 w-52 min-h-32 flex items-center justify-center bg-pf-bg-2 bg-opacity-30 border border-pf-border rounded-md overflow-hidden">
@@ -296,9 +296,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             onClick={handleViewHistory}
             className="!p-1 !h-auto"
             title="View print history"
-            iconLeft={<HistoryIcon className="h-4 w-4" />}
+            aria-label="View print history"
+            iconCenter={<HistoryIcon className="h-4 w-4" />}
           >
-          </Button>
+        </Button>
           <Button
             type="button"
             variant="subtle"
@@ -306,9 +307,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             onClick={() => onEdit?.(printer)}
             className="!p-1 !h-auto"
             title="Edit details"
-            iconLeft={<EditIcon className="h-4 w-4" />}
+            aria-label="Edit details"
+            iconCenter={<EditIcon className="h-4 w-4" />}
           >
-          </Button>
+        </Button>
           {onDismiss && (
             <Button
               type="button"
@@ -317,9 +319,10 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               onClick={onDismiss}
               className="!p-1 !h-auto"
               title="Close"
-              iconLeft={<CloseIcon className="h-4 w-4" />}
+              aria-label="Close"
+              iconCenter={<CloseIcon className="h-4 w-4" />}
             >
-            </Button>
+        </Button>
           )}
         </div>
       </div>
@@ -394,10 +397,11 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               disabled={isPrinting}
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
+              aria-label="Cooldown"
               className="flex-shrink-0 px-2"
-              iconLeft={<SnowflakeIcon className="h-4 w-4" />}
+              iconCenter={<SnowflakeIcon className="h-4 w-4" />}
             >
-            </Button>
+        </Button>
             <Select
               value=""
               onChange={(e) => {
