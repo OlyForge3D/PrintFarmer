@@ -16,7 +16,7 @@ export function ThemeToggle({
   showLabels = false,
   size = 'md',
   variant = 'compact',
-  className = ''
+  className
 }: ThemeToggleProps) {
   const { theme, setTheme, computedTheme } = useTheme();
 
@@ -41,7 +41,7 @@ export function ThemeToggle({
 
   if (variant === 'dropdown') {
     return (
-      <div className={`relative ${className}`}>
+      <div className={`relative ${className ?? ''}`}>
         <select
           value={theme}
           onChange={(e) => setTheme(e.target.value as ThemeName)}
@@ -66,7 +66,7 @@ export function ThemeToggle({
   if (variant === 'buttons') {
     const groupName = 'theme-toggle-group';
     return (
-      <div role="radiogroup" data-testid="theme-radiogroup" className={`flex bg-pf-panel border border-pf-border rounded-lg ${className}`} aria-label="Theme selection">
+      <div role="radiogroup" data-testid="theme-radiogroup" className={`flex bg-pf-panel border border-pf-border rounded-lg ${className ?? ''}`} aria-label="Theme selection">
         {themes.map(({ value, label, icon: Icon }) => (
           <label
             key={value}
@@ -104,7 +104,7 @@ export function ThemeToggle({
         const nextIndex = (currentIndex + 1) % themes.length;
         setTheme(themes[nextIndex].value);
       }}
-      className={`${sizeClasses[size]} ${className} inline-flex items-center space-x-2 bg-pf-panel border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200`}
+      className={`${sizeClasses[size]} ${className ?? ''} inline-flex items-center space-x-2 bg-pf-panel border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2 focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200`}
       aria-label={`Current theme: ${currentTheme.label}. Click to cycle themes.`}
       title={`Current: ${currentTheme.label} (${computedThemeLabel}). Click to change.`}
     >

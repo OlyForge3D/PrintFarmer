@@ -18,7 +18,7 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({
   selectedProfileId,
   onChange,
   disabled = false,
-  className = ''
+  className
 }) => {
   // Flatten all process profiles with hierarchy context for display
   const profileOptions = useMemo(() => {
@@ -72,7 +72,7 @@ export const ProfileSelector: React.FC<ProfileSelectorProps> = ({
       value={selectedProfileId}
       onChange={e => onChange(e.target.value)}
       disabled={disabled}
-      className={`w-full ${className}`}
+      className={`w-full ${className ?? ''}`}
     >
       <option value="">-- Select Process Profile --</option>
       

@@ -37,6 +37,14 @@ export default defineConfig({
       { find: /^axios$/, replacement: resolve(__dirname, '../../../node_modules/axios') },
       { find: /^@tanstack\/react-query$/, replacement: resolve(__dirname, '../../../node_modules/@tanstack/react-query') },
       { find: /^lucide-react$/, replacement: resolve(__dirname, '../../../node_modules/lucide-react') }
+      ,
+      // Ensure a single copy of three and react-three packages is resolved
+      { find: /^three$/, replacement: resolve(__dirname, '../../../node_modules/three') },
+      // Resolve any deep imports like 'three/examples/jsm/...' to the root three package
+      { find: /^three\/(.*)$/, replacement: resolve(__dirname, '../../../node_modules/three') + '/$1' },
+      { find: /^@react-three\/fiber$/, replacement: resolve(__dirname, '../../../node_modules/@react-three/fiber') },
+      { find: /^@react-three\/drei$/, replacement: resolve(__dirname, '../../../node_modules/@react-three/drei') },
+      { find: /^three-stdlib$/, replacement: resolve(__dirname, '../../../node_modules/three-stdlib') }
     ]
   },
   optimizeDeps: {

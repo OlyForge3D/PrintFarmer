@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronRightIcon, FolderIcon, DocumentIcon, TrashIcon, FolderPlusIcon } from '@heroicons/react/24/outline';
 import { Button, Checkbox } from '@/common/components/ui';
+import { Select } from '@/common/components/ui/Select';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { toast } from 'sonner';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import type { PrinterModelDto } from '@/types/api';
@@ -66,6 +68,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   const [newFolderName, setNewFolderName] = useState('');
   const [folderNameError, setFolderNameError] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  // Delete flow handled inline via mutation; no dedicated fileToDelete state needed
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('all');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -221,10 +224,13 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
   });
 
   const handleDeleteFile = (filePath: string) => {
-    if (confirm(`Delete ${filePath}?`)) {
-      deleteFilesMutation.mutate([filePath]);
-    }
+    // Immediate confirmation flow
+    const confirmed = window.confirm('Delete this file? This action cannot be undone.');
+    if (!confirmed) return;
+    deleteFilesMutation.mutate([filePath]);
   };
+
+  // Confirmation flow handled inline where delete is triggered; handler removed to avoid unused-vars
 
   const handleSelectFile = (filePath: string, selected: boolean) => {
     setSelectedFiles(prev =>
@@ -497,12 +503,10 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
             </h3>
             <div className="flex items-center gap-3">
               {endpoint === 'gcode' && printerModels.length > 0 && (
-                /* eslint-disable-next-line local/pf-no-raw-html-controls */
-                <select
+                <Select
                   value={selectedPrinterModel}
                   onChange={(e) => setSelectedPrinterModel(e.target.value)}
-                  className="px-3 py-1.5 text-sm bg-pf-bg border border-pf-border rounded text-pf-text focus:outline-none focus:ring-1 focus:ring-pf-accent"
-                  title="Filter by printer model"
+                  aria-label="Filter by printer model"
                 >
                   <option value="all">All Models ({allFiles.length})</option>
                   {printerModels.map((model) => {
@@ -513,7 +517,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       </option>
                     );
                   })}
-                </select>
+                </Select>
               )}
               <Button
                 onClick={() => setIsCreatingFolder(true)}
@@ -597,11 +601,10 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
               </thead>
               <tbody>
                 {files.map((file: FileEntry) => (
-                  <tr
+                  <SelectableRow
                     key={file.path}
-                    className={`border-b border-pf-border hover:bg-pf-bg-2 transition-colors cursor-grab active:cursor-grabbing ${
-                      selectedFiles.includes(file.path) ? 'bg-pf-primary bg-opacity-10' : ''
-                    }`}
+                    className="border-b border-pf-border cursor-grab active:cursor-grabbing"
+                    isSelected={selectedFiles.includes(file.path)}
                     draggable={true}
                     onDragStart={(e) => {
                       // Get file ID (GUID) - use gcodeFileId for gcode, modelId for 3D models
@@ -744,7 +747,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                         <TrashIcon className="w-4 h-4" />
                       </Button>
                     </td>
-                  </tr>
+                  </SelectableRow>
                 ))}
               </tbody>
             </table>

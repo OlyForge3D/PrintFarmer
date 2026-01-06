@@ -11,7 +11,7 @@ interface SkeletonProps {
 
 export const Skeleton: React.FC<SkeletonProps> = ({
   lines = 1,
-  className = '',
+  className,
   variant = 'rect',
   width,
   height,
@@ -21,7 +21,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   const widthClass = typeof width === 'number' ? `w-[${width}px]` : typeof width === 'string' ? '' : 'w-full';
   const heightRem = height ? (typeof height === 'number' ? `${height}px` : height) : (variant === 'pill' ? '0.75rem' : '1rem');
   return (
-  <div aria-label={ariaLabel} className={`flex flex-col gap-2 ${className}`} data-skeleton>
+  <div aria-label={ariaLabel} className={`flex flex-col gap-2 ${className ?? ''}`} data-skeleton>
       {items.map((_, i) => (
         <div
           key={i}

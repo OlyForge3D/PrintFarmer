@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { EyeIcon, EyeOffIcon, LoginIcon } from '@/common/components/icons/MdiIcons';
-import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
+// PrintFarmerLogo import removed - unused in this component
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button, Input } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';

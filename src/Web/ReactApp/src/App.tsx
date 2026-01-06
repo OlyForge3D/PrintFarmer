@@ -35,6 +35,7 @@ import { LocationManagementAdminPage } from '@/features/admin/pages/LocationMana
 import { LogsPage } from '@/features/admin/pages/LogsPage';
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import { AdminPage } from '@/features/admin/pages/AdminPage';
+import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -111,6 +112,7 @@ function AuthenticatedAppRoutes() {
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
+        <Route path="admin/slicer/job-status/:id" element={<ProtectedRoute requiredRole="farm_admin"><SlicerJobStatus /></ProtectedRoute>} />
         <Route path="admin/*" element={<AdminPage />} />
         <Route path="jobs/new" element={<NewSliceJobPage />} />
       </Route>

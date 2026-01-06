@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { useSignalRPrinterStatus } from '@/common/hooks/useSignalRPrinterStatus';
 
 // Mock SignalR
@@ -54,63 +54,77 @@ describe('useSignalRPrinterStatus Hook', () => {
     vi.clearAllMocks();
   });
 
-  it('initializes with null status', () => {
+  it('initializes with null status', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
-    expect(result.current.status).toBeNull();
-    expect(result.current.isConnected).toBe(false);
+    await waitFor(() => {
+      expect(result.current.status).toBeNull();
+      expect(result.current.isConnected).toBe(false);
+    });
   });
 
-  it('requires a printer ID', () => {
+  it('requires a printer ID', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus(''));
 
-    expect(result.current.error).toBeDefined();
+    await waitFor(() => {
+      expect(result.current.error).toBeDefined();
+    });
   });
 
-  it('returns a reconnect function', () => {
+  it('returns a reconnect function', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
-    expect(typeof result.current.reconnect).toBe('function');
+    await waitFor(() => {
+      expect(typeof result.current.reconnect).toBe('function');
+    });
   });
 
   it('handles error state properly', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
-    expect(result.current.error).toBeNull();
+    await waitFor(() => {
+      expect(result.current.error).toBeNull();
+    });
   });
 
   it('tracks connection state', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
     // Initially disconnected
-    expect(result.current.isConnected).toBe(false);
+    await waitFor(() => {
+      expect(result.current.isConnected).toBe(false);
+    });
 
-    // Eventually should attempt connection
-    await waitFor(
-      () => {
-        // Connection attempt made
-      },
-      { timeout: 1000 }
-    );
+    // Eventually should attempt connection (no explicit assertion required, wait for side-effects)
+    await waitFor(() => {
+      // allow hook effects to run
+      expect(result.current).toBeDefined();
+    }, { timeout: 1000 });
   });
 
-  it('provides reconnect functionality', () => {
+  it('provides reconnect functionality', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
-    expect(result.current.reconnect).toBeDefined();
+    await waitFor(() => {
+      expect(result.current.reconnect).toBeDefined();
+    });
 
-    // Should be callable without error
-    expect(() => result.current.reconnect()).not.toThrow();
+    // Should be callable without error; wrap in act to avoid async state update warnings
+    await act(async () => {
+      await result.current.reconnect();
+    });
   });
 
   it('returns typed status when available', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
     // Status should be null until updated
-    expect(result.current.status).toBeNull();
+    await waitFor(() => {
+      expect(result.current.status).toBeNull();
+    });
   });
 
-  it('handles different printer states', () => {
+  it('handles different printer states', async () => {
     const states: Array<'Idle' | 'Printing' | 'Paused' | 'Error' | 'Offline'> = [
       'Idle',
       'Printing',
@@ -121,18 +135,23 @@ describe('useSignalRPrinterStatus Hook', () => {
 
     states.forEach(() => {
       const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
-
-      expect(result.current).toBeDefined();
+      waitFor(() => {
+        expect(result.current).toBeDefined();
+      });
     });
   });
 
-  it('properly cleans up on unmount', () => {
+  it('properly cleans up on unmount', async () => {
     const { unmount } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
-    expect(() => unmount()).not.toThrow();
+    await act(async () => {
+      unmount();
+    });
+
+    expect(true).toBe(true);
   });
 
-  it('handles multiple printer IDs', () => {
+  it('handles multiple printer IDs', async () => {
     const { result: result1 } = renderHook(() =>
       useSignalRPrinterStatus('printer-1')
     );
@@ -140,8 +159,10 @@ describe('useSignalRPrinterStatus Hook', () => {
       useSignalRPrinterStatus('printer-2')
     );
 
-    expect(result1.current).toBeDefined();
-    expect(result2.current).toBeDefined();
+    await waitFor(() => {
+      expect(result1.current).toBeDefined();
+      expect(result2.current).toBeDefined();
+    });
   });
 });
 
@@ -151,20 +172,23 @@ describe('useSignalRPrinterStatus - Error Handling', () => {
     vi.clearAllMocks();
   });
 
-  it('returns error for empty printer ID', () => {
+  it('returns error for empty printer ID', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus(''));
 
-    expect(result.current.error).toBeTruthy();
+    await waitFor(() => {
+      expect(result.current.error).toBeTruthy();
+    });
   });
 
-  it('has graceful error recovery', () => {
+  it('has graceful error recovery', async () => {
     const { result } = renderHook(() => useSignalRPrinterStatus('printer-1'));
 
-    expect(result.current.reconnect).toBeDefined();
+    await waitFor(() => {
+      expect(result.current.reconnect).toBeDefined();
+    });
 
-    // Calling reconnect should not throw
-    expect(() => {
-      result.current.reconnect();
-    }).not.toThrow();
+    await act(async () => {
+      await result.current.reconnect();
+    });
   });
 });

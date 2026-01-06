@@ -1,23 +1,22 @@
-/* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
-import { 
-  PlayIcon, 
-  CheckCircleIcon, 
-  ExclamationCircleIcon, 
+import {
+  PlayIcon,
+  CheckCircleIcon,
+  ExclamationCircleIcon,
   XCircleIcon,
   ChevronDownIcon,
   StopIcon
 } from '@heroicons/react/24/outline';
 
-import { 
+import {
   GcodeHarvestOperation,
   GcodeHarvestStatus
 } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCancelHarvestOperation } from '@/common/hooks/useApi';
-import { toast } from 'sonner';
+import { Button } from '@/common/components/ui/Button';
 import { parseApiDateTimeValue, formatDuration } from '@/common/utils/datetime';
 
 interface HarvestOperationCardProps {
@@ -62,18 +61,11 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
   }, [progress]);
 
   const handleCancel = () => {
-    if (!window.confirm('Are you sure you want to cancel this harvest operation? This action cannot be undone.')) {
-      return;
+    if (cancelMutation && typeof cancelMutation.mutate === 'function') {
+      // Trigger cancellation for this operation
+      // mutate is provided by the hook and accepts the operation id
+      cancelMutation.mutate(operation.id);
     }
-    
-    cancelMutation.mutate(operation.id, {
-      onSuccess: () => {
-        toast.success('Harvest operation cancelled successfully');
-      },
-      onError: (error) => {
-        toast.error(error instanceof Error ? error.message : 'Failed to cancel harvest operation');
-      }
-    });
   };
 
   return (
@@ -83,7 +75,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
           <div className={`flex-shrink-0 w-8 h-8 rounded-full bg-${config.color}-100 flex items-center justify-center`}>
             <config.icon className={`w-4 h-4 text-${config.color}-600`} />
           </div>
-          
+
           <div className="flex-1">
             <div className="flex items-center space-x-2">
               <h4 className="font-medium text-gray-900">
@@ -93,7 +85,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                 {config.label}
               </span>
             </div>
-            
+
             <div className="mt-1 text-sm text-gray-500">
               Started {formatDistanceToNow(parseApiDateTimeValue(operation.startedAt), { addSuffix: true })}
               {operation.completedAt && (
@@ -123,13 +115,13 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                 <span className="text-gray-600">
                   <span className="font-medium text-green-600">{operation.filesProcessed}</span> files harvested
                 </span>
-                
+
                 {operation.totalSizeBytes && (
                   <span className="text-gray-600">
                     <span className="font-medium">{formatBytes(operation.totalSizeBytes)}</span> total size
                   </span>
                 )}
-                
+
                 {operation.duplicatesSkipped > 0 && (
                   <span className="text-gray-600">
                     {operation.duplicatesSkipped} duplicates skipped
@@ -149,14 +141,9 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
         <div className="flex items-center space-x-2">
           {operation.status === GcodeHarvestStatus.Running && onViewDetails && (
-            <button
-              onClick={() => onViewDetails(operation)}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              View Details
-            </button>
+            <Button onClick={() => onViewDetails(operation)} variant="subtle" className="text-sm text-blue-600 hover:text-blue-800">View Details</Button>
           )}
-          
+
           {operation.status === GcodeHarvestStatus.Completed && hasPermission('gcode_harvest', 'read') && (
             <Link
               to={`/files?harvest=${operation.id}`}
@@ -165,14 +152,9 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
               View Files
             </Link>
           )}
-          
+
           {operation.status === GcodeHarvestStatus.Running && hasPermission('gcode_harvest', 'execute') && (
-            <button
-              onClick={handleCancel}
-              disabled={cancelMutation.isPending}
-              className="text-sm text-red-600 hover:text-red-800 disabled:text-red-400 disabled:cursor-not-allowed"
-              title="Cancel harvest operation"
-            >
+            <Button onClick={handleCancel} disabled={cancelMutation.isPending} variant="danger" className="text-sm" title="Cancel harvest operation">
               {cancelMutation.isPending ? (
                 <span className="flex items-center">
                   <StopIcon className="w-4 h-4 mr-1 animate-spin" />
@@ -184,16 +166,12 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                   Cancel
                 </span>
               )}
-            </button>
+            </Button>
           )}
-          
-          <button
-            onClick={() => setShowDetails(!showDetails)}
-            className="text-gray-400 hover:text-gray-600"
-            title="Toggle details"
-          >
+
+          <Button onClick={() => setShowDetails(!showDetails)} variant="subtle" className="text-gray-400 hover:text-gray-600" title="Toggle details">
             <ChevronDownIcon className={`w-4 h-4 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -207,21 +185,21 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                 {operation.id.substring(0, 8)}...
               </div>
             </div>
-            
+
             <div>
               <span className="text-gray-600">File Types:</span>
               <div className="font-medium text-gray-900 mt-1">
                 {operation.options?.fileTypes?.join(', ') || 'All'}
               </div>
             </div>
-            
+
             <div>
               <span className="text-gray-600">Include Subfolders:</span>
               <div className="font-medium text-gray-900 mt-1">
                 {operation.options?.includeSubfolders ? 'Yes' : 'No'}
               </div>
             </div>
-            
+
             <div>
               <span className="text-gray-600">Min File Size:</span>
               <div className="font-medium text-gray-900 mt-1">

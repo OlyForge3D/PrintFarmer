@@ -20,6 +20,7 @@ import { ColorSwatch } from '@/features/catalog/components/ColorSwatch';
 import { SpoolUsageBar } from '@/features/catalog/components/SpoolUsageBar';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import '@/features/catalog/components/spool-components.css';
 
@@ -754,7 +755,7 @@ export function SpoolsPage() {
                 } ${
                   (spool.remainingWeightG ?? Infinity) <= 10 ? 'border-red-500' : ''
                 }`}
-              >
+              hover:bg-pf-bg-secondary transition-colors>
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
                   <ColorSwatch color={getRepresentativeHex(classifyColor(spool.colorHex))} label={classifyColor(spool.colorHex)} />
@@ -859,11 +860,11 @@ export function SpoolsPage() {
                 </thead>
                 <tbody>
                   {getDisplayedSpools().map(spool => (
-                    <tr key={spool.id} className="border-t border-pf-border hover:bg-pf-bg-1">
+                    <SelectableRow key={spool.id} className="border-t border-pf-border" isSelected={false}>
                       {tableColumns.filter(c => c.visible).map(c => (
                         <td key={c.id} className="px-3 py-2" data-col-id={c.id}>{c.render(spool)}</td>
                       ))}
-                    </tr>
+                    </SelectableRow>
                   ))}
                 </tbody>
               </table>

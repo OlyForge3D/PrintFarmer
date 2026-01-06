@@ -8,11 +8,13 @@ import { PrinterDiscoveryModal } from '@/features/printers/components/PrinterDis
 import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
 import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfirmationModal';
 import ImportProgressModal from '@/features/printers/components/ImportProgressModal';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { toast } from 'sonner';
 import { DeleteIcon, EditIcon, CheckCircleIcon, CircleIcon, PrinterIcon } from '@/common/components/icons/MdiIcons';
 import { Alert, Button, Checkbox, Label, Select, Tooltip } from '@/common/components/ui';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { Printer, UpdatePrinterDto } from '@/types/api';
 
 export function PrintersAdminPage() {
@@ -28,6 +30,8 @@ export function PrintersAdminPage() {
   const [bulkManufacturerId, setBulkManufacturerId] = React.useState<string>('');
   const [bulkModelId, setBulkModelId] = React.useState<string>('');
   const [bulkOperation, setBulkOperation] = React.useState<'none' | 'enable' | 'disable' | 'delete'>('none');
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = React.useState(false);
+  const [printerToDelete, setPrinterToDelete] = React.useState<Printer | null>(null);
   const [bulkOperating, setBulkOperating] = React.useState(false);
   const [editPrinterId, setEditPrinterId] = React.useState<string | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = React.useState(false);
@@ -294,7 +298,7 @@ export function PrintersAdminPage() {
     }
   };
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmBulkDelete = async () => {
     setBulkOperating(true);
     try {
       let deleted = 0;
@@ -347,15 +351,24 @@ export function PrintersAdminPage() {
     await refetch?.();
   };
 
-  const handleDeletePrinter = async (printer: Printer) => {
-    if (!confirm(`Are you sure you want to delete "${printer.name}"?`)) return;
+  const handleDeletePrinter = (printer: Printer) => {
+    setPrinterToDelete(printer);
+    setShowDeleteConfirmation(true);
+  };
+
+  const handleConfirmDeletePrinter = async () => {
+    if (!printerToDelete) return;
     try {
-      await apiClient.deletePrinter(printer.id);
-      toast.success(`Deleted ${printer.name}`);
+      await apiClient.deletePrinter(printerToDelete.id);
+      toast.success(`Deleted ${printerToDelete.name}`);
       await refetch?.();
+      setShowDeleteConfirmation(false);
+      setPrinterToDelete(null);
     } catch (error) {
       console.error('Failed to delete printer', error);
       toast.error('Failed to delete printer');
+      setShowDeleteConfirmation(false);
+      setPrinterToDelete(null);
     }
   };
 
@@ -475,6 +488,20 @@ export function PrintersAdminPage() {
             />
           </div>
 
+          <ConfirmationModal
+            isOpen={showDeleteConfirmation}
+            title="Delete Printer"
+            message={`Are you sure you want to delete "${printerToDelete?.name}"? This action cannot be undone.`}
+            confirmButtonText="Delete"
+            cancelButtonText="Cancel"
+            isDangerous={true}
+            onConfirm={handleConfirmDeletePrinter}
+            onCancel={() => {
+              setShowDeleteConfirmation(false);
+              setPrinterToDelete(null);
+            }}
+          />
+
           {showExportOptions && (
             <div className="gap-md flex flex-col">
               <div className="flex gap-2 flex-wrap">
@@ -549,7 +576,7 @@ export function PrintersAdminPage() {
                       </thead>
                       <tbody>
                         {printers.map(p => (
-                          <tr key={p.id}>
+                          <SelectableRow key={p.id} isSelected={selectedIds.includes(p.id)}>
                             <td>
                               <Checkbox
                                 aria-label={`Select printer ${p.name}`}
@@ -583,7 +610,7 @@ export function PrintersAdminPage() {
                                     size="sm"
                                     variant="subtle"
                                     onClick={() => handleEditClick(p)}
-                                    className="!p-2 text-pf-text-tertiary hover:text-pf-accent hover:bg-pf-bg-2"
+                                    className="!p-2 text-pf-text-tertiary hover:text-pf-accent hover:bg-pf-bg-secondary transition-colors"
                                     iconLeft={<EditIcon className="w-4 h-4" />}
                                   ></Button>
                                 </Tooltip>
@@ -598,7 +625,7 @@ export function PrintersAdminPage() {
                                 </Tooltip>
                               </div>
                             </td>
-                          </tr>
+                          </SelectableRow>
                         ))}
                       </tbody>
                     </table>
@@ -703,7 +730,7 @@ export function PrintersAdminPage() {
         <DeleteConfirmationModal
           isOpen={deleteConfirmation.isOpen}
           printers={deleteConfirmation.printers}
-          onConfirm={handleConfirmDelete}
+          onConfirm={handleConfirmBulkDelete}
           onCancel={handleCancelDelete}
         />
 

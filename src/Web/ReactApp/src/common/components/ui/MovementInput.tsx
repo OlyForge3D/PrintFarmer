@@ -23,7 +23,7 @@ export function MovementInput({
   onChange,
   step = 1,
   disabled = false,
-  className = '',
+  className,
   ...props
 }: MovementInputProps) {
 
@@ -39,7 +39,7 @@ export function MovementInput({
         onChange={onChange}
         disabled={disabled}
         aria-label={`${axis} movement amount`}
-        className={`w-24 h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className}`}
+        className={`w-24 h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
         {...props}
       />
     </div>

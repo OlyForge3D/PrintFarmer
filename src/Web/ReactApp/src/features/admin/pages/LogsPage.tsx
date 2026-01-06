@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { Button, Input, FormField, Select } from '@/common/components/ui';
+import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 
 interface SystemLog {
@@ -173,11 +173,10 @@ export function LogsPage() {
       {useAdvancedQuery && (
         <div className="mb-4">
           <FormField label="Lucene Query" inline={false}>
-            <textarea
+            <Textarea
               value={queryString}
               onChange={e => setQueryString(e.target.value)}
               placeholder="Example: level:Error AND message:timeout"
-              className="w-full p-2 border rounded bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent"
               rows={4}
             />
           </FormField>
@@ -206,14 +205,12 @@ export function LogsPage() {
           <h3 className="text-sm font-semibold text-pf-text-primary">Visible Columns</h3>
           <Button variant="secondary" size="sm" onClick={resetColumns}>Reset to Defaults</Button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {Object.entries(DEFAULT_COLUMNS).map(([key, { label }]) => (
             <label key={key} className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={visibleColumns[key as ColumnKey]}
                 onChange={() => toggleColumn(key as ColumnKey)}
-                className="w-4 h-4 rounded border-pf-border bg-pf-bg-0"
               />
               <span className="text-sm text-pf-text-secondary">{label}</span>
             </label>
@@ -243,12 +240,15 @@ export function LogsPage() {
               <React.Fragment key={log.id}>
                 <tr className={index % 2 === 0 ? 'bg-pf-bg-0' : 'bg-pf-bg-1'} style={{borderBottom: '1px solid var(--pf-border)'}}>
                   <td className="p-2 text-center">
-                    <button
+                    <Button
+                      variant="subtle"
+                      size="sm"
                       onClick={() => setExpandedRowId(expandedRowId === log.id ? null : log.id)}
                       className="text-pf-accent hover:text-pf-accent-hover"
+                      aria-label={expandedRowId === log.id ? 'Collapse row' : 'Expand row'}
                     >
                       {expandedRowId === log.id ? '▼' : '▶'}
-                    </button>
+                    </Button>
                   </td>
                   {visibleColumns.timestamp && <td className="p-2 text-xs text-pf-text-secondary whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>}
                   {visibleColumns.level && <td className="p-2 text-xs text-pf-text-primary font-medium">{log.level}</td>}

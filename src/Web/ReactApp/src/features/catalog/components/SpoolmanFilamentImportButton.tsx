@@ -10,7 +10,7 @@ interface SpoolmanFilamentImportButtonProps {
 }
 
 export function SpoolmanFilamentImportButton({ 
-  className = '', 
+  className, 
   onImportSuccess 
 }: SpoolmanFilamentImportButtonProps) {
   const importMutation = useImportFilamentTypesFromSpoolman();
@@ -48,7 +48,7 @@ export function SpoolmanFilamentImportButton({
       variant="primary"
       onClick={handleImport}
       disabled={importMutation.status === 'pending'}
-      className={className}
+      className={className ?? ''}
       title="Import unique filament types from Spoolman to maintain parity between applications"
       iconLeft={importMutation.status === 'pending' ? undefined : <DownloadIcon className="w-4 h-4" />}
     >

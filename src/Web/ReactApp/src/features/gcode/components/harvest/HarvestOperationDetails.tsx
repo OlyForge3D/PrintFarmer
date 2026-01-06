@@ -18,7 +18,7 @@ interface HarvestOperationDetailsProps {
   onFilesImported?: () => void; // Callback when files are successfully imported
 }
 
-export function HarvestOperationDetails({ operation: initialOperation, operationId: propOperationId, onClose, inline = false, className = '', hideCloseButton = false, onFilesImported }: HarvestOperationDetailsProps) {
+export function HarvestOperationDetails({ operation: initialOperation, operationId: propOperationId, onClose, inline = false, className, hideCloseButton = false, onFilesImported }: HarvestOperationDetailsProps) {
   const [operation, setOperation] = useState<GcodeHarvestOperation | null>(initialOperation || null);
   const [loading, setLoading] = useState(!initialOperation);
 

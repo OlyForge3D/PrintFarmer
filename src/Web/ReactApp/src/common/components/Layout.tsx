@@ -18,7 +18,12 @@ import {
   UsersIcon,
   GearIcon,
   FolderOpenIcon,
-  HistoryIcon
+  HistoryIcon,
+  FileIcon,
+  TagIcon,
+  WrenchIcon,
+  TrendingUpIcon,
+  DatabaseIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
@@ -73,6 +78,11 @@ const navigation: NavigationElement[] = [
     href: '/spools', 
     icon: SpoolIcon
   },
+  {
+    name: 'Slicer Profiles',
+    href: '/admin/slicer-profiles',
+    icon: FileIcon
+  },
   { name: '', isDivider: true },
   {
     name: 'Locations',
@@ -102,6 +112,31 @@ const navigation: NavigationElement[] = [
     name: 'Logs',
     href: '/logs',
     icon: HistoryIcon,
+    requiredRole: 'farm_admin'
+  },
+  // Surface key admin pages directly in primary nav (permissioned)
+  {
+    name: 'Tags',
+    href: '/admin/tags',
+    icon: TagIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Workers',
+    href: '/admin/workers',
+    icon: WrenchIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Observability',
+    href: '/admin/observability',
+    icon: TrendingUpIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'File Health',
+    href: '/admin/file-health',
+    icon: DatabaseIcon,
     requiredRole: 'farm_admin'
   },
   {
@@ -177,8 +212,10 @@ export function Layout() {
     setUserMenuOpen(false);
   };
 
-  // Track which parent menus are expanded (with persistence)
+  // Key for persisting expanded nav groups
   const LOCAL_STORAGE_KEY = 'pf_nav_expanded_v1';
+
+  // Track which parent menus are expanded (with persistence)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [announcement, setAnnouncement] = useState('');
   const announcementTimer = useRef<number | null>(null);
@@ -310,11 +347,11 @@ export function Layout() {
   }, [location.pathname, filteredNavigation]); // Include all dependencies
 
   return (
-    <div className="min-h-screen bg-pf-bg-0 flex flex-col">
+    <div className="flex flex-col h-screen bg-pf-bg-0">
       {/* Live region for accessibility announcements */}
       <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
       {/* Top Header Bar */}
-      <header className="bg-pf-bg-1 border-b border-pf-border sticky top-0 z-50">
+      <header className="bg-pf-bg-1 border-b border-pf-border h-16 flex-shrink-0 z-50">
         <div className="flex items-center justify-between h-16 px-4">
           {/* Left side - App branding */}
           <div className="flex items-center space-x-4">
@@ -446,7 +483,7 @@ export function Layout() {
         </div>
       </header>
 
-      <div className="flex flex-1 h-[calc(100vh-4rem)]">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div className="fixed inset-0 z-40 lg:hidden">
@@ -548,8 +585,8 @@ export function Layout() {
 
         {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
         <aside className={`hidden lg:flex lg:flex-shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-20' : 'w-64'}`}>
-          <div className={`flex flex-col ${navbarCollapsed ? 'w-20' : 'w-64'} bg-pf-bg-1 border-r border-pf-border h-screen`}>
-            <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto max-h-[calc(100vh-4rem)]">
+          <div className={`flex flex-col ${navbarCollapsed ? 'w-20' : 'w-64'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
+            <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto min-h-0">
               {filteredNavigation.map(item => {
                 if (isDivider(item)) {
                   return (
@@ -687,7 +724,7 @@ export function Layout() {
         </aside>
 
         {/* Main content area */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto min-h-0">
           <EmailConfirmationBanner />
           <div className="pt-2 pr-2 pl-2">
             <Outlet />

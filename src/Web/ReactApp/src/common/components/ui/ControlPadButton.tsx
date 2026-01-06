@@ -14,7 +14,7 @@ export interface ControlPadButtonProps extends ButtonProps {
 export function ControlPadButton({
   padSize = 'medium',
   variant = 'secondary',
-  className = '',
+  className,
   children,
   ...props
 }: ControlPadButtonProps) {
@@ -28,7 +28,7 @@ export function ControlPadButton({
     <Button
       variant={variant}
       size="sm"
-      className={`${sizeClasses[padSize]} !p-0 ${className}`}
+      className={`${sizeClasses[padSize]} !p-0 ${className ?? ''}`}
       {...props}
     >
       {children}

@@ -86,7 +86,7 @@ dotnet build ./farm-web.sln -c Release
 cd ./src/Web/ReactApp
 npm run build
 ```
-⚠️ **CRITICAL**: This currently FAILS with 97 TypeScript compilation errors. Use dev mode instead:
+⚠️ **NOTICE:** A previous snapshot of this repository reported a production build failure with TypeScript errors. In the current workspace the production build completes successfully when running `npm run build`. If you encounter local build failures, use the dev server as a fallback:
 ```powershell
 npm run dev  # Development server works fine
 ```

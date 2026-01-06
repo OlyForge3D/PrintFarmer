@@ -65,4 +65,28 @@ public static class SlicerHubEvents
     /// Payload: { id: Guid, name: string, rotatedAt: DateTime }
     /// </summary>
     public const string SlicerApiKeyRotated = "SlicerApiKeyRotated";
+
+    /// <summary>
+    /// Event name for when profile import starts
+    /// Payload: { totalProfiles: int, message: string }
+    /// </summary>
+    public const string ProfileImportStarted = "ProfileImportStarted";
+
+    /// <summary>
+    /// Event name for when a profile is imported
+    /// Payload: { profileName: string, profileType: string, count: int, total: int }
+    /// </summary>
+    public const string ProfileImported = "ProfileImported";
+
+    /// <summary>
+    /// Event name for when profile import completes
+    /// Payload: { imported: int, skipped: int, deleted: int, message: string }
+    /// </summary>
+    public const string ProfileImportCompleted = "ProfileImportCompleted";
+
+    /// <summary>
+    /// Event name for when profile import encounters an error
+    /// Payload: { error: string, profileName: string }
+    /// </summary>
+    public const string ProfileImportError = "ProfileImportError";
 }

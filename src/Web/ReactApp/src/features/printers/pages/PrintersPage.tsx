@@ -20,6 +20,7 @@ import { PrinterCompactCard } from '@/features/printers/components/PrinterCompac
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
+import { FileUpload } from '@/common/components/ui/FileUpload';
 import { ViewModeToggle } from '@/common/components/ViewModeToggle';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
@@ -437,14 +438,12 @@ export function PrintersPage() {
               >
                 Import
               </Button>
-              <input
-                ref={fileInputRef}
+              <FileUpload
                 id={fileInputId}
-                type="file"
                 accept=".json,.csv"
-                onChange={(e) => handleFile(e.target.files?.[0])}
-                style={{ display: 'none' }}
-                aria-label="Select CSV or JSON file to import printers"
+                onChange={(files) => handleFile(files?.[0] ?? null)}
+                buttonText="Choose file"
+                buttonIcon={<FileImportIcon className="w-4 h-4" ariaLabel="Import" />}
               />
             </>
           )}

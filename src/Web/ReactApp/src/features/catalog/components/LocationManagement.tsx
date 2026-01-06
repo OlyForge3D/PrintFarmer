@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { Location, CreateLocationRequest, UpdateLocationRequest, locationService } from '@/services/locationService';
+// ConfirmationModal removed; not used in this component
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
 import { Button, Textarea } from '@/common/components/ui';
 
@@ -18,6 +20,7 @@ export const LocationManagement: React.FC = () => {
     name: '',
     description: '',
   });
+  // locationToDelete state removed - deletion uses immediate confirmation
 
   // Load locations on component mount
   useEffect(() => {
@@ -78,9 +81,8 @@ export const LocationManagement: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this location?')) {
-      return;
-    }
+    const confirmed = window.confirm('Delete this location? This action cannot be undone.');
+    if (!confirmed) return;
 
     try {
       setLoading(true);
@@ -211,7 +213,7 @@ export const LocationManagement: React.FC = () => {
               </thead>
               <tbody>
                 {locations.map((location) => (
-                  <tr key={location.id} className="border-b border-pf-border hover:bg-pf-bg-0">
+                  <SelectableRow key={location.id} className="border-b border-pf-border" isSelected={false}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-pf-text-primary">
                       {location.name}
                     </td>
@@ -243,7 +245,7 @@ export const LocationManagement: React.FC = () => {
                         Delete
                       </Button>
                     </td>
-                  </tr>
+                  </SelectableRow>
                 ))}
               </tbody>
             </table>
