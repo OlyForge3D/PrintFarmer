@@ -121,8 +121,8 @@ export function CollapsedPrinterCard({
           onClick={onExpand}
           className="!p-1 !h-auto"
           title="Open details sidebar"
+          iconLeft={<PanelRightIcon className="h-4 w-4" />}
         >
-          <PanelRightIcon className="h-4 w-4" />
         </Button>
         
         {/* External link */}
@@ -147,8 +147,8 @@ export function CollapsedPrinterCard({
           className="!p-1 !h-auto"
           aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
           title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+          iconLeft={<CameraIcon className="h-4 w-4" />}
         >
-          <CameraIcon className="h-4 w-4" />
         </Button>
         
         {/* History button - only show for backends that support it (Moonraker, OctoPrint) */}
@@ -160,8 +160,8 @@ export function CollapsedPrinterCard({
             onClick={handleViewHistory}
             className="!p-1 !h-auto"
             title="View print history"
+            iconLeft={<HistoryIcon className="h-4 w-4" />}
           >
-            <HistoryIcon className="h-4 w-4" />
           </Button>
         )}
         
@@ -173,8 +173,8 @@ export function CollapsedPrinterCard({
           onClick={() => setShowFiles(true)}
           className="!p-1 !h-auto"
           title="View printer files"
+          iconLeft={<FileIcon className="h-4 w-4" />}
         >
-          <FileIcon className="h-4 w-4" />
         </Button>
         
         {/* Edit button */}
@@ -185,8 +185,8 @@ export function CollapsedPrinterCard({
           onClick={() => onEdit?.(printer)}
           className="!p-1 !h-auto"
           title="Edit details"
+          iconLeft={<EditIcon className="h-4 w-4" />}
         >
-          <EditIcon className="h-4 w-4" />
         </Button>
         
         {/* Delete button */}
@@ -197,8 +197,8 @@ export function CollapsedPrinterCard({
           onClick={() => onDelete?.(printer)}
           className="!p-1 !h-auto"
           title="Delete printer"
+          iconLeft={<DeleteIcon className="h-4 w-4" />}
         >
-          <DeleteIcon className="h-4 w-4" />
         </Button>
       </div>
 
@@ -264,9 +264,9 @@ export function CollapsedPrinterCard({
                 title="Snapshot"
                 variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
                 size="sm"
-                className="flex-1 p-2 flex items-center justify-center"
+                className="flex-1"
+                iconLeft={<ImageIcon className="h-4 w-4" />}
               >
-                <ImageIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -274,9 +274,9 @@ export function CollapsedPrinterCard({
                 title="Stream"
                 variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
                 size="sm"
-                className="flex-1 p-2 flex items-center justify-center"
+                className="flex-1"
+                iconLeft={<VideoIcon className="h-4 w-4" />}
               >
-                <VideoIcon className="h-4 w-4" />
               </Button>
             </div>
           )}

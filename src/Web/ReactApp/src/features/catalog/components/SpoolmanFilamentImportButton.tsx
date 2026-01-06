@@ -1,5 +1,5 @@
 import React from 'react';
-// No MdiIcons used in this component
+import { DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { useImportFilamentTypesFromSpoolman } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
@@ -50,6 +50,7 @@ export function SpoolmanFilamentImportButton({
       disabled={importMutation.status === 'pending'}
       className={className}
       title="Import unique filament types from Spoolman to maintain parity between applications"
+      iconLeft={importMutation.status === 'pending' ? undefined : <DownloadIcon className="w-4 h-4" />}
     >
       {importMutation.status === 'pending' ? (
         <>
@@ -57,10 +58,7 @@ export function SpoolmanFilamentImportButton({
           Importing...
         </>
       ) : (
-        <>
-          <Download className="w-4 h-4 mr-2" />
-          Import from Spoolman
-        </>
+        'Import from Spoolman'
       )}
     </Button>
   );

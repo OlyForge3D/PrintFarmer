@@ -515,14 +515,10 @@ export function PrintersAdminPage() {
                     <div className="text-sm text-pf-text-secondary">{printers.length} printers</div>
                     <div className="flex items-center gap-1">
                       <Tooltip content="Select all">
-                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds(printers.map(p => p.id)); }}>
-                          <CheckCircleIcon className="w-4 h-4" />
-                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds(printers.map(p => p.id)); }} iconLeft={<CheckCircleIcon className="w-4 h-4" />}></Button>
                       </Tooltip>
                       <Tooltip content="Select none">
-                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds([]); }}>
-                          <CircleIcon className="w-4 h-4" />
-                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setSelectedIds([]); }} iconLeft={<CircleIcon className="w-4 h-4" />}></Button>
                       </Tooltip>
                     </div>
                   </div>
@@ -588,9 +584,8 @@ export function PrintersAdminPage() {
                                     variant="subtle"
                                     onClick={() => handleEditClick(p)}
                                     className="!p-2 text-pf-text-tertiary hover:text-pf-accent hover:bg-pf-bg-2"
-                                  >
-                                    <EditIcon className="w-4 h-4" />
-                                  </Button>
+                                    iconLeft={<EditIcon className="w-4 h-4" />}
+                                  ></Button>
                                 </Tooltip>
                                 <Tooltip content="Delete printer">
                                   <Button
@@ -598,9 +593,8 @@ export function PrintersAdminPage() {
                                     variant="subtle"
                                     onClick={() => handleDeletePrinter(p)}
                                     className="!p-2 text-pf-text-tertiary hover:text-pf-error-text hover:bg-pf-error-bg"
-                                  >
-                                    <DeleteIcon className="w-4 h-4" />
-                                  </Button>
+                                    iconLeft={<DeleteIcon className="w-4 h-4" />}
+                                  ></Button>
                                 </Tooltip>
                               </div>
                             </td>

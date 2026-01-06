@@ -276,8 +276,8 @@ export function PrinterCard({
                     variant="subtle"
                     size="sm"
                     className="!p-2 !h-auto text-pf-warning"
+                    iconLeft={<PauseIcon className="h-4 w-4" />}
                   >
-                    <PauseIcon className="h-4 w-4" />
                   </Button>
                 )}
                 {(currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
@@ -288,8 +288,8 @@ export function PrinterCard({
                     variant="subtle"
                     size="sm"
                     className="!p-2 !h-auto text-pf-success"
+                    iconLeft={<PlayIcon className="h-4 w-4" />}
                   >
-                    <PlayIcon className="h-4 w-4" />
                   </Button>
                 )}
                 <Button
@@ -299,8 +299,8 @@ export function PrinterCard({
                   variant="subtle"
                   size="sm"
                   className="!p-2 !h-auto text-pf-error"
+                  iconLeft={<StopIcon className="h-4 w-4" />}
                 >
-                  <StopIcon className="h-4 w-4" />
                 </Button>
               </>
             )}
@@ -313,8 +313,8 @@ export function PrinterCard({
                 variant="subtle"
                 size="sm"
                 className="!p-2 !h-auto text-pf-accent"
+                iconLeft={<GearIcon className="h-4 w-4" />}
               >
-                <GearIcon className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -476,26 +476,24 @@ export function PrinterCard({
             onClick={() => onManage(printer)}
             variant="secondary"
             size="sm"
-            className="flex-1 justify-center flex items-center gap-2"
+            className="flex-1 justify-center"
+            iconLeft={<GearIcon className="h-4 w-4" />}
           >
-            <GearIcon className="h-4 w-4" />
-            <span>Manage</span>
+            Manage
           </Button>
           {/* OctoPrint/Moonraker/PrusaLink: Only show controls if supported */}
           {hasPermission('printers', 'execute') && currentStatus.isOnline && (
             <>
               {/* Only show Pause if printer is printing and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && currentStatus.state === 'printing' && (
-                <Button variant="danger" size="sm" className="inline-flex items-center gap-2">
-                  <PauseIcon className="h-4 w-4" />
-                  <span>Pause</span>
+                <Button variant="danger" size="sm" iconLeft={<PauseIcon className="h-4 w-4" />}>
+                  Pause
                 </Button>
               )}
               {/* Only show Resume/Start if printer is paused or ready and backend supports it */}
               {[PrinterBackend.Moonraker, PrinterBackend.PrusaLink, PrinterBackend.OctoPrint].includes(printer.backend) && (currentStatus.state === 'paused' || currentStatus.state === 'ready') && (
-                <Button variant="success" size="sm" className="inline-flex items-center gap-2">
-                  <PlayIcon className="h-4 w-4" />
-                  <span>{currentStatus.state === 'paused' ? 'Resume' : 'Start'}</span>
+                <Button variant="success" size="sm" iconLeft={<PlayIcon className="h-4 w-4" />}>
+                  {currentStatus.state === 'paused' ? 'Resume' : 'Start'}
                 </Button>
               )}
             </>

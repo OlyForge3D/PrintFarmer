@@ -18,6 +18,8 @@ import {
   RefreshIcon,
   ExternalLinkIcon,
   CameraIcon,
+  CloseIcon,
+  SnowflakeIcon,
 } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
@@ -256,8 +258,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
                 className="!p-1 !h-auto"
                 aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
                 title={hasCameraUrls ? `Camera available` : 'No camera configured'}
+                iconLeft={<CameraIcon className="h-4 w-4" />}
               >
-                <CameraIcon className="h-4 w-4" />
               </Button>
             </div>
             {showCamera && (
@@ -294,8 +296,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             onClick={handleViewHistory}
             className="!p-1 !h-auto"
             title="View print history"
+            iconLeft={<HistoryIcon className="h-4 w-4" />}
           >
-            <HistoryIcon className="h-4 w-4" />
           </Button>
           <Button
             type="button"
@@ -304,8 +306,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
             onClick={() => onEdit?.(printer)}
             className="!p-1 !h-auto"
             title="Edit details"
+            iconLeft={<EditIcon className="h-4 w-4" />}
           >
-            <EditIcon className="h-4 w-4" />
           </Button>
           {onDismiss && (
             <Button
@@ -315,8 +317,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               onClick={onDismiss}
               className="!p-1 !h-auto"
               title="Close"
+              iconLeft={<CloseIcon className="h-4 w-4" />}
             >
-              ✕
             </Button>
           )}
         </div>
@@ -393,8 +395,8 @@ export function DetailedPrinterCard({ printer: initialPrinter, onEdit, onDismiss
               onClick={() => handleApplyPreset('cooldown')}
               title="Cooldown"
               className="flex-shrink-0 px-2"
+              iconLeft={<SnowflakeIcon className="h-4 w-4" />}
             >
-              ❄
             </Button>
             <Select
               value=""

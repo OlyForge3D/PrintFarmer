@@ -260,6 +260,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
               type="submit"
               disabled={isLoading || !formData.username || !formData.email || !formData.password}
               variant="primary"
+              iconLeft={isLoading ? undefined : <UserPlusIcon className="h-4 w-4" />}
             >
               {isLoading ? (
                 <>
@@ -267,10 +268,7 @@ export function RegisterModal({ isOpen, onClose, onSwitchToLogin }: RegisterModa
                   <span>Creating Account...</span>
                 </>
               ) : (
-                <>
-                  <UserPlusIcon className="h-4 w-4" />
-                  <span>Create Account</span>
-                </>
+                'Create Account'
               )}
             </Button>
           </div>

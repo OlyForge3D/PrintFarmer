@@ -251,15 +251,9 @@ export function ResetPasswordPage() {
               variant="primary"
               disabled={isLoading || !token || !email || !newPassword || !confirmPassword}
               className="flex-1"
+              iconLeft={!isLoading ? <LockIcon className="h-4 w-4" /> : undefined}
             >
-              {isLoading ? (
-                <>Resetting...</>
-              ) : (
-                <>
-                  <LockIcon className="h-4 w-4 mr-2" />
-                  Reset Password
-                </>
-              )}
+              {isLoading ? 'Resetting...' : 'Reset Password'}
             </Button>
           </div>
         </form>

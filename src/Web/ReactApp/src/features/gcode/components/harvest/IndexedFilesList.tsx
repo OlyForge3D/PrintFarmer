@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';
 import { Modal } from '@/common/components/ui/Modal';
+import { ArrowLeftIcon, ArrowRightIcon, ChevronsLeftIcon, ChevronsRightIcon } from '@/common/components/icons/MdiIcons';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -502,9 +503,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
                 onClick={() => setCurrentPage(0)}
                 className="!px-2 !py-1"
                 title="First page"
-              >
-                «
-              </Button>
+                iconLeft={<ChevronsLeftIcon className="h-3 w-3" />}
+              />
               <Button
                 variant="secondary"
                 size="sm"
@@ -512,9 +512,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
                 onClick={() => setCurrentPage(currentPage - 1)}
                 className="!px-2 !py-1"
                 title="Previous page"
-              >
-                ‹
-              </Button>
+                iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
+              />
               <span className="text-pf-muted text-xs px-2 py-1">Page {currentPage + 1} of {totalPages}</span>
               <Button
                 variant="secondary"
@@ -523,9 +522,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
                 onClick={() => setCurrentPage(currentPage + 1)}
                 className="!px-2 !py-1"
                 title="Next page"
-              >
-                ›
-              </Button>
+                iconLeft={<ArrowRightIcon className="h-3 w-3" />}
+              />
               <Button
                 variant="secondary"
                 size="sm"
@@ -533,9 +531,8 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
                 onClick={() => setCurrentPage(totalPages - 1)}
                 className="!px-2 !py-1"
                 title="Last page"
-              >
-                »
-              </Button>
+                iconLeft={<ChevronsRightIcon className="h-3 w-3" />}
+              />
             </div>
           )}
         </div>

@@ -82,9 +82,9 @@ export function ForgotPasswordPage() {
               type="button"
               onClick={handleClose}
               variant="primary"
-              className="w-full justify-center flex items-center gap-2"
+              className="w-full justify-center"
+              iconLeft={<ArrowLeftIcon className="h-4 w-4" />}
             >
-              <ArrowLeftIcon className="h-4 w-4" />
               Back to Sign In
             </Button>
           </div>
@@ -160,16 +160,10 @@ export function ForgotPasswordPage() {
               type="submit"
               disabled={isLoading || !email}
               variant="primary"
-              className="flex-1 flex items-center justify-center gap-2"
+              className="flex-1 justify-center"
+              iconLeft={!isLoading ? <EmailIcon className="h-4 w-4" /> : undefined}
             >
-              {isLoading ? (
-                <>Processing</>
-              ) : (
-                <>
-                  <EmailIcon className="h-4 w-4" />
-                  Send Reset Link
-                </>
-              )}
+              {isLoading ? 'Processing' : 'Send Reset Link'}
             </Button>
           </div>
 

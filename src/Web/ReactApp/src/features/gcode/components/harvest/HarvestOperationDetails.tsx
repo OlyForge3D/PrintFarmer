@@ -6,6 +6,7 @@ import { ErrorIcon } from './ErrorIcon';
 import { Button } from '@/common/components/ui/Button';
 import { apiClient } from '@/services/api';
 import { signalRService } from '@/services/harvest-signalr';
+import { CloseIcon } from '@/common/components/icons/MdiIcons';
 
 interface HarvestOperationDetailsProps {
   operation?: GcodeHarvestOperation; // Optional - can be provided or fetched
@@ -168,7 +169,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
           className="absolute top-2 right-2 !p-1 !h-auto"
           aria-label="Close details"
         >
-          ×
+          <CloseIcon className="h-4 w-4" />
         </Button>
       )}
       <h2 className="text-xl font-bold mb-3 text-pf-text-0 flex-shrink-0">Harvest Operation Details</h2>

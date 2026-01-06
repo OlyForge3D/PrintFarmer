@@ -123,6 +123,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
             type="submit"
             disabled={isLoading || !username || !password}
             variant="primary"
+            iconLeft={isLoading ? undefined : <LoginIcon className="h-4 w-4" />}
           >
             {isLoading ? (
               <>
@@ -130,10 +131,7 @@ export function LoginModal({ isOpen, onClose, onSwitchToRegister }: LoginModalPr
                 <span>Signing In...</span>
               </>
             ) : (
-              <>
-                <LoginIcon className="h-4 w-4" />
-                <span>Sign In</span>
-              </>
+              'Sign In'
             )}
           </Button>
         </div>

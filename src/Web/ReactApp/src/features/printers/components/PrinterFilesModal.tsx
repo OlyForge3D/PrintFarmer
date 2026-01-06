@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Select } from '@/common/components/ui';
-import { Modal } from '@/common/components/modals/Modal';
+import { Modal, ConfirmationModal } from '@/common/components/modals';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import type { Printer, PrinterFileDto } from '@/types/api';
@@ -284,9 +284,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                       onClick={toggleSortOrder}
                       className="!p-2 !h-auto"
                       title={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
-                    >
-                      <SortIcon className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
-                    </Button>
+                      iconLeft={<SortIcon className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />}
+                    ></Button>
                   </div>
                 </div>
 
@@ -334,9 +333,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           onClick={() => handleQueueFile(file.fileName)}
                           className="!p-2 !h-auto"
                           title="Queue for printing"
-                        >
-                          <PlayIcon className="h-4 w-4" />
-                        </Button>
+                          iconLeft={<PlayIcon className="h-4 w-4" />}
+                        ></Button>
 
                         <Button
                           type="button"
@@ -345,9 +343,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           onClick={() => handleCopyFilename(file.fileName)}
                           className="!p-2 !h-auto"
                           title={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
-                        >
-                          <CopyIcon className="h-4 w-4" />
-                        </Button>
+                          iconLeft={<CopyIcon className="h-4 w-4" />}
+                        ></Button>
 
                         <Button
                           type="button"
@@ -357,13 +354,12 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           disabled={isDownloading === file.fileName}
                           className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
                           title={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
-                        >
-                          {isDownloading === file.fileName ? (
+                          iconLeft={isDownloading === file.fileName ? (
                             <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                           ) : (
                             <DownloadIcon className="h-4 w-4" />
                           )}
-                        </Button>
+                        ></Button>
 
                         <Button
                           type="button"
@@ -373,13 +369,12 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           disabled={isHarvesting === file.fileName}
                           className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
                           title={isHarvesting === file.fileName ? 'Harvesting...' : 'Harvest file metadata'}
-                        >
-                          {isHarvesting === file.fileName ? (
+                          iconLeft={isHarvesting === file.fileName ? (
                             <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                           ) : (
                             <SaveIcon className="h-4 w-4" />
                           )}
-                        </Button>
+                        ></Button>
 
                         <Button
                           type="button"
@@ -389,13 +384,12 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           disabled={isDeleting === file.fileName}
                           className="!p-2 !h-auto text-red-500 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
                           title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
-                        >
-                          {isDeleting === file.fileName ? (
+                          iconLeft={isDeleting === file.fileName ? (
                             <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
                           ) : (
                             <DeleteIcon className="h-4 w-4" />
                           )}
-                        </Button>
+                        ></Button>
                       </div>
                     </div>
                   ))}
@@ -423,112 +417,90 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     </div>
   );
 
-  // Confirmation dialog component
-  const confirmDialogContent = confirmDialog && (
-    <div className="fixed inset-0 z-[60] overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDialog(null)} />
-        
-        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-md w-full">
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-pf-border">
-            <h3 className="text-lg font-semibold text-pf-text-primary">
-              {confirmDialog.type === 'print' ? 'Start Printing?' : 'Delete File?'}
-            </h3>
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              onClick={() => setConfirmDialog(null)}
-              className="!p-2 !h-auto"
-            >
-              {/* Close icon removed - using button without icon */}
-            </Button>
-          </div>
-
-          {/* Content */}
-          <div className="p-6 space-y-4">
-            {/* Thumbnail Preview */}
-            {confirmDialog.file.thumbnailUrl && (
-              <div className="flex justify-center mb-4">
-                <img
-                  src={confirmDialog.file.thumbnailUrl}
-                  alt={confirmDialog.file.fileName}
-                  className="rounded-lg max-w-xs max-h-48 object-cover border border-pf-border"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-              </div>
-            )}
-
-            {/* File Details */}
-            <div className="bg-pf-bg-1 rounded p-3 space-y-2">
-              <p className="text-sm text-pf-text-secondary">File:</p>
-              <p className="text-pf-text-primary font-medium break-all">{confirmDialog.file.fileName}</p>
-              
-              {confirmDialog.file.sizeBytes && (
-                <div>
-                  <p className="text-sm text-pf-text-secondary">Size:</p>
-                  <p className="text-pf-text-primary">{formatFileSize(confirmDialog.file.sizeBytes)}</p>
-                </div>
-              )}
-              
-              {confirmDialog.file.modified && (
-                <div>
-                  <p className="text-sm text-pf-text-secondary">Modified:</p>
-                  <p className="text-pf-text-primary text-sm">{formatModifiedDate(confirmDialog.file.modified)}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Confirmation Message */}
-            <div className="bg-pf-bg-1 rounded p-3 border border-pf-border-warning">
-              {confirmDialog.type === 'print' ? (
-                <p className="text-sm text-pf-text-primary">
-                  Start printing this file? The printer will begin the print job.
-                </p>
-              ) : (
-                <p className="text-sm text-red-400">
-                  Delete this file? This action cannot be undone.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-pf-border bg-pf-bg-1">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setConfirmDialog(null)}
-            >
-              Cancel
-            </Button>
-            
-            <Button
-              type="button"
-              variant={confirmDialog.type === 'print' ? 'primary' : 'danger'}
-              onClick={() => {
-                if (confirmDialog.type === 'print') {
-                  confirmPrintFile(confirmDialog.file.fileName);
-                } else {
-                  confirmDeleteFile(confirmDialog.file.fileName);
-                }
-              }}
-            >
-              {confirmDialog.type === 'print' ? 'Start Printing' : 'Delete'}
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  // Confirmation dialog using generic ConfirmationModal component
+  const printConfirmDialog = confirmDialog?.type === 'print' ? confirmDialog : null;
+  const deleteConfirmDialog = confirmDialog?.type === 'delete' ? confirmDialog : null;
 
   return createPortal(
     <>
       {modalContent}
-      {confirmDialogContent}
+      
+      {/* Print Confirmation */}
+      {printConfirmDialog && (
+        <ConfirmationModal
+          isOpen={!!printConfirmDialog}
+          title="Start Printing?"
+          message="Start printing this file? The printer will begin the print job."
+          confirmButtonText="Start Printing"
+          cancelButtonText="Cancel"
+          onConfirm={() => confirmPrintFile(printConfirmDialog.file.fileName)}
+          onCancel={() => setConfirmDialog(null)}
+        >
+          {printConfirmDialog.file.thumbnailUrl && (
+            <div className="flex justify-center mb-4 -mx-6 -mt-6 px-6 pt-6 border-b border-pf-border pb-4">
+              <img
+                src={printConfirmDialog.file.thumbnailUrl}
+                alt={printConfirmDialog.file.fileName}
+                className="rounded-lg max-w-xs max-h-48 object-cover border border-pf-border"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            </div>
+          )}
+          <div className="bg-pf-bg-2 rounded p-3 space-y-2 text-sm">
+            <div>
+              <p className="text-pf-text-secondary">File:</p>
+              <p className="text-pf-text-primary font-medium break-all">{printConfirmDialog.file.fileName}</p>
+            </div>
+            {printConfirmDialog.file.sizeBytes && (
+              <div>
+                <p className="text-pf-text-secondary">Size:</p>
+                <p className="text-pf-text-primary">{formatFileSize(printConfirmDialog.file.sizeBytes)}</p>
+              </div>
+            )}
+            {printConfirmDialog.file.modified && (
+              <div>
+                <p className="text-pf-text-secondary">Modified:</p>
+                <p className="text-pf-text-primary">{formatModifiedDate(printConfirmDialog.file.modified)}</p>
+              </div>
+            )}
+          </div>
+        </ConfirmationModal>
+      )}
+      
+      {/* Delete Confirmation */}
+      {deleteConfirmDialog && (
+        <ConfirmationModal
+          isOpen={!!deleteConfirmDialog}
+          title="Delete File?"
+          message="Delete this file? This action cannot be undone."
+          confirmButtonText="Delete"
+          cancelButtonText="Cancel"
+          isDangerous={true}
+          onConfirm={() => confirmDeleteFile(deleteConfirmDialog.file.fileName)}
+          onCancel={() => setConfirmDialog(null)}
+        >
+          <div className="bg-pf-bg-2 rounded p-3 space-y-2 text-sm">
+            <div>
+              <p className="text-pf-text-secondary">File:</p>
+              <p className="text-pf-text-primary font-medium break-all">{deleteConfirmDialog.file.fileName}</p>
+            </div>
+            {deleteConfirmDialog.file.sizeBytes && (
+              <div>
+                <p className="text-pf-text-secondary">Size:</p>
+                <p className="text-pf-text-primary">{formatFileSize(deleteConfirmDialog.file.sizeBytes)}</p>
+              </div>
+            )}
+            {deleteConfirmDialog.file.modified && (
+              <div>
+                <p className="text-pf-text-secondary">Modified:</p>
+                <p className="text-pf-text-primary">{formatModifiedDate(deleteConfirmDialog.file.modified)}</p>
+              </div>
+            )}
+          </div>
+        </ConfirmationModal>
+      )}
       
       {/* Thumbnail Preview Modal */}
       {selectedThumbnail && (

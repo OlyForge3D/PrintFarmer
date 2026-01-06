@@ -8,9 +8,9 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { 
   ChevronDown, ChevronUp, Cog, Square as StopIcon, Home, Upload, RefreshCw,
-  Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, Move, FileText
+  Camera, CameraOff, ExternalLink, History, Thermometer, RotateCcw, FileText
 } from 'lucide-react';
-import { PlayIcon, PauseIcon } from '@/common/components/icons/MdiIcons';
+import { PlayIcon, PauseIcon, SnowflakeIcon, ArrowUpIcon, ArrowLeftIcon, ArrowRightIcon, ArrowDownIcon, ArrowsAllDirectionsIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, FileUpload } from '@/common/components/ui';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 
@@ -112,8 +112,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 disabled={!isPrinting}
                 title="Pause"
                 className="!p-2 !h-auto"
+                iconLeft={<PauseIcon className="h-4 w-4" />}
               >
-                <PauseIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -123,8 +123,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 disabled={!isPaused}
                 title="Resume"
                 className="!p-2 !h-auto"
+                iconLeft={<PlayIcon className="h-4 w-4" />}
               >
-                <PlayIcon className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -133,8 +133,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop}
                 title={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}
                 className="!p-2 !h-auto"
+                iconLeft={isShutdown ? <RotateCcw className="h-4 w-4" /> : <StopIcon className="h-4 w-4" />}
               >
-                {isShutdown ? <RotateCcw className="h-4 w-4" /> : <StopIcon className="h-4 w-4" />}
               </Button>
             </>
             }
@@ -145,8 +145,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               onClick={() => setIsExpanded(true)}
               title="Expand"
               className="!p-2 !h-auto"
+              iconLeft={<ChevronDown className="h-4 w-4" />}
             >
-              <ChevronDown className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -187,8 +187,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                     onClick={() => setIsCameraVisible(!isCameraVisible)}
                     title={isCameraVisible ? 'Hide camera' : 'Show camera'}
                     className="!p-0 !h-auto text-blue-500 hover:text-blue-700"
+                    iconLeft={isCameraVisible ? <CameraOff className="h-3 w-3" /> : <Camera className="h-3 w-3" />}
                   >
-                    {isCameraVisible ? <CameraOff className="h-3 w-3" /> : <Camera className="h-3 w-3" />}
                   </Button>
                 )}
               </div>
@@ -202,8 +202,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               onClick={() => setIsExpanded(false)}
               title="Collapse"
               className="!p-2 !h-auto"
+              iconLeft={<ChevronUp className="h-4 w-4" />}
             >
-              <ChevronUp className="h-4 w-4" />
             </Button>
             <Button
               type="button"
@@ -211,8 +211,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               size="sm"
               title="History"
               className="!p-2 !h-auto"
+              iconLeft={<History className="h-4 w-4" />}
             >
-              <History className="h-4 w-4" />
             </Button>
             <Button
               type="button"
@@ -220,8 +220,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               size="sm"
               title="Settings"
               className="!p-2 !h-auto"
+              iconLeft={<Cog className="h-4 w-4" />}
             >
-              <Cog className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -273,32 +273,41 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
             onClick={() => handleApplyPreset('pla')}
             disabled={isPrinting}
             title="Cooldown (0°/0°)"
+            iconLeft={<SnowflakeIcon className="h-4 w-4" />}
           >
-            ❄
           </Button></div>
       </div>
       <div className="p-4 border-b border-gray-200">
-        <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><Move className="h-4 w-4 mr-2" />Movement</h4>
+        <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center">
+          <ArrowsAllDirectionsIcon className="h-4 w-4 mr-2" />
+          Movement
+        </h4>
         <div className="grid grid-cols-2 gap-4">
-          <div><div className="grid grid-cols-3 gap-1 mb-2 text-center"><div /><Button
+          <div>
+            <div className="grid grid-cols-3 gap-1 mb-2 text-center">
+              <div />
+              <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() => handleMove(null, moveStep, null)}
                 disabled={isPrinting}
                 className="p-2"
+                iconLeft={<ArrowUpIcon className="h-4 w-4" />}
               >
-                ▲
-              </Button><div /><Button
+              </Button>
+              <div />
+              <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() => handleMove(-moveStep, null, null)}
                 disabled={isPrinting}
                 className="p-2"
+                iconLeft={<ArrowLeftIcon className="h-4 w-4" />}
               >
-                ◀
-              </Button><Button
+              </Button>
+              <Button
                 type="button"
                 variant="secondary"
                 size="sm"
@@ -306,28 +315,32 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 disabled={isPrinting}
                 title="Home XY"
                 className="p-2"
+                iconLeft={<Home className="h-3 w-3" />}
               >
-                <Home className="h-3 w-3 mx-auto" />
-              </Button><Button
+              </Button>
+              <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() => handleMove(moveStep, null, null)}
                 disabled={isPrinting}
                 className="p-2"
+                iconLeft={<ArrowRightIcon className="h-4 w-4" />}
               >
-                ▶
-              </Button><div /><Button
+              </Button>
+              <div />
+              <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() => handleMove(null, -moveStep, null)}
                 disabled={isPrinting}
                 className="p-2"
+                iconLeft={<ArrowDownIcon className="h-4 w-4" />}
               >
-                ▼
               </Button><div /></div><div className="text-center text-xs text-gray-500">X: {formatPosition(currentStatus.x)} Y: {formatPosition(currentStatus.y)}</div></div>
-          <div className="text-center"><div className="space-y-1 mb-2"><Button
+          <div className="text-center"><div className="space-y-1 mb-2">
+            <Button
                 type="button"
                 variant="secondary"
                 size="sm"
@@ -336,7 +349,8 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 className="w-full"
               >
                 Z+
-              </Button><Button
+              </Button>
+              <Button
                 type="button"
                 variant="secondary"
                 size="sm"
@@ -344,9 +358,10 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                 disabled={isPrinting}
                 title="Home Z"
                 className="w-full"
+                iconLeft={<Home className="h-3 w-3" />}
               >
-                <Home className="h-3 w-3 mx-auto" />
-              </Button><Button
+              </Button>
+              <Button
                 type="button"
                 variant="secondary"
                 size="sm"
@@ -391,8 +406,9 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                   size="sm"
                   onClick={handlePause}
                   disabled={!isPrinting}
+                  iconLeft={<PauseIcon className="h-4 w-4" />}
                 >
-                  <PauseIcon className="h-3 w-3 mr-1" />Pause
+                  Pause
                 </Button>
                 <Button
                   type="button"
@@ -400,8 +416,9 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
                   size="sm"
                   onClick={handleResume}
                   disabled={!isPaused}
+                  iconLeft={<PlayIcon className="h-4 w-4" />}
                 >
-                  <PlayIcon className="h-3 w-3 mr-1" />Resume
+                  Resume
                 </Button>
               </>
             )}
@@ -411,8 +428,9 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
               size="sm"
               onClick={isShutdown ? handleFirmwareRestart : handleEmergencyStop}
               disabled={!currentStatus.isOnline}
+              iconLeft={isShutdown ? <RotateCcw className="h-4 w-4" /> : <StopIcon className="h-4 w-4" />}
             >
-              {isShutdown ? <RotateCcw className="h-3 w-3 mr-1" /> : <StopIcon className="h-3 w-3 mr-1" />}{isShutdown ? 'Restart' : 'Stop'}
+              {isShutdown ? 'Restart' : 'Stop'}
             </Button>
           </div>
         </div>
@@ -432,14 +450,16 @@ export function EnhancedPrinterCard({ printer: printerProp }: EnhancedPrinterCar
       </div>
       <div className="p-4">
         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center"><FileText className="h-4 w-4 mr-2" />Files</h4>
-          <div className="flex items-center space-x-2"><div className="flex-1"><FileUpload accept=".gcode" aria-label="Upload GCode file" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} disabled={isPrinting || isUploading} /></div><Button
+          <div className="flex items-center space-x-2"><div className="flex-1"><FileUpload accept=".gcode" aria-label="Upload GCode file" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} disabled={isPrinting || isUploading} /></div>
+          <Button
             type="button"
             variant="primary"
             size="sm"
             onClick={handleFileUpload}
             disabled={!selectedFile || isPrinting || isUploading}
+            iconLeft={isUploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
           >
-            {isUploading ? <RefreshCw className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}Upload
+            Upload
           </Button></div>
       </div>
     </div>

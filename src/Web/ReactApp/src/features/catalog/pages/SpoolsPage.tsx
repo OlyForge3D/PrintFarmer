@@ -7,7 +7,10 @@ import {
   EditIcon, 
   GridIcon, 
   TableIcon, 
-  GearIcon 
+  GearIcon,
+  CloseIcon,
+  ArrowUpIcon,
+  ArrowDownIcon
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
 import { normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
@@ -505,8 +508,8 @@ export function SpoolsPage() {
                     variant="subtle"
                     onClick={() => setShowColumnConfig(false)}
                     aria-label="Close column configuration"
-                    className="text-xs px-1"
-                  >✕</Button>
+                    iconLeft={<CloseIcon className="h-3 w-3" />}
+                  />
                 </div>
                 <ul className="space-y-1 max-h-64 overflow-auto" aria-label="Column list">
                   {tableColumns.map((c, i) => (
@@ -535,16 +538,16 @@ export function SpoolsPage() {
                           onClick={() => moveColumn(c.id, -1)}
                           disabled={i === 0}
                           aria-label={`Move ${c.label} up`}
-                          className="text-[10px] px-1 py-0.5"
-                        >▲</Button>
+                          iconLeft={<ArrowUpIcon className="h-3 w-3" />}
+                        />
                         <Button
                           size="sm"
                           variant="subtle"
                           onClick={() => moveColumn(c.id, 1)}
                           disabled={i === tableColumns.length - 1}
                           aria-label={`Move ${c.label} down`}
-                          className="text-[10px] px-1 py-0.5"
-                        >▼</Button>
+                          iconLeft={<ArrowDownIcon className="h-3 w-3" />}
+                        />
                       </div>
                     </li>
                   ))}
@@ -702,8 +705,8 @@ export function SpoolsPage() {
                       variant="subtle"
                       aria-label="Toggle sort direction"
                       onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
-                      className="text-xs px-2 py-1"
-                    >{sortDir === 'asc' ? '▲' : '▼'}</Button>
+                      iconLeft={sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />}
+                    />
                   </div>
                 </div>
               )}
@@ -846,7 +849,7 @@ export function SpoolsPage() {
                           <span className="inline-flex items-center gap-1">
                             {c.label}
                             {c.sortable && isSorted && (
-                              <span className="text-[10px]">{sortDir === 'asc' ? '▲' : '▼'}</span>
+                              sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />
                             )}
                           </span>
                         </th>

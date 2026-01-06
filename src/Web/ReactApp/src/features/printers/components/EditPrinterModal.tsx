@@ -204,8 +204,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         form="edit-printer-form"
         variant="primary"
         disabled={updateMutation.status === 'pending'}
+        iconLeft={<CheckIcon className="w-4 h-4" />}
       >
-        <CheckIcon className="w-4 h-4 mr-1" />
         {updateMutation.status === 'pending' ? 'Saving...' : 'Save Changes'}
       </Button>
     </div>
@@ -532,8 +532,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 onClick={handleRefreshCameraUrls}
                 disabled={isRefreshingCameras}
                 title="Refresh camera URLs from the printer backend"
+                iconLeft={<RefreshIcon className={`w-4 h-4 mr-1 ${isRefreshingCameras ? 'animate-spin' : ''}`} />}
               >
-                <RefreshIcon className={`w-4 h-4 mr-1 ${isRefreshingCameras ? 'animate-spin' : ''}`} />
                 {isRefreshingCameras ? 'Detecting...' : 'Detect Cameras'}
               </Button>
             </div>

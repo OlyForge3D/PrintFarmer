@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CloseIcon, ArrowLeftIcon, TagIcon, EditIcon, SaveIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+import { CloseIcon, ArrowLeftIcon, TagIcon, EditIcon, SaveIcon, PlusIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TagEditor } from '@/features/catalog/components/TagEditor';
 import { Button, Input, FormField, Textarea } from '@/common/components/ui';
@@ -243,8 +243,8 @@ export const ModelDetailPage: React.FC = () => {
                     variant="subtle" 
                     onClick={() => navigate('/models')}
                     className="flex items-center gap-2"
+                    iconLeft={ <ArrowLeftIcon className="w-5 h-5" /> }
                 >
-                    <ArrowLeftIcon className="w-5 h-5" />
                     Back to Models
                 </Button>
             </div>
@@ -432,6 +432,7 @@ export const ModelDetailPage: React.FC = () => {
                                     download
                                     className="inline-flex items-center gap-2 px-4 py-2 bg-pf-accent text-white rounded hover:bg-pf-success-hover mt-3"
                                 >
+                                    <DownloadIcon className="w-4 h-4" />
                                     Download File
                                 </a>
                             </div>

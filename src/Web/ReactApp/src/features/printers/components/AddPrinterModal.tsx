@@ -223,18 +223,9 @@ export function AddPrinterModal({ isOpen, onClose, onSuccess }: AddPrinterModalP
         variant="success"
         disabled={isLoading}
         className="flex-1"
+        iconLeft={isLoading ? <LoadingIcon className="w-4 h-4" /> : <CheckIcon className="w-4 h-4" />}
       >
-        {isLoading ? (
-          <>
-            <LoadingIcon className="w-4 h-4 mr-2" />
-            Adding...
-          </>
-        ) : (
-          <>
-            <CheckIcon className="w-4 h-4 mr-2" />
-            Add Printer
-          </>
-        )}
+        {isLoading ? 'Adding...' : 'Add Printer'}
       </Button>
     </div>
   );

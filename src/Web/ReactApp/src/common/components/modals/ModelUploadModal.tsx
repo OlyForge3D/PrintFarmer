@@ -241,8 +241,8 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
               variant="primary"
               size="sm"
               className="w-full"
+              iconLeft={<UploadIcon className="w-4 h-4" />}
             >
-              <UploadIcon className="w-4 h-4 mr-2" />
               Upload {queuedCount} File{queuedCount > 1 ? 's' : ''}
             </Button>
           )}

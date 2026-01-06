@@ -8,6 +8,9 @@
 export { Modal } from './Modal';
 export type { ModalProps } from './Modal';
 
+export { ConfirmationModal } from './ConfirmationModal';
+export type { ConfirmationModalProps } from './ConfirmationModal';
+
 export { DeleteConfirmationModal } from './DeleteConfirmationModal';
 export { BulkTagAssignmentModal } from './BulkTagAssignmentModal';
 export { GcodeUploadModal } from './GcodeUploadModal';

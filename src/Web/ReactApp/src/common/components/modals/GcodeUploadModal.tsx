@@ -157,8 +157,8 @@ export const GcodeUploadModal: React.FC<GcodeUploadModalProps> = ({
                   variant="primary"
                   size="sm"
                   className="w-full"
+                  iconLeft={<UploadIcon className="w-4 h-4" />}
                 >
-                  <UploadIcon className="w-4 h-4 mr-2" />
                   Upload {selectedItems.length} File{selectedItems.length > 1 ? 's' : ''}
                 </Button>
               )}

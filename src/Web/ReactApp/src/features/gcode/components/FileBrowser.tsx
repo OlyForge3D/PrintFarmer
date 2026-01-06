@@ -12,7 +12,7 @@ import { UploadIcon } from '@/common/components/icons/MdiIcons';
 
 import { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
-import { ConfirmationDialog } from '@/common/components/dialogs/ConfirmationDialog';
+import { ConfirmationModal } from '@/common/components/modals';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
@@ -786,9 +786,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
         </div>
       )}
-      <ConfirmationDialog
+      <ConfirmationModal
         isOpen={deleteConfirmDialog.isOpen}
-        onClose={() => setDeleteConfirmDialog({ isOpen: false, filesToDelete: [] })}
+        onCancel={() => setDeleteConfirmDialog({ isOpen: false, filesToDelete: [] })}
+        onConfirm={confirmDelete}
         title="Confirm Delete"
         message={
           deleteConfirmDialog.filesToDelete.length === 1
@@ -797,9 +798,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         }
         confirmButtonText="Delete"
         cancelButtonText="Cancel"
-        onConfirm={confirmDelete}
-        isDestructive={true}
-        isLoading={deleteMutation.isPending}
+        isDangerous={true}
       />
       </div>
     </div>

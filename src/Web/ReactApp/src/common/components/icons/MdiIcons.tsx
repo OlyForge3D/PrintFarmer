@@ -90,7 +90,10 @@ import {
   mdiTimerOutline,
   mdiFileImportOutline,
   mdiFileExportOutline,
-  mdiPrinterSearch
+  mdiPrinterSearch,
+  mdiSkipForward,
+  mdiSnowflake,
+  mdiArrowAllDirections,
 } from '@mdi/js';
 
 interface IconProps {
@@ -255,6 +258,84 @@ export function PauseIcon({ className = 'w-4 h-4', ariaLabel = 'Pause' }: Omit<I
       role="img"
     >
       <path fill="currentColor" d={mdiPause} />
+    </svg>
+  );
+}
+
+/**
+ * Skip forward icon
+ * 
+ * Material Design icon component for skipping forward or jumping to the end.
+ * 
+ * @component
+ * @preview ![skip-forward](https://unpkg.com/@mdi/svg@7.4.47/svg/skip-forward.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/skip-forward.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <SkipForwardIcon className="w-5 h-5" ariaLabel="Skip forward" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function SkipForwardIcon({ className = 'w-4 h-4', ariaLabel = 'Skip forward' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiSkipForward} />
+    </svg>
+  );
+}
+
+/**
+ * Snowflake icon
+ * 
+ * Material Design icon component for temperature cooling, cooldown operations, or ice-related actions.
+ * 
+ * @component
+ * @preview ![snowflake](https://unpkg.com/@mdi/svg@7.4.47/svg/snowflake.svg)
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <SnowflakeIcon className="w-5 h-5" ariaLabel="Cooldown" />
+ * @see — https://materialdesignicons.com
+ */
+export function SnowflakeIcon({ className = 'w-4 h-4', ariaLabel = 'Snowflake' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiSnowflake} />
+    </svg>
+  );
+}
+
+/**
+ * Arrows all directions icon
+ * 
+ * Material Design icon component for multi-directional movement/control.
+ * 
+ * @component
+ * @preview ![arrows-all-directions](https://unpkg.com/@mdi/svg@7.4.47/svg/arrows-all.svg)
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <ArrowsAllDirectionsIcon className="w-5 h-5" ariaLabel="Move" />
+ * @see — https://materialdesignicons.com
+ */
+export function ArrowsAllDirectionsIcon({ className = 'w-4 h-4', ariaLabel = 'Arrows All Directions' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiArrowAllDirections} />
     </svg>
   );
 }

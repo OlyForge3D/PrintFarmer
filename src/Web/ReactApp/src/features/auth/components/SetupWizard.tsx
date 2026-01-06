@@ -540,9 +540,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           onClick={nextFromAccount}
           disabled={submitting}
           variant="primary"
-          className="flex items-center gap-2"
+          iconLeft={<CheckCircleIcon className="h-4 w-4" />}
         >
-          <CheckCircleIcon className="h-4 w-4" />
           Next
         </Button>
       </div>
@@ -875,18 +874,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             onClick={finalizeSetup}
             disabled={submitting}
             variant="success"
-            className="flex items-center gap-2"
+            iconLeft={submitting ? undefined : <CheckCircleIcon className="h-4 w-4" />}
           >
             {submitting ? (
               <>
                 <div className="pf-animate-spin h-4 w-4 border-b-2 border-white rounded-full"></div>
-                Finishing...
+                <span>Finishing...</span>
               </>
             ) : (
-              <>
-                <CheckCircleIcon className="h-4 w-4" />
-                Finish Setup
-              </>
+              'Finish Setup'
             )}
           </Button>
         </div>

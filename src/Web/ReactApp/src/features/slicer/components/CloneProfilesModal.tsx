@@ -119,18 +119,9 @@ export const CloneProfilesModal: React.FC<CloneProfilesModalProps> = ({
         onClick={handleClone}
         variant="primary"
         disabled={!selectedMachineId || profilesLoading || cloneMutation.isPending}
+        iconLeft={cloneMutation.isPending ? <LoadingIcon className="animate-spin w-4 h-4" /> : <CheckIcon className="w-4 h-4" />}
       >
-        {cloneMutation.isPending ? (
-          <>
-            <LoadingIcon className="animate-spin w-4 h-4 mr-2" />
-            Cloning...
-          </>
-        ) : (
-          <>
-            <CheckIcon className="w-4 h-4 mr-2" />
-            Clone Profiles
-          </>
-        )}
+        {cloneMutation.isPending ? 'Cloning...' : 'Clone Profiles'}
       </Button>
     </div>
   );

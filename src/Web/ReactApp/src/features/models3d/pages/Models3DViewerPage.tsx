@@ -224,8 +224,8 @@ export const Models3DViewerPage: React.FC = () => {
                       variant="secondary"
                       size="sm"
                       className="flex-1 flex items-center justify-center gap-2"
+                      iconLeft={ <EyeIcon className="w-4 h-4" /> }
                     >
-                      <EyeIcon className="w-4 h-4" />
                       Preview
                     </Button>
                     <Button

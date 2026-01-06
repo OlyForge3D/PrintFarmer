@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { Line, OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button, Checkbox, Select } from '@/common/components/ui';
-import { GearIcon } from '@/common/components/icons/MdiIcons';
+import { GearIcon, SkipForwardIcon, PlayIcon, PauseIcon } from '@/common/components/icons/MdiIcons';
 
 interface GCodePoint {
   x: number;
@@ -459,16 +459,18 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
               variant={playAnimation ? 'danger' : 'primary'}
               size="sm"
               onClick={() => setPlayAnimation(!playAnimation)}
+              iconLeft={playAnimation ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
             >
-              {playAnimation ? '⏸ Pause' : '▶ Play'}
+              {playAnimation ? 'Pause' : 'Play'}
             </Button>
             
             <Button
               variant="secondary"
               size="sm"
               onClick={() => setCurrentLayer(layers.length - 1)}
+              iconLeft={<SkipForwardIcon className="h-4 w-4" />}
             >
-              ⏭ Show All
+              Show All
             </Button>
           </div>
           

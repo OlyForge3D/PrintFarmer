@@ -127,9 +127,8 @@ export const JobCard: React.FC<JobCardProps> = ({
               aria-label="Toggle job actions menu"
               title="Job actions"
               className="!p-1"
-            >
-              <MoreHorizontal className="w-4 h-4 text-gray-400" />
-            </Button>
+              iconLeft={<MoreHorizontal className="w-4 h-4 text-gray-400" />}
+            ></Button>
 
               {showActions && (
                 <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10 min-w-32">
@@ -141,10 +140,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     aria-label="Set priority to Urgent"
                     title="Set priority to Urgent"
                     className="w-full text-left flex items-center gap-2"
-                  >
-                    <ArrowUp className="w-4 h-4 text-red-500" />
-                    <span>Urgent</span>
-                  </Button>
+                    iconLeft={<ArrowUp className="w-4 h-4 text-red-500" />}
+                  >Urgent</Button>
                   <Button
                     onClick={() => handleChangePriority(2)}
                     variant="subtle"
@@ -153,10 +150,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     aria-label="Set priority to High"
                     title="Set priority to High"
                     className="w-full text-left flex items-center gap-2"
-                  >
-                    <ArrowUp className="w-4 h-4 text-orange-500" />
-                    <span>High</span>
-                  </Button>
+                    iconLeft={<ArrowUp className="w-4 h-4 text-orange-500" />}
+                  >High</Button>
                   <Button
                     onClick={() => handleChangePriority(1)}
                     variant="subtle"
@@ -176,10 +171,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     aria-label="Set priority to Low"
                     title="Set priority to Low"
                     className="w-full text-left flex items-center gap-2"
-                  >
-                    <ArrowDown className="w-4 h-4 text-gray-500" />
-                    <span>Low</span>
-                  </Button>
+                    iconLeft={<ArrowDown className="w-4 h-4 text-gray-500" />}
+                  >Low</Button>
                   <hr className="my-1" />
                   <Button
                     onClick={handleRemoveJob}
@@ -188,10 +181,8 @@ export const JobCard: React.FC<JobCardProps> = ({
                     aria-label="Remove job from queue"
                     title="Remove job"
                     className="w-full text-left flex items-center gap-2"
-                  >
-                    <DeleteIcon className="w-4 h-4" />
-                    <span>Remove</span>
-                  </Button>
+                    iconLeft={<DeleteIcon className="w-4 h-4" />}
+                  >Remove</Button>
                 </div>
               )}
             </div>

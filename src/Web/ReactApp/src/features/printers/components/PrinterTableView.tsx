@@ -132,8 +132,8 @@ export function PrinterTableView({
               variant="success"
               size="sm"
               className="flex items-center gap-1"
+              iconLeft={<CheckIcon className="w-4 h-4" />}
             >
-              <CheckIcon className="w-4 h-4" />
               Apply
             </Button>
             
@@ -143,8 +143,8 @@ export function PrinterTableView({
               variant="secondary"
               size="sm"
               className="flex items-center gap-1"
+              iconLeft={<CloseIcon className="w-4 h-4" />}
             >
-              <CloseIcon className="w-4 h-4" />
               Cancel
             </Button>
           </div>
@@ -163,15 +163,16 @@ export function PrinterTableView({
                   variant="subtle"
                   size="sm"
                   className="!p-0 !h-auto"
-                >
-                  {selectedPrinters.size === printers.length ? (
-                    <CheckCircleIcon className="w-5 h-5" />
-                  ) : selectedPrinters.size > 0 ? (
-                    <AlertIcon className="w-5 h-5" />
-                  ) : (
-                    <CircleIcon className="w-5 h-5" />
-                  )}
-                </Button>
+                  iconLeft={
+                    selectedPrinters.size === printers.length ? (
+                      <CheckCircleIcon className="w-5 h-5" />
+                    ) : selectedPrinters.size > 0 ? (
+                      <AlertIcon className="w-5 h-5" />
+                    ) : (
+                      <CircleIcon className="w-5 h-5" />
+                    )
+                  }
+                ></Button>
               </th>
               <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Printer
@@ -212,13 +213,14 @@ export function PrinterTableView({
                       variant="subtle"
                       size="sm"
                       className="!p-0 !h-auto"
-                    >
-                      {selectedPrinters.has(printer.id) ? (
-                        <CheckCircleIcon className="w-5 h-5" />
-                      ) : (
-                        <CircleIcon className="w-5 h-5" />
-                      )}
-                    </Button>
+                      iconLeft={
+                        selectedPrinters.has(printer.id) ? (
+                          <CheckCircleIcon className="w-5 h-5" />
+                        ) : (
+                          <CircleIcon className="w-5 h-5" />
+                        )
+                      }
+                    ></Button>
                   </td>
 
                   {/* Printer Info */}
@@ -302,9 +304,8 @@ export function PrinterTableView({
                           borderColor: '#fb8c00'
                         } : undefined}
                         title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
-                      >
-                        <ToolsIcon className="w-4 h-4" ariaLabel={printer.inMaintenance ? 'Maintenance Enabled' : 'Maintenance Disabled'} />
-                      </Button>
+                        iconLeft={<ToolsIcon className="w-4 h-4" ariaLabel={printer.inMaintenance ? 'Maintenance Enabled' : 'Maintenance Disabled'} />}
+                      ></Button>
                       
                       {hasPermission('printers', 'update') && (
                         <Button
@@ -314,9 +315,8 @@ export function PrinterTableView({
                           size="sm"
                           className="!p-2 !h-auto"
                           title="Edit printer"
-                        >
-                          <EditIcon className="w-4 h-4" />
-                        </Button>
+                          iconLeft={<EditIcon className="w-4 h-4" />}
+                        ></Button>
                       )}
                       
                       {hasPermission('printers', 'delete') && (
@@ -327,9 +327,8 @@ export function PrinterTableView({
                           size="sm"
                           className="!p-2 !h-auto"
                           title="Delete printer"
-                        >
-                          <DeleteIcon className="w-4 h-4" />
-                        </Button>
+                          iconLeft={<DeleteIcon className="w-4 h-4" />}
+                        ></Button>
                       )}
                     </div>
                   </td>
