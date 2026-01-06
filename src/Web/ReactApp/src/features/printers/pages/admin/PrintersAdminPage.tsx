@@ -584,7 +584,8 @@ export function PrintersAdminPage() {
                                     variant="subtle"
                                     onClick={() => handleEditClick(p)}
                                     className="!p-2 text-pf-text-tertiary hover:text-pf-accent hover:bg-pf-bg-2"
-                                    iconLeft={<EditIcon className="w-4 h-4" />}
+                                    iconCenter={<EditIcon className="w-4 h-4" />}
+                                    aria-label="Edit printer"
                                   ></Button>
                                 </Tooltip>
                                 <Tooltip content="Delete printer">
@@ -593,7 +594,8 @@ export function PrintersAdminPage() {
                                     variant="subtle"
                                     onClick={() => handleDeletePrinter(p)}
                                     className="!p-2 text-pf-text-tertiary hover:text-pf-error-text hover:bg-pf-error-bg"
-                                    iconLeft={<DeleteIcon className="w-4 h-4" />}
+                                    iconCenter={<DeleteIcon className="w-4 h-4" />}
+                                    aria-label="Delete printer"
                                   ></Button>
                                 </Tooltip>
                               </div>
