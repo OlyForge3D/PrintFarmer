@@ -10,6 +10,21 @@ global.ResizeObserver = vi.fn().mockImplementation(() => ({
   disconnect: vi.fn(),
 }));
 
+// Silence noisy Three.js duplicate import warnings in test output.
+// Some transitive deps include their own three copy which triggers
+// "WARNING: Multiple instances of Three.js being imported." during tests.
+// Filter that specific message to keep test logs clean.
+const _origConsoleWarn = console.warn.bind(console);
+console.warn = (...args: unknown[]) => {
+  const first = args[0];
+  const msg = typeof first === 'string' ? first : String(first);
+  if (msg.includes('Multiple instances of Three.js being imported')) {
+    return;
+  }
+  // Fallback to original console.warn
+  _origConsoleWarn(...args as unknown[]);
+};
+
 // extends Vitest's expect method with methods from react-testing-library
 expect.extend(matchers);
 

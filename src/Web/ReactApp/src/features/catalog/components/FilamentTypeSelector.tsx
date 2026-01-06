@@ -15,7 +15,7 @@ export function FilamentTypeSelector({
   availableFilamentTypes = [], 
   selectedFilamentTypes = [], 
   onSelectionChange,
-  className = ''
+  className
 }: FilamentTypeSelectorProps) {
   const [showSelector, setShowSelector] = useState(false);
   const [available, setAvailable] = useState<FilamentTypeDto[]>([]);
@@ -98,7 +98,7 @@ export function FilamentTypeSelector({
 
   if (!showSelector) {
     return (
-      <div className={className}>
+      <div className={className ?? ''}>
         <div className="flex items-center gap-2">
           <div className="flex-1">
             <div className="px-3 py-2 rounded-lg bg-pf-panel border border-pf-border text-pf-text-primary min-h-[40px] flex items-center text-sm">

@@ -94,6 +94,7 @@ import {
   mdiSkipForward,
   mdiSnowflake,
   mdiArrowAll,
+  mdiTimerSand,
 } from '@mdi/js';
 
 interface IconProps {
@@ -830,6 +831,33 @@ export function RefreshIcon({ className = 'w-4 h-4', ariaLabel = 'Refresh' }: Om
       role="img"
     >
       <path fill="currentColor" d={mdiRefresh} />
+    </svg>
+  );
+}
+
+/**
+ * Timer sand icon (hourglass)
+ * 
+ * Material Design icon component that displays a sand timer/hourglass icon.
+ * Used to indicate loading or waiting states.
+ * 
+ * @component
+ * @preview ![timer-sand](https://unpkg.com/@mdi/svg@7.4.47/svg/timer-sand.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/timer-sand.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <TimerSandIcon className="w-5 h-5" ariaLabel="Loading" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function TimerSandIcon({ className = 'w-4 h-4', ariaLabel = 'Loading' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiTimerSand} />
     </svg>
   );
 }

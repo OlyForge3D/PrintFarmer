@@ -360,13 +360,13 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
                 return (
                   <div
-                    key={printer.serverUrl}
-                    className={`p-4 border rounded-lg transition-all ${
-                      selectedPrinters.has(printer.serverUrl)
-                        ? 'border-pf-accent bg-pf-accent-light'
-                        : 'border-pf-border hover:border-pf-border-hover hover:bg-pf-bg-2'
-                    }`}
-                  >
+                      key={printer.serverUrl}
+                      className={`p-4 rounded-lg transition-colors border ${
+                        selectedPrinters.has(printer.serverUrl)
+                          ? 'bg-pf-bg-2 border-pf-border'
+                          : 'border-pf-border hover:bg-pf-bg-secondary'
+                      }`}
+                    >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center space-x-2 mb-1">

@@ -10,6 +10,8 @@ using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Catalog;
 using Farm.Web.Api.Services.Slicing;
+using Farm.Web.Api.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;
 
@@ -26,6 +28,7 @@ namespace Farm.Web.Api.Tests.Services
             Mock<IWorkerRepository> workerRepository = new(MockBehavior.Loose);
             Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
             Mock<IProfileParsingService> parsingService = new(MockBehavior.Loose);
+            Mock<IHubContext<SlicerHub>> hubContext = new(MockBehavior.Loose);
 
             return new ProfilesService(
                 repo,
@@ -36,7 +39,8 @@ namespace Farm.Web.Api.Tests.Services
                 unitOfWork.Object,
                 workerRepository.Object,
                 catalogService.Object,
-                parsingService.Object);
+                parsingService.Object,
+                hubContext.Object);
         }
 
         // NOTE: Tests using non-existent CreateSlicerProfileDto DTO have been removed.

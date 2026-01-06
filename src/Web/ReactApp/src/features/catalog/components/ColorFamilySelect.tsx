@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { colorFamilyBgClass } from '@/common/utils/colorFamilies';
+import { Button } from '@/common/components/ui';
 
 interface Props {
   value: string;
@@ -71,7 +72,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
 
   return (
     <div className="relative w-auto">
-      <button
+      <Button
         ref={btnRef}
         type="button"
         aria-haspopup="listbox"
@@ -79,6 +80,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
         onClick={() => { setOpen(o => !o); if (!open) setActiveIdx( value ? (families.indexOf(value) + 1) : 0 ); }}
         onKeyDown={onKeyDown}
         className="w-40 border rounded p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-pf-accent transition disabled:bg-pf-disabled disabled:cursor-not-allowed appearance-none pr-7 flex items-center justify-between gap-2"
+        variant="subtle"
       >
         <span className="flex items-center gap-2 flex-1">
           {value ? (
@@ -89,7 +91,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
           <span className="truncate">{visibleLabel}</span>
         </span>
         <span className="text-xs opacity-60 flex-shrink-0" aria-hidden="true">{open ? '▲' : '▼'}</span>
-      </button>
+      </Button>
       {open && (
         <div
           ref={listRef}

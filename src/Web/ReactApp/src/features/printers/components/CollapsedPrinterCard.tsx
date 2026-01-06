@@ -241,10 +241,17 @@ export function CollapsedPrinterCard({
               <span className="truncate flex-1">{printer.jobName || 'Printing...'}</span>
               <span className="font-semibold ml-2">{Math.round(progress)}%</span>
             </div>
-            <div className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden">
+            <div
+              className="w-full bg-pf-border-dark rounded-full h-2 overflow-hidden"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(Math.max(0, Math.min(100, progress)))}
+            >
               <div
                 ref={collapsedProgressRef}
                 className="bg-pf-success-bg h-2 rounded-full transition-all duration-300"
+                style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
               >
                 <span className="sr-only">Print progress: {Math.round(Math.max(0, Math.min(100, progress)))}%</span>
               </div>

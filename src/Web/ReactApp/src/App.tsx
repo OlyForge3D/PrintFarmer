@@ -33,8 +33,12 @@ import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
 import { LogsPage } from '@/features/admin/pages/LogsPage';
+import { WorkersAdminPage } from '@/features/workers/pages/WorkersAdminPage';
+import { ObservabilityAdminPage } from '@/features/admin/pages/ObservabilityAdminPage';
+import { FileHealthAdminPage } from '@/features/admin/pages/FileHealthAdminPage';
+import { TagsAdminPage } from '@/features/admin/pages/TagsAdminPage';
 import { FilesPage } from '@/features/files/pages/FilesPage';
-import { AdminPage } from '@/features/admin/pages/AdminPage';
+import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -111,7 +115,13 @@ function AuthenticatedAppRoutes() {
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
-        <Route path="admin/*" element={<AdminPage />} />
+        <Route path="admin/slicer/job-status/:id" element={<ProtectedRoute requiredRole="farm_admin"><SlicerJobStatus /></ProtectedRoute>} />
+        <Route path="admin/printers" element={<ProtectedRoute requiredRole="farm_admin"><PrintersPage /></ProtectedRoute>} />
+        <Route path="admin/workers" element={<ProtectedRoute requiredRole="farm_admin"><WorkersAdminPage /></ProtectedRoute>} />
+        <Route path="admin/observability" element={<ProtectedRoute requiredRole="farm_admin"><ObservabilityAdminPage /></ProtectedRoute>} />
+        <Route path="admin/file-health" element={<ProtectedRoute requiredRole="farm_admin"><FileHealthAdminPage /></ProtectedRoute>} />
+        <Route path="admin/slicer-profiles" element={<ProtectedRoute requiredRole="farm_admin"><SpoolsPage /></ProtectedRoute>} />
+        <Route path="admin/tags" element={<ProtectedRoute requiredRole="farm_admin"><TagsAdminPage /></ProtectedRoute>} />
         <Route path="jobs/new" element={<NewSliceJobPage />} />
       </Route>
     </Routes>

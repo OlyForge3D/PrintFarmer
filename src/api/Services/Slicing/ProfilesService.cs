@@ -14,7 +14,9 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Repositories.Workers;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
+using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Services.Catalog;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.Slicing
 {
@@ -44,6 +46,7 @@ namespace Farm.Web.Api.Services.Slicing
     {
         private readonly IProfilesRepository _repo;
         private readonly IUnifiedLoggingService _logger;
+        private readonly IHubContext<SlicerHub> _slicerHubContext;
 
         private readonly IProcessProfileRepository _processProfileRepo;
         private readonly IMachineProfileRepository _machineProfileRepo;
@@ -75,10 +78,12 @@ namespace Farm.Web.Api.Services.Slicing
             IUnitOfWork unitOfWork,
             IWorkerRepository workerRepository,
             ICatalogService catalogService,
-            IProfileParsingService parsingService)
+            IProfileParsingService parsingService,
+            IHubContext<SlicerHub> slicerHubContext)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _slicerHubContext = slicerHubContext ?? throw new ArgumentNullException(nameof(slicerHubContext));
             _processProfileRepo = processProfileRepo ?? throw new ArgumentNullException(nameof(processProfileRepo));
             _machineProfileRepo = machineProfileRepo ?? throw new ArgumentNullException(nameof(machineProfileRepo));
             _filamentProfileRepo = filamentProfileRepo ?? throw new ArgumentNullException(nameof(filamentProfileRepo));
@@ -1008,6 +1013,12 @@ namespace Farm.Web.Api.Services.Slicing
                 return new { imported = 0, deleted = deletedCount, message = "No profiles available from worker or invalid hierarchy structure", orcaslicerVersion = orcaVersion };
             }
 
+            // Emit start event
+            await _slicerHubContext.Clients.All.SendAsync("profileimportstarted", new
+            {
+                message = $"Starting profile import from OrcaSlicer worker (v{orcaVersion ?? "unknown"})..."
+            }, cancellationToken: ct);
+
             int imported = 0;
             int skipped = 0;
 
@@ -1068,6 +1079,14 @@ namespace Farm.Web.Api.Services.Slicing
 
                                 await _machineProfileRepo.AddAsync(systemProfile, ct);
                                 imported++;
+                                
+                                // Emit progress event
+                                await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                                {
+                                    profileName = machineProfile.Name ?? "Unknown",
+                                    profileType = "Machine",
+                                    count = imported
+                                }, cancellationToken: ct);
                             }
                             catch
                             {
@@ -1114,6 +1133,14 @@ namespace Farm.Web.Api.Services.Slicing
 
                                 await _filamentProfileRepo.AddAsync(systemProfile, ct);
                                 imported++;
+                                
+                                // Emit progress event
+                                await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                                {
+                                    profileName = filamentProfile.Name ?? filamentProfile.Material ?? "Unknown",
+                                    profileType = "Filament",
+                                    count = imported
+                                }, cancellationToken: ct);
                             }
                             catch
                             {
@@ -1161,6 +1188,14 @@ namespace Farm.Web.Api.Services.Slicing
 
                                 await _processProfileRepo.AddAsync(systemProfile, ct);
                                 imported++;
+                                
+                                // Emit progress event
+                                await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                                {
+                                    profileName = processProfile.Name ?? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)",
+                                    profileType = "Process",
+                                    count = imported
+                                }, cancellationToken: ct);
                             }
                             catch
                             {
@@ -1170,6 +1205,15 @@ namespace Farm.Web.Api.Services.Slicing
                     }
                 }
             }
+
+            // Emit completion event
+            await _slicerHubContext.Clients.All.SendAsync("profileimportcompleted", new
+            {
+                imported,
+                skipped,
+                deleted = deletedCount,
+                message = $"Successfully imported {imported} OrcaSlicer profiles (deleted {deletedCount} old, skipped {skipped} duplicates)"
+            }, cancellationToken: ct);
 
             return new
             {

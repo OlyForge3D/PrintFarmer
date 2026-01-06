@@ -2,6 +2,7 @@
 import { useState, useCallback } from 'react';
 import styles from './PrinterTableView.module.css';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
+import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { Printer } from '@/types/api';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -103,7 +104,7 @@ export function PrinterTableView({
       )}
       {/* Bulk Actions Header */}
       {selectedPrinters.size > 0 && (
-        <div className="bg-pf-accent-2 px-4 py-3 border-b border-pf-border flex items-center justify-between">
+        <div className="bg-pf-bg-2 px-4 py-3 border-b border-pf-border flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <span className="text-sm font-medium text-pf-text-primary">
               {selectedPrinters.size} printer{selectedPrinters.size !== 1 ? 's' : ''} selected
@@ -199,12 +200,7 @@ export function PrinterTableView({
               const displayPrinter = displayPrinters[index];
 
               return (
-                <tr 
-                  key={printer.id}
-                  className={`hover:bg-pf-bg-2 transition-colors ${
-                    selectedPrinters.has(printer.id) ? 'bg-pf-accent-2' : ''
-                  }`}
-                >
+                <SelectableRow key={printer.id} isSelected={selectedPrinters.has(printer.id)}>
                   {/* Selection Checkbox */}
                   <td className="px-4 py-4">
                     <Button
@@ -332,7 +328,7 @@ export function PrinterTableView({
                       )}
                     </div>
                   </td>
-                </tr>
+                  </SelectableRow>
               );
             })}
           </tbody>

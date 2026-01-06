@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 // No MdiIcons used in this component
 import { CheckCircleIcon, AlertCircleIcon } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui/Button';
 import { Modal } from '@/common/components/modals/Modal';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
 
@@ -170,20 +171,22 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
       closeAriaLabel="Close slicing configuration"
       footer={(
         <>
-          <button
+          <Button
             onClick={onClose}
             disabled={isSlicing}
-            className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50"
+            variant="secondary"
+            className="px-4 py-2"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={handleSlice}
             disabled={!selectedPrinter || isSlicing || (validationResult?.valid === false)}
-            className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
+            variant="primary"
+            className="px-4 py-2"
           >
             {isSlicing ? 'Slicing...' : 'Slice & Queue Print'}
-          </button>
+          </Button>
         </>
       )}
     >
