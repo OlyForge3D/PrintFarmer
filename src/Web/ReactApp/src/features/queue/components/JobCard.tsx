@@ -127,7 +127,7 @@ export const JobCard: React.FC<JobCardProps> = ({
               aria-label="Toggle job actions menu"
               title="Job actions"
               className="!p-1"
-              iconLeft={<MoreHorizontal className="w-4 h-4 text-gray-400" />}
+              iconCenter={<MoreHorizontal className="w-4 h-4 text-gray-400" />}
             ></Button>
 
               {showActions && (

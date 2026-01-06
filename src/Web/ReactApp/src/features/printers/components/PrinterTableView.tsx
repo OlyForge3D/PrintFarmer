@@ -163,7 +163,8 @@ export function PrinterTableView({
                   variant="subtle"
                   size="sm"
                   className="!p-0 !h-auto"
-                  iconLeft={
+                  aria-label={selectedPrinters.size === printers.length ? "Deselect all printers" : "Select all printers"}
+                  iconCenter={
                     selectedPrinters.size === printers.length ? (
                       <CheckCircleIcon className="w-5 h-5" />
                     ) : selectedPrinters.size > 0 ? (
@@ -213,7 +214,8 @@ export function PrinterTableView({
                       variant="subtle"
                       size="sm"
                       className="!p-0 !h-auto"
-                      iconLeft={
+                      aria-label={selectedPrinters.has(printer.id) ? `Deselect ${printer.name}` : `Select ${printer.name}`}
+                      iconCenter={
                         selectedPrinters.has(printer.id) ? (
                           <CheckCircleIcon className="w-5 h-5" />
                         ) : (
@@ -304,7 +306,8 @@ export function PrinterTableView({
                           borderColor: '#fb8c00'
                         } : undefined}
                         title={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
-                        iconLeft={<ToolsIcon className="w-4 h-4" ariaLabel={printer.inMaintenance ? 'Maintenance Enabled' : 'Maintenance Disabled'} />}
+                        aria-label={printer.inMaintenance ? 'Disable Maintenance Mode' : 'Enable Maintenance Mode'}
+                        iconCenter={<ToolsIcon className="w-4 h-4" ariaLabel={printer.inMaintenance ? 'Maintenance Enabled' : 'Maintenance Disabled'} />}
                       ></Button>
                       
                       {hasPermission('printers', 'update') && (
@@ -315,7 +318,8 @@ export function PrinterTableView({
                           size="sm"
                           className="!p-2 !h-auto"
                           title="Edit printer"
-                          iconLeft={<EditIcon className="w-4 h-4" />}
+                          aria-label="Edit printer"
+                          iconCenter={<EditIcon className="w-4 h-4" />}
                         ></Button>
                       )}
                       
@@ -327,7 +331,8 @@ export function PrinterTableView({
                           size="sm"
                           className="!p-2 !h-auto"
                           title="Delete printer"
-                          iconLeft={<DeleteIcon className="w-4 h-4" />}
+                          aria-label="Delete printer"
+                          iconCenter={<DeleteIcon className="w-4 h-4" />}
                         ></Button>
                       )}
                     </div>
