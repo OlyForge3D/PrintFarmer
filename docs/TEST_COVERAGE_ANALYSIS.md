@@ -18,7 +18,6 @@ This document identifies gaps in test coverage for the deployment scripts and pr
 - ✅ Invalid architecture handling
 - ✅ Monolithic architecture generation
 - ✅ Microservices architecture generation
-- ✅ Host-network architecture generation
 
 **OrcaSlicer Workers**:
 - ✅ OrcaSlicer worker configuration
@@ -511,15 +510,14 @@ $DEPLOY_SCRIPT --dry-run --batch --architecture microservices \
 
 **Test: `test_port_binding_to_specific_interface`**
 ```bash
-# For host-network mode, verify API binds to correct interface
-$DEPLOY_SCRIPT --dry-run --batch --architecture host-network
-# Expected: API configured to listen on 0.0.0.0:API_PORT (accessible from host)
-# Expected: Not bound to localhost-only
+# Verify API binds to appropriate interface for the selected architecture
+$DEPLOY_SCRIPT --dry-run --batch --architecture microservices
+# Expected: API configured to listen on configured API_PORT and accessible via the service network or host gateway as configured
 ```
-- **Rationale**: Host-network API binding is critical for remote access
+- **Rationale**: Correct API binding ensures clients can reach the service
 - **TDD Approach**: Check generated config bindings
 - **Complexity**: MEDIUM
-- **Risk if Missing**: Host-network API not accessible externally
+- **Risk if Missing**: API not reachable from clients
 
 ---
 
@@ -536,20 +534,6 @@ $DEPLOY_SCRIPT --dry-run --batch --architecture microservices
 - **TDD Approach**: Assert service name references in compose
 - **Complexity**: MEDIUM
 - **Risk if Missing**: Services can't communicate
-
----
-
-**Test: `test_host_network_localhost_binding`**
-```bash
-# Verify host-network services bind to localhost for inter-process communication
-$DEPLOY_SCRIPT --dry-run --batch --architecture host-network
-# Expected: Database host is "localhost" (not Docker service name)
-# Expected: API connects to "localhost" for DB access
-```
-- **Rationale**: Host-network requires localhost binding, not service names
-- **TDD Approach**: Assert connection strings use localhost
-- **Complexity**: MEDIUM
-- **Risk if Missing**: Host-network services can't connect
 
 ---
 

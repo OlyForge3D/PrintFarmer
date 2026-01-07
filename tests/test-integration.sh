@@ -175,39 +175,7 @@ EOF
 }
 
 # Test microservices deployment pipeline
-test_host_network_deployment_pipeline() {
-    start_test "complete microservices deployment pipeline"
-    
-    cd "$TEST_TEMP_DIR"
-    
-    # Create microservices config
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
-NETWORK_MODE=host
-API_PORT=5245
-WEB_PORT=3000
-DISCOVERY_RANGES=192.168.0.0/16
-ENABLE_DISTRIBUTED_SLICING=true
-ORCA_WORKER_COUNT=1
-ENABLE_ORCA_WORKER=yes
-ENABLE_SPOOLMAN=no
-ORCASLICER_VERSION=2.3.1
-EOF
-    
-    # Run deployment test in dry-run mode (focus on process success)
-    local output=$(run_deployment_test ".deploy-config" 60 false)
-    
-    assert_contains "$output" "Setup completed successfully" "Microservices pipeline should complete"
-    
-    # Generate files separately for content validation
-    assert_command_success "$COMPOSE_GENERATOR --architecture microservices --output-dir $TEST_TEMP_DIR"
-    assert_file_exists "docker-compose.yml" "Should generate docker-compose.yml via compose generator"
-    local compose_content=$(cat "docker-compose.yml")
-    assert_contains "$compose_content" "services:" "Should have services section"
-    
-    pass_test
-}
+# host-network deployment pipeline tests removed
 
 # Test configuration consistency between scripts
 test_configuration_consistency() {
@@ -405,9 +373,10 @@ test_network_mode_combinations() {
         assert_contains "$output" "Setup completed successfully" "Should deploy $arch successfully"
         
         # Validate network configuration in compose file
+        # Bridge/overlay networking is the supported configuration; ensure no host-mode assertion
         if [[ "$arch" == "microservices" ]]; then
             local compose_content=$(cat "docker-compose.yml")
-            assert_contains "$compose_content" "network_mode:" "Host network mode should be configured"
+            assert_not_contains "$compose_content" "network_mode: host" "Compose should not configure host network"
         fi
         
         rm -f docker-compose.yml Dockerfile.multistage

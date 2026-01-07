@@ -44,7 +44,6 @@ services:
 **Files updated:**
 - `docker-compose.yml` (monolithic deployment)
 - `docker-compose.microservices.yml` (microservices deployment)
-- `docker-compose.host-network.yml` (generated for host networking)
 
 ### Dockerfiles
 

@@ -161,21 +161,6 @@ api:
 - Allows selective network access
 - Works cross-platform (Linux, macOS, Windows)
 
-### Option 2: Host Network Mode
-```yaml
-api:
-  network_mode: "host"
-```
-
-**Benefits:**
-- Full access to host network interfaces
-- Native network discovery capabilities
-
-**Limitations:**
-- Less secure
-- Not available on Docker Desktop for Mac/Windows
-- May conflict with other services
-
 ## Offline Deployment
 
 For deployments without internet access:
@@ -260,7 +245,6 @@ docker compose logs frontend
 docker compose exec api curl http://localhost:5245/healthz
 ```
 
-## Troubleshooting
 
 ### Docker Build Failures
 1. **Verify Docker version**: `docker --version` (requires recent version)
@@ -277,11 +261,12 @@ docker compose exec api curl http://localhost:5245/healthz
 2. **Database files**: Check SQLite file permissions for file-based databases
 3. **Migrations**: Application auto-runs EF Core migrations on startup
 
+## Troubleshooting
 ### Printer Discovery Not Working
 1. **Network access**: Verify ALLOW_LOCAL_NETWORK=true in Docker config
 2. **Network range**: Ensure ALLOWED_NETWORK_RANGES covers your network
 3. **Firewall**: Check that mDNS (port 5353) isn't blocked
-4. **Host network**: Consider switching to host-network mode for full discovery
+4. **Host access**: Configure `host-gateway` and `extra_hosts` for bridge mode to allow host network access when needed
 
 ## Production Readiness Checklist
 

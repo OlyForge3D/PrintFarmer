@@ -67,7 +67,7 @@ export DB_PROVIDER=Postgres
 export DB_PASSWORD=YourSecurePassword123!
 export ENABLE_DISCOVERY=yes
 export NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
-export NETWORK_MODE_CHOICE=2  # Host mode for full discovery
+export NETWORK_MODE_CHOICE=1
 export HTTP_PORT=8080
 export API_PORT=5245
 export ENVIRONMENT=Production
@@ -195,7 +195,7 @@ export API_PORT=5246
 ### Network Discovery Not Working
 
 ```bash
-# 1. Verify host mode
+# 1. Verify network configuration
 docker inspect printfarmer-api-1 | grep NetworkMode
 
 # 2. Check environment

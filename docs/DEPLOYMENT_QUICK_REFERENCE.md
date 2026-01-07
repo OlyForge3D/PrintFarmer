@@ -41,7 +41,6 @@
 | `.deploy-config` | Your saved deployment settings | ❌ Ignored |
 | `.env.microservices` | Generated environment for microservices | ❌ Ignored |
 | `.env.monolithic` | Generated environment for monolithic | ❌ Ignored |
-| `docker-compose.host-network.yml` | Host network override (if applicable) | ❌ Ignored |
 | `docker-compose.override.yml` | Database services override | ❌ Ignored |
 
 ---
@@ -55,15 +54,6 @@ export NETWORK_MODE_CHOICE=1
 ```
 - ✅ Works on macOS, Windows, Linux
 - ❌ Limited network discovery (known IPs only)
-
-### Host (Advanced - Linux Only)
-```bash
-export NETWORK_MODE_CHOICE=2
-./scripts/deploy-docker.sh --non-interactive
-```
-- ✅ Full broadcast/multicast support
-- ✅ Automatic printer discovery
-- ⚠️ Linux hosts only
 
 ---
 

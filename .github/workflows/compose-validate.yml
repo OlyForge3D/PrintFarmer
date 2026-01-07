@@ -31,12 +31,6 @@ jobs:
           - name: microservices-all
             architecture: microservices
             flags: "--include-monitoring --include-telemetry --include-security --include-registry"
-          - name: host-network
-            architecture: host-network
-            flags: ""
-          - name: host-network-all
-            architecture: host-network
-            flags: "--include-monitoring --include-telemetry --include-security --include-registry"
           - name: monolithic
             architecture: monolithic
             flags: ""

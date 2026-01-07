@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/typescript-node:20-bookworm
+FROM mcr.microsoft.com/devcontainers/typescript-node:22-bookworm
 
 # Install dotnet 9.0.302 using the official dotnet-install script
 ARG DOTNET_VERSION=9.0.302

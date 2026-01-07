@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="/Users/jpapiez/s/PFarm1/scripts/docker"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATES_DIR="$SCRIPT_DIR/compose-templates"
 DEBUG_DIR=$(mktemp -d)
 
@@ -16,12 +16,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "=== DIAGNOSTIC: Compose Generation for host-network + sqlserver + orcaslicer + spoolman ==="
+echo "=== DIAGNOSTIC: Compose Generation for microservices + sqlserver + orcaslicer + spoolman ==="
 echo ""
 
 # Step 1: Copy template
-echo "Step 1: Copying host-network template"
-cp "$TEMPLATES_DIR/docker-compose.host-network.yml" "$DEBUG_DIR/01-template.yml"
+echo "Step 1: Copying microservices template"
+cp "$TEMPLATES_DIR/docker-compose.microservices.yml" "$DEBUG_DIR/01-template.yml"
 echo "  Line count: $(wc -l < "$DEBUG_DIR/01-template.yml")"
 echo "  Services section lines:"
 grep -n "^services:" "$DEBUG_DIR/01-template.yml"

@@ -53,11 +53,11 @@ Tests the `scripts/docker/compose-generator.sh` script:
 - ✅ **PrusaSlicer removal** - Ensures no PrusaSlicer workers or references
 - ✅ **Configuration options** - Tests worker counts, database providers, etc.
 
-#### 2. Deploy Script Tests (`test-deploy-docker.sh`)
+-#### 2. Deploy Script Tests (`test-deploy-docker.sh`)
 Tests the main `scripts/deploy-docker.sh` script:
 
 - ✅ **Help output** - Verifies help text is correct and complete
-- ✅ **Architecture options** - Confirms only `monolithic|microservices|host-network`
+- ✅ **Architecture options** - Confirms only `monolithic|microservices`
 - ✅ **Batch mode** - Tests non-interactive execution
 - ✅ **Dry-run mode** - Ensures validation without deployment
 - ✅ **Configuration validation** - Tests port conflicts, worker counts, etc.
@@ -148,7 +148,7 @@ assert_not_contains "$compose_content" "PrusaSlicerPath"
 ```bash
 # Ensures only valid architectures accepted
 assert_exit_code 1 "$DEPLOY_SCRIPT --architecture invalid"
-assert_contains "$help_output" "monolithic|microservices|host-network"
+assert_contains "$help_output" "monolithic|microservices"
 assert_not_contains "$help_output" "multistage"
 ```
 
@@ -195,7 +195,7 @@ When adding new deployment features:
 
 1. **Add tests first** - Write tests for new functionality
 2. **Update existing tests** - Modify tests if behavior changes
-3. **Test all architectures** - Ensure monolithic, microservices, and host-network work
+3. **Test all architectures** - Ensure monolithic and microservices work
 4. **Verify removal** - Ensure Redis and PrusaSlicer remain removed
 5. **Run full suite** - Execute all tests before submitting changes
 

@@ -40,7 +40,6 @@ Multiple tests that generated compose files DID NOT perform end-to-end validatio
 Some tests CALLED docker compose config but NOT for:
 - All database provider combinations
 - Multi-architecture + multi-provider matrix
-- Host-network mode with different database providers
 
 ### Coverage Matrix BEFORE Fix
 
@@ -50,9 +49,9 @@ Some tests CALLED docker compose config but NOT for:
 | microservices | postgres | ✅ docker compose config | test_generated_compose_file_is_valid_yaml |
 | microservices | sqlserver | ❌ NO | test_provider_only_env_sqlserver |
 | microservices | mysql | ❌ NO | test_all_database_providers |
-| host-network | postgres | ✅ docker compose config | test_generated_compose_file_is_valid_yaml |
-| host-network | sqlserver | ❌ NO | (missing test) |
-| host-network | mysql | ❌ NO | (missing test) |
+| network-config | postgres | ✅ docker compose config | test_generated_compose_file_is_valid_yaml |
+| network-config | sqlserver | ❌ NO | (missing test) |
+| network-config | mysql | ❌ NO | (missing test) |
 
 **Coverage**: Only 3 of 9 combinations validated with Docker Compose!
 

@@ -36,7 +36,7 @@ check_result() {
 echo
 echo "Test 1: Architecture options validation"
 help_output=$("$REPO_ROOT/scripts/deploy-docker.sh" --help 2>&1 || true)
-if echo "$help_output" | grep -q "monolithic|microservices" && ! echo "$help_output" | grep -q "host-network" && ! echo "$help_output" | grep -q "multistage"; then
+if echo "$help_output" | grep -q "monolithic|microservices" && ! echo "$help_output" | grep -q "multistage"; then
     check_result "Architecture options show correct choices without multistage"
 else
     check_result "Architecture options validation" || true

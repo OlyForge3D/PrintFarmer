@@ -10,7 +10,7 @@ The `compose-generator.sh` script requires the Python `ruamel.yaml` module to pr
 
 ## The Problem
 
-When generating Docker Compose files for **microservices** or **host-network** architectures with non-SQLite database providers (PostgreSQL, SQL Server, MySQL):
+When generating Docker Compose files for **microservices** architectures with non-SQLite database providers (PostgreSQL, SQL Server, MySQL):
 
 1. **With ruamel.yaml installed** ✅
    - Python script properly parses and regenerates YAML
@@ -136,7 +136,6 @@ If ruamel.yaml is missing, you'll see:
 
 - **Monolithic**: Uses SQLite, doesn't require ruamel.yaml (no database service to configure)
 - **Microservices**: REQUIRES ruamel.yaml (needs database service generation)
-- **Host-network**: REQUIRES ruamel.yaml (needs database service generation)
 
 ## Historical Context
 

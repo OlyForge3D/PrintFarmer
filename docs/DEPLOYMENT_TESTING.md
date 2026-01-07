@@ -43,7 +43,7 @@ Runs comprehensive testing of all deployment scenarios:
 | **Deploy Docker** | `test-deploy-docker.sh` | Tests deployment script functionality |
 | **Configuration** | `test-config-persistence.sh` | Verifies configuration persistence across deployments |
 | **Integration** | `test-integration.sh` | End-to-end deployment scenarios |
-| **User Scenario** | `test-user-scenario-complete.sh` | Validates user's exact configuration (host-network + sqlserver) |
+| **User Scenario** | `test-user-scenario-complete.sh` | Validates user's exact configuration (microservices + sqlserver) |
 
 **Execution Time**: ~3-5 minutes
 
@@ -90,7 +90,7 @@ bash tests/test-user-scenario-complete.sh
 ✅ **Architectures**:
 - Monolithic (single container, SQLite)
 - Microservices (separate API, frontend, database)
-- Host-network (API in host network, other services in bridge)
+- Alternative advanced network configurations (API on host, others in bridge)
 
 ✅ **Database Providers**:
 - PostgreSQL (default)
@@ -135,7 +135,7 @@ bash tests/test-user-scenario-complete.sh
 ### User Scenario Tests
 
 ✅ **Exact User Configuration**:
-- Architecture: host-network
+- Architecture: microservices
 - Database: SQL Server
 - Workers: OrcaSlicer
 - Integrations: Spoolman
@@ -170,7 +170,7 @@ If any tests fail:
 Example failed test:
 
 ```
-✗ ERROR   host-network + sqlserver configuration failed
+✗ ERROR   microservices + sqlserver configuration failed
   • Docker compose validation failed
   • Duplicate volumes: keys detected
 ```
