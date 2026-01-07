@@ -397,7 +397,7 @@ src/Web/ReactApp/src/
 │   │   ├── components/3d/       # ModelViewer3D, GCodeViewer3D
 │   │   └── hooks/               # useStlUpload, etc.
 │   ├── printers/                # Printer management
-│   │   ├── pages/               # PrintersPage, PrintersAdminPage
+│   │   ├── pages/               # PrintersPage
 │   │   ├── components/          # Printer cards, discovery, modals
 │   │   └── hooks/               # Printer-specific hooks
 │   ├── slicer/                  # Slicing operations

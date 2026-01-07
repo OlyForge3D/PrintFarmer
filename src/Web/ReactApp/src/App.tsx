@@ -117,13 +117,15 @@ function AuthenticatedAppRoutes() {
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
-        <Route path="admin/slicer/job-status/:id" element={<ProtectedRoute requiredRole="farm_admin"><SlicerJobStatus /></ProtectedRoute>} />
-        <Route path="admin/printers" element={<ProtectedRoute requiredRole="farm_admin"><PrintersPage /></ProtectedRoute>} />
-        <Route path="admin/workers" element={<ProtectedRoute requiredRole="farm_admin"><WorkerManagementPage /></ProtectedRoute>} />
-        <Route path="admin/observability" element={<ProtectedRoute requiredRole="farm_admin"><ObservabilityDashboard /></ProtectedRoute>} />
-        <Route path="admin/file-health" element={<ProtectedRoute requiredRole="farm_admin"><FileHealthDashboard /></ProtectedRoute>} />
-        <Route path="admin/slicer-profiles" element={<ProtectedRoute requiredRole="farm_admin"><SpoolsPage /></ProtectedRoute>} />
-        <Route path="admin/tags" element={<ProtectedRoute requiredRole="farm_admin"><TagAdminPage /></ProtectedRoute>} />
+        <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><div /></ProtectedRoute>}>
+          <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
+          <Route path="printers" element={<PrintersPage />} />
+          <Route path="workers" element={<WorkerManagementPage />} />
+          <Route path="observability" element={<ObservabilityDashboard />} />
+          <Route path="file-health" element={<FileHealthDashboard />} />
+          <Route path="slicer-profiles" element={<SpoolsPage />} />
+          <Route path="tags" element={<TagAdminPage />} />
+        </Route>
         <Route path="jobs/new" element={<NewSliceJobPage />} />
       </Route>
     </Routes>
