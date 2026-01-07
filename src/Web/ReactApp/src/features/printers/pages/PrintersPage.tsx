@@ -12,7 +12,6 @@ import { PrinterTableView } from '@/features/printers/components/PrinterTableVie
 import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
 import { AddPrinterButton } from '@/features/printers/components/AddPrinterButton';
 import { PrinterDiscoveryModal } from '@/features/printers/components/PrinterDiscoveryModal';
-import ImportProgressModal from '@/features/printers/components/ImportProgressModal';
 import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/common/components/skeletons/PrinterCardSkeleton';
 import { DetailedPrinterCard } from '@/features/printers/components/DetailedPrinterCard';
@@ -20,15 +19,12 @@ import { PrinterCompactCard } from '@/features/printers/components/PrinterCompac
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
-import { FileUpload } from '@/common/components/ui/FileUpload';
 import { ViewModeToggle } from '@/common/components/ViewModeToggle';
 import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
-import { PrinterIcon, FileImportIcon, FileExportIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
-import PrinterDiscoveryControls from '@/features/printers/components/admin/PrinterDiscoveryControls';
-import PrinterImportControls from '@/features/printers/components/admin/PrinterImportControls';
-import PrinterExportControls from '@/features/printers/components/admin/PrinterExportControls';
+import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
+import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
 import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
 
 
@@ -68,19 +64,10 @@ export function PrintersPage() {
     printers: Printer[];
   }>({ isOpen: false, printers: [] });
 
-  // Discovery and Export state
-  const [showDiscovery, setShowDiscovery] = useState(false);
+  // Discovery availability state
   const [discoveryAvailable, setDiscoveryAvailable] = useState(false);
-  const [showExportOptions, setShowExportOptions] = useState(false);
-  const [exporting, setExporting] = useState<boolean>(false);
-  const [, setExportProgress] = useState<number | null>(null); // exportProgress not currently used in UI
-
-  // Import state
-  const [showImportProgress, setShowImportProgress] = useState(false);
-  const [importFileName, setImportFileName] = useState('');
-  const [importTotalCount, setImportTotalCount] = useState(0);
-  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const fileInputId = React.useId();
+  // Page-level discovery modal state (header button opens modal)
+  const [showDiscovery, setShowDiscovery] = useState(false);
 
   // Check if discovery service is available
   React.useEffect(() => {
@@ -111,7 +98,6 @@ export function PrintersPage() {
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
   // Tabs removed — admin controls are now inline and permission-gated
-  const [activeTab] = useState<'overview'>('overview');
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
   const printersById = useMemo(() => {
     const map: Record<string, Printer> = {};
@@ -167,122 +153,7 @@ export function PrintersPage() {
     setDeleteConfirmation({ isOpen: false, printers: [] });
   };
 
-  const handleExport = () => {
-    if (!printers || !printers.length) {
-      toast('No printers to export');
-      return;
-    }
-    setShowExportOptions(true);
-  };
-
-  const exportSelectedJson = async () => {
-    if (!printers || printers.length === 0) return toast('No printers to export');
-    const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.json`;
-    try {
-      setExporting(true);
-      setExportProgress(0);
-      await apiClient.streamExportFile(printers.map(p => p.id), 'json', filename, (loaded, total) => {
-        if (total && total > 0) setExportProgress(Math.round((loaded / total) * 100));
-        else setExportProgress(null);
-      });
-      toast.success('Printers exported (JSON)');
-    } catch (err) {
-      console.error('Export failed', err);
-      toast.error('Export failed');
-    } finally {
-      setShowExportOptions(false);
-      setExportProgress(null);
-      setExporting(false);
-    }
-  };
-
-  const exportSelectedCsv = async () => {
-    if (!printers || printers.length === 0) return toast('No printers to export');
-    const filename = `printfarmer-printers-${new Date().toISOString().slice(0,10)}.csv`;
-    try {
-      setExporting(true);
-      setExportProgress(0);
-      await apiClient.streamExportFile(printers.map(p => p.id), 'csv', filename, (loaded, total) => {
-        if (total && total > 0) setExportProgress(Math.round((loaded / total) * 100));
-        else setExportProgress(null);
-      });
-      toast.success('Printers exported (CSV)');
-    } catch (err) {
-      console.error('Export CSV failed', err);
-      toast.error('Export failed');
-    } finally {
-      setShowExportOptions(false);
-      setExportProgress(null);
-      setExporting(false);
-    }
-  };
-
-  const countPrintersInFile = async (file: File): Promise<number> => {
-    try {
-      const text = await file.text();
-      const extension = file.name.split('.').pop()?.toLowerCase();
-      
-      if (extension === 'json') {
-        const data = JSON.parse(text);
-        return Array.isArray(data) ? data.length : 0;
-      } else if (extension === 'csv') {
-        const lines = text.split('\n').filter(line => line.trim());
-        return Math.max(0, lines.length - 1);
-      }
-      return 0;
-    } catch {
-      return 0;
-    }
-  };
-
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFile = async (file?: File) => {
-    try {
-      const f = file || (fileInputRef.current?.files ? fileInputRef.current.files[0] : undefined);
-      if (!f) return;
-
-      const extension = f.name.split('.').pop()?.toLowerCase();
-      if (!['csv', 'json'].includes(extension || '')) {
-        toast.error('File must be CSV or JSON format');
-        return;
-      }
-
-      const printerCount = await countPrintersInFile(f);
-      if (printerCount === 0) {
-        toast.error('No printers found in file');
-        return;
-      }
-
-      setImportFileName(f.name);
-      setImportTotalCount(printerCount);
-      setShowImportProgress(true);
-
-      const formData = new FormData();
-      formData.append('file', f);
-
-      const response = await fetch(`${getApiBaseUrl()}/printers/import`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: formData
-      });
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-        throw new Error(error.message || `HTTP ${response.status}`);
-      }
-
-      await response.json();
-      
-      await queryClient.invalidateQueries({ queryKey: ['printers'] });
-    } catch (err) {
-      console.error('Import failed', err);
-      setShowImportProgress(false);
-      toast.error(err instanceof Error ? err.message : 'Failed to import file');
-    }
-  };
+  // Import/export handled by admin components (PrinterImportControls / PrinterExportControls)
 
   const handleEditPrinter = (printer: Printer) => {
     setEditPrinterId(printer.id);
@@ -391,12 +262,6 @@ export function PrintersPage() {
           {hasPermission('printers', 'create') && (
             <AddPrinterButton onSuccess={refetchPrinters} />
           )}
-          {/* Admin inline controls (discovery / import / export) */}
-          <div className="hidden md:flex items-center gap-2">
-            <PrinterDiscoveryControls />
-            <PrinterImportControls />
-            <PrinterExportControls />
-          </div>
           {hasPermission('printers', 'admin') && discoveryAvailable && (
             <Button
               variant="primary"
@@ -407,6 +272,10 @@ export function PrintersPage() {
               Discover Printers
             </Button>
           )}
+          {/* Admin inline controls (discovery / import / export) */}
+          <div className="hidden md:flex items-center gap-2">
+            <PrinterImportExportControls />
+          </div>
           {hasPermission('printers', 'admin') && (
             <Button
               variant="secondary"
@@ -430,74 +299,12 @@ export function PrintersPage() {
               Refresh Capabilities
             </Button>
           )}
-          {hasPermission('printers', 'admin') && (
-            <Button 
-              variant="primary" 
-              aria-label="Export printers as JSON" 
-              onClick={handleExport} 
-              disabled={exporting}
-              iconLeft={!exporting && <FileExportIcon className="w-4 h-4" ariaLabel="Export" />}
-            >
-              {exporting ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                  Exporting...
-                </span>
-              ) : 'Export'}
-            </Button>
-          )}
-          {showExportOptions && (
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                onClick={exportSelectedJson}
-                disabled={exporting}
-              >
-                Export JSON
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={exportSelectedCsv}
-                disabled={exporting}
-              >
-                Export CSV
-              </Button>
-              <Button
-                variant="subtle"
-                onClick={() => setShowExportOptions(false)}
-                disabled={exporting}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-          {hasPermission('printers', 'admin') && (
-            <>
-              <Button 
-                variant="primary" 
-                aria-label="Open file picker to import printers" 
-                onClick={handleImportClick}
-                iconLeft={<FileImportIcon className="w-4 h-4" ariaLabel="Import" />}
-              >
-                Import
-              </Button>
-              <FileUpload
-                id={fileInputId}
-                accept=".json,.csv"
-                onChange={(files) => handleFile(files?.[0] ?? undefined)}
-                buttonText="Choose file"
-                buttonIcon={<FileImportIcon className="w-4 h-4" ariaLabel="Import" />}
-              />
-            </>
-          )}
         </div>
       </div>
 
         {/* Content Area */}
         <div className="space-y-6">
-          {activeTab === 'admin' && hasPermission('printers', 'admin') ? (
-            {/* Admin UI migrated inline into PrintersPage; PrintersAdminPage removed */}
-          ) : (
+          {(
             (userPrinters.length === 0) ? (
               <div className="text-center py-12">
                 <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
@@ -559,15 +366,15 @@ export function PrintersPage() {
                 </div>
 
                 <PrinterTableView
-                printers={userPrinters}
-                onEdit={handleEditPrinter}
-                onDelete={handleDeleteClick}
-                onBulkSetMaintenance={handleBulkSetMaintenance}
-                showEnableColumn={hasPermission('printers', 'admin')}
+                  printers={userPrinters}
+                  onEdit={handleEditPrinter}
+                  onDelete={handleDeleteClick}
+                  onBulkSetMaintenance={handleBulkSetMaintenance}
+                  showEnableColumn={hasPermission('printers', 'admin')}
                   onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
                   onToggleEnabled={async (printer) => {
                   try {
-                    const updated: Partial<Printer> = { isEnabled: !printer.isEnabled };
+                    const updated = { isEnabled: !printer.isEnabled } as unknown as import('@/types/api').UpdatePrinterDto;
                     await apiClient.updatePrinter(printer.id, updated);
                     toast.success(`${printer.name || 'Printer'} ${updated.isEnabled ? 'enabled' : 'disabled'}`);
                     await queryClient.invalidateQueries({ queryKey: ['printers'] });
@@ -598,17 +405,11 @@ export function PrintersPage() {
           onSuccess={() => { setShowEditModal(false); refetchPrinters(); }}
         />
 
+        {/* Page-level discovery modal: header button opens this and we refetch on success */}
         <PrinterDiscoveryModal
           isOpen={showDiscovery}
           onClose={() => setShowDiscovery(false)}
           onSuccess={() => { setShowDiscovery(false); refetchPrinters(); }}
-        />
-
-        <ImportProgressModal
-          isOpen={showImportProgress}
-          fileName={importFileName}
-          totalCount={importTotalCount}
-          onClose={() => setShowImportProgress(false)}
         />
     </PageTemplate>
   );

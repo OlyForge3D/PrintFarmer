@@ -9,26 +9,17 @@ type ImportProgressItem = PrinterImportProgress;
 interface ImportProgressModalProps {
   isOpen: boolean;
   onClose: () => void;
-  fileName: string;
-  totalCount: number;
+  fileName?: string;
+  totalCount?: number;
 }
 
-const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
-  isOpen,
-  onClose,
-  fileName,
-  totalCount
-}) => {
+const ImportProgressModal: React.FC<ImportProgressModalProps> = ({ isOpen, onClose, fileName = '', totalCount = 0 }) => {
   const [items, setItems] = useState<ImportProgressItem[]>([]);
   const [isComplete, setIsComplete] = useState(false);
 
+  // When modal opens and after upload, subscribe to SignalR progress
   useEffect(() => {
-    if (!isOpen) {
-      // Reset state when modal closes
-      setItems([]);
-      setIsComplete(false);
-      return;
-    }
+    if (!isOpen || !totalCount) return;
 
     // Initialize all items as Pending
     const initialItems: ImportProgressItem[] = Array.from({ length: totalCount }, (_, i) => ({
@@ -38,23 +29,22 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
     }));
     setItems(initialItems);
 
-    // Ensure SignalR connection is started before subscribing
+    let unsubscribe: (() => void) | undefined;
+
     const setupSignalR = async () => {
       try {
         if (!printerHubService.isConnected()) {
           await printerHubService.start();
         }
 
-        // Subscribe to SignalR progress updates
-        const unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
+        unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
           if (window.PrintFarmerDebug?.import) {
             console.log('[ImportProgress] Received update:', progress);
           }
-          
+
           setItems(prevItems => {
             const newItems = [...prevItems];
             const index = progress.index;
-            
             if (index >= 0 && index < newItems.length) {
               newItems[index] = {
                 index: progress.index,
@@ -64,28 +54,18 @@ const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
                 reason: progress.reason
               };
             }
-            
             return newItems;
           });
         });
-
-        return unsubscribe;
-      } catch (error) {
-        console.error('Failed to set up SignalR for import progress:', error);
-        return () => {}; // Return empty cleanup function on error
+      } catch (e) {
+        console.error('Failed to set up SignalR for import progress:', e);
       }
     };
 
-    let unsubscribe: (() => void) | undefined;
-    
-    setupSignalR().then(unsub => {
-      unsubscribe = unsub;
-    });
+    setupSignalR();
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      if (unsubscribe) unsubscribe();
     };
   }, [isOpen, totalCount]);
 
