@@ -104,7 +104,9 @@ public sealed class OctoPrintPollingService(
 
         foreach (var adapter in _webSocketAdapters.Values)
         {
-            try { adapter?.Dispose(); } catch { }
+            try
+            { adapter?.Dispose(); }
+            catch { }
         }
         _webSocketAdapters.Clear();
 

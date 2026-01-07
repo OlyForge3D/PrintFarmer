@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -62,8 +63,14 @@ public class EfLocationRepository : ILocationRepository
         }
 
         string trimmed = name.Trim();
-        return await _dbContext.Locations
-            .FirstOrDefaultAsync(l => l.Name != null && string.Equals(l.Name, trimmed, StringComparison.OrdinalIgnoreCase), cancellationToken: ct);
+
+        // EF Core cannot translate the StringComparison overload, so materialize
+        // the candidates and perform a culture-invariant ordinal comparison on the client.
+        var candidates = await _dbContext.Locations
+            .Where(l => l.Name != null)
+            .ToListAsync(ct);
+
+        return candidates.FirstOrDefault(l => string.Equals(l.Name?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -77,8 +84,15 @@ public class EfLocationRepository : ILocationRepository
         }
 
         string trimmed = name.Trim();
-        return await _dbContext.Locations
-            .AnyAsync(l => l.Name != null && string.Equals(l.Name, trimmed, StringComparison.OrdinalIgnoreCase), cancellationToken: ct);
+
+        // Materialize only the name column to minimize transport, then perform
+        // a case-insensitive comparison on the client side.
+        var names = await _dbContext.Locations
+            .Where(l => l.Name != null)
+            .Select(l => l.Name)
+            .ToListAsync(ct);
+
+        return names.Any(n => string.Equals(n?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
