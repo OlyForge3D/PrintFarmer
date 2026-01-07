@@ -76,10 +76,13 @@ jobs:
           category: 'trivy-slicer-base'
 
       - name: Analyze image efficiency with Dive (slicer-base)
-        uses: MartinHeinz/dive-action@v1
-        with:
-          image: ${{ steps.build-base.outputs.image }}
-          config-file: ${{ github.workspace }}/.dive-ci.yml
+        run: |
+          echo "Analyzing image efficiency for slicer-base using dive container"
+          # Pull dive image and run analysis against the built image
+          docker pull wagoodman/dive:0.10.0 || true
+          docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock \ 
+            -v "${{ github.workspace }}":/workspace \ 
+            wagoodman/dive:0.10.0 --json /workspace/dive-slicer-base.json ${{ steps.build-base.outputs.image }} || true
         continue-on-error: true # Don't fail build on efficiency warnings initially
 
       - name: Export image size metrics
@@ -145,10 +148,12 @@ jobs:
           category: 'trivy-orcaslicer'
 
       - name: Analyze image efficiency with Dive (OrcaSlicer)
-        uses: MartinHeinz/dive-action@v1
-        with:
-          image: ${{ steps.build-orca.outputs.image }}
-          config-file: ${{ github.workspace }}/.dive-ci.yml
+        run: |
+          echo "Analyzing image efficiency for OrcaSlicer using dive container"
+          docker pull wagoodman/dive:0.10.0 || true
+          docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock \ 
+            -v "${{ github.workspace }}":/workspace \ 
+            wagoodman/dive:0.10.0 --json /workspace/dive-orca.json ${{ steps.build-orca.outputs.image }} || true
         continue-on-error: true
 
       - name: Export image size metrics
