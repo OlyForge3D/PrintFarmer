@@ -519,7 +519,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
-            FrontendUrl: printer.FrontendUrl
+            FrontendUrl: printer.FrontendUrl,
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)
         );
     }
 

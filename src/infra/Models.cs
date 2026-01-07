@@ -113,7 +113,9 @@ public record PrinterDto(
     int? FrontendPort = null,
     PrinterSpoolInfoDto? SpoolInfo = null,
     string? BackendUrl = null,
-    string? FrontendUrl = null);
+    string? FrontendUrl = null,
+    LocationSummaryDto? Location = null);
+    
 
 // Basic printer info without live status (for fast loading)
 /// <summary>
@@ -206,7 +208,8 @@ public record CompletePrinterDto(
     string? HomedAxes,
     PrinterSpoolInfoDto? SpoolInfo,
     string? BackendUrl = null,
-    string? FrontendUrl = null);
+    string? FrontendUrl = null,
+    LocationSummaryDto? Location = null);
 
 // Live status info for a specific printer
 /// <summary>

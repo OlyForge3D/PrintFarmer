@@ -558,8 +558,18 @@ namespace Farm.Infrastructure.Services.Printers
             // Delegate to the appropriate backend status client
             // Each status client is responsible for retrieving typed status from its backend
             // and building the complete PrinterDto
-            var statusClient = _statusClientFactory.GetStatusClient(p.Backend);
-            return await statusClient.GetPrinterDtoAsync(p, ct);
+            try
+            {
+                var statusClient = _statusClientFactory.GetStatusClient(p.Backend);
+                return await statusClient.GetPrinterDtoAsync(p, ct);
+            }
+            catch (Exception ex)
+            {
+                // Log and return an offline/fallback DTO so that write operations (assign/unassign)
+                // don't surface transient backend errors as 500 to the client.
+                _logger.LogWarning(ex, $"Failed to retrieve status for printer {p.Id}");
+                return CreateOfflinePrinterDto(p);
+            }
         }
 
         /// <summary>
@@ -809,7 +819,8 @@ namespace Farm.Infrastructure.Services.Printers
                         HomedAxes: null, // Will be filled by PrinterStatusUpdate via SignalR
                         SpoolInfo: status.SpoolInfo,
                         BackendUrl: p.BackendUrl,
-                        FrontendUrl: p.FrontendUrl
+                        FrontendUrl: p.FrontendUrl,
+                        Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)
                     ));
                 }
                 catch (Exception ex)
@@ -848,7 +859,8 @@ namespace Farm.Infrastructure.Services.Printers
                         HomedAxes: null,
                         SpoolInfo: null,
                         BackendUrl: p.BackendUrl,
-                        FrontendUrl: p.FrontendUrl
+                        FrontendUrl: p.FrontendUrl,
+                        Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)
                     ));
                 }
             }
@@ -1112,7 +1124,8 @@ namespace Farm.Infrastructure.Services.Printers
                 FrontendPort: p.FrontendPort,
                 SpoolInfo: null,
                 BackendUrl: p.BackendUrl,
-                FrontendUrl: p.FrontendUrl
+                FrontendUrl: p.FrontendUrl,
+                Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description)
             );
         }
 

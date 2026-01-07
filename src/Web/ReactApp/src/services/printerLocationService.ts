@@ -42,22 +42,47 @@ class PrinterLocationService {
    * Get all printers (used for drag and drop assignment)
    */
   async getAllPrinters(): Promise<Printer[]> {
-    const response = await this.api.get<Printer[]>('/printers');
-    return Array.isArray(response.data) ? response.data : [];
+    const response = await this.api.get<any[]>('/printers');
+    const raw = Array.isArray(response.data) ? response.data : [];
+    // Normalize server-side DTO (Location object) to frontend shape (locationId)
+    return raw.map((r) => ({
+      id: r.id,
+      name: r.name,
+      backend: r.backend,
+      // prefer backendUrl, then frontendUrl, then originalServerUrl
+      serverUrl: r.backendUrl || r.frontendUrl || r.originalServerUrl || '',
+      locationId: r.location ? r.location.id : undefined,
+    }));
   }
 
   /**
    * Assign a printer to a location
    */
-  async assignPrinterToLocation(printerId: string, locationId: string): Promise<void> {
-    await this.api.post(`/printers/${printerId}/location`, { locationId });
+  async assignPrinterToLocation(printerId: string, locationId: string): Promise<Printer> {
+    const resp = await this.api.post<any>(`/printers/${printerId}/location`, { locationId });
+    const r = resp.data;
+    return {
+      id: r.id,
+      name: r.name,
+      backend: r.backend,
+      serverUrl: r.backendUrl || r.frontendUrl || r.originalServerUrl || '',
+      locationId: r.location ? r.location.id : undefined,
+    };
   }
 
   /**
    * Remove a printer from its location (unassign)
    */
-  async unassignPrinterFromLocation(printerId: string): Promise<void> {
-    await this.api.delete(`/printers/${printerId}/location`);
+  async unassignPrinterFromLocation(printerId: string): Promise<Printer> {
+    const resp = await this.api.delete<any>(`/printers/${printerId}/location`);
+    const r = resp.data;
+    return {
+      id: r.id,
+      name: r.name,
+      backend: r.backend,
+      serverUrl: r.backendUrl || r.frontendUrl || r.originalServerUrl || '',
+      locationId: r.location ? r.location.id : undefined,
+    };
   }
 }
 

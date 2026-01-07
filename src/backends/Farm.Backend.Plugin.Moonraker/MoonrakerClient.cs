@@ -511,7 +511,8 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             FrontendPort: printer.FrontendPort,
             SpoolInfo: spoolInfo,
             BackendUrl: printer.BackendUrl,
-            FrontendUrl: printer.FrontendUrl
+            FrontendUrl: printer.FrontendUrl,
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description)
         ));
     }
 

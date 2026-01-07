@@ -2081,7 +2081,7 @@ public class PrintersController(
     /// <response code="404">Printer or location not found</response>
     /// <response code="500">Failed to assign printer to location</response>
     [HttpPost("{id}/location")]
-    [ProducesResponseType(200)]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -2107,7 +2107,9 @@ public class PrintersController(
             printer.LocationId = request.LocationId;
             await _printersService.SaveChangesAsync(ct);
 
-            return Ok(new { message = "Printer assigned to location successfully" });
+            // Return authoritative updated DTO
+            PrinterDto updated = await _printersService.GetPrinterDtoAsync(id, ct);
+            return Ok(updated);
         }
         catch (Exception ex)
         {
@@ -2126,7 +2128,7 @@ public class PrintersController(
     /// <response code="404">Printer not found</response>
     /// <response code="500">Failed to unassign printer from location</response>
     [HttpDelete("{id}/location")]
-    [ProducesResponseType(204)]
+    [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult> UnassignPrinterFromLocationAsync(
@@ -2144,7 +2146,10 @@ public class PrintersController(
             // Remove location from printer
             printer.LocationId = null;
             await _printersService.SaveChangesAsync(ct);
-            return NoContent();
+
+            // Return authoritative updated DTO
+            PrinterDto updated = await _printersService.GetPrinterDtoAsync(id, ct);
+            return Ok(updated);
         }
         catch (Exception ex)
         {

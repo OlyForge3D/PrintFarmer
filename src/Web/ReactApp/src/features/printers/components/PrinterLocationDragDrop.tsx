@@ -12,6 +12,7 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draggedPrinter, setDraggedPrinter] = useState<Printer | null>(null);
+  const [savingPrinterIds, setSavingPrinterIds] = useState<string[]>([]);
 
   // Load data on mount or when parent locations change
   const loadData = async () => {
@@ -64,20 +65,36 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
     e.preventDefault();
     if (!draggedPrinter) return;
 
+    // Optimistic update: move locally first for snappy UI
+    const prevPrinters = printers;
+    const optimistic = printers.map((p) => (p.id === draggedPrinter.id ? { ...p, locationId } : p));
+    setPrinters(optimistic);
+    setDraggedPrinter(null);
+    setError(null);
+    setSavingPrinterIds((s) => [...s, draggedPrinter.id]);
+
     try {
-      setError(null);
-      await printerLocationService.assignPrinterToLocation(draggedPrinter.id, locationId);
-      
-      // Update local state
-      setPrinters(
-        printers.map((p) =>
-          p.id === draggedPrinter.id ? { ...p, locationId } : p
-        )
+      const updated = await printerLocationService.assignPrinterToLocation(draggedPrinter.id, locationId);
+
+      // Merge authoritative server response for this printer into local state.
+      // Avoid wiping the optimistic `locationId` when the server response omits it.
+      setPrinters((prev) =>
+        prev.map((p) => {
+          if (p.id !== updated.id) return p;
+          const merged = { ...p, ...updated } as Printer;
+          // preserve optimistic location if server didn't include one
+          if (updated.locationId === undefined && p.locationId) {
+            merged.locationId = p.locationId;
+          }
+          return merged;
+        })
       );
-      setDraggedPrinter(null);
     } catch (err) {
+      // Rollback optimistic change on failure
+      setPrinters(prevPrinters);
       setError(err instanceof Error ? err.message : 'Failed to assign printer to location');
-      setDraggedPrinter(null);
+    } finally {
+      setSavingPrinterIds((s) => s.filter((id) => id !== draggedPrinter.id));
     }
   };
 
@@ -85,20 +102,36 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
     e.preventDefault();
     if (!draggedPrinter || !draggedPrinter.locationId) return;
 
+    // Optimistic update: mark as unassigned locally
+    const prevPrinters = printers;
+    const optimistic = printers.map((p) => (p.id === draggedPrinter.id ? { ...p, locationId: undefined } : p));
+    setPrinters(optimistic);
+    setDraggedPrinter(null);
+    setError(null);
+    setSavingPrinterIds((s) => [...s, draggedPrinter.id]);
+
     try {
-      setError(null);
-      await printerLocationService.unassignPrinterFromLocation(draggedPrinter.id);
-      
-      // Update local state
-      setPrinters(
-        printers.map((p) =>
-          p.id === draggedPrinter.id ? { ...p, locationId: undefined } : p
-        )
-      );
-      setDraggedPrinter(null);
+      const updated = await printerLocationService.unassignPrinterFromLocation(draggedPrinter.id);
+
+      // Merge authoritative server response for this printer into local state.
+      if (updated) {
+        setPrinters((prev) =>
+          prev.map((p) => {
+            if (p.id !== updated.id) return p;
+            const merged = { ...p, ...updated } as Printer;
+            if (updated.locationId === undefined && p.locationId) {
+              merged.locationId = p.locationId;
+            }
+            return merged;
+          })
+        );
+      }
     } catch (err) {
+      // Rollback optimistic change on failure
+      setPrinters(prevPrinters);
       setError(err instanceof Error ? err.message : 'Failed to unassign printer');
-      setDraggedPrinter(null);
+    } finally {
+      setSavingPrinterIds((s) => s.filter((id) => id !== draggedPrinter.id));
     }
   };
 
@@ -145,6 +178,7 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
                     printer={printer}
                     onDragStart={(e) => handleDragStart(e, printer)}
                     isDragging={draggedPrinter?.id === printer.id}
+                    isSaving={savingPrinterIds.includes(printer.id)}
                   />
                 ))
               )}
@@ -178,15 +212,16 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
                     </span>
                   </div>
                   <div className="space-y-2 min-h-32 bg-pf-bg-2 rounded-md p-3">
-                    {locationPrinters.length === 0 ? (
+                      {locationPrinters.length === 0 ? (
                       <p className="text-pf-text-tertiary text-center py-8 text-sm">Drag printers here</p>
                     ) : (
                       locationPrinters.map((printer) => (
                         <PrinterCard
                           key={printer.id}
-                          printer={printer}
-                          onDragStart={(e) => handleDragStart(e, printer)}
-                          isDragging={draggedPrinter?.id === printer.id}
+                            printer={printer}
+                            onDragStart={(e) => handleDragStart(e, printer)}
+                            isDragging={draggedPrinter?.id === printer.id}
+                            isSaving={savingPrinterIds.includes(printer.id)}
                         />
                       ))
                     )}
@@ -205,9 +240,10 @@ interface PrinterCardProps {
   printer: Printer;
   onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
   isDragging: boolean;
+  isSaving?: boolean;
 }
 
-const PrinterCard: React.FC<PrinterCardProps> = ({ printer, onDragStart, isDragging }) => {
+const PrinterCard: React.FC<PrinterCardProps> = ({ printer, onDragStart, isDragging, isSaving }) => {
   return (
     <div
       draggable
@@ -217,8 +253,15 @@ const PrinterCard: React.FC<PrinterCardProps> = ({ printer, onDragStart, isDragg
         ${isDragging ? 'opacity-50 scale-95 border-pf-accent' : 'border-pf-border hover:shadow-md hover:border-pf-primary'}
       `}
     >
-      <p className="font-medium text-sm text-pf-text-primary truncate">{printer.name}</p>
-      <p className="text-xs text-pf-text-tertiary truncate">{printer.serverUrl}</p>
+      <div className="flex items-center justify-between">
+        <div className="min-w-0">
+          <p className="font-medium text-sm text-pf-text-primary truncate">{printer.name}</p>
+          <p className="text-xs text-pf-text-tertiary truncate">{printer.serverUrl}</p>
+        </div>
+        {isSaving && (
+          <div className="ml-3 text-xs text-pf-text-secondary">Saving...</div>
+        )}
+      </div>
     </div>
   );
 };
