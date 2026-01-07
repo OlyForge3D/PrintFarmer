@@ -33,21 +33,42 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+    const controller = new AbortController();
+
     if (file) {
       const getFileInfo = async () => {
         try {
-          const arrayBuffer = await file.arrayBuffer();
-          const view = new DataView(arrayBuffer);
-          const triangles = view.getUint32(80, true);
-          const vertices = triangles * 3;
-          const fileSize = (file.size / 1024 / 1024).toFixed(2);
+          // Some test environments provide a File-like object without arrayBuffer();
+          // gracefully fall back to a minimal info object to avoid throwing.
+          if (typeof (file as any).arrayBuffer === 'function') {
+            const arrayBuffer = await (file as any).arrayBuffer();
+            if (!mounted) return;
+            const view = new DataView(arrayBuffer);
+            const triangles = view.getUint32(80, true);
+            const vertices = triangles * 3;
+            const fileSize = (file.size / 1024 / 1024).toFixed(2);
 
-          setModelInfo({
-            vertices,
-            triangles,
-            fileSize: `${fileSize} MB`,
-            format: file.name.endsWith('.stl') ? 'STL' : 'Unknown',
-          });
+            if (mounted) {
+              setModelInfo({
+                vertices,
+                triangles,
+                fileSize: `${fileSize} MB`,
+                format: file.name.endsWith('.stl') ? 'STL' : 'Unknown',
+              });
+            }
+          } else {
+            // Fallback: provide basic metadata when arrayBuffer is not available
+            const fileSize = (file.size / 1024 / 1024).toFixed(2);
+            if (mounted) {
+              setModelInfo({
+                vertices: 0,
+                triangles: 0,
+                fileSize: `${fileSize} MB`,
+                format: file.name?.endsWith('.stl') ? 'STL' : 'Unknown',
+              });
+            }
+          }
         } catch (error) {
           console.error('Error reading file info:', error);
         }
@@ -57,9 +78,10 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
     } else if (fileUrl && fileName) {
       // For URL-based files, estimate info from file name
       setIsLoading(true);
-      fetch(fileUrl)
+      fetch(fileUrl, { signal: controller.signal })
         .then(res => res.blob())
         .then(blob => {
+          if (!mounted) return;
           const fileSize = (blob.size / 1024 / 1024).toFixed(2);
           setModelInfo({
             vertices: 0,
@@ -67,13 +89,19 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
             fileSize: `${fileSize} MB`,
             format: fileName.endsWith('.stl') ? 'STL' : fileName.split('.').pop()?.toUpperCase() || 'Unknown',
           });
-          setIsLoading(false);
+          if (mounted) setIsLoading(false);
         })
         .catch(error => {
+          if (error.name === 'AbortError') return; // cancelled
           console.error('Error fetching file info:', error);
-          setIsLoading(false);
+          if (mounted) setIsLoading(false);
         });
     }
+
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
   }, [file, fileUrl, fileName]);
 
   if (!isOpen || (!file && !fileUrl)) {
