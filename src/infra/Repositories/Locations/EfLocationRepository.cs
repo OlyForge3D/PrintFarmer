@@ -52,21 +52,34 @@ public class EfLocationRepository : ILocationRepository
     }
 
     /// <summary>
-    /// Finds a location by name (case-sensitive).
+    /// <summary>
+    /// Finds a location by name (case-insensitive, trimmed).
     /// </summary>
     public async Task<Location?> FindByNameAsync(string name, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        string normalized = name.Trim().ToLowerInvariant();
         return await _dbContext.Locations
-            .FirstOrDefaultAsync(l => l.Name == name, cancellationToken: ct);
+            .FirstOrDefaultAsync(l => l.Name.ToLower() == normalized, cancellationToken: ct);
     }
 
     /// <summary>
-    /// Checks if a location with the given name exists (case-sensitive).
+    /// Checks if a location with the given name exists (case-insensitive, trimmed).
     /// </summary>
     public async Task<bool> ExistsByNameAsync(string name, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        string normalized = name.Trim().ToLowerInvariant();
         return await _dbContext.Locations
-            .AnyAsync(l => l.Name == name, cancellationToken: ct);
+            .AnyAsync(l => l.Name.ToLower() == normalized, cancellationToken: ct);
     }
 
     /// <summary>

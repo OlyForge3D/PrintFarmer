@@ -40,6 +40,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     className,
     iconLeft,
     iconRight,
+    iconCenter,
     children,
     ...rest
   },
@@ -52,14 +53,25 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
         'rounded-sm font-medium inline-flex items-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-pf-accent shadow-sm',
         variantClasses[variant],
         sizeClasses[size],
+        // center icon style when iconCenter provided
+        iconCenter && 'justify-center',
         className
       )}
       disabled={disabled || loading}
       {...rest}
     >
       {iconLeft && <span className="flex items-center" aria-hidden>{iconLeft}</span>}
-      {children && <span>{loading ? 'Please wait…' : children}</span>}
-      {iconRight && <span className="flex items-center" aria-hidden>{iconRight}</span>}
+      {iconCenter ? (
+        <>
+          <span className="flex items-center" aria-hidden>{iconCenter}</span>
+          {loading && <span>Loading...</span>}
+        </>
+      ) : (
+        <>
+          {children && <span>{loading ? 'Please wait…' : children}</span>}
+          {iconRight && <span className="flex items-center" aria-hidden>{iconRight}</span>}
+        </>
+      )}
     </button>
   );
 });
