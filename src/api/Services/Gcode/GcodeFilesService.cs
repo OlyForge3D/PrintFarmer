@@ -509,7 +509,7 @@ namespace Farm.Web.Api.Services.Gcode
             string guidFileName = $"{fileId}{ext}";
             string destinationPath = Path.Combine(targetDirFullPath, guidFileName);
             string fullTarget = Path.GetFullPath(destinationPath);
-            
+
             if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Unsafe target path");
@@ -817,9 +817,9 @@ namespace Farm.Web.Api.Services.Gcode
         public async Task<bool> DeleteFilesAsync(IEnumerable<Guid> fileIds, CancellationToken ct)
         {
             List<Guid> fileIdsList = fileIds.ToList();
-            
+
             _logger.LogInformation($"[DeleteFilesAsync] Starting deletion of {fileIdsList.Count} file(s) by ID");
-            
+
             // Step 1: Get all file records from database by ID
             List<GcodeFile> filesToDelete = new();
             foreach (var fileId in fileIdsList)
@@ -851,13 +851,13 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Step 2: Delete database records first (before deleting physical files)
             _logger.LogInformation($"[DeleteFilesAsync] Deleting {filesToDelete.Count} record(s) from database");
-            
+
             foreach (var file in filesToDelete)
             {
                 _logger.LogInformation($"[DeleteFilesAsync]   - Removing from DB: {file.FileName} (ID: {file.Id})");
                 await _gcodeRepo.RemoveAsync(file, ct);
             }
-            
+
             await _gcodeRepo.SaveChangesAsync(ct);
             _logger.LogInformation($"[DeleteFilesAsync] Successfully saved database changes, {filesToDelete.Count} record(s) deleted from DB");
 
@@ -869,7 +869,7 @@ namespace Farm.Web.Api.Services.Gcode
                 try
                 {
                     string fullPath = Path.Combine(file.FilePath, file.FileName);
-                    
+
                     if (File.Exists(fullPath))
                     {
                         _logger.LogInformation($"[DeleteFilesAsync] Deleting file from disk: {fullPath}");
@@ -882,7 +882,7 @@ namespace Farm.Web.Api.Services.Gcode
                         deleted++;
                         _logger.LogInformation($"[DeleteFilesAsync] ✓ File not on disk (DB record already deleted): {file.FileName}");
                     }
-                    
+
                     // Delete associated thumbnail if it exists
                     if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                     {

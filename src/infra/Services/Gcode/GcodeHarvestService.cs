@@ -927,7 +927,7 @@ public class GcodeHarvestService(
                 // Use shared helper methods for consistency with single file harvest
                 var (fileHash, existingFile) = await CalculateHashAndCheckDuplicateAsync(gcodeContent.ToArray(), ct);
                 discoveredFile.FileHash = fileHash;
-                
+
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Calculated file hash: {fileHash}");
 
                 // Extract metadata and process thumbnail using shared approach
@@ -1480,8 +1480,8 @@ public class GcodeHarvestService(
     /// Returns just the thumbnail filename (not full path)
     /// </summary>
     private async Task<string?> ProcessThumbnailWithFallbackAsync(
-        string? thumbnailUrl, 
-        byte[] gcodeContent, 
+        string? thumbnailUrl,
+        byte[] gcodeContent,
         CancellationToken ct)
     {
         // Try downloading from URL first (preferred)
@@ -1672,7 +1672,7 @@ public class GcodeHarvestService(
     {
         using var scope = _serviceScopeFactory.CreateScope();
         var printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
-        
+
         var fileContent = await printersService.DownloadPrinterFileAsync(printerId, filename, ct);
         if (fileContent == null || fileContent.Length == 0)
         {
@@ -1737,7 +1737,7 @@ public class GcodeHarvestService(
             string guidBasedFileName = $"{Guid.NewGuid()}.gcode";
             string storageDir = _storagePathService.GetGcodeStorageDirectory();
             string filePath = Path.Combine(storageDir, guidBasedFileName);
-            
+
             // Ensure storage directory exists
             Directory.CreateDirectory(storageDir);
             await File.WriteAllBytesAsync(filePath, fileContent, ct);

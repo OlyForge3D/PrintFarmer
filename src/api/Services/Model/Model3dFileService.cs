@@ -512,13 +512,13 @@ namespace Farm.Web.Api.Services.Model
                         }
                         // Move temp to final location
                         _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
-                        
+
                         // Verify file exists at final location before proceeding
                         if (!_fileSystem.FileExists(finalFilePath))
                         {
                             throw new InvalidOperationException("File move succeeded but verification failed - file not found at final location");
                         }
-                        
+
                         _logger.LogDebug($"Model file moved from temp to final location: {modelId}");
                     }
                     else

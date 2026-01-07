@@ -92,17 +92,30 @@ public sealed class OctoPrintPollingService(
 
     public void Dispose()
     {
-        _cts?.Dispose();
+        // Signal cancellation to background loops first, then dispose adapters and clear collections.
+        try
+        {
+            _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore - already disposed
+        }
+
         foreach (var adapter in _webSocketAdapters.Values)
         {
-            adapter?.Dispose();
+            try { adapter?.Dispose(); } catch { }
         }
         _webSocketAdapters.Clear();
-        foreach (var loop in _pollingLoops.Values)
-        {
-            loop?.Dispose();
-        }
+
+        // Do not call Dispose() on running Task instances. They will be observed by the runtime when completed.
         _pollingLoops.Clear();
+
+        try
+        {
+            _cts.Dispose();
+        }
+        catch { }
     }
 
     /// <summary>

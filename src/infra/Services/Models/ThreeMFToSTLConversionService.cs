@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Text.Json;
 using System.Xml;
 using Farm.Infrastructure.Telemetry;
@@ -47,7 +47,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             using var zipArchive = new ZipArchive(memoryStream, ZipArchiveMode.Read);
 
             // Find the main 3D/3dmodel.model file
-            var mainModelEntry = zipArchive.Entries.FirstOrDefault(e => 
+            var mainModelEntry = zipArchive.Entries.FirstOrDefault(e =>
                 e.FullName.Equals("3D/3dmodel.model", StringComparison.OrdinalIgnoreCase));
 
             if (mainModelEntry == null)
@@ -90,7 +90,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             {
                 var pathAttr = componentNode.Attributes?["p:path"] ?? componentNode.Attributes?["path"];
                 var transformAttr = componentNode.Attributes?["transform"];
-                
+
                 if (pathAttr == null)
                 {
                     _logger.LogWarning($"Component {componentIndex} missing path attribute");
@@ -102,7 +102,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
                 _logger.LogInformation($"Processing component {componentIndex}: {refPath}");
 
                 // Find the referenced object file in the archive
-                var refEntry = zipArchive.Entries.FirstOrDefault(e => 
+                var refEntry = zipArchive.Entries.FirstOrDefault(e =>
                     e.FullName.Equals(refPath, StringComparison.OrdinalIgnoreCase));
 
                 if (refEntry == null)
@@ -170,13 +170,13 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             foreach (var component in components)
             {
                 // Apply grid position offset to vertices
-                var positionedVertices = component.Vertices.Select(v => 
+                var positionedVertices = component.Vertices.Select(v =>
                     (v.x + component.GridOffsetX, v.y + component.GridOffsetY, v.z)
                 ).ToList();
 
                 int vertexOffset = allVertices.Count;
                 allVertices.AddRange(positionedVertices);
-                allTriangles.AddRange(component.Triangles.Select(t => 
+                allTriangles.AddRange(component.Triangles.Select(t =>
                     (t.v1 + vertexOffset, t.v2 + vertexOffset, t.v3 + vertexOffset)
                 ));
             }
@@ -355,7 +355,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
             // Calculate normal vector (cross product)
             var edge1 = (v2.x - v1.x, v2.y - v1.y, v2.z - v1.z);
             var edge2 = (v3.x - v1.x, v3.y - v1.y, v3.z - v1.z);
-            
+
             var normal = (
                 edge1.Item2 * edge2.Item3 - edge1.Item3 * edge2.Item2,
                 edge1.Item3 * edge2.Item1 - edge1.Item1 * edge2.Item3,
@@ -400,7 +400,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         public int Index { get; set; }
         public List<(float x, float y, float z)> Vertices { get; set; } = new();
         public List<(int v1, int v2, int v3)> Triangles { get; set; } = new();
-        
+
         // Bounding box in original coordinates
         public float MinX { get; set; }
         public float MaxX { get; set; }
@@ -408,11 +408,11 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         public float MaxY { get; set; }
         public float MinZ { get; set; }
         public float MaxZ { get; set; }
-        
+
         // Grid layout offsets to position on XY plane
         public float GridOffsetX { get; set; }
         public float GridOffsetY { get; set; }
-        
+
         public float Width => MaxX - MinX;
         public float Length => MaxY - MinY;
     }
@@ -447,7 +447,9 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
     private void ApplyGridLayout(List<ComponentData> components, float padding)
     {
         if (components.Count == 0)
+        {
             return;
+        }
 
         // Sort by size (largest first) for better packing
         var sortedComponents = components.OrderByDescending(c => c.Width * c.Length).ToList();
@@ -467,7 +469,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         {
             int row = i / gridCols;
             int col = i % gridCols;
-            
+
             colWidths[col] = Math.Max(colWidths[col], sortedComponents[i].Width);
             rowHeights[row] = Math.Max(rowHeights[row], sortedComponents[i].Length);
         }
@@ -495,7 +497,7 @@ public class ThreeMfToStlConversionService : I3MfToStlConversionService
         {
             int row = i / gridCols;
             int col = i % gridCols;
-            
+
             // Position the component at grid cell position, offset to align with its bounding box
             sortedComponents[i].GridOffsetX = colPositions[col] - sortedComponents[i].MinX;
             sortedComponents[i].GridOffsetY = rowPositions[row] - sortedComponents[i].MinY;

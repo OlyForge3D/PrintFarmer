@@ -523,7 +523,7 @@ public class PrinterFileMetadata
     /// Estimated filament used in grams, or null if not available.
     /// </summary>
     public double? ExtrUsedFilament { get; set; }
-    
+
     /// <summary>
     /// Thumbnail images embedded in the G-code file.
     /// Each tuple contains (Width in pixels, Height in pixels, Relative path to thumbnail file).

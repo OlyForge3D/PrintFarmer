@@ -257,12 +257,12 @@ public class GcodeFilesServiceTests
         // Arrange
         string storageDir = Path.Combine(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(storageDir);
-        
+
         // Create a test file
         string testFileName = "test.gcode";
         string fullPath = Path.Combine(storageDir, testFileName);
         await File.WriteAllTextAsync(fullPath, "G1 X1 Y1");
-        
+
         // Create a GcodeFile entity with matching path
         var fileId = Guid.NewGuid();
         var gcodeFile = new GcodeFile
@@ -295,7 +295,7 @@ public class GcodeFilesServiceTests
         repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, 
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
@@ -314,16 +314,16 @@ public class GcodeFilesServiceTests
         // Arrange
         string storageDir = Path.Combine(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(storageDir);
-        
+
         // Create a test file and thumbnail
         string testFileName = "test.gcode";
         string thumbnailFileName = "test_thumb.png";
         string fullPath = Path.Combine(storageDir, testFileName);
         string thumbnailPath = Path.Combine(storageDir, thumbnailFileName);
-        
+
         await File.WriteAllTextAsync(fullPath, "G1 X1 Y1");
         await File.WriteAllBytesAsync(thumbnailPath, new byte[] { 1, 2, 3, 4 });
-        
+
         // Create a GcodeFile entity with thumbnail
         var fileId = Guid.NewGuid();
         var gcodeFile = new GcodeFile
@@ -357,7 +357,7 @@ public class GcodeFilesServiceTests
         repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, 
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
@@ -378,17 +378,17 @@ public class GcodeFilesServiceTests
         string storageDir = Path.Combine(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
         string subDir = Path.Combine(storageDir, "subfolder");
         Directory.CreateDirectory(subDir);
-        
+
         // Create test files in subdirectory
         string file1Path = Path.Combine(subDir, "file1.gcode");
         string file2Path = Path.Combine(subDir, "file2.gcode");
         await File.WriteAllTextAsync(file1Path, "G1 X1 Y1");
         await File.WriteAllTextAsync(file2Path, "G1 X2 Y2");
-        
+
         // Create GcodeFile entities
         var file1Id = Guid.NewGuid();
         var file2Id = Guid.NewGuid();
-        
+
         var gcodeFile1 = new GcodeFile
         {
             Id = file1Id,
@@ -435,7 +435,7 @@ public class GcodeFilesServiceTests
         repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, 
+        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act

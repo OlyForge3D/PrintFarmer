@@ -457,7 +457,7 @@ namespace Farm.Infrastructure.Services.Printers
         /// Handles backend-specific status retrieval and DTO construction.
         /// Never returns null - always returns PrinterDto (offline on error).
         /// </summary>
-#pragma warning disable CS8603 
+#pragma warning disable CS8603
         private async Task<PrinterDto> GetStatusDtoInternalAsync(Printer p, CancellationToken ct)
         {
             try

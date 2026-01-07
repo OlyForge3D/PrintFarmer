@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Contracts.Slicing.Libraries;
 
 namespace Farm.Web.Api.Tests.Slicers;
@@ -29,8 +29,8 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
     /// <param name="profilesPath">Path to profiles directory (typically sample_profiles/orcaslicer for testing)</param>
     internal OrcaSlicerProfilesProvider(string? profilesPath = null)
     {
-        _profilesPath = profilesPath ?? 
-            Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH") ?? 
+        _profilesPath = profilesPath ??
+            Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH") ??
             "/opt/orcaslicer/resources/profiles";
     }
 
@@ -143,7 +143,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         {
             // Load universal filaments from OrcaFilamentLibrary directory
             var universalFilamentsDir = Path.Combine(_profilesPath, "OrcaFilamentLibrary");
-            
+
             if (!Directory.Exists(universalFilamentsDir))
             {
                 return; // No universal filaments available

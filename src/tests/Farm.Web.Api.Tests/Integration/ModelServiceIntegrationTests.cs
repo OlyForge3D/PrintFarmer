@@ -770,10 +770,10 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
         // Assert
         filePath.Should().NotBeNull();
-        
+
         // Verify the path is relative (doesn't start with /)
         filePath.Should().NotStartWith(Path.DirectorySeparatorChar.ToString(), "Path should be relative");
-        
+
         // Verify the path contains the filename
         filePath.Should().Contain(".stl", "Path should contain the STL extension");
     }
@@ -809,12 +809,12 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Assert - Check that model was saved to database
         var uploadedModel = await repository.GetByIdAsync(result.Id, CancellationToken.None);
         uploadedModel.Should().NotBeNull();
-        
+
         // The database record should exist with the uploaded file
         uploadedModel!.FileName.Should().NotBeNullOrEmpty("Model should have a filename");
         uploadedModel!.FileHash.Should().NotBeNullOrEmpty("Model should have a file hash");
         uploadedModel!.FilePath.Should().NotBeNullOrEmpty("Model should have a file path");
-        
+
         // Note: ThumbnailFileName may be null if thumbnail generation is not available in test environment
         // The important test is that the upload and database save succeeded
     }

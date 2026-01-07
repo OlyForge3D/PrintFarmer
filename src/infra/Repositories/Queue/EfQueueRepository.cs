@@ -86,7 +86,7 @@ public class EfQueueRepository : IQueueRepository
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);
 
     // Specialized queue query methods
-    
+
     /// <summary>
     /// Retrieves all printers that are available for print job assignment.
     /// Includes related entities (Model and Toolheads) needed for job assignment decisions.
