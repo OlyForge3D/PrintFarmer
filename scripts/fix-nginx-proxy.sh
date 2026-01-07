@@ -67,7 +67,7 @@ info "Starting nginx proxy (bridge) on host port ${HTTP_PORT}"
 docker run -d --name printfarmer-nginx-proxy \
   --add-host=host.docker.internal:host-gateway \
   -p "${HTTP_PORT}:80" \
-  -v "${ROOT_DIR}/deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro" \
+  -v "${ROOT_DIR}/deploy/nginx/conf.d:/etc/nginx/conf.d:ro" \
   -v "${ROOT_DIR}/deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro" \
   nginx:alpine >/dev/null
 

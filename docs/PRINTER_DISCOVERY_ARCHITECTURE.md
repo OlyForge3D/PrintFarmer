@@ -60,7 +60,7 @@ The **Printer Discovery Service** is a dedicated microservice that solves a crit
 | Problem | Original Setup | Solution |
 |---------|---|---|
 | **Local Network Access** | Host network needed for mDNS/ARP | Discovery service in host network |
-| **DNS Resolution** | Host mode breaks Docker DNS | API in bridge network |
+| **DNS Resolution** | API in bridge network |
 | **Worker Registration** | Workers can't reach `http://api:5245` | API accessible from bridge network via service name |
 | **Security** | Host network exposes entire container | Discovery is isolated, minimal surface |
 | **Scalability** | One service manages everything | Clear separation of concerns |

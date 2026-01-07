@@ -436,7 +436,7 @@ ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
    - Isolated container network
    - May not reach WiFi devices on macOS
 
-2. **Host Mode (Linux only):**
+2. **Network Considerations:**
    ```yaml
    network_mode: host
    ```

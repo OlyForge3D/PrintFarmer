@@ -114,7 +114,7 @@ DB_PROVIDER=sqlserver ./scripts/deploy-docker.sh --architecture microservices
 
 - **Monolithic**: Uses SQLite by default, no database service cleanup needed
 - **Microservices**: Supports all providers with dynamic database service generation
-- **Host-network**: Supports all providers with dynamic database service generation
+- **Host-network**: Removed from supported deployment modes. Use microservices for multi-container deployments with provider-specific database generation.
 
 ## Files
 
@@ -149,8 +149,8 @@ The cleanup has been tested with all supported architectures and database provid
 ./compose-generator.sh --architecture microservices --db-provider sqlserver --dry-run
 ./compose-generator.sh --architecture microservices --db-provider mysql --dry-run
 
-# Test host-network architecture
-./compose-generator.sh --architecture host-network --db-provider postgres --dry-run
+# Test microservices architecture
+./compose-generator.sh --architecture microservices --db-provider postgres --dry-run
 ```
 
 All tests confirmed proper database service replacement with provider-specific configurations.

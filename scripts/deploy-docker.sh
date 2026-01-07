@@ -804,9 +804,7 @@ generate_deployment_config() {
             "microservices")
                 GENERATED_FILES+=("Dockerfile.multistage")
                 ;;
-            "host-network")
-                GENERATED_FILES+=("Dockerfile.multistage")
-                ;;
+            # (no host-network option)
         esac
 
         # Ensure Dockerfile.multistage is available in the output directory. Many compose templates
@@ -892,19 +890,9 @@ run_api_diagnostics() {
         if [ -n "$conn_string" ]; then
             print_info "ConnectionStrings__Default: $conn_string"
 
-            local host_network_enabled="false"
-            if [ "${NETWORK_MODE:-bridge}" = "host" ] || ${SYSTEM_HOST_NETWORK:-false}; then
-                host_network_enabled="true"
-            fi
-
-            if [ "$host_network_enabled" = "true" ]; then
-                if echo "$conn_string" | grep -qiE 'host=(database|postgres|sqlserver|mysql)'; then
-                    print_warning "Host network mode detected but connection string uses Docker service name. Use Host=localhost when the API is on the host network."
-                fi
-            else
-                if echo "$conn_string" | grep -qiE 'host=(localhost|127\.0\.0\.1)'; then
-                    print_warning "Bridge network detected but connection string points to localhost. Use the service name (e.g., Host=database)."
-                fi
+            # Assume bridge networking; warn if connection string points to localhost
+            if echo "$conn_string" | grep -qiE 'host=(localhost|127\.0\.0\.1)'; then
+                print_warning "Connection string points to localhost while bridge networking is expected; use the service name (e.g., Host=database)."
             fi
         else
             print_warning "ConnectionStrings__Default not found in $ENV_FILE."
@@ -983,11 +971,6 @@ run_api_diagnostics() {
     local conn_string
     conn_string=$(get_env_value "ConnectionStrings__Default")
     if [ -n "$conn_string" ]; then
-        local host_network_enabled="false"
-        if [ "${NETWORK_MODE:-bridge}" = "host" ] || ${SYSTEM_HOST_NETWORK:-false}; then
-            host_network_enabled="true"
-        fi
-
         local db_host
         db_host=$(extract_conn_setting "Host" "$conn_string")
         if [ -z "$db_host" ]; then
@@ -997,7 +980,7 @@ run_api_diagnostics() {
             db_host=$(extract_conn_setting "Data Source" "$conn_string")
         fi
 
-        if [ -n "$db_host" ] && [ "$host_network_enabled" = "false" ]; then
+        if [ -n "$db_host" ]; then
             local api_running
             api_running=$(dc ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep 'api ' || true)
             if echo "$api_running" | grep -qi 'running'; then
@@ -1872,13 +1855,6 @@ tear_down_deployment() {
         fi
     fi
 
-    # Ensure standalone host-mode nginx proxy (if created by script) is removed
-    if docker ps -a --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
-        print_info "Removing standalone host-mode nginx proxy container: printfarmer-nginx-proxy"
-        docker rm -f printfarmer-nginx-proxy || true
-        print_success "Removed printfarmer-nginx-proxy"
-    fi
-
     # 1. Stop all remaining running containers (fallback)
     print_info "Step 1/8: Stopping any remaining running Docker containers..."
     local running_containers
@@ -2342,7 +2318,6 @@ DATABASE OPTIONS:
 
 NETWORK MODES:
     1. Bridge          - Standard Docker networking (default)
-    2. Host            - Direct host network access (for printer discovery)
 
 DATA PERSISTENCE (P0 Requirement):
     During interactive deployment, you'll be prompted to configure external storage
@@ -2370,7 +2345,7 @@ PRINTER DISCOVERY (MICROSERVICES ONLY):
     The network printer discovery service automatically scans your local network 
     to find compatible 3D printers (Moonraker, PrusaLink, OctoPrint, SDCP).
     - Enabled by default in microservices deployments
-    - Runs in host network mode to access local network
+    - Runs on the configured Docker network and can be tuned via discovery ranges
     - Scans configurable IP ranges periodically
     - Supports both automatic push and manual pull discovery modes
     - Accessible via API endpoint: POST /api/discovery/scan
@@ -2955,10 +2930,10 @@ validate_configuration() {
         ORCA_WORKER_COUNT=0
     fi
 
-    # Monolithic constraints: host networking -> only one instance per worker due to fixed ports 8081/8082
+    # Monolithic constraints: single-container mode uses fixed ports for workers
     if [ "$ARCHITECTURE" = "monolithic" ]; then
         if [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
-            print_warning "Monolithic mode: Cannot scale OrcaSlicer workers (host networking / fixed port 8081). For scaling, use microservices. Forcing count=1."
+            print_warning "Monolithic mode: Cannot scale OrcaSlicer workers (fixed port 8081). For scaling, use microservices. Forcing count=1."
             ORCA_WORKER_COUNT=1
         fi
 
@@ -3003,7 +2978,7 @@ validate_configuration() {
     # Worker port handling
     ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
     if [ "$ARCHITECTURE" = "monolithic" ]; then
-        # Only warn; cannot remap easily due to fixed host network & static internal ports
+        # Only warn; cannot remap easily due to fixed container port mapping
         if [ "$ENABLE_ORCA_WORKER" = "yes" ] && port_in_use "$ORCA_HOST_PORT"; then
             print_warning "Monolithic: Orca worker port $ORCA_HOST_PORT in use; startup may fail."
         fi
@@ -3246,60 +3221,11 @@ configure_networking() {
         print_success "Microservices architecture: all services on bridge network with service discovery"
         NETWORK_MODE="bridge"
         print_info "API will be accessible at http://api:5245 within the docker network"
-        print_info "Printer discovery service runs on host network for local network scanning"
+        print_info "Printer discovery service will scan configured IP ranges for devices"
     else
-        # For monolithic, allow user to choose network mode
-        echo -e "${BLUE}Network Mode for Container:${NC}"
-        echo -e "  ${BLUE}1.${NC} Bridge (default) - Works on all platforms, limited broadcast/multicast"
-        echo -e "  ${BLUE}2.${NC} Host (advanced) - Direct host network access, full discovery support"
-        echo
-        
-        if [ "$OS" != "linux" ]; then
-            print_warning "Host network mode only works on Linux."
-            print_warning "Current OS: $OS (detected)"
-            echo
-            prompt_yes_no "Are you deploying to a Linux server (not this machine)?" "no" "DEPLOYING_TO_LINUX"
-            
-            if [ "$DEPLOYING_TO_LINUX" = "yes" ]; then
-                print_info "Generating configuration for Linux target deployment"
-                echo -e "${YELLOW}Host mode provides optimal network discovery (broadcast/multicast).${NC}"
-                echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
-                echo
-                prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
-                
-                case "$NETWORK_MODE_CHOICE" in
-                    2|host|Host)
-                        NETWORK_MODE="host"
-                        print_success "Using host network mode for full discovery support"
-                        print_info "Container will bind to port ${API_PORT:-5245} on the host"
-                        ;;
-                    *)
-                        NETWORK_MODE="bridge"
-                        print_info "Using bridge mode (cross-platform compatible)"
-                        ;;
-                esac
-            else
-                print_info "Forcing bridge mode for $OS deployment"
-                NETWORK_MODE="bridge"
-            fi
-        else
-            echo -e "${YELLOW}Host mode provides optimal network discovery (broadcast/multicast).${NC}"
-            echo -e "${YELLOW}Bridge mode works for known IP addresses but may miss auto-discovery.${NC}"
-            echo
-            prompt_with_default "Network mode [1=Bridge, 2=Host]:" "2" "NETWORK_MODE_CHOICE"
-            
-            case "$NETWORK_MODE_CHOICE" in
-                2|host|Host)
-                    NETWORK_MODE="host"
-                    print_success "Using host network mode for full discovery support"
-                    print_info "Container will bind to port ${API_PORT:-5245} on the host"
-                    ;;
-                *)
-                    NETWORK_MODE="bridge"
-                    print_info "Using bridge mode (cross-platform compatible)"
-                    ;;
-            esac
-        fi
+        # Monolithic deployments always use bridge networking. Host-network mode removed.
+        NETWORK_MODE="bridge"
+        print_info "Monolithic deployments use bridge networking"
     fi
     
     echo
@@ -3319,327 +3245,11 @@ configure_networking() {
 
 # Adjust connection strings for network mode
 adjust_connection_strings_for_network_mode() {
-    # In host network mode, services need to connect to localhost instead of service names
-    if [ "$NETWORK_MODE" = "host" ]; then
-        print_header "🔧 Adjusting Configuration for Host Network Mode"
-        
-        print_info "Host network mode requires using localhost for database connections"
-        
-        # Adjust connection string based on database provider
-        case "$DB_PROVIDER" in
-            postgres)
-                # PostgreSQL: Change from "Host=postgres" to "Host=localhost"
-                CONNECTION_STRING="Host=localhost;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-}"
-                print_success "PostgreSQL connection string updated for host networking"
-                ;;
-            sqlserver)
-                # SQL Server: Change from "Server=sqlserver" to "Server=localhost,PORT"
-                CONNECTION_STRING="Server=localhost,${SQLSERVER_PORT:-1433};Database=${SQLSERVER_DB:-printfarmer};User Id=sa;Password=${SQLSERVER_PASSWORD:-};TrustServerCertificate=True;"
-                print_success "SQL Server connection string updated for host networking (port ${SQLSERVER_PORT:-1433})"
-                ;;
-            mysql)
-                # MySQL: Change from "Server=mysql" to "Server=localhost"
-                CONNECTION_STRING="Server=localhost;Database=${MYSQL_DB:-printfarmer};User=${MYSQL_USER:-root};Password=${MYSQL_PASSWORD:-};"
-                print_success "MySQL connection string updated for host networking"
-                ;;
-        esac
-        
-        print_info "Database will be accessible at localhost:${SQLSERVER_PORT:-5432}"
-        
-        # Also generate a custom Nginx config for frontend to proxy to localhost API
-        generate_host_network_nginx_config
-    fi
-}
-
-# Generate Nginx config and Dockerfile for host network mode
-# In host mode, frontend (bridge network) must proxy to host.docker.internal:API_PORT instead of api:5001
-generate_host_network_nginx_config() {
-    print_info "Generating Nginx config for host network mode..."
-    
-    mkdir -p deploy/nginx/conf.d.host
-    
-    # Create the custom Nginx config with host.docker.internal and actual API port
-    cat > deploy/nginx/conf.d.host/frontend-app.conf << NGINXEOF
-server {
-    listen ${HTTP_PORT:-8080};
-    server_name localhost;
-    root /usr/share/nginx/html;
-    index index.html;
-
-    # Cache static assets (immutable build output)
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Dedicated health check endpoint
-    location /health {
-        access_log off;
-        default_type text/plain;
-        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
-        return 200 "OK\n";
-    }
-
-    # Explicit index.html handling
-    location = /index.html {
-        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
-        add_header Pragma "no-cache" always;
-        add_header Expires "0" always;
-        try_files /index.html =404;
-    }
-
-    # SPA routing fallback
-    location / {
-        try_files \$uri \$uri/ /index.html;
-        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
-        add_header Pragma "no-cache" always;
-        add_header Expires "0" always;
-    }
-
-    # Proxy API requests (HOST MODE: API is on host network, accessible via host.docker.internal)
-    location ^~ /api/ {
-        proxy_pass http://host.docker.internal:${API_PORT:-5245};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Port \$server_port;
-    }
-
-    # Proxy SignalR hub (WebSockets & long polling)
-    location ^~ /hubs/ {
-        proxy_pass http://host.docker.internal:${API_PORT:-5245};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "Upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Port \$server_port;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-}
-# Close the here-doc for the generated Nginx config
-NGINXEOF
-
-# Start an nginx proxy container in host network mode using the generated host config
-start_host_mode_nginx_proxy() {
-    print_info "Ensuring host-mode nginx proxy is running..."
-
-    # If a container with the expected name exists and is running, nothing to do
-    if docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
-        print_info "Host-mode nginx proxy container already running: printfarmer-nginx-proxy"
-        return 0
-    fi
-
-    # Build a lightweight nginx image that uses the generated host configs
-    # Use a temporary Dockerfile to reference the generated confs
-    local tmp_dockerfile=".tmp.Dockerfile.nginx.host"
-    cat > "$tmp_dockerfile" <<EOF
-FROM nginx:alpine
-COPY deploy/nginx/nginx-frontend.conf /etc/nginx/nginx.conf
-COPY deploy/nginx/conf.d.host/*.conf /etc/nginx/conf.d/
-RUN rm -f /etc/nginx/conf.d/default.conf || true
-EOF
-
-    local image_name="printfarmer-nginx-host:latest"
-    if docker build -t "$image_name" -f "$tmp_dockerfile" .; then
-        print_success "Built host-mode nginx image: $image_name"
-    else
-        print_warning "Failed to build host-mode nginx image; attempting to run nginx:alpine with mounted config"
-        image_name="nginx:alpine"
-    fi
-
-    rm -f "$tmp_dockerfile" || true
-
-    # Ensure host HTTP port is available before attempting to start nginx.
-    local http_port="${HTTP_PORT:-8080}"
-    # If the port is bound, try to identify a Docker container that owns it and stop it (with prompt)
-    if ss -ltn "sport = :${http_port}" >/dev/null 2>&1; then
-        # Try to find a container that exposes this host port
-        occupier=$(docker ps --format '{{.Names}}\t{{.Ports}}' | grep ":${http_port}->" | awk -F'\t' '{print $1}' | head -1 || true)
-        if [ -n "${occupier}" ]; then
-            print_warning "Host port ${http_port} is already bound by container: ${occupier}"
-            # If non-interactive, stop it automatically; otherwise ask the user
-            if [ "${NON_INTERACTIVE:-false}" = "true" ]; then
-                print_info "Non-interactive mode: stopping container ${occupier} to free port ${http_port}"
-                docker stop "${occupier}" || true
-                docker rm -f "${occupier}" || true
-            else
-                prompt_yes_no "Host port ${http_port} is in use by container ${occupier}. Stop it so nginx can bind ${http_port}?" "n" "STOP_FRONTEND_CONFIRM"
-                if [ "${STOP_FRONTEND_CONFIRM:-no}" = "yes" ]; then
-                    print_info "Stopping container ${occupier} as requested"
-                    docker stop "${occupier}" || true
-                    docker rm -f "${occupier}" || true
-                else
-                    print_error "Cannot start nginx proxy because port ${http_port} is in use by ${occupier}. Aborting start_host_mode_nginx_proxy."
-                    return 1
-                fi
-            fi
-        else
-            print_error "Host port ${http_port} appears in use by a non-container process. Please free it and retry."
-            return 1
-        fi
-    fi
-
-    # Remove an existing container with the same name if present but not running
-    if docker ps -a --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
-        print_info "Removing stale nginx proxy container"
-        docker rm -f printfarmer-nginx-proxy || true
-    fi
-
-    # Run the container in host network mode so it binds the requested HTTP port on the host
-    # Use --network host for Linux; on macOS/Docker Desktop this is a no-op and will fall back to bridge
-    # Wait for the API to be available on the host before starting nginx
-    if ! wait_for_host_api; then
-        print_warning "API did not become available; continuing to attempt starting nginx but proxy may fail."
-    fi
-
-    if docker run -d --name printfarmer-nginx-proxy --network host \
-        -v "${PWD}/deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro" \
-        -v "${PWD}/deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro" \
-        "$image_name" >/dev/null; then
-        print_success "Started host-mode nginx proxy: printfarmer-nginx-proxy"
-        if validate_nginx_proxy; then
-            return 0
-        else
-            print_error "Nginx proxy started but failed validation"
-            return 1
-        fi
-    else
-        print_warning "Failed to start host-mode nginx proxy container"
-        print_info "Attempting fallback: start nginx image with port mapping"
-        # Fallback: start default nginx with explicit port mapping (best-effort)
-        # Wait again for API before starting fallback mapping
-        if ! wait_for_host_api; then
-            print_warning "API did not become available; fallback nginx may fail to proxy."
-        fi
-
-        if docker run -d --name printfarmer-nginx-proxy --add-host=host.docker.internal:host-gateway -p "${HTTP_PORT:-8080}:80" \
-            -v "${PWD}/deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro" \
-            -v "${PWD}/deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro" \
-            nginx:alpine >/dev/null; then
-            print_success "Started nginx-proxy (fallback port mapped): printfarmer-nginx-proxy"
-            if validate_nginx_proxy; then
-                return 0
-            else
-                print_error "Nginx proxy (fallback) started but failed validation"
-                return 1
-            fi
-        else
-            print_error "Unable to start an nginx-proxy container in host or mapped mode. Please start one manually or check Docker permissions."
-            return 1
-        fi
-    fi
-}
-
-# Helper function: Wait for the host API port to be ready before launching nginx
-# This prevents nginx startup failures and 502s when proxying to an unreachable upstream
-wait_for_host_api() {
-    local host_port=${API_PORT:-5245}
-    local timeout_seconds=${API_WAIT_TIMEOUT:-60}
-    local interval=2
-    local waited=0
-    print_info "Waiting up to ${timeout_seconds}s for API to accept connections on host port ${host_port}..."
-    while ! ss -ltn "sport = :${host_port}" >/dev/null 2>&1; do
-        if [ "$waited" -ge "$timeout_seconds" ]; then
-            print_warning "Timeout waiting for API on host port ${host_port} after ${timeout_seconds}s"
-            return 1
-        fi
-        sleep $interval
-        waited=$((waited + interval))
-    done
-    print_success "API is listening on host port ${host_port}"
+    # Host-mode connection adjustments removed. No-op.
     return 0
 }
 
-# Helper function: Validate that the nginx proxy is correctly proxying to the API
-# Queries the health endpoint through the proxy. Returns 0 on success.
-validate_nginx_proxy() {
-    local port=${HTTP_PORT:-8080}
-    local timeout=${API_WAIT_TIMEOUT:-60}
-    local interval=2
-    local waited=0
-    print_info "Validating nginx proxy is responding at http://localhost:${port}/healthz ..."
-    while true; do
-        # Use --max-time to avoid long hangs; accept 200 OK
-        if curl -sS --max-time 5 -f "http://localhost:${port}/healthz" >/dev/null 2>&1; then
-            print_success "Nginx proxy validated: /healthz returned 200 via proxy"
-            return 0
-        fi
-        if [ "$waited" -ge "$timeout" ]; then
-            print_error "Nginx proxy validation failed after ${timeout}s"
-            # Dump some useful debug info
-            print_info "--- nginx-proxy logs (last 200 lines) ---"
-            docker logs printfarmer-nginx-proxy --tail 200 || true
-            print_info "--- nginx config (if container running) ---"
-            if docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
-                docker exec printfarmer-nginx-proxy nginx -T 2>/dev/null | sed -n '1,200p' || true
-            fi
-            print_info "--- docker ps snapshot ---"
-            docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' || true
-            return 1
-        fi
-        sleep $interval
-        waited=$((waited + interval))
-    done
-}
-    
-    print_success "Created host-network Nginx config at deploy/nginx/conf.d.host/frontend-app.conf"
-    
-    # Also create a custom Dockerfile for frontend that uses this config
-    cat > Dockerfile.frontend-host << 'DOCKEREOF'
-# Host Network Mode Frontend Dockerfile
-# Uses custom Nginx config that proxies to host.docker.internal
-FROM node:18-alpine AS build
-
-ARG VITE_API_BASE_URL=http://localhost:5245/api
-ARG VITE_SIGNALR_PRINTERS_URL=http://localhost:5245/hubs/printers
-ARG VITE_SIGNALR_HARVEST_URL=http://localhost:5245/hubs/harvest
-ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
-    VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL} \
-    VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}
-
-WORKDIR /app
-
-COPY src/Web/ReactApp/package*.json ./
-RUN npm install --silent
-
-COPY src/Web/ReactApp/ ./
-RUN echo "Building with VITE_API_BASE_URL=$VITE_API_BASE_URL" && npm run build
-
-# Production stage with Nginx
-FROM nginx:alpine
-
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY deploy/nginx/nginx-frontend.conf /etc/nginx/nginx.conf
-
-# USE HOST MODE CONFIG - proxies to host.docker.internal instead of 'api' service
-COPY deploy/nginx/conf.d.host/*.conf /etc/nginx/conf.d/
-
-RUN rm -f /etc/nginx/conf.d/default.conf || true
-
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD curl -f http://localhost:80/ || exit 1
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
-DOCKEREOF
-    
-    print_success "Created host-network Dockerfile at Dockerfile.frontend-host"
-}
+ 
 
 # Configure additional settings
 configure_external_storage() {
@@ -4276,14 +3886,8 @@ EOF
     # If we're deploying in host network mode, rewrite any Docker service hostnames
     # (e.g., 'database', 'postgres', 'mysql', 'sqlserver') to 'localhost' so the
     # API running in host network mode connects to the host services correctly.
-    if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
-        # Use sed to conservatively replace common host keys while preserving the rest
-        CONNECTION_STRING_TO_WRITE=$(printf '%s' "$CONNECTION_STRING" | sed -E \
-            -e 's/([Hh]ost)=(database|postgres|postgresql)/\1=localhost/Ig' \
-            -e 's/([Ss]erver)=(mysql|sqlserver)/\1=localhost/Ig')
-    else
-        CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
-    fi
+    # Use the configured connection string as-is (bridge networking expected)
+    CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
     # IMPORTANT: Do NOT quote the connection string in the .env file - Docker Compose
     # includes literal quotes as part of the value, breaking connection string parsing.
     # The application reads only ConnectionStrings__Default and determines the provider
@@ -4306,7 +3910,7 @@ VAULT_DEV_ROOT_TOKEN=$VAULT_DEV_ROOT_TOKEN
 ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
 ALLOWED_NETWORK_RANGES=$NETWORK_RANGES
 NETWORK_MODE=${NETWORK_MODE:-bridge}
-DOCKER_HOST_NETWORK=$([ "${NETWORK_MODE:-bridge}" = "host" ] && echo "true" || echo "false")
+DOCKER_HOST_NETWORK=false
 
 # CORS Configuration
 CORS__AllowedOrigins=$CORS_ORIGINS
@@ -4633,21 +4237,7 @@ generate_react_env_production() {
 
     print_info "Creating React production environment file"
 
-    # If we're running in host network mode, build the frontend to call the API on localhost:API_PORT
-    if [ "${NETWORK_MODE:-bridge}" = "host" ]; then
-        local api_host_port=${API_PORT:-5245}
-        cat > "$react_dir/.env.production" << EOF
-# React Production Build Configuration (host network)
-# Auto-generated by deploy-docker.sh
-# Frontend will call the API on the host (localhost) when running in host network mode
-VITE_API_BASE_URL=http://localhost:${api_host_port}/api
-
-# SignalR hub URLs (point to host)
-VITE_SIGNALR_PRINTERS_URL=http://localhost:${api_host_port}/hubs/printers
-VITE_SIGNALR_HARVEST_URL=http://localhost:${api_host_port}/hubs/harvest
-EOF
-    else
-        cat > "$react_dir/.env.production" << 'EOF'
+    cat > "$react_dir/.env.production" << 'EOF'
 # React Production Build Configuration
 # Auto-generated by deploy-docker.sh
 # These relative URLs work through the Nginx proxy in Docker deployment
@@ -4753,240 +4343,6 @@ EOF
     fi
 }
 
-# Generate host network override if needed
-generate_host_network_override() {
-    if [ "${NETWORK_MODE:-bridge}" = "host" ] && [ "$ARCHITECTURE" = "microservices" ]; then
-        print_info "Creating complete host network compose file (standalone)"
-        print_warning "This file includes ALL services with API configured for host networking"
-        
-        # Start the compose file
-        cat > docker-compose.host-network.yml << 'MAINEOF'
-# PrintFarmer Microservices Architecture - HOST NETWORK MODE
-# Complete standalone compose file with API in host network mode
-# DO NOT use with docker-compose.microservices.yml (conflicts due to network_mode)
-
-services:
-
-
-MAINEOF
-
-        # Add the appropriate database service based on DB_PROVIDER
-        case "${DB_PROVIDER:-postgres}" in
-            postgres)
-                cat >> docker-compose.host-network.yml << 'DBEOF'
-  # PostgreSQL Database
-    database:
-        image: postgres:15
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    ports:
-      - "5432:5432"
-    networks:
-      - printfarmer-network
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-printfarmer}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-DBEOF
-                ;;
-            sqlserver)
-                cat >> docker-compose.host-network.yml << 'DBEOF'
-  # SQL Server Database
-  database:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${SQLSERVER_PASSWORD}
-      MSSQL_PID: ${MSSQL_PID:-Developer}
-    ports:
-      - "${SQLSERVER_PORT:-1433}:1433"
-    networks:
-      - printfarmer-network
-    volumes:
-      - sqlserver_data:/var/opt/mssql
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${SQLSERVER_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-
-DBEOF
-                ;;
-            mysql)
-                cat >> docker-compose.host-network.yml << 'DBEOF'
-  # MySQL Database
-  database:
-    image: mysql:8.0
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DB:-printfarmer}
-      MYSQL_USER: ${MYSQL_USER:-printfarmer}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    ports:
-      - "3306:3306"
-    networks:
-      - printfarmer-network
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-DBEOF
-                ;;
-        esac
-
-        # Continue with the rest of the services (API, workers, frontend)
-        cat >> docker-compose.host-network.yml << 'RESTEOF'
-  # PrintFarmer API - Using HOST NETWORK MODE for full network discovery
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    image: printfarmer-api
-    # HOST NETWORK MODE: Direct host network access (no ports/networks allowed)
-    network_mode: "host"
-    depends_on:
-      database:
-        condition: service_healthy
-    restart: on-failure:5
-    environment:
-      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
-      - ASPNETCORE_URLS=http://0.0.0.0:${API_PORT:-5245}
-      - API_URL=http://localhost:${API_PORT:-5245}
-      - DB_PROVIDER=${DB_PROVIDER:-Postgres}
-      - ConnectionStrings__Default=${ConnectionStrings__Default}
-      - CORS__AllowedOrigins=${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:8080}
-      - DOCKER_HOST_NETWORK=true
-      - NETWORK_MODE=host
-      - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
-      - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
-      - DEPLOYMENT_MODE=microservices
-      - ModelStorage__Path=/app/models
-      - Logging__LogLevel__Default=Information
-      - Logging__LogLevel__Microsoft.AspNetCore=Warning
-      - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
-      - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://localhost:8081}
-      - PFARM__Spoolman__BaseUrl=${PFARM__Spoolman__BaseUrl:-}
-      - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
-      - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
-    volumes:
-      - printfarmer-app-data:/data
-      - printfarmer-model-storage:/app/models
-      - printfarmer-gcode-storage:/app/gcode
-      - printfarmer-slicer-profiles:/app/profiles
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-5245}/healthz"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 90s
-
-  # OrcaSlicer Worker - Distributed slicing microservice
-  orcaslicer-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.multistage
-      target: orcaslicer-worker
-    profiles:
-      - orca
-    image: printfarmer-orcaslicer-worker
-    ports:
-      - "8081:8080"
-    networks:
-      - printfarmer-network
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - Worker__StorageEndpoint=http://localhost:${API_PORT:-5245}
-      - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
-      - Worker__WorkerId=orcaslicer-worker-1
-      - Worker__QueueName=orcaslicer-jobs
-      - Logging__LogLevel__Default=Information
-    volumes:
-      - printfarmer-orcaslicer-temp:/app/temp
-      - printfarmer-gcode-storage:/app/gcode
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
-
-  # React Frontend
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend-host  # Custom Dockerfile for host network mode
-      args:
-        VITE_API_BASE_URL: /api
-        VITE_SIGNALR_PRINTERS_URL: /hubs/printers
-        VITE_SIGNALR_HARVEST_URL: /hubs/harvest
-    image: printfarmer-frontend-host
-    ports:
-      - "${HTTP_PORT:-8080}:80"
-    networks:
-      - printfarmer-network
-    # CRITICAL for Linux: Map host.docker.internal to host gateway so Nginx can reach host-network API
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    # Nginx proxy (host-mode)
-    nginx-proxy:
-        image: printfarmer-nginx-host:latest
-        container_name: printfarmer-nginx-proxy
-        # Run in host network mode so it binds host ports directly
-        network_mode: "host"
-        # Use the generated host nginx config (bind mounts from repo when running compose)
-        volumes:
-            - ./deploy/nginx/nginx-frontend.conf:/etc/nginx/nginx.conf:ro
-            - ./deploy/nginx/conf.d.host:/etc/nginx/conf.d:ro
-        restart: unless-stopped
-        healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost/health"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-
-networks:
-    printfarmer-network:
-        driver: bridge
-
-volumes:
-    postgres_data:
-    sqlserver_data:
-    mysql_data:
-    printfarmer-app-data:
-    printfarmer-model-storage:
-    printfarmer-gcode-storage:
-    printfarmer-slicer-profiles:
-    printfarmer-orcaslicer-temp:
-RESTEOF
-        
-        print_success "Host network compose file created: docker-compose.host-network.yml"
-        # Ensure no top-level `version:` key remains in generated host-network file
-        remove_version_keys "docker-compose.host-network.yml"
-        print_warning "API will bind directly to host port ${API_PORT:-5245}"
-        print_warning "Database accessible on localhost (host networking)"
-        print_info "Workers and frontend use bridge network, API uses host network"
-        print_info "This file is standalone - do NOT combine with docker-compose.microservices.yml"
-    fi
-}
-
 # Build and deploy
 deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
@@ -5012,14 +4368,8 @@ deploy_containers() {
     # Always include selected compose file
     local compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
-    # For host network mode, we need special handling because networks and network_mode are mutually exclusive
-    # We'll use ONLY the host-network compose file which has all services, skipping the base microservices file
-    if [ -f docker-compose.host-network.yml ]; then
-        # Use host-network file as the PRIMARY file (has all services with API in host mode)
-        # DO NOT load override file - host-network.yml is standalone and already includes database
-        compose_cmd=( docker compose --env-file "$ENV_FILE" -f docker-compose.host-network.yml )
-        print_info "Using host network mode: docker-compose.host-network.yml (standalone, includes all services)"
-    elif [ -f docker-compose.override.yml ]; then
+    # Host network mode removed. Use standard compose override if present.
+    if [ -f docker-compose.override.yml ]; then
         compose_cmd+=( -f docker-compose.override.yml )
     fi
 
@@ -5358,16 +4708,16 @@ EOF
                 # and runs on the docker network in bridge mode. Don't try to start a host-mode proxy.
                 # For monolithic with host mode, we may need a separate host-mode nginx proxy.
                 if [ "$ARCHITECTURE" = "microservices" ]; then
-                    # For microservices, just verify the docker-compose nginx-proxy is working
+                    # For microservices, verify the docker-compose nginx-proxy is working
                     if check_nginx_proxy; then
                         print_info "nginx proxy verification passed"
                     else
                         print_error "nginx proxy verification FAILED - aborting deployment"
                         exit 2
                     fi
-                elif [ "${NETWORK_MODE:-bridge}" = "host" ]; then
-                    # For monolithic with host mode, start a host-mode nginx proxy
-                    start_host_mode_nginx_proxy || true
+                else
+                    # For monolithic (bridge networking) verify the nginx proxy
+                    # that is part of the compose stack or host environment is reachable.
                     if check_nginx_proxy; then
                         print_info "nginx proxy verification passed"
                     else
@@ -6705,7 +6055,7 @@ main() {
         fi
 
         # Minimal set of images used in compose; expand as needed
-        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim" "node:18-alpine")
+        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim" "node:22-alpine")
         for img in "${images[@]}"; do
             print_info "Pulling $img ($platform_arg)"
             if docker pull $platform_arg "$img"; then
@@ -7045,11 +6395,8 @@ if [ "$VERIFY_DEPLOYMENT" = "true" ]; then
 
     # Basic compose file defaults when not set by config
     COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
-    # Prefer host-network compose only when network mode is host and file exists
-    if [ "${NETWORK_MODE:-bridge}" = "host" ] && [ -f docker-compose.host-network.yml ]; then
-        COMPOSE_FILE="docker-compose.host-network.yml"
-    # If architecture is microservices, prefer the microservices template when available
-    elif [ "${ARCHITECTURE:-}" = "microservices" ] && [ -f docker-compose.microservices.yml ]; then
+    # Select compose file based on architecture; host-network mode removed
+    if [ "${ARCHITECTURE:-}" = "microservices" ] && [ -f docker-compose.microservices.yml ]; then
         COMPOSE_FILE="docker-compose.microservices.yml"
     fi
 

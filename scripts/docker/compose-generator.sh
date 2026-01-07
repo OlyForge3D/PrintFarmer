@@ -12,6 +12,20 @@ CONFIGS_DIR="$DOCKER_DIR/configs"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SYSTEM_ARCH="${TARGET_ARCH:-$(uname -m)}"
 
+# Ensure required compose templates exist (monolithic and microservices)
+required_templates=(
+    "$TEMPLATES_DIR/docker-compose.yml"
+    "$TEMPLATES_DIR/docker-compose.microservices.yml"
+    "$TEMPLATES_DIR/docker-compose.common.yml"
+)
+for tf in "${required_templates[@]}"; do
+    if [[ ! -f "$tf" ]]; then
+        log_error "Required template missing: $tf"
+        log_error "Please restore the missing template under scripts/docker/compose-templates/"
+        exit 2
+    fi
+done
+
 # Elastic Stack capabilities (disabled by default)
 SUPPORTS_ELASTIC_STACK=false
 ELASTIC_STACK_REASON="disabled by default"

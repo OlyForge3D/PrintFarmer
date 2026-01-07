@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPO_ROOT="/Users/jpapiez/s/PFarm1"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_TEMP_DIR=$(mktemp -d -t printfarmer-test-debug.XXXXXX)
 echo "Using temp directory: $TEST_TEMP_DIR"
 
@@ -35,8 +35,6 @@ echo "Step 2: Extract architecture from config"
 arch_value="monolithic"
 if grep -q "ARCHITECTURE=microservices" "$config_name" 2>/dev/null; then
     arch_value="microservices"
-elif grep -q "ARCHITECTURE=host-network" "$config_name" 2>/dev/null; then
-    arch_value="host-network"
 fi
 echo "Detected architecture: $arch_value"
 

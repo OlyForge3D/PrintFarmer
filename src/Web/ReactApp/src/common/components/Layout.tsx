@@ -24,6 +24,8 @@ import {
   WrenchIcon,
   TrendingUpIcon,
   DatabaseIcon
+  ,
+  LocationIcon
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
@@ -87,7 +89,7 @@ const navigation: NavigationElement[] = [
   {
     name: 'Locations',
     href: '/locations',
-    icon: LayersIcon,
+    icon: LocationIcon,
     requiredRole: 'farm_admin'
   },
   {
@@ -103,19 +105,6 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
-    name: 'Settings',
-    href: '/settings',
-    icon: GearIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Logs',
-    href: '/logs',
-    icon: HistoryIcon,
-    requiredRole: 'farm_admin'
-  },
-  // Surface key admin pages directly in primary nav (permissioned)
-  {
     name: 'Tags',
     href: '/admin/tags',
     icon: TagIcon,
@@ -125,6 +114,12 @@ const navigation: NavigationElement[] = [
     name: 'Workers',
     href: '/admin/workers',
     icon: WrenchIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Logs',
+    href: '/logs',
+    icon: HistoryIcon,
     requiredRole: 'farm_admin'
   },
   {
@@ -140,9 +135,9 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin'
   },
   {
-    name: 'Admin',
-    href: '/admin',
-    icon: SettingsIcon,
+    name: 'Settings',
+    href: '/settings',
+    icon: GearIcon,
     requiredRole: 'farm_admin'
   },
 ];

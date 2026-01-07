@@ -2,7 +2,7 @@
 # Multi-stage build for PrintFarmer React + ASP.NET Core
 
 # Stage 1: Build React application
-FROM node:18-alpine AS react-build
+FROM node:22-alpine AS react-build
 WORKDIR /app
 
 # Copy package files first for better caching

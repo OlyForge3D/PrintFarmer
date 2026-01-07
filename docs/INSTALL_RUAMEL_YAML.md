@@ -1,7 +1,7 @@
 # Installing ruamel.yaml on Your VM
 
 **Date**: November 1, 2025  
-**Required For**: Docker Compose deployment (microservices and host-network architectures)
+**Required For**: Docker Compose deployment (compose generation and microservices architecture)
 
 ## Quick Install
 

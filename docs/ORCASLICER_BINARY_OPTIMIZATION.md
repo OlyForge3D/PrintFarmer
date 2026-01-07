@@ -196,7 +196,6 @@ The binary layer optimization has been integrated across all microservice deploy
 ### Updated Files
 - **`docker-compose.yml`** - Main deployment configuration
 - **`docker-compose.microservices.yml`** - Microservices architecture
-- **`docker-compose.host-network.yml`** - Host network configuration
 - **`scripts/deploy-docker.sh`** - Production deployment script
 - **`scripts/start-all-local-with-workers.sh`** - Local development script
 - **`scripts/build-orcaslicer-amd64.sh`** - Cross-platform build script
@@ -210,15 +209,6 @@ docker compose -f docker-compose.microservices.yml --profile orca-binaries build
 
 # Build and run OrcaSlicer worker
 docker compose -f docker-compose.microservices.yml --profile orca up orcaslicer-worker
-```
-
-**Host Network Mode:**
-```bash
-# Build binary layer
-docker compose -f docker-compose.host-network.yml --profile orca-binaries build orcaslicer-binaries
-
-# Build and run OrcaSlicer worker
-docker compose -f docker-compose.host-network.yml --profile orca up orcaslicer-worker
 ```
 
 **Production Deployment:**

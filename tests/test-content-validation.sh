@@ -221,26 +221,6 @@ test_microservices_content_validation() {
     pass_test
 }
 
-# Test host-network architecture content validation
-test_host_network_content_validation() {
-    start_test "host-network architecture content validation"
-    
-    assert_command_success "$COMPOSE_GENERATOR --architecture host-network --output-dir $TEST_TEMP_DIR"
-    
-    local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
-    assert_file_exists "$compose_file"
-    
-    validate_compose_structure "$compose_file" "microservices"
-    validate_multistage_targets "$compose_file"
-    validate_environment_variables "$compose_file" "microservices"
-    validate_service_dependencies "$compose_file"
-    validate_volume_configuration "$compose_file"
-    validate_network_configuration "$compose_file" "microservices"
-    validate_health_checks "$compose_file"
-    
-    pass_test
-}
-
 # Test OrcaSlicer worker content validation
 test_orcaslicer_worker_content_validation() {
     start_test "OrcaSlicer worker content validation"

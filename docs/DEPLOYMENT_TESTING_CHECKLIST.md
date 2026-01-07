@@ -68,12 +68,12 @@ git commit -m "Your change description"
 
 | Component | Tested | Coverage |
 |-----------|--------|----------|
-| **Architectures** | Monolithic, Microservices, Host-Network | 3 architectures × 3 providers = 9 combos |
+| **Architectures** | Monolithic, Microservices | 2 architectures × 3 providers = 6 combos |
 | **Databases** | PostgreSQL, SQL Server, MySQL | All 3 providers |
 | **Addons** | Monitoring, Telemetry, Security, Registry | All combinations |
 | **Output** | YAML validity, no duplicates, permissions | Full validation |
 | **Error Handling** | Invalid inputs, missing files | Graceful failures |
-| **User Scenarios** | host-network + sqlserver + orcaslicer + spoolman | Exact user config |
+| **User Scenarios** | microservices + sqlserver + orcaslicer + spoolman | Exact user config |
 
 ## Common Test Results
 

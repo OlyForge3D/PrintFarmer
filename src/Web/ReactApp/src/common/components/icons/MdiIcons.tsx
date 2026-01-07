@@ -95,6 +95,7 @@ import {
   mdiSnowflake,
   mdiArrowAll,
   mdiTimerSand,
+  mdiMapMarker,
 } from '@mdi/js';
 
 interface IconProps {
@@ -311,6 +312,24 @@ export function SnowflakeIcon({ className = 'w-4 h-4', ariaLabel = 'Snowflake' }
       role="img"
     >
       <path fill="currentColor" d={mdiSnowflake} />
+    </svg>
+  );
+}
+
+/**
+ * Location / Map marker icon
+ *
+ * @component
+ */
+export function LocationIcon({ className = 'w-4 h-4', ariaLabel = 'Location' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiMapMarker} />
     </svg>
   );
 }

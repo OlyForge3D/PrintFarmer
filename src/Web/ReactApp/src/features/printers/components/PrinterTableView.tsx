@@ -16,13 +16,18 @@ interface PrinterTableViewProps {
   onEdit: (printer: Printer) => void;
   onDelete: (printers: Printer[]) => void;
   onBulkSetMaintenance: (printers: Printer[], inMaintenance: boolean) => void;
+  showEnableColumn?: boolean;
+  onToggleEnabled?: (printer: Printer) => void;
+  onSelectionChange?: (ids: string[]) => void;
 }
 
 export function PrinterTableView({
   printers,
   onEdit,
   onDelete,
-  onBulkSetMaintenance
+  onBulkSetMaintenance,
+  showEnableColumn = false,
+  onToggleEnabled
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
   const displayPrinters = usePrinterDisplays(printers);
@@ -31,9 +36,13 @@ export function PrinterTableView({
 
   const toggleSelectAll = useCallback(() => {
     if (selectedPrinters.size === printers.length) {
-      setSelectedPrinters(new Set());
+      const next = new Set<string>();
+      setSelectedPrinters(next);
+      onSelectionChange?.([]);
     } else {
-      setSelectedPrinters(new Set(printers.map(p => p.id)));
+      const next = new Set(printers.map(p => p.id));
+      setSelectedPrinters(next);
+      onSelectionChange?.(Array.from(next));
     }
   }, [printers, selectedPrinters.size]);
 
@@ -45,6 +54,7 @@ export function PrinterTableView({
       newSelection.add(printerId);
     }
     setSelectedPrinters(newSelection);
+    onSelectionChange?.(Array.from(newSelection));
   }, [selectedPrinters]);
 
   const handleBulkAction = useCallback(() => {
@@ -191,6 +201,13 @@ export function PrinterTableView({
               <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Last Updated
               </th>
+              {/** Optionally show Enabled column for admins */}
+              {showEnableColumn && (
+                <th className="text-center px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
+                  Enabled
+                </th>
+              )}
+              {/** Actions header */}
               <th className="text-center px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Actions
               </th>
@@ -286,6 +303,25 @@ export function PrinterTableView({
                       Recently
                     </span>
                   </td>
+
+                  {showEnableColumn && (
+                    <td className="px-4 py-4 text-center">
+                      {typeof onToggleEnabled === 'function' ? (
+                        <Button
+                          type="button"
+                          onClick={() => onToggleEnabled(printer)}
+                          variant="subtle"
+                          size="sm"
+                          className="!p-2 !h-auto"
+                          title={printer.isEnabled ? 'Disable printer' : 'Enable printer'}
+                        >
+                          {printer.isEnabled ? <CheckCircleIcon className="w-4 h-4" /> : <CircleIcon className="w-4 h-4" />}
+                        </Button>
+                      ) : (
+                        <span className="text-sm text-pf-text-tertiary">{printer.isEnabled ? 'Yes' : 'No'}</span>
+                      )}
+                    </td>
+                  )}
 
                   {/* Actions */}
                   <td className="px-4 py-4">

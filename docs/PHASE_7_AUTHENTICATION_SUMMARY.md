@@ -361,7 +361,7 @@ function AuthenticatedAppRoutes() {
 All admin routes wrapped with `<ProtectedRoute requiredRole="farm_admin">`:
 - `/admin/users` - User Management
 - `/admin/observability` - Observability Dashboard
-- `/admin/printers` - Printer Administration
+- `/admin/printers` - Printer Administration (alias to `/printers`; admin controls are permission-gated within that page)
 - `/admin/slicers` - Slicer Administration
 - `/admin/logs` - System Logs
 - `/admin/slicer` - Slicer Settings

@@ -23,6 +23,12 @@ import { printerSignalRService } from '@/services/printer-signalr';
 import { CatalogPage } from '@/features/catalog/pages/CatalogPage';
 import { SpoolsPage } from '@/features/catalog/pages/SpoolsPage';
 import { PrintersPage } from '@/features/printers/pages/PrintersPage';
+import { LocationManagementAdminPage } from '@/features/admin/pages/LocationManagementAdminPage';
+import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
+import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { LogsPage } from '@/features/admin/pages/LogsPage';
+import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
+import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
@@ -33,6 +39,8 @@ import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendi
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
 import { FilesPage } from '@/features/files/pages/FilesPage';
 import SlicerJobStatus from '@/features/slicer/components/SlicerJobStatus';
+import { ObservabilityDashboard } from '@/common/components/ObservabilityDashboard';
+import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 
 // External packages
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -104,18 +112,20 @@ function AuthenticatedAppRoutes() {
         <Route path="printers" element={<PrintersPage />} />
         <Route path="files/*" element={<FilesPage />} />
         <Route path="spools" element={<SpoolsPage />} />
-        <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">Location management (admin)</div></ProtectedRoute>} />
+        <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
-        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">User management (admin)</div></ProtectedRoute>} />
-        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">Settings (admin)</div></ProtectedRoute>} />
-        <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">Logs (admin)</div></ProtectedRoute>} />
-        <Route path="admin/slicer/job-status/:id" element={<ProtectedRoute requiredRole="farm_admin"><SlicerJobStatus /></ProtectedRoute>} />
-        <Route path="admin/printers" element={<ProtectedRoute requiredRole="farm_admin"><PrintersPage /></ProtectedRoute>} />
-        <Route path="admin/workers" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">Workers admin area (coming soon)</div></ProtectedRoute>} />
-        <Route path="admin/observability" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">Observability (admin)</div></ProtectedRoute>} />
-        <Route path="admin/file-health" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">File health (admin)</div></ProtectedRoute>} />
-        <Route path="admin/slicer-profiles" element={<ProtectedRoute requiredRole="farm_admin"><SpoolsPage /></ProtectedRoute>} />
-        <Route path="admin/tags" element={<ProtectedRoute requiredRole="farm_admin"><div className="p-8">Tags management (admin)</div></ProtectedRoute>} />
+        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
+        <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
+        <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><div /></ProtectedRoute>}>
+          <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
+          <Route path="printers" element={<PrintersPage />} />
+          <Route path="workers" element={<WorkerManagementPage />} />
+          <Route path="observability" element={<ObservabilityDashboard />} />
+          <Route path="file-health" element={<FileHealthDashboard />} />
+          <Route path="slicer-profiles" element={<SpoolsPage />} />
+          <Route path="tags" element={<TagAdminPage />} />
+        </Route>
         <Route path="jobs/new" element={<NewSliceJobPage />} />
       </Route>
     </Routes>

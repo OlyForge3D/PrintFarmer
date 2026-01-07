@@ -26,6 +26,10 @@ import type { Printer } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 
 import { PrinterIcon, FileImportIcon, FileExportIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
+import PrinterDiscoveryControls from '@/features/printers/components/admin/PrinterDiscoveryControls';
+import PrinterImportControls from '@/features/printers/components/admin/PrinterImportControls';
+import PrinterExportControls from '@/features/printers/components/admin/PrinterExportControls';
+import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -106,6 +110,14 @@ export function PrintersPage() {
   // Filter state
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
+  // Tabs removed — admin controls are now inline and permission-gated
+  const [activeTab] = useState<'overview'>('overview');
+  const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
+  const printersById = useMemo(() => {
+    const map: Record<string, Printer> = {};
+    (printers || []).forEach(p => { map[p.id] = p; });
+    return map;
+  }, [printers]);
 
   // Filter printers for the current user (for now show all printers since userId isn't on Printer)
   const userPrinters = useMemo(() => {
@@ -348,6 +360,8 @@ export function PrintersPage() {
     >
       <div className="flex flex-col md:flex-row md:items-center gap-4 mb-8">
         <div className="flex flex-col md:flex-row md:items-center gap-3">
+          {/* Overview (admin features inline, permission-gated) */}
+
           {/* State Filter */}
           <Select
             value={stateFilter}
@@ -377,6 +391,12 @@ export function PrintersPage() {
           {hasPermission('printers', 'create') && (
             <AddPrinterButton onSuccess={refetchPrinters} />
           )}
+          {/* Admin inline controls (discovery / import / export) */}
+          <div className="hidden md:flex items-center gap-2">
+            <PrinterDiscoveryControls />
+            <PrinterImportControls />
+            <PrinterExportControls />
+          </div>
           {hasPermission('printers', 'admin') && discoveryAvailable && (
             <Button
               variant="primary"
@@ -385,6 +405,29 @@ export function PrintersPage() {
               iconLeft={<PrinterSearchIcon className="w-4 h-4" ariaLabel="Discover" />}
             >
               Discover Printers
+            </Button>
+          )}
+          {hasPermission('printers', 'admin') && (
+            <Button
+              variant="secondary"
+              aria-label="Refresh printer capabilities"
+              onClick={async () => {
+                try {
+                  // Refresh capabilities for all printers
+                  if (!printers || printers.length === 0) {
+                    toast.info('No printers to refresh');
+                    return;
+                  }
+                  await Promise.all(printers.map(p => apiClient.refreshCameraUrls(p.id)));
+                  toast.success('Refreshed printer capabilities');
+                  await queryClient.invalidateQueries({ queryKey: ['printers'] });
+                } catch (err) {
+                  console.error('Failed to refresh capabilities', err);
+                  toast.error('Failed to refresh capabilities');
+                }
+              }}
+            >
+              Refresh Capabilities
             </Button>
           )}
           {hasPermission('printers', 'admin') && (
@@ -441,7 +484,7 @@ export function PrintersPage() {
               <FileUpload
                 id={fileInputId}
                 accept=".json,.csv"
-                onChange={(files) => handleFile(files?.[0] ?? null)}
+                onChange={(files) => handleFile(files?.[0] ?? undefined)}
                 buttonText="Choose file"
                 buttonIcon={<FileImportIcon className="w-4 h-4" ariaLabel="Import" />}
               />
@@ -452,62 +495,90 @@ export function PrintersPage() {
 
         {/* Content Area */}
         <div className="space-y-6">
-          {userPrinters.length === 0 ? (
-            <div className="text-center py-12">
-              <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
-              <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
-            </div>
-          ) : viewMode === 'compact' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
-              {userPrinters.map((p: Printer) => (
-                <PrinterCompactCard
-                  key={p.id}
-                  printer={p}
-                  onEdit={(printer) => handleEditPrinter(printer)}
-                  onDelete={handleDeleteSinglePrinter}
-                />
-              ))}
-            </div>
-          ) : viewMode === 'collapsed' ? (
-            <div className="flex gap-6 items-start min-w-0">
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 transition-opacity duration-200 min-w-0">
-                {userPrinters.map((printer) => (
-                  <CollapsedPrinterCard
-                    key={printer.id}
-                    printer={printer}
-                    onExpand={() => setExpandedPrinterId(printer.id)}
-                    onEdit={() => handleEditPrinter(printer)}
-                    onDelete={() => handleDeleteSinglePrinter(printer)}
+          {activeTab === 'admin' && hasPermission('printers', 'admin') ? (
+            {/* Admin UI migrated inline into PrintersPage; PrintersAdminPage removed */}
+          ) : (
+            (userPrinters.length === 0) ? (
+              <div className="text-center py-12">
+                <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
+                <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
+              </div>
+            ) : viewMode === 'compact' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
+                {userPrinters.map((p: Printer) => (
+                  <PrinterCompactCard
+                    key={p.id}
+                    printer={p}
+                    onEdit={(printer) => handleEditPrinter(printer)}
+                    onDelete={handleDeleteSinglePrinter}
                   />
                 ))}
               </div>
-              {expandedPrinterId && (
-                <div className="w-96 flex-shrink-0">
-                  <PrinterDetailsSidebar
-                    printerId={expandedPrinterId}
-                    onClose={() => setExpandedPrinterId(null)}
+            ) : viewMode === 'collapsed' ? (
+              <div className="flex gap-6 items-start min-w-0">
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 transition-opacity duration-200 min-w-0">
+                  {userPrinters.map((printer) => (
+                    <CollapsedPrinterCard
+                      key={printer.id}
+                      printer={printer}
+                      onExpand={() => setExpandedPrinterId(printer.id)}
+                      onEdit={() => handleEditPrinter(printer)}
+                      onDelete={() => handleDeleteSinglePrinter(printer)}
+                    />
+                  ))}
+                </div>
+                {expandedPrinterId && (
+                  <div className="w-96 flex-shrink-0">
+                    <PrinterDetailsSidebar
+                      printerId={expandedPrinterId}
+                      onClose={() => setExpandedPrinterId(null)}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : viewMode === 'expandable' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
+                {userPrinters.map((p) => (
+                  <DetailedPrinterCard
+                    key={p.id}
+                    printer={p}
+                    onEdit={() => handleEditPrinter(p)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <PrinterBulkControls
+                    selectedIds={selectedPrinterIds}
+                    printersById={printersById}
+                    onDelete={(ps) => handleDeleteClick(ps)}
+                    onBulkSetMaintenance={handleBulkSetMaintenance}
                   />
                 </div>
-              )}
-            </div>
-          ) : viewMode === 'expandable' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 min-w-0">
-              {userPrinters.map((p) => (
-                <DetailedPrinterCard
-                  key={p.id}
-                  printer={p}
-                  onEdit={() => handleEditPrinter(p)}
-                />
-              ))}
-            </div>
-          ) : (
-            <PrinterTableView
-              printers={userPrinters}
-              onEdit={handleEditPrinter}
-              onDelete={handleDeleteClick}
-              onBulkSetMaintenance={handleBulkSetMaintenance}
-            />
+
+                <PrinterTableView
+                printers={userPrinters}
+                onEdit={handleEditPrinter}
+                onDelete={handleDeleteClick}
+                onBulkSetMaintenance={handleBulkSetMaintenance}
+                showEnableColumn={hasPermission('printers', 'admin')}
+                  onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
+                  onToggleEnabled={async (printer) => {
+                  try {
+                    const updated: Partial<Printer> = { isEnabled: !printer.isEnabled };
+                    await apiClient.updatePrinter(printer.id, updated);
+                    toast.success(`${printer.name || 'Printer'} ${updated.isEnabled ? 'enabled' : 'disabled'}`);
+                    await queryClient.invalidateQueries({ queryKey: ['printers'] });
+                  } catch (err) {
+                    console.error('Failed to toggle enabled', err);
+                    toast.error('Failed to toggle enabled state');
+                  }
+                }}
+              />
+              </>
+            )
           )}
 
         </div>
