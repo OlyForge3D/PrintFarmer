@@ -52,7 +52,6 @@ public class EfLocationRepository : ILocationRepository
     }
 
     /// <summary>
-    /// <summary>
     /// Finds a location by name (case-insensitive, trimmed).
     /// </summary>
     public async Task<Location?> FindByNameAsync(string name, CancellationToken ct)
@@ -62,9 +61,9 @@ public class EfLocationRepository : ILocationRepository
             return null;
         }
 
-        string normalized = name.Trim().ToLowerInvariant();
+        string trimmed = name.Trim();
         return await _dbContext.Locations
-            .FirstOrDefaultAsync(l => l.Name.ToLower() == normalized, cancellationToken: ct);
+            .FirstOrDefaultAsync(l => l.Name != null && string.Equals(l.Name, trimmed, StringComparison.OrdinalIgnoreCase), cancellationToken: ct);
     }
 
     /// <summary>
@@ -77,9 +76,9 @@ public class EfLocationRepository : ILocationRepository
             return false;
         }
 
-        string normalized = name.Trim().ToLowerInvariant();
+        string trimmed = name.Trim();
         return await _dbContext.Locations
-            .AnyAsync(l => l.Name.ToLower() == normalized, cancellationToken: ct);
+            .AnyAsync(l => l.Name != null && string.Equals(l.Name, trimmed, StringComparison.OrdinalIgnoreCase), cancellationToken: ct);
     }
 
     /// <summary>
