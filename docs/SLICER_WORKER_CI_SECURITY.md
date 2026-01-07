@@ -255,7 +255,7 @@ ci:
 ### Version Updates
 
 **Trivy Action**: Update `aquasecurity/trivy-action@0.28.0` to latest
-**Dive Action**: Update `MartinHeinz/dive-action@v1` to latest
+**Dive Action**: Use the `wagoodman/dive` container directly (or update `MartinHeinz/dive-action` reference). The workflow now runs the `wagoodman/dive:0.10.0` container to analyze images without depending on the marketplace action.
 **Slicer Versions**: Update `ORCASLICER_VERSION` and `PRUSASLICER_VERSION` env vars in workflow
 
 ### Adding New Worker Types
