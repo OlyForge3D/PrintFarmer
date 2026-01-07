@@ -175,7 +175,7 @@ sqlite3 farm.db "SELECT u.Username, r.Name FROM Users u JOIN UserRoles ur ON u.I
 
 **Repeat for all admin routes:**
 - /admin/observability
-- /admin/printers
+- /admin/printers  (alias to /printers; admin controls are permission-gated on that page)
 - /admin/slicers
 - /admin/logs
 - /admin/slicer
