@@ -41,8 +41,8 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
         try {
           // Some test environments provide a File-like object without arrayBuffer();
           // gracefully fall back to a minimal info object to avoid throwing.
-          if (typeof (file as any).arrayBuffer === 'function') {
-            const arrayBuffer = await (file as any).arrayBuffer();
+          if (typeof (file as File).arrayBuffer === 'function') {
+            const arrayBuffer = await (file as File).arrayBuffer();
             if (!mounted) return;
             const view = new DataView(arrayBuffer);
             const triangles = view.getUint32(80, true);

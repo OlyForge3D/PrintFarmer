@@ -16,26 +16,27 @@ vi.mock('@/services/harvest-signalr', () => ({ signalRService: { connect: vi.fn(
 vi.mock('@/common/utils/apiUrlHelpers', () => ({ getApiBaseUrl: () => 'http://localhost:5245', getAuthHeaders: () => ({}) }));
 
 // Mock providers and components used by App to keep rendering lightweight
-vi.mock('@/contexts/ThemeContext', () => ({ ThemeProvider: ({ children }: any) => <>{children}</> }));
-vi.mock('@/common/contexts/AuthContext', () => ({ AuthProvider: ({ children }: any) => <>{children}</> }));
-vi.mock('@/contexts/SlicerUIContext', () => ({ SlicerUIProvider: ({ children }: any) => <>{children}</> }));
-vi.mock('@/features/auth/components/SetupWizard', () => ({ SetupWizard: ({ onComplete }: any) => <div>SetupWizardMock</div> }));
-vi.mock('@/common/components/ErrorBoundary', () => ({ ErrorBoundary: ({ children }: any) => <>{children}</> }));
+vi.mock('@/contexts/ThemeContext', () => ({ ThemeProvider: ({ children }: React.ReactNode) => <>{children}</> }));
+vi.mock('@/common/contexts/AuthContext', () => ({ AuthProvider: ({ children }: React.ReactNode) => <>{children}</> }));
+vi.mock('@/contexts/SlicerUIContext', () => ({ SlicerUIProvider: ({ children }: React.ReactNode) => <>{children}</> }));
+vi.mock('@/features/auth/components/SetupWizard', () => ({ SetupWizard: () => <div>SetupWizardMock</div> }));
+vi.mock('@/common/components/ErrorBoundary', () => ({ ErrorBoundary: ({ children }: React.ReactNode) => <>{children}</> }));
 
 // Minimal mock for Toaster so it doesn't render complex UI
-vi.mock('sonner', () => ({ Toaster: ({ children }: any) => <>{children}</> }));
+vi.mock('sonner', () => ({ Toaster: ({ children }: React.ReactNode) => <>{children}</> }));
 
 import App from '@/App';
 
 describe('App smoke', () => {
   beforeEach(() => {
     // Mock global fetch used by App to check setup status
-    (global as any).fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ needsSetup: true }) });
+    (global as unknown as { fetch?: typeof fetch }).fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ needsSetup: true }) });
   });
 
   afterEach(() => {
     vi.resetAllMocks();
-    delete (global as any).fetch;
+    // delete the mocked fetch from global safely
+    delete (global as unknown as { fetch?: typeof fetch }).fetch;
   });
 
   it('renders the setup wizard when setup is required', async () => {

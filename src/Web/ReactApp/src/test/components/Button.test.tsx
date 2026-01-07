@@ -1,4 +1,3 @@
-/* eslint-disable local/pf-no-raw-html-controls */
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { Button } from '@/common/components/ui/Button';
