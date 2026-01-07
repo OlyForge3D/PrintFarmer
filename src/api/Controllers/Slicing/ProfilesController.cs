@@ -87,12 +87,12 @@ public class ProfilesController(
         {
             return BadRequest("Invalid slicerType");
         }
-        
+
         try
         {
             (ProcessProfileExtendedDto dto, bool created) = await _profilesService.ImportProfileAsync(request, ct);
-            return created 
-                ? Created($"/api/slicer/profiles/{dto.Id}", dto) 
+            return created
+                ? Created($"/api/slicer/profiles/{dto.Id}", dto)
                 : Ok(dto);
         }
         catch (ArgumentException ex)
@@ -137,7 +137,7 @@ public class ProfilesController(
                 _logger.LogWarning($"Profile not found for export: {id}");
                 return NotFound();
             }
-            
+
             return Ok(dto);
         }
         catch (Exception ex)
@@ -351,7 +351,7 @@ public class ProfilesController(
         {
             // Delegate to service for all filtering and profile retrieval
             IReadOnlyList<SlicerProfileDto> allProfiles = await _profilesService.GetProfilesAsync(CancellationToken.None);
-            
+
             // Controller handles simple query string filtering only
             IReadOnlyList<object> result = allProfiles
                 .Where(p => p.ProcessProfile != null)
@@ -369,7 +369,7 @@ public class ProfilesController(
                     quality = p.ProcessProfile!.Quality
                 })
                 .ToList();
-            
+
             return Ok(result);
         }
         catch (Exception ex)

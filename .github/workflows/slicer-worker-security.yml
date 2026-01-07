@@ -7,14 +7,16 @@ name: Slicer Worker Security & Efficiency
 on:
   pull_request:
     paths:
-      - 'Dockerfile.multistage'
+      - 'scripts/docker/dockerfiles/Dockerfile.multistage'
+      - 'scripts/docker/dockerfiles/**'
       - 'src/orcaslicer-worker/**'
       - 'src/worker-shared/**'
       - '.github/workflows/slicer-worker-security.yml'
   push:
     branches: [ main ]
     paths:
-      - 'Dockerfile.multistage'
+      - 'scripts/docker/dockerfiles/Dockerfile.multistage'
+      - 'scripts/docker/dockerfiles/**'
       - 'src/orcaslicer-worker/**'
       - 'src/worker-shared/**'
   workflow_dispatch:
@@ -45,7 +47,7 @@ jobs:
           echo "Building slicer-base for security scanning (via Dockerfile.multistage)"
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           SHA='${{ github.sha }}'
-          docker build --platform linux/amd64 -f Dockerfile.multistage --target slicer-base -t printfarmer-slicer-base:scan-${{ github.sha }} \
+          docker build --platform linux/amd64 -f scripts/docker/dockerfiles/Dockerfile.multistage --target slicer-base -t printfarmer-slicer-base:scan-${{ github.sha }} \
             --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" .
           echo "image=printfarmer-slicer-base:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
 
@@ -69,17 +71,21 @@ jobs:
           severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
 
       - name: Upload Trivy SARIF (slicer-base)
-        uses: github/codeql-action/upload-sarif@v3
         if: always()
-        with:
-          sarif_file: 'trivy-slicer-base.sarif'
-          category: 'trivy-slicer-base'
+        run: |
+          if [ -f trivy-slicer-base.sarif ]; then
+            echo "SARIF file exists, uploading via gh CLI"
+            gh api --method POST /repos/${{ github.repository }}/code-scanning/sarifs -f "commit_sha=${{ github.sha }}" -f "sarif=@trivy-slicer-base.sarif" -f category=trivy-slicer-base || true
+          else
+            echo "trivy-slicer-base.sarif not found, skipping upload"
+          fi
 
       - name: Analyze image efficiency with Dive (slicer-base)
-        uses: MartinHeinz/dive-action@v1
-        with:
-          image: ${{ steps.build-base.outputs.image }}
-          config-file: ${{ github.workspace }}/.dive-ci.yml
+        run: |
+          echo "Analyzing image efficiency for slicer-base using dive container"
+          # Pull dive image and run analysis against the built image
+          docker pull wagoodman/dive:0.10.0 || true
+          docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}":/workspace wagoodman/dive:0.10.0 --json /workspace/dive-slicer-base.json ${{ steps.build-base.outputs.image }} || true
         continue-on-error: true # Don't fail build on efficiency warnings initially
 
       - name: Export image size metrics
@@ -114,7 +120,7 @@ jobs:
             --build-arg ALLOW_STUB=true \
             --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
             --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
-            -f Dockerfile.multistage --target orcaslicer-worker \
+            -f scripts/docker/dockerfiles/Dockerfile.multistage --target orcaslicer-worker \
             -t orcaslicer-worker:scan-${{ github.sha }} .
           echo "image=orcaslicer-worker:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
 
@@ -138,17 +144,20 @@ jobs:
           severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
 
       - name: Upload Trivy SARIF (OrcaSlicer)
-        uses: github/codeql-action/upload-sarif@v3
         if: always()
-        with:
-          sarif_file: 'trivy-orcaslicer.sarif'
-          category: 'trivy-orcaslicer'
+        run: |
+          if [ -f trivy-orcaslicer.sarif ]; then
+            echo "SARIF file exists, uploading via gh CLI"
+            gh api --method POST /repos/${{ github.repository }}/code-scanning/sarifs -f "commit_sha=${{ github.sha }}" -f "sarif=@trivy-orcaslicer.sarif" -f category=trivy-orcaslicer || true
+          else
+            echo "trivy-orcaslicer.sarif not found, skipping upload"
+          fi
 
       - name: Analyze image efficiency with Dive (OrcaSlicer)
-        uses: MartinHeinz/dive-action@v1
-        with:
-          image: ${{ steps.build-orca.outputs.image }}
-          config-file: ${{ github.workspace }}/.dive-ci.yml
+        run: |
+          echo "Analyzing image efficiency for OrcaSlicer using dive container"
+          docker pull wagoodman/dive:0.10.0 || true
+          docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}":/workspace wagoodman/dive:0.10.0 --json /workspace/dive-orca.json ${{ steps.build-orca.outputs.image }} || true
         continue-on-error: true
 
       - name: Export image size metrics

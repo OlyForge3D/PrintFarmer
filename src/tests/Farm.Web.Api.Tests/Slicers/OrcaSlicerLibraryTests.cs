@@ -36,10 +36,10 @@ public class OrcaSlicerProfilesProviderTests
         // Should load profiles from sample manufacturers (Prusa, Elegoo, Voron, etc.)
         profiles.Should().NotBeEmpty();
         profiles.Should().OnlyContain(p => !string.IsNullOrWhiteSpace(p.Id) && !string.IsNullOrWhiteSpace(p.Name));
-        
+
         // Should find known manufacturers from samples
         var manufacturerNames = profiles.Select(p => p.Manufacturer).Distinct();
-        manufacturerNames.Should().Contain(m => 
+        manufacturerNames.Should().Contain(m =>
             m.Equals("Prusa", StringComparison.OrdinalIgnoreCase) ||
             m.Equals("Elegoo", StringComparison.OrdinalIgnoreCase) ||
             m.Equals("Voron", StringComparison.OrdinalIgnoreCase)
@@ -60,9 +60,9 @@ public class OrcaSlicerProfilesProviderTests
     public void GetProfilesVersion_ReturnsCurrentVersion()
     {
         var provider = new OrcaSlicerProfilesProvider();
-        
+
         var version = provider.GetProfilesVersion();
-        
+
         version.Should().Be("2.3.1");
     }
 
@@ -85,7 +85,7 @@ public class OrcaSlicerProfilesProviderTests
 
         prusaCoreOneProfiles.Should().NotBeEmpty("Should have Prusa CORE One machine profiles");
         prusaCoreOneProfiles.Should().AllSatisfy(p => p.Manufacturer.Should().Be("Prusa"));
-        
+
         // Should have multiple nozzle size variants (at least 2: base and HF)
         var variants = prusaCoreOneProfiles.Select(p => p.Name).Distinct().Count();
         variants.Should().BeGreaterThanOrEqualTo(2, "Should have base and HF variants");
@@ -103,7 +103,7 @@ public class OrcaSlicerProfilesProviderTests
 
         // Load all profiles
         var profiles = await provider.ListOfficialProfilesAsync();
-        
+
         // Get a Prusa CORE One profile (try different variants)
         var coreOneProfile = profiles
             .FirstOrDefault(p => p.Name != null && (
@@ -194,9 +194,9 @@ public class OrcaSlicerProfilesProviderTests
 
         // Parse the JSON to count filaments
         var filaments = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(filamentsJson!);
-        
+
         var filamentCount = filaments.GetArrayLength();
-        
+
         // Expected: ~28 filament profiles (what's in the OrcaFilamentLibrary bundle)
         // Note: The provider loads only profiles listed in the bundle metadata,
         // not all individual .json files in the directory.
@@ -224,7 +224,7 @@ public class OrcaSlicerProfilesProviderTests
         Directory.Exists(processDir).Should().BeTrue("Sample data should have Prusa process profiles directory");
 
         var processFiles = Directory.GetFiles(processDir, "*.json");
-        
+
         // Note: The provider loads only profiles explicitly listed in the bundle metadata.
         // Sample directory has 267 usable Prusa process profiles (281 total - 14 with instantiation="false"),
         // but only what's in the bundle gets loaded into the provider.
@@ -296,7 +296,7 @@ public class OrcaSlicerProfilesProviderTests
 
         // Both Prusa printer families should be represented
         machineProfiles.Should().NotBeEmpty("Should load at least some machine profiles");
-        
+
         // If CORE One or MK4S profiles exist in the bundle, they should be properly loaded
         if (coreOneProfiles.Any())
         {
@@ -337,7 +337,7 @@ public class OrcaSlicerProfilesProviderTests
         {
             // Load the process profiles from disk to check compatible_printers_condition
             var processDir = Path.Combine(sampleProfilesPath, "Prusa", "process");
-            
+
             if (Directory.Exists(processDir))
             {
                 var processFiles = Directory.GetFiles(processDir, "*.json");

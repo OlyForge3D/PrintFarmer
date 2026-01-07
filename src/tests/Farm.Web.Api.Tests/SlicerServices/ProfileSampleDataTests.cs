@@ -1,7 +1,7 @@
+﻿using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using FluentAssertions;
-using System.Text.Json;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -59,7 +59,7 @@ public class ProfileSampleDataTests
         // Assert - verify the sample profiles directory exists and has content
         Directory.Exists(SampleProfilesPath).Should().BeTrue(
             $"Sample profiles directory should exist at {SampleProfilesPath}");
-        
+
         var manufacturers = Directory.GetDirectories(SampleProfilesPath);
         manufacturers.Should().NotBeEmpty("Should have manufacturer directories");
         manufacturers.Should().Contain(m => m.EndsWith("Prusa"), "Should have Prusa directory");
@@ -97,7 +97,7 @@ public class ProfileSampleDataTests
         var manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
         var machineDir = Path.Combine(manufacturerDir, "machine");
         var machineFiles = Directory.GetFiles(machineDir, "*.json");
-        
+
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         // Act & Assert
@@ -105,7 +105,7 @@ public class ProfileSampleDataTests
         {
             var json = File.ReadAllText(file);
             var action = () => JsonSerializer.Deserialize<MachineProfileDto>(json, options);
-            
+
             action.Should().NotThrow(
                 $"Machine profile {Path.GetFileName(file)} should deserialize successfully");
 
@@ -125,7 +125,7 @@ public class ProfileSampleDataTests
         // Arrange
         var manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
         var filamentDir = Path.Combine(manufacturerDir, "filament");
-        
+
         // Some manufacturers may not have filament profiles - skip them
         if (!Directory.Exists(filamentDir))
         {
@@ -133,7 +133,7 @@ public class ProfileSampleDataTests
         }
 
         var filamentFiles = Directory.GetFiles(filamentDir, "*.json");
-        
+
         // Skip if no files found
         if (filamentFiles.Length == 0)
         {
@@ -147,7 +147,7 @@ public class ProfileSampleDataTests
         {
             var json = File.ReadAllText(file);
             var action = () => JsonSerializer.Deserialize<FilamentProfileDto>(json, options);
-            
+
             action.Should().NotThrow(
                 $"Filament profile {Path.GetFileName(file)} should deserialize successfully");
 
@@ -167,7 +167,7 @@ public class ProfileSampleDataTests
         // Arrange
         var manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
         var processDir = Path.Combine(manufacturerDir, "process");
-        
+
         // Some manufacturers may not have process profiles
         if (!Directory.Exists(processDir))
         {
@@ -182,7 +182,7 @@ public class ProfileSampleDataTests
         {
             var json = File.ReadAllText(file);
             var action = () => JsonSerializer.Deserialize<ProcessProfileDto>(json, options);
-            
+
             action.Should().NotThrow(
                 $"Process profile {Path.GetFileName(file)} should deserialize successfully");
 
@@ -210,9 +210,9 @@ public class ProfileSampleDataTests
         // Assert
         foreach (var manufacturer in catalogManufacturers)
         {
-            var matching = sampleManufacturers.FirstOrDefault(m => 
+            var matching = sampleManufacturers.FirstOrDefault(m =>
                 m.Equals(manufacturer, StringComparison.OrdinalIgnoreCase));
-            
+
             matching.Should().NotBeNull(
                 $"Catalog manufacturer '{manufacturer}' should have sample profiles");
         }
@@ -231,7 +231,7 @@ public class ProfileSampleDataTests
 
         // Act
         var machineProfiles = Directory.GetFiles(machineDir, "*.json")
-            .Where(f => 
+            .Where(f =>
             {
                 try
                 {
@@ -282,7 +282,7 @@ public class ProfileSampleDataTests
     {
         // Arrange - we know Flashforge has files with "FlashForge" vs "Flashforge" casing
         var flashforgeDir = Path.Combine(SampleProfilesPath, "Flashforge");
-        
+
         if (!Directory.Exists(flashforgeDir))
         {
             return;  // Skip if Flashforge doesn't exist
@@ -290,7 +290,7 @@ public class ProfileSampleDataTests
 
         var filamentDir = Path.Combine(flashforgeDir, "filament");
         var filamentFiles = Directory.GetFiles(filamentDir, "*.json");
-        
+
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         // Act
@@ -302,12 +302,12 @@ public class ProfileSampleDataTests
 
         // Assert - profiles should parse successfully regardless of case variations
         profiles.Should().NotBeEmpty();
-        
+
         // At least some should have "FlashForge" (capital f) in the manufacturer or name
-        var withFlashForgeCase = profiles.Where(p => 
+        var withFlashForgeCase = profiles.Where(p =>
             (p.Manufacturer?.Contains("FlashForge") ?? false) ||
             p.Name.Contains("FlashForge")).ToList();
-        
+
         withFlashForgeCase.Count.Should().BeGreaterThan(0,
             "Should have profiles with 'FlashForge' casing");
     }

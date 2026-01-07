@@ -188,7 +188,7 @@ namespace Farm.Infrastructure.Settings
             {
                 return false; // Lock already held
             }
-            
+
             // Acquire lock
             await _settingsRepo.SetAsync(lockKey, "in-progress", ct);
             await _settingsRepo.SaveChangesAsync(ct);

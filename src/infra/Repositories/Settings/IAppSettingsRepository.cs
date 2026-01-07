@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Settings
@@ -77,7 +77,7 @@ namespace Farm.Infrastructure.Repositories.Settings
         public async Task SetAsync(string key, string value, CancellationToken ct = default)
         {
             var existing = await GetAsync(key, ct);
-            
+
             if (existing != null)
             {
                 existing.SettingsJson = value;

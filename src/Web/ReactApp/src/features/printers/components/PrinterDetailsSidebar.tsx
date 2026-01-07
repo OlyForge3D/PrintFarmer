@@ -351,7 +351,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
           onClick={onClose}
           className="!p-1 !h-auto flex-shrink-0"
           title="Close sidebar"
-          iconLeft={<CloseIcon className="h-6 w-6" />}
+          iconCenter={<CloseIcon className="h-6 w-6" />}
         ></Button>
       </div>
 
@@ -373,7 +373,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleControlAction('pause')}
                 title="Pause print"
                 className="w-full h-full !p-0"
-                iconLeft={<PauseIcon className="h-6 w-6" />}
+                iconCenter={<PauseIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
@@ -383,7 +383,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleControlAction('resume')}
                 title="Resume print"
                 className="w-full h-full !p-0"
-                iconLeft={<PlayIcon className="h-6 w-6" />}
+                iconCenter={<PlayIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
@@ -408,7 +408,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 size="sm"
                 onClick={() => setStep(Math.max(1, step - 5))}
                 className="flex-1 p-0 text-xs"
-                iconLeft={<MinusIcon className="h-3 w-3" />}
+                iconCenter={<MinusIcon className="h-3 w-3" />}
               ></Button>
               <span className="text-xs text-pf-text-secondary flex-1 text-center">{step}mm</span>
               <Button
@@ -442,7 +442,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Home all axes"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isAllHomed).className}`}
                 style={getHomeButtonStyle(isAllHomed).style}
-                iconLeft={<HomeIcon className="h-6 w-6" />}
+                iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
@@ -451,7 +451,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', step)}
                 className="w-full h-full !p-0"
-                iconLeft={<ArrowUpIcon className="h-6 w-6" />}
+                iconCenter={<ArrowUpIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
@@ -461,7 +461,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleControlAction('disable-motors')}
                 title="Disable Motors (M84)"
                 className="w-full h-full !p-0"
-                iconLeft={<DisableMotorsIcon className="w-6 h-6" />}
+                iconCenter={<DisableMotorsIcon className="w-6 h-6" />}
               ></Button>
 
               {/* Middle row */}
@@ -472,7 +472,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleMove('X', -step)}
                 className="w-full h-full !p-0"
-                iconLeft={<ArrowLeftIcon className="h-6 w-6" />}
+                iconCenter={<ArrowLeftIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
@@ -483,7 +483,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Home X"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isXHomed).className}`}
                 style={getHomeButtonStyle(isXHomed).style}
-                iconLeft={<HomeIcon className="h-6 w-6" />}
+                iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
@@ -492,7 +492,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleMove('X', step)}
                 className="w-full h-full !p-0"
-                iconLeft={<ArrowRightIcon className="h-6 w-6" />}
+                iconCenter={<ArrowRightIcon className="h-6 w-6" />}
               ></Button>
 
               {/* Bottom row */}
@@ -504,7 +504,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 disabled={isPrinting}
                 onClick={() => handleMove('Y', -step)}
                 className="w-full h-full !p-0"
-                iconLeft={<ArrowDownIcon className="h-6 w-6" />}
+                iconCenter={<ArrowDownIcon className="h-6 w-6" />}
               ></Button>
               <div></div>
             </div>
@@ -530,7 +530,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 title="Home Z"
                 className={`w-full h-full !p-0 ${getHomeButtonStyle(isZHomed).className}`}
                 style={getHomeButtonStyle(isZHomed).style}
-                iconLeft={<HomeIcon className="h-6 w-6" />}
+                iconCenter={<HomeIcon className="h-6 w-6" />}
               ></Button>
               <Button
                 type="button"
@@ -630,7 +630,7 @@ export function PrinterDetailsSidebar({ printerId, onClose }: PrinterDetailsSide
                 onClick={() => handleApplyPreset('cooldown')}
                 title="Cooldown"
                 className="flex-shrink-0 px-2"
-                iconLeft={<SnowflakeIcon className="h-4 w-4" />}
+                iconCenter={<SnowflakeIcon className="h-4 w-4" />}
               ></Button>
               <Select
                 value=""

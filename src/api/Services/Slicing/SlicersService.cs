@@ -569,7 +569,7 @@ namespace Farm.Web.Api.Services.Slicing
         private async Task SeedProfilesFromWorkerAsync(string workerHost, CancellationToken ct)
         {
             const string SEED_LOCK_KEY = "SystemOrcaSlicerProfilesSeedLock";
-            
+
             try
             {
                 // Attempt to acquire distributed lock to prevent concurrent seeding
@@ -671,7 +671,7 @@ namespace Farm.Web.Api.Services.Slicing
                             {
                                 var instantiableMachineProfiles = modelProfiles.MachineProfiles.Where(p => p.Instantiation).ToList();
                                 _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableMachineProfiles.Count} instantiable machine profiles (out of {modelProfiles.MachineProfiles.Count} total) for {displayName}");
-                                
+
                                 foreach (var machineProfile in instantiableMachineProfiles)
                                 {
                                     try
@@ -717,7 +717,7 @@ namespace Farm.Web.Api.Services.Slicing
                             {
                                 var instantiableFilamentProfiles = modelProfiles.FilamentProfiles.Where(p => p.Instantiation).ToList();
                                 _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableFilamentProfiles.Count} instantiable filament profiles (out of {modelProfiles.FilamentProfiles.Count} total) for {displayName}");
-                                
+
                                 foreach (var filamentProfile in instantiableFilamentProfiles)
                                 {
                                     try
@@ -768,7 +768,7 @@ namespace Farm.Web.Api.Services.Slicing
                             {
                                 var instantiableProcessProfiles = modelProfiles.ProcessProfiles.Where(p => p.Instantiation).ToList();
                                 _logger.LogDebug($"[SeedProfilesFromWorker] Importing {instantiableProcessProfiles.Count} instantiable process profiles (out of {modelProfiles.ProcessProfiles.Count} total) for {displayName}");
-                                
+
                                 foreach (var processProfile in instantiableProcessProfiles)
                                 {
                                     try

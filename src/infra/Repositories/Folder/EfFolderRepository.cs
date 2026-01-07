@@ -23,7 +23,7 @@ public class EfFolderRepository : IFolderRepository
     {
         // Normalize path: ensure root is "/" not empty string
         string normalizedPath = string.IsNullOrWhiteSpace(directoryPath) ? "/" : directoryPath.TrimEnd(System.IO.Path.DirectorySeparatorChar, '/');
-        
+
         // If trimming left us with empty string, it was root "/"
         if (string.IsNullOrEmpty(normalizedPath))
         {

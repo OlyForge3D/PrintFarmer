@@ -284,7 +284,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                       onClick={toggleSortOrder}
                       className="!p-2 !h-auto"
                       title={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
-                      iconLeft={<SortIcon className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />}
+                      aria-label={`Sort ${sortOrder === 'asc' ? 'descending' : 'ascending'}`}
+                      iconCenter={<SortIcon className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />}
                     ></Button>
                   </div>
                 </div>
@@ -333,7 +334,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           onClick={() => handleQueueFile(file.fileName)}
                           className="!p-2 !h-auto"
                           title="Queue for printing"
-                          iconLeft={<PlayIcon className="h-4 w-4" />}
+                          aria-label="Queue for printing"
+                          iconCenter={<PlayIcon className="h-4 w-4" />}
                         ></Button>
 
                         <Button
@@ -343,7 +345,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           onClick={() => handleCopyFilename(file.fileName)}
                           className="!p-2 !h-auto"
                           title={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
-                          iconLeft={<CopyIcon className="h-4 w-4" />}
+                          aria-label={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
+                          iconCenter={<CopyIcon className="h-4 w-4" />}
                         ></Button>
 
                         <Button
@@ -354,7 +357,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           disabled={isDownloading === file.fileName}
                           className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
                           title={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
-                          iconLeft={isDownloading === file.fileName ? (
+                          aria-label={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
+                          iconCenter={isDownloading === file.fileName ? (
                             <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                           ) : (
                             <DownloadIcon className="h-4 w-4" />
@@ -369,7 +373,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           disabled={isHarvesting === file.fileName}
                           className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
                           title={isHarvesting === file.fileName ? 'Harvesting...' : 'Harvest file metadata'}
-                          iconLeft={isHarvesting === file.fileName ? (
+                          aria-label={isHarvesting === file.fileName ? 'Harvesting...' : 'Harvest file metadata'}
+                          iconCenter={isHarvesting === file.fileName ? (
                             <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                           ) : (
                             <SaveIcon className="h-4 w-4" />
@@ -384,7 +389,8 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           disabled={isDeleting === file.fileName}
                           className="!p-2 !h-auto text-red-500 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
                           title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
-                          iconLeft={isDeleting === file.fileName ? (
+                          aria-label={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
+                          iconCenter={isDeleting === file.fileName ? (
                             <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
                           ) : (
                             <DeleteIcon className="h-4 w-4" />

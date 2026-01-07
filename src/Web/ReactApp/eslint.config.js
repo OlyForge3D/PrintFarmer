@@ -7,7 +7,7 @@ import { globalIgnores } from 'eslint/config'
 import localPlugin from './eslint-rules/eslint-plugin-local.js'
 
 export default tseslint.config([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'coverage', 'coverage/**', 'coverage/lcov-report/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

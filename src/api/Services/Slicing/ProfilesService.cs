@@ -68,6 +68,7 @@ namespace Farm.Web.Api.Services.Slicing
         /// <param name="workerRepository">Repository for OrcaSlicer worker registry lookups</param>
         /// <param name="catalogService">Service for manufacturer and printer model catalog lookups</param>
         /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
+        /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
         /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
         public ProfilesService(
             IProfilesRepository repo,
@@ -120,7 +121,7 @@ namespace Farm.Web.Api.Services.Slicing
         public async Task<(ProcessProfileExtendedDto dto, bool created)> ImportProfileAsync(ImportProcessProfileDto req, CancellationToken ct)
         {
             _logger.LogInformation($"[ImportProfileAsync] Starting profile import with name: {req.Name}, slicerType: {req.SlicerType}, allowSystemOverride: {req.AllowSystemOverride}");
-            
+
             ArgumentNullException.ThrowIfNull(req);
             if (string.IsNullOrWhiteSpace(req.RawJson))
             {
@@ -190,7 +191,7 @@ namespace Farm.Web.Api.Services.Slicing
             _logger.LogDebug($"[ImportProfileAsync] Attempting to persist profile: {imported.Name} (ID: {imported.Id})");
             ProcessProfile saved = await _processProfileRepo.AddOrUpdateFromImportAsync(imported, allowSystemOverride: req.AllowSystemOverride, ct);
             bool created = saved.Id == imported.Id;
-            
+
             if (created)
             {
                 _logger.LogInformation($"[ImportProfileAsync] New profile created successfully: {saved.Name} (ID: {saved.Id})");
@@ -1079,7 +1080,7 @@ namespace Farm.Web.Api.Services.Slicing
 
                                 await _machineProfileRepo.AddAsync(systemProfile, ct);
                                 imported++;
-                                
+
                                 // Emit progress event
                                 await _slicerHubContext.Clients.All.SendAsync("profileimported", new
                                 {
@@ -1133,7 +1134,7 @@ namespace Farm.Web.Api.Services.Slicing
 
                                 await _filamentProfileRepo.AddAsync(systemProfile, ct);
                                 imported++;
-                                
+
                                 // Emit progress event
                                 await _slicerHubContext.Clients.All.SendAsync("profileimported", new
                                 {
@@ -1188,7 +1189,7 @@ namespace Farm.Web.Api.Services.Slicing
 
                                 await _processProfileRepo.AddAsync(systemProfile, ct);
                                 imported++;
-                                
+
                                 // Emit progress event
                                 await _slicerHubContext.Clients.All.SendAsync("profileimported", new
                                 {

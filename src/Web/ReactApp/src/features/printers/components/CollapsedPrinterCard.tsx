@@ -121,7 +121,8 @@ export function CollapsedPrinterCard({
           onClick={onExpand}
           className="!p-1 !h-auto"
           title="Open details sidebar"
-          iconLeft={<PanelRightIcon className="h-4 w-4" />}
+          aria-label="Open details sidebar"
+          iconCenter={<PanelRightIcon className="h-4 w-4" />}
         >
         </Button>
         
@@ -147,7 +148,7 @@ export function CollapsedPrinterCard({
           className="!p-1 !h-auto"
           aria-label={showCamera ? 'Hide camera stream' : 'Show camera stream'}
           title={hasCameraUrls ? `Camera available` : 'No camera configured'}
-          iconLeft={<CameraIcon className="h-4 w-4" />}
+          iconCenter={<CameraIcon className="h-4 w-4" />}
         >
         </Button>
         
@@ -160,7 +161,8 @@ export function CollapsedPrinterCard({
             onClick={handleViewHistory}
             className="!p-1 !h-auto"
             title="View print history"
-            iconLeft={<HistoryIcon className="h-4 w-4" />}
+            aria-label="View print history"
+            iconCenter={<HistoryIcon className="h-4 w-4" />}
           >
           </Button>
         )}
@@ -173,7 +175,8 @@ export function CollapsedPrinterCard({
           onClick={() => setShowFiles(true)}
           className="!p-1 !h-auto"
           title="View printer files"
-          iconLeft={<FileIcon className="h-4 w-4" />}
+          aria-label="View printer files"
+          iconCenter={<FileIcon className="h-4 w-4" />}
         >
         </Button>
         
@@ -185,7 +188,8 @@ export function CollapsedPrinterCard({
           onClick={() => onEdit?.(printer)}
           className="!p-1 !h-auto"
           title="Edit details"
-          iconLeft={<EditIcon className="h-4 w-4" />}
+          aria-label="Edit details"
+          iconCenter={<EditIcon className="h-4 w-4" />}
         >
         </Button>
         
@@ -197,7 +201,8 @@ export function CollapsedPrinterCard({
           onClick={() => onDelete?.(printer)}
           className="!p-1 !h-auto"
           title="Delete printer"
-          iconLeft={<DeleteIcon className="h-4 w-4" />}
+          aria-label="Delete printer"
+          iconCenter={<DeleteIcon className="h-4 w-4" />}
         >
         </Button>
       </div>
@@ -269,20 +274,22 @@ export function CollapsedPrinterCard({
                 type="button"
                 onClick={() => setCameraMode('snapshot')}
                 title="Snapshot"
+                aria-label="Snapshot"
                 variant={cameraMode === 'snapshot' ? 'primary' : 'secondary'}
                 size="sm"
                 className="flex-1"
-                iconLeft={<ImageIcon className="h-4 w-4" />}
+                iconCenter={<ImageIcon className="h-4 w-4" />}
               >
               </Button>
               <Button
                 type="button"
                 onClick={() => setCameraMode('stream')}
                 title="Stream"
+                aria-label="Stream"
                 variant={cameraMode === 'stream' ? 'primary' : 'secondary'}
                 size="sm"
                 className="flex-1"
-                iconLeft={<VideoIcon className="h-4 w-4" />}
+                iconCenter={<VideoIcon className="h-4 w-4" />}
               >
               </Button>
             </div>

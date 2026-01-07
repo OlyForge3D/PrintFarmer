@@ -115,7 +115,7 @@ public class Model3DFilesController : ControllerBase
             // Return the file endpoint with forceStl=true to trigger conversion
             return $"/api/3d-models/{model.Id}/file?forceStl=true";
         }
-        
+
         // For STL, PLY, OBJ, STEP - return direct file URL
         return $"/api/3d-models/{model.Id}/file";
     }
@@ -332,7 +332,7 @@ public class Model3DFilesController : ControllerBase
         }
 
         string fileExtension = Path.GetExtension(fullPath);
-        
+
         // Check if this is a 3MF file that needs conversion to STL
         byte[]? fileData = null;
         string? fileName = null;
@@ -343,10 +343,10 @@ public class Model3DFilesController : ControllerBase
             {
                 byte[] inputBytes = await _fileSystem.ReadAllBytesAsync(fullPath);
                 _logger.LogInformation($"Successfully read 3MF file {id}, size: {inputBytes.Length} bytes");
-                
+
                 byte[]? stlBytes = await _threeMfConverter.ConvertToSTLAsync(inputBytes, CancellationToken.None);
                 _logger.LogInformation($"Conversion result for {id}: {(stlBytes != null ? $"{stlBytes.Length} bytes" : "null")}");
-                
+
                 if (stlBytes != null)
                 {
                     // File was successfully converted - set up to return STL
@@ -391,7 +391,7 @@ public class Model3DFilesController : ControllerBase
         {
             return File(fileData, contentType, fileName);
         }
-        
+
         return PhysicalFile(fullPath, contentType, fileName);
     }
 
@@ -511,12 +511,12 @@ public class Model3DFilesController : ControllerBase
             }
 
             var (fileBytes, safeFileName) = result.Value;
-            
+
             // Check if this is a 3MF file that needs conversion
             if (forceStl && safeFileName.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation($"Converting 3MF file {safeFileName} to STL for viewer");
-                
+
                 var stlBytes = await _threeMfConverter.ConvertToSTLAsync(fileBytes, CancellationToken.None);
                 if (stlBytes != null)
                 {
@@ -530,7 +530,7 @@ public class Model3DFilesController : ControllerBase
                     return StatusCode(StatusCodes.Status500InternalServerError, "Failed to convert 3MF file to STL");
                 }
             }
-            
+
             // Return original file
             string contentType = GetContentType(safeFileName);
             return File(fileBytes, contentType, safeFileName);

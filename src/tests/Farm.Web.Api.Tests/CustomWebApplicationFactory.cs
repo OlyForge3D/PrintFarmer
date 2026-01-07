@@ -33,12 +33,12 @@ namespace Farm.Web.Api.Tests
             // Using auto-increment ID ensures complete isolation between tests
             var dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
             _connectionString = $"Data Source=:memory:?mode=memory&cache=shared";
-            
+
             // Create temp directories for file storage (isolated per test)
             var tempDir = Path.Combine(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
             _modelStoragePath = Path.Combine(tempDir, "models");
             _gcodeStoragePath = Path.Combine(tempDir, "gcode");
-            
+
             // Create the directories
             Directory.CreateDirectory(_modelStoragePath);
             Directory.CreateDirectory(_gcodeStoragePath);
@@ -106,7 +106,7 @@ namespace Farm.Web.Api.Tests
             {
                 // Ignore cleanup errors (files might be locked)
             }
-            
+
             await base.DisposeAsync();
         }
 

@@ -144,7 +144,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
         {
             _logQueue.CompleteAdding();
             _cts.Cancel();
-            
+
             // Wait for processing to complete with timeout
             try
             {

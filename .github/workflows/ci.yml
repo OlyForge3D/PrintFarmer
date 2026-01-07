@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 22.x
           cache: "npm"
-          cache-dependency-path: src/Web/ReactApp/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Restore .NET
         working-directory: src

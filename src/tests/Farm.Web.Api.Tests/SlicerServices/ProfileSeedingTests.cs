@@ -1,8 +1,8 @@
+﻿using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Slicing;
 using FluentAssertions;
-using System.Text.Json;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.SlicerServices;
@@ -39,13 +39,13 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var result = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, options);
+        var result = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, options)!;
 
         // Assert
         result.Should().NotBeNull();
         result.ByHierarchy.Should().HaveCount(1);
         result.ByHierarchy.Should().ContainKey("Prusa");
-        
+
         var prusa = result.ByHierarchy["Prusa"];
         prusa.Name.Should().Be("Prusa");
         prusa.Models.Should().HaveCount(1);
@@ -114,7 +114,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options);
+        var profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options)!;
 
         // Assert
         profile.Should().NotBeNull();
@@ -143,7 +143,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<ProcessProfileDto>(json, options);
+        var profile = JsonSerializer.Deserialize<ProcessProfileDto>(json, options)!;
 
         // Assert
         profile.Should().NotBeNull();
@@ -167,7 +167,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<MachineProfileDto>(json, options);
+        var profile = JsonSerializer.Deserialize<MachineProfileDto>(json, options)!;
 
         // Assert
         profile.Should().NotBeNull();
@@ -181,7 +181,7 @@ public class ProfileSeedingTests
         // Arrange - Create a response with many manufacturers
         var fullHierarchy = GenerateHierarchyJson();
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var response = JsonSerializer.Deserialize<AllProfilesResponseDto>(fullHierarchy, options);
+        var response = JsonSerializer.Deserialize<AllProfilesResponseDto>(fullHierarchy, options)!;
 
         var catalogManufacturers = new[] { "Prusa", "Voron", "RatRig", "FlashForge", "Sovol" };
         var catalogSet = new HashSet<string>(catalogManufacturers, StringComparer.OrdinalIgnoreCase);
@@ -232,7 +232,7 @@ public class ProfileSeedingTests
         var filaments = JsonSerializer.Deserialize<List<FilamentProfileDto>>(
             JsonSerializer.Serialize(doc.RootElement.GetProperty("filamentProfiles")),
             options
-        );
+        )!;
 
         var instantiable = filaments.Where(f => f.Instantiation).ToList();
 
@@ -273,7 +273,7 @@ public class ProfileSeedingTests
         var processes = JsonSerializer.Deserialize<List<ProcessProfileDto>>(
             JsonSerializer.Serialize(doc.RootElement.GetProperty("processProfiles")),
             options
-        );
+        )!;
 
         var instantiable = processes.Where(p => p.Instantiation).ToList();
 
@@ -300,7 +300,7 @@ public class ProfileSeedingTests
 
         // Act
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options);
+        var profile = JsonSerializer.Deserialize<FilamentProfileDto>(json, options)!;
 
         // Assert - Inherits property should be captured for inheritance resolution during seeding
         profile.Should().NotBeNull();
@@ -326,7 +326,7 @@ public class ProfileSeedingTests
             "Voxelab", "Wanhao"
         };
 
-        var manufacturers = string.Join(",\n", manufacturerList.Select(m => 
+        var manufacturers = string.Join(",\n", manufacturerList.Select(m =>
             $@"
         ""{m}"": {{
             ""name"": ""{m}"",

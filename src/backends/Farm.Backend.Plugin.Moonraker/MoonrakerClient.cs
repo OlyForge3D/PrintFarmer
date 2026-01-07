@@ -2206,7 +2206,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             ObjectHeight = metadata.ObjectHeight,
             ExtrUsedFilament = metadata.FilamentTotal
         };
-        
+
         // Extract thumbnail information
         if (metadata.Thumbnails != null && metadata.Thumbnails.Length > 0)
         {
