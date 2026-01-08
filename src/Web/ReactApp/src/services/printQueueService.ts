@@ -1,4 +1,4 @@
-import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
+import { getApiBaseUrl, getAuthHeaders } from "@/common/utils/apiUrlHelpers";
 import axios, { AxiosInstance, AxiosError } from "axios";
 
 // ============= TYPES =============
@@ -134,6 +134,15 @@ class PrintQueueService {
         "Content-Type": "application/json",
       },
       timeout: 30000,
+    });
+
+    // Add request interceptor to include auth headers
+    this.apiClient.interceptors.request.use((config) => {
+      const authHeaders = getAuthHeaders();
+      if (typeof authHeaders === 'object' && authHeaders !== null && 'Authorization' in authHeaders) {
+        config.headers.Authorization = (authHeaders as Record<string, string>).Authorization;
+      }
+      return config;
     });
   }
 
