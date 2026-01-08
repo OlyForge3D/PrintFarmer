@@ -383,6 +383,41 @@ public class PrintQueueController(
         }
     }
 
+    /// <summary>
+    /// Rerun a completed job (add it back to queue)
+    /// </summary>
+    [HttpPost("jobs/{jobId}/rerun")]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> RerunJobAsync(
+        [FromRoute] string jobId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(jobId))
+                return BadRequest(new { error = "Job ID is required" });
+
+            var userId = User.FindFirst("sub")?.Value ?? "system";
+            var job = await _printQueueService.RerunJobAsync(jobId, userId, cancellationToken);
+
+            return Ok(job);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rerunning job {JobId}", jobId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to rerun job" });
+        }
+    }
+
     // ============= BULK OPERATIONS =============
 
     /// <summary>

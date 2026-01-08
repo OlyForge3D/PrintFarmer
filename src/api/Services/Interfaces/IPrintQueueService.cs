@@ -126,6 +126,15 @@ public interface IPrintQueueService
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// Rerun a completed job (add it back to queue)
+    /// </summary>
+    Task<QueuedPrintJobDto> RerunJobAsync(
+        string jobId,
+        string userId,
+        CancellationToken cancellationToken = default
+    );
+
     // ============= HISTORY OPERATIONS (Phase 2) =============
     
     /// <summary>

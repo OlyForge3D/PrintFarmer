@@ -342,6 +342,21 @@ class PrintQueueService {
   }
 
   /**
+   * Rerun a completed job (add it back to queue)
+   */
+  async rerunJobAsync(jobId: string): Promise<QueuedPrintJobDto> {
+    try {
+      const response = await this.apiClient.post<QueuedPrintJobDto>(
+        `${this.baseUrl}/jobs/${jobId}/rerun`
+      );
+      return response.data;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  /**
    * Bulk cancel multiple print jobs
    */
   async bulkCancelJobsAsync(

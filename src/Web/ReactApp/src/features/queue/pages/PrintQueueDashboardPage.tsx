@@ -101,6 +101,19 @@ export function PrintQueueDashboardPage() {
     }
   };
 
+  const handleRerunJob = async (jobId: string) => {
+    try {
+      await printQueueService.rerunJobAsync(jobId);
+      setError(null);
+      // Reload jobs to show the new job in the queue
+      await loadJobs();
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to rerun job";
+      setError(errorMessage);
+    }
+  };
+
   const handlePriorityChange = async (jobId: string, newPriority: number) => {
     try {
       await printQueueService.updateJobPriorityAsync(jobId, newPriority);
@@ -220,11 +233,7 @@ export function PrintQueueDashboardPage() {
           {/* Tab 3: History */}
           <Tabs.Panel id="history">
             <QueueHistoryTab
-              onRerun={async (jobId) => {
-                // TODO: Implement rerun functionality
-                // This would need a new API endpoint or adapt existing one
-                console.log("Rerun job:", jobId);
-              }}
+              onRerun={handleRerunJob}
               onViewDetails={(jobId) => {
                 // TODO: Navigate to job details page
                 console.log("View job details:", jobId);

@@ -570,6 +570,66 @@ public class PrintQueueService(
         }
     }
 
+    /// <summary>
+    /// Rerun a completed job (add it back to queue)
+    /// </summary>
+    public async Task<QueuedPrintJobDto> RerunJobAsync(
+        string jobId,
+        string userId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(jobId))
+                throw new ArgumentException("Job ID is required");
+
+            // Find the job to rerun
+            var originalJob = await _dbContext.PrintJobs.FirstOrDefaultAsync(j => j.Id == Guid.Parse(jobId), cancellationToken)
+                ?? throw new InvalidOperationException($"Job {jobId} not found");
+
+            // Create new print job with same properties as original
+            var newJob = new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = originalJob.Name,
+                GcodeFileId = originalJob.GcodeFileId,
+                AssignedPrinterId = originalJob.AssignedPrinterId,
+                Status = PrintJobStatus.Queued,
+                Priority = originalJob.Priority,
+                RequiredNozzleDiameter = originalJob.RequiredNozzleDiameter,
+                RequiredMaterialType = originalJob.RequiredMaterialType,
+                RequiredCapabilities = originalJob.RequiredCapabilities,
+                EstimatedPrintTime = originalJob.EstimatedPrintTime,
+                EstimatedFilamentUsage = originalJob.EstimatedFilamentUsage,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                QueuedAt = DateTime.UtcNow
+            };
+
+            // Calculate queue position
+            var maxPosition = await _dbContext.PrintJobs
+                .Where(pj => pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing)
+                .MaxAsync(pj => (int?)pj.QueuePosition, cancellationToken) ?? -1;
+            newJob.QueuePosition = maxPosition + 1;
+
+            _dbContext.PrintJobs.Add(newJob);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Job {JobId} rerun as {NewJobId} by user {UserId}",
+                originalJob.Id, newJob.Id, userId
+            );
+
+            return MapToQueuedPrintJobDto(newJob);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rerunning job {JobId}", jobId);
+            throw;
+        }
+    }
+
     // ============= HISTORY OPERATIONS (Phase 2) =============
 
     /// <summary>
