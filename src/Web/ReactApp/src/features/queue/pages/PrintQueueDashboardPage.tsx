@@ -6,6 +6,7 @@ import { Tabs } from "@/common/components/ui/Tabs";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
 import ModelFilteredJobsTab from "../components/ModelFilteredJobsTab";
+import QueueHistoryTab from "../components/QueueHistoryTab";
 import {
   printQueueService,
   QueuedPrintJobWithFileMetaDto,
@@ -216,13 +217,19 @@ export function PrintQueueDashboardPage() {
             />
           </Tabs.Panel>
 
-          {/* Tab 3: History (Placeholder) */}
+          {/* Tab 3: History */}
           <Tabs.Panel id="history">
-            <div className="py-12 text-center">
-              <div className="text-pf-text-secondary text-lg">
-                Coming soon: View completed and failed print jobs
-              </div>
-            </div>
+            <QueueHistoryTab
+              onRerun={async (jobId) => {
+                // TODO: Implement rerun functionality
+                // This would need a new API endpoint or adapt existing one
+                console.log("Rerun job:", jobId);
+              }}
+              onViewDetails={(jobId) => {
+                // TODO: Navigate to job details page
+                console.log("View job details:", jobId);
+              }}
+            />
           </Tabs.Panel>
         </Tabs.Panels>
       </Tabs>
