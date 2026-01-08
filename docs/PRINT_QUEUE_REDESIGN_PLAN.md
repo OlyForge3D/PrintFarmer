@@ -785,6 +785,11 @@ PrintQueueDashboardPage
 
 ## Phase 2: Enhanced Queuing (🔄 IN PROGRESS)
 
+**Status**: Just starting - see [PHASE_2_ENHANCED_QUEUING_PLAN.md](PHASE_2_ENHANCED_QUEUING_PLAN.md) for detailed breakdown
+
+**Quick Summary**:
+Transform dashboard from simple list view into comprehensive job management system with three tabs and advanced statistics.
+
 **Objectives**:
 - Add "By Model" tab with job grouping and statistics
 - Add "History" tab showing completed/failed/cancelled jobs
@@ -792,11 +797,11 @@ PrintQueueDashboardPage
 - Model-based statistics and analytics
 - Enhanced UI with tabs and advanced views
 
-**Features to Implement**:
+**Three Tabs Structure**:
 1. **"All Jobs" Tab** (refine existing)
+   - Current single-view functionality
    - Enhance filter bar
    - Add sorting options
-   - Add pagination controls
    - Performance optimization for 100+ jobs
 
 2. **"By Model" Tab** (new)
@@ -804,6 +809,7 @@ PrintQueueDashboardPage
    - Show count per model: Queued/Printing/Paused
    - Mini statistics per model
    - Click-through to model's job list
+   - Model-based analytics
 
 3. **"History" Tab** (new)
    - Completed jobs with success rate
@@ -812,34 +818,27 @@ PrintQueueDashboardPage
    - Timeline view of recent jobs
    - Rerun option for completed jobs
 
-4. **Enhanced Filtering**
-   - Status filter across all tabs
-   - Model filter (works everywhere)
-   - Material filter (works everywhere)
-   - Date range filter for history
-   - Search by job name/file name
-
-5. **Statistics & Analytics**
-   - Total jobs by status
-   - Jobs per model
-   - Success rate by model
-   - Average print time per model
-   - Material usage statistics
-
-**Components to Create**:
+**New Components** (7 total):
 - `ModelFilteredJobsTab.tsx` - Model grouping and statistics
-- `QueueHistoryTab.tsx` - History view with filtering
 - `ModelJobsCard.tsx` - Individual model job card with stats
+- `ModelStatisticsPanel.tsx` - Per-model analytics
+- `QueueHistoryTab.tsx` - History view with filtering
 - `HistoryJobCard.tsx` - Completed/failed job card
-- `JobStatisticsPanel.tsx` - Statistics visualization
-- Update `PrintQueueDashboardPage.tsx` - Add tabs and routing
+- `HistoryStatisticsPanel.tsx` - History analytics
+- Updated `PrintQueueDashboardPage.tsx` - Add tabs
 
-**Backend Changes** (if needed):
-- Verify `/api/printQueue/history` endpoint
-- Verify `/api/printQueue/stats/models` endpoint
-- May need to add history seed endpoint
+**Testing**: Target 43+ new unit tests, 2000+ total tests
 
-**Timeline**: 1-2 weeks
+**Timeline**: 1-2 weeks (estimated completion Jan 22, 2026)
+
+**See Also**: [PHASE_2_ENHANCED_QUEUING_PLAN.md](PHASE_2_ENHANCED_QUEUING_PLAN.md) for:
+- Component architecture diagrams
+- Data flow specifications
+- API requirements & verification
+- Step-by-step development workflow
+- Testing strategy and coverage targets
+- Risk mitigation strategies
+- Definition of done checklist
 
 ---
 

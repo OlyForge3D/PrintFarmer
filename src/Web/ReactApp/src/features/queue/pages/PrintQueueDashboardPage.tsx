@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
+import { Tabs } from "@/common/components/ui/Tabs";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
 import {
@@ -20,6 +21,7 @@ export function PrintQueueDashboardPage() {
   const [materialFilter, setMaterialFilter] = useState<string | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("all-jobs");
 
   const loadJobs = useCallback(async () => {
     try {
@@ -153,26 +155,58 @@ export function PrintQueueDashboardPage() {
         </div>
       )}
 
-      {/* Filters */}
-      <TableFiltersBar
-        onStatusChange={setStatusFilter}
-        onModelChange={setModelFilter}
-        onMaterialChange={setMaterialFilter}
-        onRefresh={loadJobs}
-        isLoading={loading}
-      />
+      {/* Tabbed Interface */}
+      <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
+        <Tabs.List>
+          <Tabs.Tab id="all-jobs">All Jobs</Tabs.Tab>
+          <Tabs.Tab id="by-model">By Model</Tabs.Tab>
+          <Tabs.Tab id="history">History</Tabs.Tab>
+        </Tabs.List>
 
-      {/* Jobs Table */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-        <QueueJobsTable
-          jobs={jobs}
-          isLoading={loading}
-          onPause={handlePauseJob}
-          onResume={handleResumeJob}
-          onCancel={handleCancelJob}
-          onPriority={handlePriorityChange}
-        />
-      </div>
+        <Tabs.Panels>
+          {/* Tab 1: All Jobs */}
+          <Tabs.Panel id="all-jobs">
+            {/* Filters */}
+            <TableFiltersBar
+              onStatusChange={setStatusFilter}
+              onModelChange={setModelFilter}
+              onMaterialChange={setMaterialFilter}
+              onRefresh={loadJobs}
+              isLoading={loading}
+            />
+
+            {/* Jobs Table */}
+            <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 mt-4">
+              <QueueJobsTable
+                jobs={jobs}
+                isLoading={loading}
+                onPause={handlePauseJob}
+                onResume={handleResumeJob}
+                onCancel={handleCancelJob}
+                onPriority={handlePriorityChange}
+              />
+            </div>
+          </Tabs.Panel>
+
+          {/* Tab 2: By Model (Placeholder) */}
+          <Tabs.Panel id="by-model">
+            <div className="py-12 text-center">
+              <div className="text-pf-text-secondary text-lg">
+                Coming soon: View jobs grouped by printer model
+              </div>
+            </div>
+          </Tabs.Panel>
+
+          {/* Tab 3: History (Placeholder) */}
+          <Tabs.Panel id="history">
+            <div className="py-12 text-center">
+              <div className="text-pf-text-secondary text-lg">
+                Coming soon: View completed and failed print jobs
+              </div>
+            </div>
+          </Tabs.Panel>
+        </Tabs.Panels>
+      </Tabs>
 
       {/* Cancel Confirmation Modal */}
       <ConfirmationModal
