@@ -1,4 +1,4 @@
-import { Button } from "@/common/components/ui/Button";
+import { Button, Checkbox, Select } from "@/common/components/ui";
 import { useState } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 
@@ -42,26 +42,26 @@ export function QueueJobsTable({
   const getStatusColor = (status: string) => {
     switch (status) {
       case "Queued":
-        return "bg-blue-100 text-blue-800";
+        return "bg-pf-info-bg text-pf-info-text";
       case "Printing":
-        return "bg-green-100 text-green-800";
+        return "bg-pf-success-bg text-pf-success-text";
       case "Paused":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-pf-warning-bg text-pf-warning-text";
       case "Completed":
-        return "bg-gray-100 text-gray-800";
+        return "bg-pf-bg-2 text-pf-text-secondary";
       case "Failed":
-        return "bg-red-100 text-red-800";
+        return "bg-pf-error-bg text-pf-error-text";
       case "Cancelled":
-        return "bg-gray-100 text-gray-800";
+        return "bg-pf-bg-2 text-pf-text-secondary";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-pf-bg-2 text-pf-text-secondary";
     }
   };
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center py-8">
-        <div className="text-gray-600">Loading jobs...</div>
+        <div className="text-pf-text-secondary">Loading jobs...</div>
       </div>
     );
   }
@@ -69,31 +69,29 @@ export function QueueJobsTable({
   if (jobs.length === 0) {
     return (
       <div className="flex justify-center items-center py-8">
-        <div className="text-gray-600">No jobs in queue</div>
+        <div className="text-pf-text-secondary">No jobs in queue</div>
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto border border-pf-border rounded-lg bg-pf-bg-1">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-200 bg-gray-50">
+          <tr className="border-b border-pf-border bg-pf-bg-2">
             <th className="px-4 py-3 text-left">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={selectedJobs.size === jobs.length && jobs.length > 0}
                 onChange={handleSelectAll}
-                className="rounded border-gray-300"
               />
             </th>
-            <th className="px-4 py-3 text-left font-medium">File</th>
-            <th className="px-4 py-3 text-left font-medium">Printer</th>
-            <th className="px-4 py-3 text-left font-medium">Model</th>
-            <th className="px-4 py-3 text-left font-medium">Material</th>
-            <th className="px-4 py-3 text-left font-medium">Status</th>
-            <th className="px-4 py-3 text-left font-medium">Priority</th>
-            <th className="px-4 py-3 text-left font-medium">Actions</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">File</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Printer</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Model</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Material</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Status</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Priority</th>
+            <th className="px-4 py-3 text-left font-medium text-pf-text-primary">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -109,23 +107,20 @@ export function QueueJobsTable({
             return (
               <tr
                 key={jobWrapper.id}
-                className="border-b border-gray-200 hover:bg-gray-50"
+                className="border-b border-pf-border hover:bg-pf-bg-2 transition-colors"
               >
                 <td className="px-4 py-3">
-                  {/* TODO: Replace with Checkbox component from @/components/ui */}
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selectedJobs.has(jobWrapper.id)}
                     onChange={() => handleSelectJob(jobWrapper.id)}
-                    className="rounded border-gray-300"
                   />
                 </td>
                 <td className="px-4 py-3">
-                  <div className="font-medium text-gray-900">{fileName}</div>
+                  <div className="font-medium text-pf-text-primary">{fileName}</div>
                 </td>
-                <td className="px-4 py-3 text-gray-600">{printerName}</td>
-                <td className="px-4 py-3 text-gray-600">{model}</td>
-                <td className="px-4 py-3 text-gray-600">{material}</td>
+                <td className="px-4 py-3 text-pf-text-secondary">{printerName}</td>
+                <td className="px-4 py-3 text-pf-text-secondary">{model}</td>
+                <td className="px-4 py-3 text-pf-text-secondary">{material}</td>
                 <td className="px-4 py-3">
                   <span
                     className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
@@ -136,19 +131,18 @@ export function QueueJobsTable({
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  {/* TODO: Replace with Select component wrapped in FormField */}
-                  <select
+                  <Select
                     value={priority}
                     onChange={(e) =>
                       onPriority?.(jobWrapper.id, parseInt(e.target.value))
                     }
-                    className="px-2 py-1 border border-gray-300 rounded-md text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    className="text-xs w-24"
                   >
                     <option value="0">Normal</option>
                     <option value="1">High</option>
                     <option value="2">Urgent</option>
                     <option value="-1">Low</option>
-                  </select>
+                  </Select>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">

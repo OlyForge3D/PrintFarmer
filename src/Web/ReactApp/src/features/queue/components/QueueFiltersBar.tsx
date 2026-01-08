@@ -1,4 +1,4 @@
-import { Button } from "@/common/components/ui/Button";
+import { Button, FormField, Select, Input } from "@/common/components/ui";
 import { useState, useCallback } from "react";
 
 export interface TableFiltersBarProps {
@@ -74,18 +74,13 @@ export function TableFiltersBar({
   }, [onStatusChange, onMaterialChange, onModelChange]);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 mb-4">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
         {/* Status Filter */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Status
-          </label>
-          {/* TODO: Replace with FormField + Select component */}
-          <select
+        <FormField label="Status">
+          <Select
             value={selectedStatus || ""}
             onChange={handleStatusChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">All Statuses</option>
             {STATUS_OPTIONS.map((option) => (
@@ -93,33 +88,24 @@ export function TableFiltersBar({
                 {option.label}
               </option>
             ))}
-          </select>
-        </div>
+          </Select>
+        </FormField>
 
         {/* Model Filter */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Printer Model
-          </label>
-          <input
+        <FormField label="Printer Model">
+          <Input
             type="text"
             value={selectedModel || ""}
             onChange={handleModelChange}
             placeholder="Search by model..."
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
           />
-        </div>
+        </FormField>
 
         {/* Material Filter */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Material
-          </label>
-          {/* TODO: Replace with FormField + Select component */}
-          <select
+        <FormField label="Material">
+          <Select
             value={selectedMaterial || ""}
             onChange={handleMaterialChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">All Materials</option>
             {MATERIAL_OPTIONS.map((option) => (
@@ -127,8 +113,8 @@ export function TableFiltersBar({
                 {option.label}
               </option>
             ))}
-          </select>
-        </div>
+          </Select>
+        </FormField>
 
         {/* Action Buttons */}
         <div className="flex gap-2">
