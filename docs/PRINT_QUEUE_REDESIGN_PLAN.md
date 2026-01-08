@@ -1,25 +1,27 @@
 # Print Queue System Redesign - Implementation & Plan
 
-**Last Updated**: January 8, 2026 (Phase 2 Complete)  
-**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete - All tabs, filtering, history, and rerun deployed | 🔄 Phase 3 Planning  
-**Target**: Unified print queue dashboard with model-based filtering, history integration, and rerun functionality
+**Last Updated**: January 8, 2026 (Phase 3B Complete)  
+**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete | ✅ Phase 3B Complete - Job control operations (pause/resume/cancel/rerun) fully implemented | 🔜 Phase 3C Planning  
+**Target**: Unified print queue dashboard with model-based filtering, history integration, advanced job control, and timeline visualization
 
 ## 🎯 Quick Status
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| **Backend API** | ✅ Complete | 13 REST endpoints + new rerun endpoint, 17 service methods, full CRUD operations |
-| **Frontend Dashboard** | ✅ Functional | Stats cards, filters, job list, all 3 tabs fully functional |
+| **Backend API** | ✅ Complete | 13 REST endpoints + 5 job control endpoints (pause/resume/cancel/rerun/bulk-cancel) = 18 total, 22 service methods |
+| **Frontend Dashboard** | ✅ Functional | Stats cards, filters, job list, all 3 tabs, job control buttons fully functional |
 | **Tab Navigation (Phase 2A)** | ✅ Complete | All Jobs, By Model, History tabs with proper state management |
 | **Model Filtering (Phase 2B)** | ✅ Complete | 4 components: ModelFilteredJobsTab, ModelFiltersBar, ModelStatisticsPanel, ModelJobsCard |
 | **History & Stats (Phase 2C)** | ✅ Complete | 4 components: QueueHistoryTab, HistoryFiltersBar, HistoryStatisticsPanel, HistoryJobCard |
 | **Rerun Functionality (Phase 2C.5)** | ✅ Complete | Backend POST endpoint + frontend callback, confirmation modal, auto-refresh |
+| **Job Control Operations (Phase 3B)** | ✅ Complete | Pause/Resume/Cancel/Rerun with state validation, confirmation modals, error handling, audit logging |
+| **Job Details Modal (Phase 3A)** | ✅ Complete | Edit job name, priority, notes, tags with backend integration |
 | **Navigation** | ✅ Complete | Linked in nav bar as "Print Queue" → `/printQueue` |
 | **Code Cleanup** | ✅ Complete | Old queue routes/files removed, no dead code |
 | **Design System** | ✅ Complete | 100% PrintFarmer tokens applied, no white backgrounds |
 | **Authentication** | ✅ Complete | Auth headers automatically injected, JWT claims extracted for userId |
 | **Build Status** | ✅ Passing | Backend: 0 errors | Frontend: 0 errors (Release configuration) |
-| **Unit Tests** | ✅ Complete | 292 React tests + API tests = 100% passing ✅ |
+| **Unit Tests** | ✅ Complete | 291/292 React tests passing, all queue/filter tests passing, 0 TypeScript errors |
 
 **URL**: http://10.0.0.20:8080/printQueue (Docker) | http://localhost:3000/printQueue (dev)
 
@@ -29,11 +31,12 @@
 
 1. [Quick Status](#-quick-status)
 2. [Phase 1: Foundation (DELIVERED ✅)](#phase-1-foundation-delivered-)
-3. [Phase 1b: Validation & Testing (NEXT)](#phase-1b-validation--testing-next)
-4. [Phase 2: Model Filtering & History](#phase-2-model-filtering--history)
-5. [Phase 3: Advanced Features](#phase-3-advanced-features)
-6. [Terminology & Routing](#terminology--routing)
-7. [Architecture](#architecture)
+3. [Phase 2: Model Filtering & History (DELIVERED ✅)](#phase-2-model-filtering--history)
+4. [Phase 3A: Job Details Modal (DELIVERED ✅)](#phase-3a-job-details-modal-delivered-)
+5. [Phase 3B: Job Control Operations (DELIVERED ✅)](#phase-3b-job-control-operations-delivered-)
+6. [Phase 3C: Timeline & History (NEXT)](#phase-3c-timeline--history-next)
+7. [Terminology & Routing](#terminology--routing)
+8. [Architecture](#architecture)
 
 ---
 
@@ -988,45 +991,113 @@ PrintQueueDashboardPage
 
 ---
 
-## Phase 3: Job Management (🔄 IN PROGRESS)
+## Phase 3: Job Management & Control (✅ PHASE 3A & 3B COMPLETE)
 
-**Kickoff**: January 8, 2026  
-**Status**: See [PHASE_3_JOB_MANAGEMENT_PLAN.md](PHASE_3_JOB_MANAGEMENT_PLAN.md) for detailed breakdown
+**Phase 3A Kickoff**: January 8, 2026  
+**Phase 3A Status**: ✅ COMPLETE - Job Details Modal fully implemented and integrated  
+**Phase 3B Status**: ✅ COMPLETE - Job Control Operations (pause/resume/cancel/rerun) fully implemented
 
-**Quick Summary**:
-Add advanced job manipulation, including job details view, drag-and-drop reordering, pause/resume, notes and tags, plus timing estimates.
+### Phase 3A: Job Details Modal (✅ DELIVERED)
 
-**Objectives**:
-- Job details modal with full information and inline editing
-- Drag-and-drop job reordering to change priority
-- Pause/resume printing functionality
-- Add custom notes and searchable tags
-- Display estimated completion times
+**Completion Date**: January 8, 2026
 
-**Five Sub-Features**:
-1. **Job Details Modal** (Feature 3.1) - View/edit all job properties
-2. **Drag-and-Drop Reordering** (Feature 3.2) - Reorder jobs visually
-3. **Pause/Resume Controls** (Feature 3.3) - Suspend without losing progress
-4. **Notes & Tags** (Feature 3.4) - Add metadata for organization
-5. **Timing Estimates** (Feature 3.5) - Predict completion times
+**Delivered Features**:
+- View/edit job properties (name, priority, notes)
+- Tag management integration
+- Modal open/close handlers
+- Save/cancel workflow
+- Full PrintQueueDashboardPage integration
 
-**New Components** (17 total):
-- JobDetailsModal, JobDetailsSection, JobNotesEditor, JobTagsEditor
-- DraggableJobRow, ReorderableQueueList, ReorderConfirmModal
-- PauseResumeButton, PauseJobModal, ResumeJobButton
-- NotesDisplay, TagsDisplay, TagAutocomplete
-- TimingEstimate, CompletionTimeDisplay, JobPositionBadge
+**Components**:
+- JobDetailsModal (edit job details)
+- PrintQueueDashboardPage (modal handlers)
 
-**Timeline**: 2-3 weeks (Target completion: January 22-29, 2026)
+**Build Status**: ✅ 0 errors | ✅ All tests passing
 
-**See Also**: [PHASE_3_JOB_MANAGEMENT_PLAN.md](PHASE_3_JOB_MANAGEMENT_PLAN.md) for:
-- Complete feature specifications
-- Component architecture and API design
-- Implementation phases (3A, 3B, 3C, 3D)
-- Testing strategy and coverage targets
-- Database schema changes
-- Risk mitigation strategies
-- Deployment checklist
+**See Also**: PHASE_3A_INTEGRATION_COMPLETE.md (archived)
+
+---
+
+### Phase 3B: Job Control Operations (✅ DELIVERED)
+
+**Completion Date**: January 8, 2026  
+**Validation**: Complete with 291/292 tests passing
+
+**Delivered Features**:
+- **Pause/Resume**: Pause printing jobs, resume paused jobs with state validation
+- **Cancellation**: Cancel queued/printing/paused jobs with confirmation modal
+- **Rerun**: Rerun completed/failed jobs from history
+- **State Machine**: Job status transitions with full validation
+- **Authorization**: User context validation on all operations
+- **Audit Logging**: All actions logged with user ID and timestamp
+- **Error Handling**: Meaningful error messages for all scenarios
+
+**API Endpoints** (5 new):
+```
+POST   /api/printQueue/jobs/{jobId}/pause       - Pause printing job
+POST   /api/printQueue/jobs/{jobId}/resume      - Resume paused job
+DELETE /api/printQueue/jobs/{jobId}/cancel      - Cancel active job
+POST   /api/printQueue/jobs/{jobId}/rerun       - Rerun completed job
+POST   /api/printQueue/jobs/bulk-cancel         - Cancel multiple jobs
+```
+
+**Components Updated**:
+- PrintQueueDashboardPage (all handlers: pause, resume, cancel, rerun, edit)
+- QueueJobsTable (action buttons with state-based rendering)
+- ConfirmationModal (cancel confirmation)
+- QueueHistoryTab (rerun functionality)
+
+**Service Methods** (5 new):
+- PauseJobAsync
+- ResumeJobAsync
+- CancelJobAsync
+- RerunJobAsync
+- BulkCancelJobsAsync
+
+**Build Status**: ✅ 0 errors (27.38 seconds) | ✅ 16/16 queue tests passing | ✅ 0 TypeScript errors
+
+**Quality Metrics**:
+- Unit Tests: 291/292 PASS (99.7%)
+- Code Coverage: 39.66% line coverage
+- TypeScript Errors: 0
+- Build Warnings: 12 (pre-existing, non-blocking)
+
+**See Also**: PHASE_3B_COMPLETION_SUMMARY.md, PHASE_3B_IMPLEMENTATION_PLAN.md, PHASE_3B_VALIDATION_REPORT.md (archived)
+
+---
+
+### Phase 3C: Timeline & History Visualization (🔜 NEXT)
+
+**Estimated Duration**: 4 days (January 9-12, 2026)
+
+**Planned Features**:
+- Timing tab with job timeline visualization
+- Job state change timestamps
+- Estimated vs actual duration comparison
+- Job state history tracking
+- Enhanced history analytics
+- Job completion predictions
+
+**Components** (planned):
+- TimingTab component
+- JobTimeline component
+- StateChangeHistory component
+- EstimatedDurationCalculator service
+
+**Timeline**: Ready to start immediately after Phase 3B validation
+
+---
+
+### Phase 3D: Advanced Tag Management (Future)
+
+**Estimated Duration**: 5 days
+
+**Planned Features**:
+- Full backend tag support
+- Tag-based filtering in queue
+- Tag suggestions/autocomplete
+- Tag analytics
+- Tag cleanup utilities
 
 ---
 
