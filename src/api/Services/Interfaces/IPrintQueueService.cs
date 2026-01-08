@@ -163,6 +163,38 @@ public interface IPrintQueueService
         CancellationToken cancellationToken = default
     );
 
+    // ============= TIMELINE & ANALYTICS OPERATIONS (Phase 3C) =============
+
+    /// <summary>
+    /// Get timeline events for visualization with optional filtering
+    /// </summary>
+    Task<IEnumerable<TimelineEventDto>> GetTimelineAsync(
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null,
+        string? printerId = null,
+        string? filterStatus = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// Get complete state history for a specific job
+    /// </summary>
+    Task<JobStateHistoryDto> GetJobStateHistoryAsync(
+        string jobId,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// Get duration analytics comparing estimated vs actual durations
+    /// </summary>
+    Task<DurationAnalyticsDto> GetDurationAnalyticsAsync(
+        string? printerId = null,
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null,
+        CancellationToken cancellationToken = default
+    );
+
     // ============= HISTORY OPERATIONS (Phase 2) =============
     
     /// <summary>

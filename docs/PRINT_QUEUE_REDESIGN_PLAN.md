@@ -1,7 +1,7 @@
 # Print Queue System Redesign - Implementation & Plan
 
-**Last Updated**: January 8, 2026 (Phase 3B Complete)  
-**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete | ✅ Phase 3B Complete - Job control operations (pause/resume/cancel/rerun) fully implemented | 🔜 Phase 3C Planning  
+**Last Updated**: January 8, 2026 (Phase 3C Kickoff)  
+**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete | ✅ Phase 3A Complete | ✅ Phase 3B Complete | 🔜 Phase 3C (Timeline & History - IN PROGRESS)  
 **Target**: Unified print queue dashboard with model-based filtering, history integration, advanced job control, and timeline visualization
 
 ## 🎯 Quick Status
@@ -1066,25 +1066,49 @@ POST   /api/printQueue/jobs/bulk-cancel         - Cancel multiple jobs
 
 ---
 
-### Phase 3C: Timeline & History Visualization (🔜 NEXT)
+### Phase 3C: Timeline & History Visualization (🔜 IN PROGRESS)
 
-**Estimated Duration**: 4 days (January 9-12, 2026)
+**Status**: Implementation kickoff January 9, 2026  
+**Estimated Duration**: 4 days (January 9-12, 2026)  
+**Implementation Plan**: See `/docs/PHASE_3C_IMPLEMENTATION_PLAN.md`
 
 **Planned Features**:
 - Timing tab with job timeline visualization
 - Job state change timestamps
 - Estimated vs actual duration comparison
-- Job state history tracking
-- Enhanced history analytics
-- Job completion predictions
+- Job state history tracking with state transitions
+- Enhanced history analytics (accuracy metrics)
+- Job completion predictions (based on historical data)
+- Duration variance analysis
 
-**Components** (planned):
-- TimingTab component
-- JobTimeline component
-- StateChangeHistory component
-- EstimatedDurationCalculator service
+**Components** (to implement):
+1. **TimingTab** - Main container with filters and statistics cards
+2. **JobTimeline** - Gantt-style chart showing job progression
+3. **JobStateHistory** - Chronological list of state transitions
+4. **DurationComparison** - Est vs actual bar charts
+5. **CompletionPrediction** - Predict future completion times
 
-**Timeline**: Ready to start immediately after Phase 3B validation
+**API Endpoints** (new):
+- GET `/api/printQueue/timeline` - Timeline events for visualization
+- GET `/api/printQueue/jobs/{jobId}/state-history` - State transitions for a job
+- GET `/api/printQueue/duration-analytics` - Duration comparison data
+
+**Service Methods** (new):
+- GetTimelineAsync - Get timeline events with filters
+- GetJobStateHistoryAsync - Get state transitions
+- GetDurationAnalyticsAsync - Get duration metrics
+
+**Database Changes**:
+- New table: JobStateHistory (timestamps for each state transition)
+- Updated PrintJobs table: ActualStartTime, ActualEndTime, ActualDurationSeconds
+
+**Implementation Phases**:
+- Phase 3C.1: Data Models & API (Day 1)
+- Phase 3C.2: React Components (Day 2)
+- Phase 3C.3: Styling & Polish (Day 3)
+- Phase 3C.4: Testing & Validation (Day 4)
+
+**Timeline**: Ready to start immediately - comprehensive plan document created
 
 ---
 

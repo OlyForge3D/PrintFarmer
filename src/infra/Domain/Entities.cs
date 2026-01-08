@@ -586,6 +586,25 @@ public class PrintJob
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime QueuedAt { get; set; }
+    
+    // Phase 3C: Timeline tracking
+    public ICollection<JobStateHistory> StateHistory { get; } = new List<JobStateHistory>();
+}
+
+/// <summary>
+/// Tracks state transitions for a print job (Phase 3C)
+/// </summary>
+public class JobStateHistory
+{
+    public Guid Id { get; set; }
+    public Guid JobId { get; set; }
+    public PrintJob PrintJob { get; set; } = null!;
+    public string FromState { get; set; } = string.Empty; // Previous state
+    public string ToState { get; set; } = string.Empty; // New state
+    public DateTime TransitionedAtUtc { get; set; }
+    public TimeSpan? DurationInState { get; set; } // How long job stayed in FromState
+    public string? Notes { get; set; } // Optional notes about the transition
+    public DateTime CreatedAt { get; set; }
 }
 
 // User Management and Authentication System

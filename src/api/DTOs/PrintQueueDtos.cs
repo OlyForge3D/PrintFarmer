@@ -236,3 +236,77 @@ public class UpdateJobNotesRequest
 {
     public string? Notes { get; set; }
 }
+
+// ============= TIMELINE & ANALYTICS DTOs (Phase 3C) =============
+
+/// <summary>
+/// Represents a single event on the job timeline
+/// </summary>
+public class TimelineEventDto
+{
+    public string JobId { get; set; } = string.Empty;
+    public string JobName { get; set; } = string.Empty;
+    public string PrinterName { get; set; } = string.Empty;
+    public string State { get; set; } = string.Empty; // Queued, Printing, Paused, Completed, Failed, Cancelled
+    public DateTime EnteredAtUtc { get; set; }
+    public DateTime? ExitedAtUtc { get; set; }
+    public int? DurationSeconds { get; set; }
+    public int? EstimatedDurationSeconds { get; set; }
+    public decimal? VariancePercent { get; set; }
+}
+
+/// <summary>
+/// Represents a single state transition in a job's history
+/// </summary>
+public class StateTransitionDto
+{
+    public string FromState { get; set; } = string.Empty;
+    public string ToState { get; set; } = string.Empty;
+    public DateTime TransitionedAtUtc { get; set; }
+    public int? DurationInStateSeconds { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Complete state history for a single job
+/// </summary>
+public class JobStateHistoryDto
+{
+    public string JobId { get; set; } = string.Empty;
+    public string JobName { get; set; } = string.Empty;
+    public List<StateTransitionDto> Transitions { get; set; } = new();
+    public int? TotalDurationSeconds { get; set; }
+    public int? EstimatedDurationSeconds { get; set; }
+    public decimal? VariancePercent { get; set; }
+}
+
+/// <summary>
+/// Duration comparison data for a single printer or aggregate
+/// </summary>
+public class DurationStatsDto
+{
+    public string? PrinterId { get; set; }
+    public string? PrinterName { get; set; }
+    public int TotalJobs { get; set; }
+    public double AverageEstimatedSeconds { get; set; }
+    public double AverageActualSeconds { get; set; }
+    public double AccuracyPercent { get; set; } // 0-100
+    public double VariancePercent { get; set; } // -100 to +100
+    public int MinActualSeconds { get; set; }
+    public int MaxActualSeconds { get; set; }
+}
+
+/// <summary>
+/// Aggregate duration analytics across all jobs or filtered set
+/// </summary>
+public class DurationAnalyticsDto
+{
+    public int TotalJobs { get; set; }
+    public double AverageEstimatedSeconds { get; set; }
+    public double AverageActualSeconds { get; set; }
+    public double OverallAccuracyPercent { get; set; } // 0-100
+    public double OverallVariancePercent { get; set; } // -100 to +100
+    public Dictionary<string, DurationStatsDto> ByPrinter { get; set; } = new();
+    public List<DurationStatsDto> TopPerformers { get; set; } = new(); // Most accurate printers
+    public List<DurationStatsDto> NeedsAttention { get; set; } = new(); // Least accurate printers
+}

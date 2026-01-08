@@ -867,5 +867,315 @@ public class PrintQueueService(
             throw;
         }
     }
+
+    // ============= TIMELINE & ANALYTICS OPERATIONS (Phase 3C) =============
+
+    /// <summary>
+    /// Get timeline events for visualization with optional filtering
+    /// </summary>
+    public async Task<IEnumerable<TimelineEventDto>> GetTimelineAsync(
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null,
+        string? printerId = null,
+        string? filterStatus = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var query = _dbContext.PrintJobs
+                .Include(pj => pj.AssignedPrinter)
+                .AsQueryable();
+
+            // Apply date filters
+            if (dateFrom.HasValue)
+            {
+                query = query.Where(pj => pj.ActualStartTime >= dateFrom || pj.CreatedAt >= dateFrom);
+            }
+            if (dateTo.HasValue)
+            {
+                query = query.Where(pj => pj.ActualEndTime <= dateTo || pj.CreatedAt <= dateTo);
+            }
+
+            // Apply printer filter
+            if (!string.IsNullOrEmpty(printerId))
+            {
+                query = query.Where(pj => pj.AssignedPrinterId.ToString() == printerId);
+            }
+
+            // Apply status filter
+            if (!string.IsNullOrEmpty(filterStatus))
+            {
+                if (Enum.TryParse<PrintJobStatus>(filterStatus, ignoreCase: true, out var status))
+                {
+                    query = query.Where(pj => pj.Status == status);
+                }
+            }
+
+            var jobs = await query
+                .OrderByDescending(pj => pj.CreatedAt)
+                .Take(limit)
+                .ToListAsync(cancellationToken);
+
+            var events = jobs.Select(job => new TimelineEventDto
+            {
+                JobId = job.Id.ToString(),
+                JobName = job.Name,
+                PrinterName = job.AssignedPrinter?.Name ?? "Unassigned",
+                State = job.Status.ToString(),
+                EnteredAtUtc = job.Status == PrintJobStatus.Queued ? job.CreatedAt : job.ActualStartTime ?? job.CreatedAt,
+                ExitedAtUtc = job.Status == PrintJobStatus.Completed || job.Status == PrintJobStatus.Failed || job.Status == PrintJobStatus.Cancelled
+                    ? job.ActualEndTime
+                    : null,
+                DurationSeconds = job.ActualPrintTime.HasValue ? (int)job.ActualPrintTime.Value.TotalSeconds : null,
+                EstimatedDurationSeconds = job.EstimatedPrintTime.HasValue ? (int)job.EstimatedPrintTime.Value.TotalSeconds : null,
+                VariancePercent = job.EstimatedPrintTime.HasValue && job.ActualPrintTime.HasValue
+                    ? CalculateVariancePercent((int)job.EstimatedPrintTime.Value.TotalSeconds, (int)job.ActualPrintTime.Value.TotalSeconds)
+                    : null
+            }).ToList();
+
+            _logger.LogInformation("Retrieved {Count} timeline events", events.Count);
+            return events;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting timeline");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Get complete state history for a specific job
+    /// </summary>
+    public async Task<JobStateHistoryDto> GetJobStateHistoryAsync(
+        string jobId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                throw new ArgumentException("Job ID is required", nameof(jobId));
+
+            var job = await _dbContext.PrintJobs
+                .Include(pj => pj.StateHistory)
+                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+
+            if (job == null)
+                throw new ArgumentException($"Job {jobId} not found", nameof(jobId));
+
+            // Build state transitions from job history
+            var transitions = new List<StateTransitionDto>();
+
+            // Add initial Queued state
+            transitions.Add(new StateTransitionDto
+            {
+                FromState = "Initial",
+                ToState = "Queued",
+                TransitionedAtUtc = job.CreatedAt,
+                DurationInStateSeconds = job.ActualStartTime.HasValue
+                    ? (int)(job.ActualStartTime.Value - job.CreatedAt).TotalSeconds
+                    : null,
+                Notes = "Job created and queued"
+            });
+
+            // Add started state
+            if (job.ActualStartTime.HasValue)
+            {
+                transitions.Add(new StateTransitionDto
+                {
+                    FromState = "Queued",
+                    ToState = "Printing",
+                    TransitionedAtUtc = job.ActualStartTime.Value,
+                    DurationInStateSeconds = job.ActualEndTime.HasValue
+                        ? (int)(job.ActualEndTime.Value - job.ActualStartTime.Value).TotalSeconds
+                        : job.ActualPrintTime.HasValue
+                            ? (int)job.ActualPrintTime.Value.TotalSeconds
+                            : null,
+                    Notes = job.Status == PrintJobStatus.Failed ? $"Failed: {job.FailureReason}" : "Print started"
+                });
+            }
+
+            // Add completion state
+            if (job.ActualEndTime.HasValue)
+            {
+                transitions.Add(new StateTransitionDto
+                {
+                    FromState = "Printing",
+                    ToState = job.Status.ToString(),
+                    TransitionedAtUtc = job.ActualEndTime.Value,
+                    DurationInStateSeconds = 0,
+                    Notes = $"Job {job.Status.ToString().ToLower()}"
+                });
+            }
+
+            var totalDuration = job.ActualPrintTime.HasValue ? (int)job.ActualPrintTime.Value.TotalSeconds : (job.ActualEndTime.HasValue
+                ? (int)(job.ActualEndTime.Value - (job.ActualStartTime ?? job.CreatedAt)).TotalSeconds
+                : (int?)null);
+
+            var estimatedDuration = job.EstimatedPrintTime.HasValue ? (int?)job.EstimatedPrintTime.Value.TotalSeconds : null;
+
+            _logger.LogInformation("Retrieved state history for job {JobId} with {Count} transitions",
+                jobId, transitions.Count);
+
+            return new JobStateHistoryDto
+            {
+                JobId = job.Id.ToString(),
+                JobName = job.Name,
+                Transitions = transitions,
+                TotalDurationSeconds = totalDuration,
+                EstimatedDurationSeconds = estimatedDuration,
+                VariancePercent = CalculateVariancePercent(estimatedDuration, totalDuration)
+            };
+        }
+        catch (ArgumentException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting state history for job {JobId}", jobId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Get duration analytics comparing estimated vs actual durations
+    /// </summary>
+    public async Task<DurationAnalyticsDto> GetDurationAnalyticsAsync(
+        string? printerId = null,
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var query = _dbContext.PrintJobs
+                .Include(pj => pj.AssignedPrinter)
+                .Where(pj => pj.Status == PrintJobStatus.Completed || pj.Status == PrintJobStatus.Failed)
+                .AsQueryable();
+
+            // Apply date filters
+            if (dateFrom.HasValue)
+            {
+                query = query.Where(pj => pj.ActualEndTime >= dateFrom);
+            }
+            if (dateTo.HasValue)
+            {
+                query = query.Where(pj => pj.ActualEndTime <= dateTo);
+            }
+
+            // Apply printer filter
+            if (!string.IsNullOrEmpty(printerId))
+            {
+                query = query.Where(pj => pj.AssignedPrinterId.ToString() == printerId);
+            }
+
+            var jobs = await query.ToListAsync(cancellationToken);
+
+            if (jobs.Count == 0)
+            {
+                _logger.LogWarning("No completed jobs found for analytics");
+                return new DurationAnalyticsDto();
+            }
+
+            // Calculate overall stats
+            var estimatedTimes = jobs
+                .Where(j => j.EstimatedPrintTime.HasValue)
+                .Select(j => j.EstimatedPrintTime!.Value.TotalSeconds) // Use null-forgiving operator
+                .ToList();
+
+            var actualTimes = jobs
+                .Where(j => j.ActualPrintTime.HasValue)
+                .Select(j => j.ActualPrintTime!.Value.TotalSeconds) // Use null-forgiving operator
+                .ToList();
+
+            var avgEstimated = estimatedTimes.Any() ? estimatedTimes.Average() : 0;
+            var avgActual = actualTimes.Any() ? actualTimes.Average() : 0;
+            var accuracy = avgEstimated > 0 ? (1 - Math.Abs(avgActual - avgEstimated) / avgEstimated) * 100 : 0;
+            var variance = avgEstimated > 0 ? ((avgActual - avgEstimated) / avgEstimated) * 100 : 0;
+
+            // Group by printer for detailed stats
+            var byPrinter = new Dictionary<string, DurationStatsDto>();
+            foreach (var printerGroup in jobs.GroupBy(j => j.AssignedPrinterId))
+            {
+                var printerJobs = printerGroup.ToList();
+                var printerName = printerJobs.FirstOrDefault()?.AssignedPrinter?.Name ?? "Unknown";
+                var printerIdStr = printerGroup.Key?.ToString() ?? "unassigned";
+
+                var printerEstimated = printerJobs
+                    .Where(j => j.EstimatedPrintTime.HasValue)
+                    .Select(j => j.EstimatedPrintTime!.Value.TotalSeconds) // Use null-forgiving operator
+                    .ToList();
+
+                var printerActual = printerJobs
+                    .Where(j => j.ActualPrintTime.HasValue)
+                    .Select(j => j.ActualPrintTime!.Value.TotalSeconds) // Use null-forgiving operator
+                    .ToList();
+
+                var printerAvgEst = printerEstimated.Any() ? printerEstimated.Average() : 0;
+                var printerAvgAct = printerActual.Any() ? printerActual.Average() : 0;
+                var printerAccuracy = printerAvgEst > 0
+                    ? (1 - Math.Abs(printerAvgAct - printerAvgEst) / printerAvgEst) * 100
+                    : 0;
+                var printerVariance = printerAvgEst > 0
+                    ? ((printerAvgAct - printerAvgEst) / printerAvgEst) * 100
+                    : 0;
+
+                byPrinter[printerIdStr] = new DurationStatsDto
+                {
+                    PrinterId = printerIdStr,
+                    PrinterName = printerName,
+                    TotalJobs = printerJobs.Count,
+                    AverageEstimatedSeconds = printerAvgEst,
+                    AverageActualSeconds = printerAvgAct,
+                    AccuracyPercent = Math.Max(0, Math.Min(100, printerAccuracy)), // Clamp 0-100
+                    VariancePercent = printerVariance,
+                    MinActualSeconds = printerActual.Any() ? (int)printerActual.Min() : 0,
+                    MaxActualSeconds = printerActual.Any() ? (int)printerActual.Max() : 0
+                };
+            }
+
+            // Find top performers and those needing attention
+            var allStats = byPrinter.Values.OrderByDescending(s => s.AccuracyPercent).ToList();
+            var topPerformers = allStats.Take(3).ToList();
+            var needsAttention = allStats.OrderBy(s => s.AccuracyPercent).Take(3).ToList();
+
+            _logger.LogInformation("Duration analytics: {TotalJobs} jobs, {AvgEst}s est, {AvgAct}s act, {Accuracy}% accuracy",
+                jobs.Count, (int)avgEstimated, (int)avgActual, (int)accuracy);
+
+            return new DurationAnalyticsDto
+            {
+                TotalJobs = jobs.Count,
+                AverageEstimatedSeconds = avgEstimated,
+                AverageActualSeconds = avgActual,
+                OverallAccuracyPercent = Math.Max(0, Math.Min(100, accuracy)), // Clamp 0-100
+                OverallVariancePercent = variance,
+                ByPrinter = byPrinter,
+                TopPerformers = topPerformers,
+                NeedsAttention = needsAttention
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting duration analytics");
+            throw;
+        }
+    }
+
+    // ============= HELPER METHODS =============
+
+    /// <summary>
+    /// Calculate variance percentage between estimated and actual duration
+    /// </summary>
+    private static decimal? CalculateVariancePercent(int? estimated, int? actual)
+    {
+        if (!estimated.HasValue || !actual.HasValue || estimated.Value == 0)
+            return null;
+
+        return ((decimal)(actual.Value - estimated.Value) / estimated.Value) * 100;
+    }
 }
 

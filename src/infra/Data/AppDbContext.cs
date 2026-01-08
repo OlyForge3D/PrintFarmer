@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
+    public DbSet<JobStateHistory> JobStateHistories => Set<JobStateHistory>();
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
@@ -401,6 +402,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(j => j.QueuedAt);
             _ = b.HasIndex(j => j.Priority);
             _ = b.HasIndex(j => j.AssignedPrinterId);
+        });
+
+        // JobStateHistory Entity Configuration (Phase 3C)
+        _ = modelBuilder.Entity<JobStateHistory>(b =>
+        {
+            _ = b.HasKey(h => h.Id);
+            _ = b.Property(h => h.JobId).IsRequired();
+            _ = b.Property(h => h.FromState).IsRequired().HasMaxLength(50);
+            _ = b.Property(h => h.ToState).IsRequired().HasMaxLength(50);
+            _ = b.Property(h => h.TransitionedAtUtc).IsRequired();
+            _ = b.Property(h => h.DurationInState).HasConversion<long>();
+            _ = b.Property(h => h.Notes).HasMaxLength(500);
+            _ = b.Property(h => h.CreatedAt).IsRequired();
+
+            // Foreign Key
+            _ = b.HasOne(h => h.PrintJob)
+                .WithMany(j => j.StateHistory)
+                .HasForeignKey(h => h.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes
+            _ = b.HasIndex(h => h.JobId);
+            _ = b.HasIndex(h => h.TransitionedAtUtc).IsDescending();
         });
 
         // Printer Capabilities Entity Configuration - REMOVED (merged into Printer entity)

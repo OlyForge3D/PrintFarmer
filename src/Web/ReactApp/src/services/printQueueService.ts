@@ -87,6 +87,60 @@ export interface QueueHistoryEntryDto {
   failureReason?: string;
 }
 
+// ============= TIMING & ANALYTICS TYPES =============
+
+export interface TimelineEventDto {
+  jobId: string;
+  jobName: string;
+  printerName: string;
+  state: string;
+  enteredAtUtc: string;
+  exitedAtUtc?: string;
+  durationSeconds?: number;
+  estimatedDurationSeconds?: number;
+  variancePercent?: number;
+}
+
+export interface StateTransitionDto {
+  fromState: string;
+  toState: string;
+  transitionedAtUtc: string;
+  durationInStateSeconds?: number;
+  notes?: string;
+}
+
+export interface JobStateHistoryDto {
+  jobId: string;
+  jobName: string;
+  transitions: StateTransitionDto[];
+  totalDurationSeconds?: number;
+  estimatedDurationSeconds?: number;
+  variancePercent?: number;
+}
+
+export interface DurationStatsDto {
+  printerId: string;
+  printerName: string;
+  totalJobs: number;
+  averageEstimatedSeconds?: number;
+  averageActualSeconds?: number;
+  accuracyPercent?: number;
+  variancePercent?: number;
+  minActualSeconds?: number;
+  maxActualSeconds?: number;
+}
+
+export interface DurationAnalyticsDto {
+  totalJobs: number;
+  averageEstimatedSeconds?: number;
+  averageActualSeconds?: number;
+  overallAccuracyPercent?: number;
+  overallVariancePercent?: number;
+  byPrinter: Record<string, DurationStatsDto>;
+  topPerformers: DurationStatsDto[];
+  needsAttention: DurationStatsDto[];
+}
+
 export interface EnqueueQueueJobRequest {
   gcodeFileId: string;
   priority?: number;
@@ -450,6 +504,73 @@ class PrintQueueService {
       await this.apiClient.put(`${this.baseUrl}/jobs/${jobId}/notes`, {
         notes: notes || null,
       });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get timeline events with optional filtering
+   */
+  async getTimelineAsync(
+    dateFrom?: Date,
+    dateTo?: Date,
+    printerId?: string,
+    filterStatus?: string,
+    limit: number = 100
+  ): Promise<TimelineEventDto[]> {
+    try {
+      const params = new URLSearchParams();
+      if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
+      if (dateTo) params.append("dateTo", dateTo.toISOString());
+      if (printerId) params.append("printerId", printerId);
+      if (filterStatus) params.append("filterStatus", filterStatus);
+      params.append("limit", limit.toString());
+
+      const response = await this.apiClient.get<TimelineEventDto[]>(
+        `${this.baseUrl}/timeline?${params.toString()}`
+      );
+      return response.data;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get state history for a specific job
+   */
+  async getJobStateHistoryAsync(jobId: string): Promise<JobStateHistoryDto> {
+    try {
+      const response = await this.apiClient.get<JobStateHistoryDto>(
+        `${this.baseUrl}/jobs/${jobId}/state-history`
+      );
+      return response.data;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get duration analytics with optional filtering
+   */
+  async getDurationAnalyticsAsync(
+    printerId?: string,
+    dateFrom?: Date,
+    dateTo?: Date
+  ): Promise<DurationAnalyticsDto> {
+    try {
+      const params = new URLSearchParams();
+      if (printerId) params.append("printerId", printerId);
+      if (dateFrom) params.append("dateFrom", dateFrom.toISOString());
+      if (dateTo) params.append("dateTo", dateTo.toISOString());
+
+      const response = await this.apiClient.get<DurationAnalyticsDto>(
+        `${this.baseUrl}/duration-analytics?${params.toString()}`
+      );
+      return response.data;
     } catch (error) {
       this.handleError(error);
       throw error;

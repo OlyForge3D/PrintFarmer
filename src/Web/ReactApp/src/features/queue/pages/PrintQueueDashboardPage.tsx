@@ -8,6 +8,7 @@ import { QueueJobsTable } from "../components/QueueJobsTable";
 import JobDetailsModal from "../components/JobDetailsModal";
 import ModelFilteredJobsTab from "../components/ModelFilteredJobsTab";
 import QueueHistoryTab from "../components/QueueHistoryTab";
+import TimingTab from "../components/TimingTab";
 import {
   printQueueService,
   QueuedPrintJobWithFileMetaDto,
@@ -193,6 +194,7 @@ export function PrintQueueDashboardPage() {
         <Tabs.List>
           <Tabs.Tab id="all-jobs">All Jobs</Tabs.Tab>
           <Tabs.Tab id="by-model">By Model</Tabs.Tab>
+          <Tabs.Tab id="timing">Timing & Analytics</Tabs.Tab>
           <Tabs.Tab id="history">History</Tabs.Tab>
         </Tabs.List>
 
@@ -249,7 +251,12 @@ export function PrintQueueDashboardPage() {
             />
           </Tabs.Panel>
 
-          {/* Tab 3: History */}
+          {/* Tab 3: Timing & Analytics */}
+          <Tabs.Panel id="timing">
+            <TimingTab />
+          </Tabs.Panel>
+
+          {/* Tab 4: History */}
           <Tabs.Panel id="history">
             <QueueHistoryTab
               onRerun={handleRerunJob}

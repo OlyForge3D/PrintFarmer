@@ -629,4 +629,115 @@ public class PrintQueueController(
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to seed history" });
         }
     }
+
+    // ============= TIMELINE & ANALYTICS ENDPOINTS (Phase 3C) =============
+
+    /// <summary>
+    /// Get timeline events for visualization with optional filtering
+    /// </summary>
+    [HttpGet("timeline")]
+    [ProducesResponseType(typeof(List<TimelineEventDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetTimelineAsync(
+        [FromQuery] DateTime? dateFrom,
+        [FromQuery] DateTime? dateTo,
+        [FromQuery] string? printerId,
+        [FromQuery] string? filterStatus,
+        [FromQuery] int limit = 100,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (limit <= 0 || limit > 1000)
+                return BadRequest(new { error = "Limit must be between 1 and 1000" });
+
+            // Validate date range
+            if (dateFrom.HasValue && dateTo.HasValue && dateFrom > dateTo)
+                return BadRequest(new { error = "dateFrom must be before dateTo" });
+
+            var events = await _printQueueService.GetTimelineAsync(
+                dateFrom, dateTo, printerId, filterStatus, limit, cancellationToken);
+
+            _logger.LogInformation("Retrieved timeline with {Count} events", events.Count());
+            return Ok(events);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving timeline");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve timeline" });
+        }
+    }
+
+    /// <summary>
+    /// Get complete state history for a specific job
+    /// </summary>
+    [HttpGet("jobs/{jobId}/state-history")]
+    [ProducesResponseType(typeof(JobStateHistoryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetJobStateHistoryAsync(
+        [FromRoute] string jobId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                return BadRequest(new { error = "Job ID is required" });
+
+            var history = await _printQueueService.GetJobStateHistoryAsync(jobId, cancellationToken);
+            
+            _logger.LogInformation("Retrieved state history for job {JobId}", jobId);
+            return Ok(history);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid job ID: {JobId}", jobId);
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving state history for job {JobId}", jobId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve state history" });
+        }
+    }
+
+    /// <summary>
+    /// Get duration analytics comparing estimated vs actual durations
+    /// </summary>
+    [HttpGet("duration-analytics")]
+    [ProducesResponseType(typeof(DurationAnalyticsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetDurationAnalyticsAsync(
+        [FromQuery] string? printerId,
+        [FromQuery] DateTime? dateFrom,
+        [FromQuery] DateTime? dateTo,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            // Validate date range
+            if (dateFrom.HasValue && dateTo.HasValue && dateFrom > dateTo)
+                return BadRequest(new { error = "dateFrom must be before dateTo" });
+
+            var analytics = await _printQueueService.GetDurationAnalyticsAsync(
+                printerId, dateFrom, dateTo, cancellationToken);
+
+            _logger.LogInformation("Retrieved duration analytics for {TotalJobs} jobs", analytics.TotalJobs);
+            return Ok(analytics);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving duration analytics");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve analytics" });
+        }
+    }
 }
