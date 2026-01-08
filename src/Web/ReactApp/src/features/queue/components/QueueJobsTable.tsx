@@ -9,6 +9,7 @@ export interface QueueJobsTableProps {
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
   onPriority?: (jobId: string, priority: number) => void;
+  onEdit?: (jobId: string) => void;
 }
 
 export function QueueJobsTable({
@@ -18,6 +19,7 @@ export function QueueJobsTable({
   onResume,
   onCancel,
   onPriority,
+  onEdit,
 }: QueueJobsTableProps) {
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
 
@@ -146,6 +148,13 @@ export function QueueJobsTable({
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
+                    <Button
+                      onClick={() => onEdit?.(jobWrapper.id)}
+                      variant="subtle"
+                      size="sm"
+                    >
+                      Edit
+                    </Button>
                     {status === "Printing" && (
                       <Button
                         onClick={() => onPause?.(jobWrapper.id)}

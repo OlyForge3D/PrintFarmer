@@ -5,6 +5,7 @@ import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal"
 import { Tabs } from "@/common/components/ui/Tabs";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
+import JobDetailsModal from "../components/JobDetailsModal";
 import ModelFilteredJobsTab from "../components/ModelFilteredJobsTab";
 import QueueHistoryTab from "../components/QueueHistoryTab";
 import {
@@ -24,6 +25,8 @@ export function PrintQueueDashboardPage() {
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [jobToCancel, setJobToCancel] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("all-jobs");
+  const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -125,6 +128,21 @@ export function PrintQueueDashboardPage() {
     }
   };
 
+  const handleEditJob = (jobId: string) => {
+    setSelectedJobId(jobId);
+    setIsJobDetailsModalOpen(true);
+  };
+
+  const handleCloseJobDetailsModal = () => {
+    setIsJobDetailsModalOpen(false);
+    setSelectedJobId(null);
+  };
+
+  const handleJobDetailsSaved = () => {
+    handleCloseJobDetailsModal();
+    loadJobs();
+  };
+
   return (
     <PageTemplate
       title="Print Queue Dashboard"
@@ -199,6 +217,7 @@ export function PrintQueueDashboardPage() {
                 onResume={handleResumeJob}
                 onCancel={handleCancelJob}
                 onPriority={handlePriorityChange}
+                onEdit={handleEditJob}
               />
             </div>
           </Tabs.Panel>
@@ -256,6 +275,15 @@ export function PrintQueueDashboardPage() {
           setShowCancelConfirmation(false);
           setJobToCancel(null);
         }}
+      />
+
+      {/* Job Details Modal */}
+      <JobDetailsModal
+        jobId={selectedJobId || ""}
+        isOpen={isJobDetailsModalOpen}
+        onClose={handleCloseJobDetailsModal}
+        onSave={handleJobDetailsSaved}
+        onRefresh={loadJobs}
       />
     </PageTemplate>
   );
