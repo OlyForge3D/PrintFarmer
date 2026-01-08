@@ -122,31 +122,31 @@ export function PrintQueueDashboardPage() {
       {/* Stats Summary */}
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-gray-600 text-sm font-medium">Queued Jobs</div>
-            <div className="text-3xl font-bold text-blue-600">
+          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+            <div className="text-pf-text-secondary text-sm font-medium">Queued Jobs</div>
+            <div className="text-3xl font-bold text-pf-info">
               {stats.totalQueued}
             </div>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-gray-600 text-sm font-medium">
+          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+            <div className="text-pf-text-secondary text-sm font-medium">
               Currently Printing
             </div>
-            <div className="text-3xl font-bold text-green-600">
+            <div className="text-3xl font-bold text-pf-success">
               {stats.totalPrinting}
             </div>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-gray-600 text-sm font-medium">Paused Jobs</div>
-            <div className="text-3xl font-bold text-yellow-600">
+          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+            <div className="text-pf-text-secondary text-sm font-medium">Paused Jobs</div>
+            <div className="text-3xl font-bold text-pf-warning">
               {stats.totalPaused}
             </div>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-gray-600 text-sm font-medium">
+          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
+            <div className="text-pf-text-secondary text-sm font-medium">
               Average Wait Time
             </div>
-            <div className="text-3xl font-bold text-gray-600">
+            <div className="text-3xl font-bold text-pf-text-secondary">
               {Math.round(stats.averageWaitTimeMinutes)}m
             </div>
           </div>
@@ -163,7 +163,7 @@ export function PrintQueueDashboardPage() {
       />
 
       {/* Jobs Table */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
+      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
         <QueueJobsTable
           jobs={jobs}
           isLoading={loading}

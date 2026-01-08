@@ -124,7 +124,7 @@ export interface QueueOperationFailureDto {
 
 class PrintQueueService {
   private apiClient: AxiosInstance;
-  private baseUrl = "/api/printQueue";
+  private baseUrl = "printQueue";
 
   constructor() {
     const apiBaseUrl = getApiBaseUrl();
