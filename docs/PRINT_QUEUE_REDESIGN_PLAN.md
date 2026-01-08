@@ -988,23 +988,45 @@ PrintQueueDashboardPage
 
 ---
 
-## Phase 3: Job Management (🔄 Planned)
+## Phase 3: Job Management (🔄 IN PROGRESS)
+
+**Kickoff**: January 8, 2026  
+**Status**: See [PHASE_3_JOB_MANAGEMENT_PLAN.md](PHASE_3_JOB_MANAGEMENT_PLAN.md) for detailed breakdown
+
+**Quick Summary**:
+Add advanced job manipulation, including job details view, drag-and-drop reordering, pause/resume, notes and tags, plus timing estimates.
 
 **Objectives**:
-- Advanced job manipulation
-- Job prioritization and reordering
-- Pause/resume functionality
-- Job notes and tagging
+- Job details modal with full information and inline editing
+- Drag-and-drop job reordering to change priority
+- Pause/resume printing functionality
+- Add custom notes and searchable tags
+- Display estimated completion times
 
-**Features**:
-- Drag-to-reorder jobs in queue (modify priority)
-- Pause printing job (suspend without cancel)
-- Resume paused job
-- Add notes to jobs (e.g., "watch for layer shift")
-- Tag jobs with printer/project (searchable)
-- Estimated print time per job
+**Five Sub-Features**:
+1. **Job Details Modal** (Feature 3.1) - View/edit all job properties
+2. **Drag-and-Drop Reordering** (Feature 3.2) - Reorder jobs visually
+3. **Pause/Resume Controls** (Feature 3.3) - Suspend without losing progress
+4. **Notes & Tags** (Feature 3.4) - Add metadata for organization
+5. **Timing Estimates** (Feature 3.5) - Predict completion times
 
-**Timeline**: 2-3 weeks
+**New Components** (17 total):
+- JobDetailsModal, JobDetailsSection, JobNotesEditor, JobTagsEditor
+- DraggableJobRow, ReorderableQueueList, ReorderConfirmModal
+- PauseResumeButton, PauseJobModal, ResumeJobButton
+- NotesDisplay, TagsDisplay, TagAutocomplete
+- TimingEstimate, CompletionTimeDisplay, JobPositionBadge
+
+**Timeline**: 2-3 weeks (Target completion: January 22-29, 2026)
+
+**See Also**: [PHASE_3_JOB_MANAGEMENT_PLAN.md](PHASE_3_JOB_MANAGEMENT_PLAN.md) for:
+- Complete feature specifications
+- Component architecture and API design
+- Implementation phases (3A, 3B, 3C, 3D)
+- Testing strategy and coverage targets
+- Database schema changes
+- Risk mitigation strategies
+- Deployment checklist
 
 ---
 
