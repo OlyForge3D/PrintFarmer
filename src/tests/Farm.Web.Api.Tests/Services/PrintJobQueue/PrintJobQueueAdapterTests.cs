@@ -15,7 +15,7 @@ public class PrintJobQueueAdapterTests
     [Fact]
     public async Task EnqueueAsync_DelegatesToJobQueueService_AndReturnsMappedDto()
     {
-        var jobQueueMock = new Mock<Services.Queue.IJobQueueService>();
+        var jobQueueMock = new Mock<IJobQueueService>();
         var loggerMock = new Mock<Farm.Infrastructure.Telemetry.IUnifiedLoggingService>();
 
         var requestDto = new QueuePrintJobDto { GcodeFileId = Guid.NewGuid(), Priority = PrintJobPriority.Normal };

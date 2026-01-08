@@ -363,6 +363,9 @@ builder.Services.AddScoped<Farm.Web.Api.Services.FileManagement.IStoredFileOpera
 // 3MF to STL Conversion Service
 builder.Services.AddScoped<Farm.Infrastructure.Services.Models.I3MfToStlConversionService, Farm.Infrastructure.Services.Models.ThreeMfToStlConversionService>();
 
+// Print Queue Service
+builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintQueueService, Farm.Api.Services.PrintQueue.PrintQueueService>();
+
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 if (isMonolithicDeployment)

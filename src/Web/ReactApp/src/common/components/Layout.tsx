@@ -76,8 +76,8 @@ const navigation: NavigationElement[] = [
     requiredPermission: { resource: 'models', action: 'read' }
   },
   {
-    name: 'Queue',
-    href: '/queue',
+    name: 'Print Queue',
+    href: '/printQueue',
     icon: HistoryIcon,
     requiredPermission: { resource: 'printers', action: 'read' }
   },

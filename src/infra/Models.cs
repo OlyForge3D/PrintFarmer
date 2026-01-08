@@ -80,11 +80,12 @@ public enum MotionType
 /// <param name="ApiKey">API key / token for the backend if required.</param>
 /// <param name="OriginalServerUrl">Original user-entered URL prior to normalization.</param>
 /// <param name="IpAddress">Resolved IP address when known.</param>
-/// <param name="BackendUrl">Calculated backend URL with port (7125 for Moonraker, etc).</param>
-/// <param name="FrontendUrl">Calculated frontend URL (typically port 80 for web UI).</param>
 /// <param name="BackendPort">Backend port number.</param>
 /// <param name="FrontendPort">Frontend port number.</param>
 /// <param name="SpoolInfo">Active spool information (Moonraker + Spoolman integration).</param>
+/// <param name="BackendUrl">Calculated backend URL with port (7125 for Moonraker, etc).</param>
+/// <param name="FrontendUrl">Calculated frontend URL (typically port 80 for web UI).</param>
+/// <param name="Location">Location information (farm location assignment).</param>
 public record PrinterDto(
     Guid Id,
     string Name,

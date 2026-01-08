@@ -30,8 +30,7 @@ import { LogsPage } from '@/features/admin/pages/LogsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
-import { PrinterQueuePage } from '@/features/queue/pages/PrinterQueuePage';
-import QueueOverviewPage from '@/features/queue/pages/QueueOverviewPage';
+import { PrintQueueDashboardPage } from '@/features/queue/pages/PrintQueueDashboardPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
@@ -48,7 +47,7 @@ import { FileHealthDashboard } from '@/features/gcode/components/file-health';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
-import { Route, BrowserRouter as Router, Routes, Navigate, useLocation } from 'react-router-dom';
+import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
@@ -112,16 +111,15 @@ function AuthenticatedAppRoutes() {
         <Route index element={<PrinterDashboard />} />
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
-        <Route path="queue" element={<QueueOverviewPage />} />
+        <Route path="printQueue" element={<PrintQueueDashboardPage />} />
         <Route path="files/*" element={<FilesPage />} />
-        <Route path="queue/printer/:id" element={<PrinterQueuePage />} />
         <Route path="spools" element={<SpoolsPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
         <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><UserManagementPage /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute requiredRole="farm_admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="logs" element={<ProtectedRoute requiredRole="farm_admin"><LogsPage /></ProtectedRoute>} />
-        <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><div /></ProtectedRoute>}>
+        <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route path="slicer/job-status/:id" element={<SlicerJobStatus />} />
           <Route path="printers" element={<PrintersPage />} />
           <Route path="workers" element={<WorkerManagementPage />} />

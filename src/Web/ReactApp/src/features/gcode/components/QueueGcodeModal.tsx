@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Checkbox, Select } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { queueService } from '@/services/queueService';
 import printJobQueueService, { EnqueuePrintJobRequest } from '@/services/printJobQueueService';
 import { GcodeFile } from '@/types/api';
@@ -83,63 +84,72 @@ export const QueueGcodeModal: React.FC<Props> = ({ file, isOpen, onClose }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6">
-        <div className="flex items-start justify-between mb-4">
-          <h3 className="text-lg font-semibold">Queue G-code for Printing</h3>
-          <Button variant="secondary" size="sm" onClick={() => onClose(false)} className="text-gray-500 hover:text-gray-700">✕</Button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <div className="text-sm text-gray-600">File</div>
-            <div className="font-medium">{file.name}</div>
-          </div>
-
-          <div>
-            <Checkbox label="Auto-assign best available printer (recommended)" checked={autoAssign} onChange={(e) => setAutoAssign((e.target as HTMLInputElement).checked)} />
-          </div>
-
-          {!autoAssign && (
-            <div>
-              <div className="text-sm text-gray-600 mb-1">Select Printer</div>
-              <div>
-                <Select
-                  aria-label={`Select printer for ${file.name}`}
-                  value={selectedPrinter ?? ''}
-                  onChange={(e) => setSelectedPrinter((e.target as HTMLSelectElement).value || undefined)}
-                >
-                  <option value="">-- Select printer --</option>
-                  {printers.map(p => {
-                    const compatible = isPrinterCompatible(p);
-                    return (
-                      <option key={p.id} value={p.id} disabled={!p.isAvailable || !compatible}>
-                        {p.name} — {p.model} {p.isAvailable ? '' : '(offline)'}{!compatible ? ' (incompatible)' : ''}
-                      </option>
-                    );
-                  })}
-                </Select>
-              </div>
-            </div>
-          )}
-
-          {error && <div className="text-sm text-red-600">{error}</div>}
-          {(file.extractedNozzleDiameter || file.extractedMaterial) && (
-            <div className="text-sm text-gray-600">
-              <div>Compatibility required for this file:</div>
-              {file.extractedNozzleDiameter && <div>- Nozzle: {file.extractedNozzleDiameter} mm</div>}
-              {file.extractedMaterial && <div>- Material: {file.extractedMaterial}</div>}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-6 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => onClose(false)}>Cancel</Button>
+    <Modal
+      isOpen={isOpen}
+      onClose={() => onClose(false)}
+      title="Queue G-code for Printing"
+      footer={
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => onClose(false)}>
+            Cancel
+          </Button>
           <Button variant="primary" onClick={handleQueue} disabled={loading}>
             {loading ? 'Queueing…' : 'Queue for Print'}
           </Button>
         </div>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <div className="text-sm text-pf-text-secondary mb-1">File</div>
+          <div className="font-medium text-pf-text-primary">{file.name}</div>
+        </div>
+
+        <div>
+          <Checkbox 
+            label="Auto-assign best available printer (recommended)" 
+            checked={autoAssign} 
+            onChange={(e) => setAutoAssign((e.target as HTMLInputElement).checked)} 
+          />
+        </div>
+
+        {!autoAssign && (
+          <div>
+            <div className="text-sm text-pf-text-secondary mb-2">Select Printer</div>
+            <div>
+              <Select
+                aria-label={`Select printer for ${file.name}`}
+                value={selectedPrinter ?? ''}
+                onChange={(e) => setSelectedPrinter((e.target as HTMLSelectElement).value || undefined)}
+              >
+                <option value="">-- Select printer --</option>
+                {printers.map(p => {
+                  const compatible = isPrinterCompatible(p);
+                  return (
+                    <option key={p.id} value={p.id} disabled={!p.isAvailable || !compatible}>
+                      {p.name} — {p.model} {p.isAvailable ? '' : '(offline)'}{!compatible ? ' (incompatible)' : ''}
+                    </option>
+                  );
+                })}
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+            {error}
+          </div>
+        )}
+
+        {(file.extractedNozzleDiameter || file.extractedMaterial) && (
+          <div className="text-sm text-pf-text-secondary bg-pf-bg-2 p-3 rounded-lg">
+            <div className="font-medium mb-1">Compatibility required for this file:</div>
+            {file.extractedNozzleDiameter && <div>- Nozzle: {file.extractedNozzleDiameter} mm</div>}
+            {file.extractedMaterial && <div>- Material: {file.extractedMaterial}</div>}
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 };
