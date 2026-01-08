@@ -7,7 +7,6 @@ import PrinterQueueHistory from '@/features/queue/components/PrinterQueueHistory
 export const PrinterQueuePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [jobs, setJobs] = useState<PrintJob[]>([]);
-  const [history, setHistory] = useState<Array<{ jobId?: string; id?: string; jobName?: string; fileName?: string; completedAt?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

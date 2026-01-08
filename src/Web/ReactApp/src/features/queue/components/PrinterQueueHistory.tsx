@@ -27,7 +27,7 @@ function formatFilament(mm?: number | null) {
 export const PrinterQueueHistory: React.FC<Props> = ({ printerId }) => {
   const { data: printer, refetch: refetchPrinter } = usePrinter(printerId);
 
-  const { data: historyData, isLoading: historyLoading, error: historyError, refetch: refetchHistory } = usePrinterHistory(printerId, { limit: 20, order: 'desc' });
+  const { data: historyData, isLoading: historyLoading, error: historyError } = usePrinterHistory(printerId, { limit: 20, order: 'desc' });
 
   const { data: totalsData, isLoading: totalsLoading } = usePrinterHistoryTotals(printerId);
 

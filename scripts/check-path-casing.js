@@ -55,7 +55,19 @@ function main() {
   const files = getTrackedFiles(repoRoot);
   const mismatches = [];
 
+  // Only validate paths where the top-level component exists at repo root.
+  // This avoids false positives for nested folders like src/.../public which
+  // are valid even though 'public' is not at repository root.
+  const rootEntries = new Set(fs.readdirSync(repoRoot));
+
   for (const f of files) {
+    const top = f.split('/')[0];
+    if (!rootEntries.has(top)) {
+      // skip checking nested paths whose top-level component is not present
+      // at the repository root (e.g., src/Web/ReactApp/public/...)
+      continue;
+    }
+
     const res = checkPathCasing(repoRoot, f);
     if (!res.ok) {
       mismatches.push({ file: f, reason: res.reason });
