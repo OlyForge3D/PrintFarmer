@@ -97,83 +97,91 @@ export function QueueJobsTable({
           </tr>
         </thead>
         <tbody>
-          {jobs.map((job) => (
-            <tr
-              key={job.id}
-              className="border-b border-gray-200 hover:bg-gray-50"
-            >
-              <td className="px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={selectedJobs.has(job.id)}
-                  onChange={() => handleSelectJob(job.id)}
-                  className="rounded border-gray-300"
-                />
-              </td>
-              <td className="px-4 py-3">
-                <div className="font-medium text-gray-900">
-                  {job.fileName || "Unknown File"}
-                </div>
-              </td>
-              <td className="px-4 py-3 text-gray-600">{job.printerName}</td>
-              <td className="px-4 py-3 text-gray-600">{job.model}</td>
-              <td className="px-4 py-3 text-gray-600">{job.material || "-"}</td>
-              <td className="px-4 py-3">
-                <span
-                  className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                    job.status
-                  )}`}
-                >
-                  {job.status}
-                </span>
-              </td>
-              <td className="px-4 py-3">
-                <select
-                  value={job.priority || 0}
-                  onChange={(e) =>
-                    onPriority?.(job.id, parseInt(e.target.value))
-                  }
-                  className="px-2 py-1 border border-gray-300 rounded-md text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="0">Normal</option>
-                  <option value="1">High</option>
-                  <option value="2">Urgent</option>
-                  <option value="-1">Low</option>
-                </select>
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex gap-2">
-                  {job.status === "Printing" && (
-                    <Button
-                      onClick={() => onPause?.(job.id)}
-                      variant="subtle"
-                      size="sm"
-                    >
-                      Pause
-                    </Button>
-                  )}
-                  {job.status === "Paused" && (
-                    <Button
-                      onClick={() => onResume?.(job.id)}
-                      variant="subtle"
-                      size="sm"
-                    >
-                      Resume
-                    </Button>
-                  )}
-                  {job.status !== "Completed" && (
-                    <Button
-                      onClick={() => onCancel?.(job.id)}
-                      variant="danger"
-                      size="sm"
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
+          {jobs.map((jobWrapper) => {
+            const job = jobWrapper.job;
+            const fileName = jobWrapper.fileMetadata?.fileName || "Unknown File";
+            const printerName = jobWrapper.printerMetadata?.name || "Unknown Printer";
+            const model = jobWrapper.printerMetadata?.modelName || "Unknown Model";
+            const material = jobWrapper.fileMetadata?.materialType || "-";
+            const status = job.status || "Unknown";
+            const priority = job.priority || 0;
+
+            return (
+              <tr
+                key={jobWrapper.id}
+                className="border-b border-gray-200 hover:bg-gray-50"
+              >
+                <td className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedJobs.has(jobWrapper.id)}
+                    onChange={() => handleSelectJob(jobWrapper.id)}
+                    className="rounded border-gray-300"
+                  />
+                </td>
+                <td className="px-4 py-3">
+                  <div className="font-medium text-gray-900">{fileName}</div>
+                </td>
+                <td className="px-4 py-3 text-gray-600">{printerName}</td>
+                <td className="px-4 py-3 text-gray-600">{model}</td>
+                <td className="px-4 py-3 text-gray-600">{material}</td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                      status
+                    )}`}
+                  >
+                    {status}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <select
+                    value={priority}
+                    onChange={(e) =>
+                      onPriority?.(jobWrapper.id, parseInt(e.target.value))
+                    }
+                    className="px-2 py-1 border border-gray-300 rounded-md text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="0">Normal</option>
+                    <option value="1">High</option>
+                    <option value="2">Urgent</option>
+                    <option value="-1">Low</option>
+                  </select>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-2">
+                    {status === "Printing" && (
+                      <Button
+                        onClick={() => onPause?.(jobWrapper.id)}
+                        variant="subtle"
+                        size="sm"
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {status === "Paused" && (
+                      <Button
+                        onClick={() => onResume?.(jobWrapper.id)}
+                        variant="subtle"
+                        size="sm"
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {status !== "Completed" && (
+                      <Button
+                        onClick={() => onCancel?.(jobWrapper.id)}
+                        variant="danger"
+                        size="sm"
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
