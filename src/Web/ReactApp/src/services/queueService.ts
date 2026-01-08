@@ -46,7 +46,7 @@ class QueueService {
   private baseUrl = '/api';
 
   async getQueueOverview(): Promise<QueueOverview[]> {
-    const response = await fetch(`${this.baseUrl}/queue/overview`);
+    const response = await fetch(`${this.baseUrl}/job-queue`);
     if (!response.ok) {
       throw new Error(`Failed to fetch queue overview: ${response.statusText}`);
     }
@@ -54,7 +54,7 @@ class QueueService {
   }
 
   async getPrinterQueue(printerId: string): Promise<PrintJob[]> {
-    const response = await fetch(`${this.baseUrl}/queue/printer/${printerId}`);
+    const response = await fetch(`${this.baseUrl}/job-queue/printer/${printerId}`);
     if (!response.ok) {
       throw new Error(`Failed to fetch printer queue: ${response.statusText}`);
     }
@@ -62,7 +62,7 @@ class QueueService {
   }
 
   async addJobToQueue(request: AddJobRequest): Promise<PrintJob> {
-    const response = await fetch(`${this.baseUrl}/queue/jobs`, {
+    const response = await fetch(`${this.baseUrl}/job-queue`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -14,6 +14,8 @@ import {
 import { Button } from '@/common/components/ui';
 import { GcodeFile } from '@/types/api';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
+import { useState } from 'react';
+import { QueueGcodeModal } from './QueueGcodeModal';
 
 interface GcodeFileCardProps {
   file: GcodeFile;
@@ -43,7 +45,9 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
   onDelete,
   isDeleting = false
 }) => {
+  const [isQueueOpen, setIsQueueOpen] = useState(false);
   return (
+    <>
     <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group min-h-0">
       {/* Thumbnail */}
       <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden flex-shrink-0">
@@ -201,6 +205,16 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <ArrowDownTrayIcon className="w-4 h-4" />
               </Button>
               <Button
+                onClick={() => setIsQueueOpen(true)}
+                disabled={isDeleting}
+                variant="primary"
+                size="sm"
+                className="flex-1"
+                title="Queue for Print"
+              >
+                Queue
+              </Button>
+              <Button
                 onClick={() => onDelete?.()}
                 disabled={isDeleting}
                 variant="danger"
@@ -215,5 +229,9 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
         </div>
       </div>
     </div>
+    {isQueueOpen && (
+      <QueueGcodeModal file={file} isOpen={isQueueOpen} onClose={(added) => { setIsQueueOpen(false); if (added) { /* maybe show toast later */ } }} />
+    )}
+    </>
   );
 };

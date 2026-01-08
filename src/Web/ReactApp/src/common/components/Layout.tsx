@@ -75,6 +75,12 @@ const navigation: NavigationElement[] = [
     icon: BoxIcon,
     requiredPermission: { resource: 'models', action: 'read' }
   },
+  {
+    name: 'Queue',
+    href: '/queue',
+    icon: HistoryIcon,
+    requiredPermission: { resource: 'printers', action: 'read' }
+  },
   { 
     name: 'Spools', 
     href: '/spools', 

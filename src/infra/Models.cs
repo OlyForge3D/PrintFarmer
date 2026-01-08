@@ -115,7 +115,7 @@ public record PrinterDto(
     string? BackendUrl = null,
     string? FrontendUrl = null,
     LocationSummaryDto? Location = null);
-    
+
 
 // Basic printer info without live status (for fast loading)
 /// <summary>

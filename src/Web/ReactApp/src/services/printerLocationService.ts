@@ -42,7 +42,17 @@ class PrinterLocationService {
    * Get all printers (used for drag and drop assignment)
    */
   async getAllPrinters(): Promise<Printer[]> {
-    const response = await this.api.get<any[]>('/printers');
+    interface ServerPrinterDto {
+      id: string;
+      name: string;
+      backend: number;
+      backendUrl?: string;
+      frontendUrl?: string;
+      originalServerUrl?: string;
+      location?: { id?: string } | null;
+    }
+
+    const response = await this.api.get<ServerPrinterDto[]>('/printers');
     const raw = Array.isArray(response.data) ? response.data : [];
     // Normalize server-side DTO (Location object) to frontend shape (locationId)
     return raw.map((r) => ({
@@ -59,7 +69,7 @@ class PrinterLocationService {
    * Assign a printer to a location
    */
   async assignPrinterToLocation(printerId: string, locationId: string): Promise<Printer> {
-    const resp = await this.api.post<any>(`/printers/${printerId}/location`, { locationId });
+    const resp = await this.api.post<ServerPrinterDto>(`/printers/${printerId}/location`, { locationId });
     const r = resp.data;
     return {
       id: r.id,
@@ -74,7 +84,7 @@ class PrinterLocationService {
    * Remove a printer from its location (unassign)
    */
   async unassignPrinterFromLocation(printerId: string): Promise<Printer> {
-    const resp = await this.api.delete<any>(`/printers/${printerId}/location`);
+    const resp = await this.api.delete<ServerPrinterDto>(`/printers/${printerId}/location`);
     const r = resp.data;
     return {
       id: r.id,

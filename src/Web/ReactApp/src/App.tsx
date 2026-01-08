@@ -30,6 +30,8 @@ import { LogsPage } from '@/features/admin/pages/LogsPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
+import { PrinterQueuePage } from '@/features/queue/pages/PrinterQueuePage';
+import QueueOverviewPage from '@/features/queue/pages/QueueOverviewPage';
 import { LoginPage } from '@/features/auth/pages/LoginPage';
 import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage';
@@ -110,7 +112,9 @@ function AuthenticatedAppRoutes() {
         <Route index element={<PrinterDashboard />} />
         <Route path="dashboard" element={<PrinterDashboard />} />
         <Route path="printers" element={<PrintersPage />} />
+        <Route path="queue" element={<QueueOverviewPage />} />
         <Route path="files/*" element={<FilesPage />} />
+        <Route path="queue/printer/:id" element={<PrinterQueuePage />} />
         <Route path="spools" element={<SpoolsPage />} />
         <Route path="locations" element={<ProtectedRoute requiredRole="farm_admin"><LocationManagementAdminPage /></ProtectedRoute>} />
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin"><CatalogPage /></ProtectedRoute>} />
