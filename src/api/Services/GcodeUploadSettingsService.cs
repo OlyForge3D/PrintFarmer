@@ -70,11 +70,10 @@ public class InMemoryGcodeUploadQuotaService(long dailyLimitBytes = 2L * 1024 * 
                 continue;
             }
             long newTotal = current.bytes + bytes;
-            bool isFirstForDay = current.bytes == 0;
             if (_usage.TryUpdate(key, (today, newTotal), current))
             {
                 usedBytes = newTotal;
-                return isFirstForDay && newTotal <= _dailyLimitBytes;
+                return newTotal <= _dailyLimitBytes;
             }
         }
     }
