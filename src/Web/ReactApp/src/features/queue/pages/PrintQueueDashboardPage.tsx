@@ -5,6 +5,7 @@ import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal"
 import { Tabs } from "@/common/components/ui/Tabs";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";
+import ModelFilteredJobsTab from "../components/ModelFilteredJobsTab";
 import {
   printQueueService,
   QueuedPrintJobWithFileMetaDto,
@@ -188,13 +189,31 @@ export function PrintQueueDashboardPage() {
             </div>
           </Tabs.Panel>
 
-          {/* Tab 2: By Model (Placeholder) */}
+          {/* Tab 2: By Model */}
           <Tabs.Panel id="by-model">
-            <div className="py-12 text-center">
-              <div className="text-pf-text-secondary text-lg">
-                Coming soon: View jobs grouped by printer model
-              </div>
-            </div>
+            <ModelFilteredJobsTab
+              onViewAllJobs={(modelName) => {
+                setModelFilter(modelName);
+                setActiveTab("all-jobs");
+              }}
+              onJobAction={async (jobId, action) => {
+                switch (action) {
+                  case "pause":
+                    await handlePauseJob(jobId);
+                    break;
+                  case "resume":
+                    await handleResumeJob(jobId);
+                    break;
+                  case "cancel":
+                    await handleCancelJob(jobId);
+                    break;
+                  case "priority":
+                    // Priority change would require a UI dialog to select priority
+                    // For now, we'll skip this in the model cards
+                    break;
+                }
+              }}
+            />
           </Tabs.Panel>
 
           {/* Tab 3: History (Placeholder) */}
