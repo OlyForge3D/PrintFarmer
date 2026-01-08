@@ -1,5 +1,5 @@
 import React from 'react';
-import { usePrinters } from '@/features/printers/hooks/usePrinters';
+import { usePrinters } from '@/common/hooks/useApi';
 import { Link } from 'react-router-dom';
 
 export function QueueOverviewPage() {
