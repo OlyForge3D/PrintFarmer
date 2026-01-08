@@ -165,7 +165,7 @@ public class GcodeUploadSettingsTests
         bool result = quota.TryAddUsage(userId, 600_000, out long used, out long limit);
 
         // Assert
-        Assert.False(result); // 300k + 600k = 900k, but we're at 600k on second call
+        Assert.True(result); // 300k + 600k = 900k, which is under 1MB limit
         Assert.Equal(900_000, used);
         Assert.Equal(1_000_000, limit);
     }

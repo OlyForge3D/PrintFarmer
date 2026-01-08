@@ -60,7 +60,7 @@ export function QueueJobsTable({
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center py-8">
+      <div className="flex justify-center items-center py-12 bg-pf-bg-1 border border-pf-border rounded-lg">
         <div className="text-pf-text-secondary">Loading jobs...</div>
       </div>
     );
@@ -68,7 +68,7 @@ export function QueueJobsTable({
 
   if (jobs.length === 0) {
     return (
-      <div className="flex justify-center items-center py-8">
+      <div className="flex justify-center items-center py-12 bg-pf-bg-1 border border-pf-border rounded-lg">
         <div className="text-pf-text-secondary">No jobs in queue</div>
       </div>
     );
