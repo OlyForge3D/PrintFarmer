@@ -721,4 +721,151 @@ public class PrintQueueService(
             IsOnline = true // TODO: Get actual online status
         };
     }
+
+    // ============= JOB DETAILS OPERATIONS (Phase 3) =============
+
+    /// <summary>
+    /// Get detailed information about a specific job
+    /// </summary>
+    public async Task<QueuedPrintJobDto?> GetJobByIdAsync(
+        string jobId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                return null;
+
+            var job = await _dbContext.PrintJobs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+
+            return job != null ? MapToQueuedPrintJobDto(job) : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving job details for {JobId}", jobId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Update job details (name, priority, notes, tags, material, nozzle)
+    /// </summary>
+    public async Task<QueuedPrintJobDto?> UpdateJobDetailsAsync(
+        string jobId,
+        UpdateJobDetailsRequest updates,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                throw new ArgumentException("Job ID is required", nameof(jobId));
+
+            if (updates == null)
+                throw new ArgumentNullException(nameof(updates), "Update data is required");
+
+            var job = await _dbContext.PrintJobs
+                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+
+            if (job == null)
+                return null;
+
+            // Validate and update fields
+            if (!string.IsNullOrEmpty(updates.Name))
+            {
+                if (updates.Name.Length > 255)
+                    throw new ArgumentException("Job name must be 255 characters or less", nameof(updates.Name));
+                job.Name = updates.Name;
+            }
+
+            if (updates.Priority.HasValue)
+            {
+                if (updates.Priority < 0 || updates.Priority > 100)
+                    throw new ArgumentException("Priority must be between 0 and 100", nameof(updates.Priority));
+                job.Priority = updates.Priority.Value;
+            }
+
+            if (updates.Notes != null)
+            {
+                if (updates.Notes.Length > 500)
+                    throw new ArgumentException("Notes must be 500 characters or less", nameof(updates.Notes));
+                job.Notes = updates.Notes;
+            }
+
+            if (updates.RequiredMaterialType != null)
+            {
+                job.RequiredMaterialType = updates.RequiredMaterialType;
+            }
+
+            if (updates.RequiredNozzleDiameter.HasValue)
+            {
+                job.RequiredNozzleDiameter = updates.RequiredNozzleDiameter;
+            }
+
+            // Handle tags (future phase enhancement)
+            if (updates.Tags != null)
+            {
+                // TODO: Implement tag support in Phase 3D
+                _logger.LogDebug("Tags update requested but not yet implemented for job {JobId}", jobId);
+            }
+
+            job.UpdatedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
+                jobId, job.Name, job.Priority, job.Notes?.Length ?? 0);
+
+            return MapToQueuedPrintJobDto(job);
+        }
+        catch (ArgumentException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating job details for {JobId}", jobId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Update job notes
+    /// </summary>
+    public async Task<bool> UpdateJobNotesAsync(
+        string jobId,
+        string? notes,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                throw new ArgumentException("Job ID is required", nameof(jobId));
+
+            if (notes != null && notes.Length > 500)
+                throw new ArgumentException("Notes must be 500 characters or less", nameof(notes));
+
+            var job = await _dbContext.PrintJobs
+                .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
+
+            if (job == null)
+                return false;
+
+            job.Notes = notes;
+            job.UpdatedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Notes updated for job {JobId}", jobId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating notes for job {JobId}", jobId);
+            throw;
+        }
+    }
 }
+

@@ -582,6 +582,7 @@ public class PrintJob
     public string? FailureReason { get; set; }
     public Guid[]? PreferredPrinterIds { get; set; } // JSON array of preferred printer IDs
     public Guid[]? ExcludedPrinterIds { get; set; } // JSON array of excluded printer IDs
+    public string? Notes { get; set; } // Job notes/comments (max 500 characters)
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime QueuedAt { get; set; }

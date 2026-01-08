@@ -135,6 +135,34 @@ public interface IPrintQueueService
         CancellationToken cancellationToken = default
     );
 
+    // ============= JOB DETAILS OPERATIONS (Phase 3) =============
+
+    /// <summary>
+    /// Get detailed information about a specific job
+    /// </summary>
+    Task<QueuedPrintJobDto?> GetJobByIdAsync(
+        string jobId,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// Update job details (name, priority, notes, tags, material, nozzle)
+    /// </summary>
+    Task<QueuedPrintJobDto?> UpdateJobDetailsAsync(
+        string jobId,
+        UpdateJobDetailsRequest updates,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// Update job notes
+    /// </summary>
+    Task<bool> UpdateJobNotesAsync(
+        string jobId,
+        string? notes,
+        CancellationToken cancellationToken = default
+    );
+
     // ============= HISTORY OPERATIONS (Phase 2) =============
     
     /// <summary>

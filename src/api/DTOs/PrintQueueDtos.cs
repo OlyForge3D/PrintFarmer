@@ -214,3 +214,25 @@ public class QueueHistoryEntryDto
     public int ActualPrintTimeSeconds { get; set; }
     public string? FailureReason { get; set; }
 }
+// ============= REQUEST DTOs (Phase 3) =============
+
+/// <summary>
+/// Request to update job details (name, priority, notes, tags, etc.)
+/// </summary>
+public class UpdateJobDetailsRequest
+{
+    public string? Name { get; set; }
+    public int? Priority { get; set; }
+    public string? Notes { get; set; }
+    public string[]? Tags { get; set; }
+    public string? RequiredMaterialType { get; set; }
+    public decimal? RequiredNozzleDiameter { get; set; }
+}
+
+/// <summary>
+/// Request to update job notes
+/// </summary>
+public class UpdateJobNotesRequest
+{
+    public string? Notes { get; set; }
+}

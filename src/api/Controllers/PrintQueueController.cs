@@ -481,6 +481,127 @@ public class PrintQueueController(
     }
 
     /// <summary>
+    /// Get detailed information about a specific job including notes and tags
+    /// </summary>
+    /// <param name="jobId">The ID of the job to retrieve</param>
+    [HttpGet("jobs/{jobId}")]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetJobDetailsAsync(
+        [FromRoute] string jobId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                return BadRequest(new { error = "Job ID is required" });
+
+            var job = await _printQueueService.GetJobByIdAsync(jobId, cancellationToken);
+
+            if (job == null)
+                return NotFound(new { error = $"Job '{jobId}' not found" });
+
+            return Ok(job);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving job details for {JobId}", jobId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve job details" });
+        }
+    }
+
+    /// <summary>
+    /// Update job details including notes and priority
+    /// </summary>
+    /// <param name="jobId">The ID of the job to update</param>
+    /// <param name="updates">The job fields to update</param>
+    [HttpPut("jobs/{jobId}")]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> UpdateJobDetailsAsync(
+        [FromRoute] string jobId,
+        [FromBody] UpdateJobDetailsRequest updates,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                return BadRequest(new { error = "Job ID is required" });
+
+            if (updates == null)
+                return BadRequest(new { error = "Update data is required" });
+
+            var updatedJob = await _printQueueService.UpdateJobDetailsAsync(jobId, updates, cancellationToken);
+
+            if (updatedJob == null)
+                return NotFound(new { error = $"Job '{jobId}' not found" });
+
+            _logger.LogInformation("Job {JobId} details updated", jobId);
+            return Ok(updatedJob);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid update request for job {JobId}", jobId);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating job details for {JobId}", jobId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update job details" });
+        }
+    }
+
+    /// <summary>
+    /// Update job notes
+    /// </summary>
+    /// <param name="jobId">The ID of the job</param>
+    /// <param name="request">The notes update request</param>
+    [HttpPut("jobs/{jobId}/notes")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> UpdateJobNotesAsync(
+        [FromRoute] string jobId,
+        [FromBody] UpdateJobNotesRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+                return BadRequest(new { error = "Job ID is required" });
+
+            if (request == null)
+                return BadRequest(new { error = "Notes request is required" });
+
+            if (request.Notes?.Length > 500)
+                return BadRequest(new { error = "Notes must be 500 characters or less" });
+
+            var success = await _printQueueService.UpdateJobNotesAsync(jobId, request.Notes, cancellationToken);
+
+            if (!success)
+                return NotFound(new { error = $"Job '{jobId}' not found" });
+
+            _logger.LogInformation("Notes updated for job {JobId}", jobId);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating notes for job {JobId}", jobId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update notes" });
+        }
+    }
+
+    /// <summary>
     /// Seed queue history from printer APIs (Phase 2)
     /// </summary>
     [HttpPost("history/seed")]

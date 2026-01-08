@@ -392,6 +392,70 @@ class PrintQueueService {
     }
   }
 
+  // ============= JOB DETAILS OPERATIONS (Phase 3) =============
+
+  /**
+   * Get detailed information about a specific job
+   */
+  async getJobDetailsAsync(jobId: string): Promise<QueuedPrintJobDto> {
+    try {
+      const response = await this.apiClient.get<QueuedPrintJobDto>(
+        `${this.baseUrl}/jobs/${jobId}`
+      );
+      return response.data;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update job details (name, priority, notes, tags, material, nozzle)
+   */
+  async updateJobDetailsAsync(
+    jobId: string,
+    updates: {
+      name?: string;
+      priority?: number;
+      notes?: string;
+      tags?: string[];
+      requiredMaterialType?: string;
+      requiredNozzleDiameter?: number;
+    }
+  ): Promise<QueuedPrintJobDto> {
+    try {
+      const response = await this.apiClient.put<QueuedPrintJobDto>(
+        `${this.baseUrl}/jobs/${jobId}`,
+        {
+          name: updates.name,
+          priority: updates.priority,
+          notes: updates.notes,
+          tags: updates.tags,
+          requiredMaterialType: updates.requiredMaterialType,
+          requiredNozzleDiameter: updates.requiredNozzleDiameter,
+        }
+      );
+      return response.data;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update job notes only
+   */
+  async updateJobNotesAsync(jobId: string, notes: string): Promise<void> {
+    try {
+      await this.apiClient.put(`${this.baseUrl}/jobs/${jobId}/notes`, {
+        notes: notes || null,
+      });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
   private handleError(error: unknown): void {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
