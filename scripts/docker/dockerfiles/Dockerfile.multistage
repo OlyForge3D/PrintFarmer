@@ -354,30 +354,107 @@ ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 ############################################################
 # React Frontend Build Stage
 ############################################################
-FROM node:${NODE_TAG} AS frontend-build
-WORKDIR /app
-
 # Accept build arguments for frontend configuration
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 
-# Copy Slicer workspace packages first (needed for vite alias resolution)
-# The vite alias resolves to /Slicers in Docker builds
-COPY src/Slicers /Slicers
+FROM node:${NODE_TAG} AS frontend-build
+WORKDIR /app
 
-# Copy package files
-COPY src/Web/ReactApp/package*.json ./
+# Copy workspace package.json files FIRST (root + workspaces) for reproducible installs
+# This is a monorepo using npm workspaces - MUST install from root to resolve all workspace deps together
+COPY package.json package-lock.json ./
+COPY src/Web/ReactApp/package.json ./src/Web/ReactApp/
+COPY src/Slicers/ ./src/Slicers/
 
-# Install dependencies faster with offline caching
-RUN npm install --prefer-offline --no-audit --legacy-peer-deps 2>&1 | tail -10
+# Create symlink for Vite path alias resolution (vite.config.ts checks /Slicers/... path in Docker)
+# Maps /Slicers -> /app/src/Slicers for absolute path resolution in Vite builds
+RUN ln -s /app/src/Slicers /Slicers
+
+# Install npm dependencies with proper error handling and validation
+# Critical: devDependencies (including vite) MUST be installed for the build to succeed
+RUN set -eux; \
+    echo "[frontend-build] Node.js version:"; node --version; \
+    echo "[frontend-build] npm version:"; npm --version; \
+    \
+    # Check if package-lock.json exists
+    if [ -f package-lock.json ]; then \
+        echo "[frontend-build] package-lock.json found - using npm ci"; \
+        npm ci --prefer-offline --no-audit --legacy-peer-deps 2>&1 | tee /tmp/npm-install.log; \
+    else \
+        echo "[frontend-build] package-lock.json NOT found - using npm install"; \
+        npm install --prefer-offline --no-audit --legacy-peer-deps 2>&1 | tee /tmp/npm-install.log; \
+    fi; \
+    npm_status=$?; \
+    \
+    # Check installation success
+    if [ "$npm_status" -ne 0 ]; then \
+        echo "[frontend-build] ERROR: npm install/ci failed with status $npm_status"; \
+        echo "[frontend-build] Last 50 lines of npm log:"; \
+        tail -n 50 /tmp/npm-install.log; \
+        exit 1; \
+    fi; \
+    \
+    # Verify critical build tools are installed
+    if [ ! -f node_modules/.bin/vite ]; then \
+        echo "[frontend-build] ERROR: vite not found in node_modules/.bin"; \
+        echo "[frontend-build] Contents of node_modules/.bin:"; \
+        ls -la node_modules/.bin 2>&1 | head -20; \
+        exit 1; \
+    fi; \
+    \
+    echo "[frontend-build] ✓ Dependencies installed successfully"; \
+    echo "[frontend-build] ✓ vite available at: $(which vite)"; \
+    npm ls --depth=0 2>&1 | head -25
 
 # Copy source code and build with environment variables
 COPY src/Web/ReactApp/ ./
-RUN VITE_API_BASE_URL=${VITE_API_BASE_URL} \
-    VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL} \
-    VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL} \
-    npm run build
+ARG VITE_API_BASE_URL=/api
+ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
+ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+RUN set -eux; \
+    echo "[frontend-build] Starting React build with Vite..."; \
+    echo "[frontend-build] VITE_API_BASE_URL=${VITE_API_BASE_URL}"; \
+    echo "[frontend-build] VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL}"; \
+    echo "[frontend-build] VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}"; \
+    echo "[frontend-build] Current directory: $(pwd)"; \
+    echo "[frontend-build] Files in current directory:"; ls -la | head -20; \
+    \
+    # Pre-build validation
+    if [ ! -f node_modules/.bin/vite ]; then \
+        echo "[frontend-build] CRITICAL ERROR: vite executable not found!"; \
+        echo "[frontend-build] node_modules/.bin contents:"; \
+        ls -la node_modules/.bin 2>&1 | head -20; \
+        exit 127; \
+    fi; \
+    \
+    # Export build environment variables
+    export VITE_API_BASE_URL="${VITE_API_BASE_URL}"; \
+    export VITE_SIGNALR_PRINTERS_URL="${VITE_SIGNALR_PRINTERS_URL}"; \
+    export VITE_SIGNALR_HARVEST_URL="${VITE_SIGNALR_HARVEST_URL}"; \
+    \
+    # Run the build with verbose error output
+    echo "[frontend-build] Executing: npm run build"; \
+    npm run build 2>&1; \
+    build_status=$?; \
+    \
+    if [ "$build_status" -ne 0 ]; then \
+        echo "[frontend-build] ERROR: Build failed with status $build_status"; \
+        exit $build_status; \
+    fi; \
+    \
+    # Verify build output
+    if [ ! -d dist ] || [ ! -f dist/index.html ]; then \
+        echo "[frontend-build] ERROR: dist directory or index.html not found!"; \
+        echo "[frontend-build] Current directory contents:"; \
+        ls -la; \
+        exit 1; \
+    fi; \
+    \
+    echo "[frontend-build] ✓ Build completed successfully"; \
+    echo "[frontend-build] dist/ contents:"; \
+    ls -lah dist/
 
 ############################################################
 # React Frontend Runtime Container
