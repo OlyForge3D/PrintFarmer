@@ -194,6 +194,406 @@ namespace Farm.Web.Api.Services.Tags
             }
         }
 
+        #region Phase 3D: Advanced Tag Management
+
+        /// <summary>
+        /// Searches for tags by partial name match with usage counts (Phase 3D).
+        /// </summary>
+        /// <param name="query">Search query to match against tag names (case-insensitive)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>List of matching tags with usage counts, sorted by name</returns>
+        public async Task<IReadOnlyList<TagSuggestionDto>> SearchTagsAsync(string query, CancellationToken ct)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(query))
+                {
+                    return [];
+                }
+
+                string lowerQuery = query.ToLowerInvariant().Trim();
+
+                // Get all tags and their usage counts
+                IReadOnlyList<Model3DTag> allTags = await _tagRepository.ListAllAsync(ct);
+
+                // Filter and enrich with usage counts
+                List<TagSuggestionDto> suggestions = new();
+                foreach (var tag in allTags)
+                {
+                    if (tag.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Count how many models use this tag
+                        IReadOnlyList<Model3DTagMapping> mappings = 
+                            await _mappingRepository.GetByTagIdAsync(tag.Id, ct);
+                        int usageCount = mappings.Count;
+
+                        suggestions.Add(new TagSuggestionDto
+                        {
+                            Id = tag.Id,
+                            Name = tag.Name,
+                            Color = tag.Color,
+                            UsageCount = usageCount,
+                            IsPopular = false // Will be determined in GetPopularTagsAsync
+                        });
+                    }
+                }
+
+                return suggestions.OrderBy(s => s.Name).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to search tags for query '{query}': {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Gets the most popular tags by usage count (Phase 3D).
+        /// </summary>
+        /// <param name="count">Maximum number of tags to return</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Top N most-used tags sorted by usage descending</returns>
+        public async Task<IReadOnlyList<TagSuggestionDto>> GetPopularTagsAsync(int count, CancellationToken ct)
+        {
+            try
+            {
+                if (count <= 0)
+                {
+                    return [];
+                }
+
+                IReadOnlyList<Model3DTag> allTags = await _tagRepository.ListAllAsync(ct);
+
+                // Get usage counts for all tags
+                List<(Model3DTag tag, int count)> tagsWithCounts = new();
+                foreach (var tag in allTags)
+                {
+                    IReadOnlyList<Model3DTagMapping> mappings = 
+                        await _mappingRepository.GetByTagIdAsync(tag.Id, ct);
+                    if (mappings.Count > 0)
+                    {
+                        tagsWithCounts.Add((tag, mappings.Count));
+                    }
+                }
+
+                // Sort by usage descending and take top N
+                var popularTags = tagsWithCounts
+                    .OrderByDescending(t => t.count)
+                    .Take(count)
+                    .Select(t => new TagSuggestionDto
+                    {
+                        Id = t.tag.Id,
+                        Name = t.tag.Name,
+                        Color = t.tag.Color,
+                        UsageCount = t.count,
+                        IsPopular = true
+                    })
+                    .ToList();
+
+                return popularTags;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to get popular tags (count={count}): {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Gets comprehensive tag usage analytics for dashboard (Phase 3D).
+        /// </summary>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Analytics DTO with usage statistics, top tags, and unused tags</returns>
+        public async Task<TagAnalyticsDto> GetAnalyticsAsync(CancellationToken ct)
+        {
+            try
+            {
+                IReadOnlyList<Model3DTag> allTags = await _tagRepository.ListAllAsync(ct);
+                int totalTags = allTags.Count;
+
+                // Calculate statistics
+                List<TagStatDto> tagStats = new();
+                int totalAssociations = 0;
+                int tagsInUse = 0;
+
+                foreach (var tag in allTags)
+                {
+                    IReadOnlyList<Model3DTagMapping> mappings = 
+                        await _mappingRepository.GetByTagIdAsync(tag.Id, ct);
+                    int modelCount = mappings.Count;
+
+                    if (modelCount > 0)
+                    {
+                        tagsInUse++;
+                    }
+
+                    totalAssociations += modelCount;
+
+                    tagStats.Add(new TagStatDto
+                    {
+                        Id = tag.Id,
+                        Name = tag.Name,
+                        ModelCount = modelCount,
+                        CreatedAt = tag.CreatedAt,
+                        LastUsedAt = mappings.Count > 0 
+                            ? mappings.Max(m => m.TaggedAt) 
+                            : null
+                    });
+                }
+
+                // Calculate averages
+                double averageTagsPerModel = totalTags > 0 
+                    ? (double)totalAssociations / tagsInUse 
+                    : 0;
+
+                // Get top 10 tags
+                var topTags = tagStats
+                    .Where(t => t.ModelCount > 0)
+                    .OrderByDescending(t => t.ModelCount)
+                    .Take(10)
+                    .ToList();
+
+                // Get unused tags for cleanup suggestions
+                var unusedTags = tagStats
+                    .Where(t => t.ModelCount == 0)
+                    .OrderByDescending(t => t.CreatedAt) // Newest first for cleanup priority
+                    .ToList();
+
+                return new TagAnalyticsDto
+                {
+                    TotalTags = totalTags,
+                    TagsInUse = tagsInUse,
+                    UnusedTags = totalTags - tagsInUse,
+                    TotalModelTagAssociations = totalAssociations,
+                    AverageTagsPerModel = averageTagsPerModel,
+                    TopTags = topTags,
+                    UnusedTagsList = unusedTags
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to get tag analytics: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Merges a source tag into a target tag, consolidating duplicates (Phase 3D).
+        /// </summary>
+        /// <param name="sourceTagId">Tag to merge FROM (will be deleted)</param>
+        /// <param name="targetTagId">Tag to merge INTO (will retain models)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <exception cref="KeyNotFoundException">Thrown if either tag not found</exception>
+        /// <remarks>
+        /// Reassigns all models from source tag to target tag, removes duplicates,
+        /// then deletes the source tag.
+        /// </remarks>
+        public async Task MergeTagsAsync(Guid sourceTagId, Guid targetTagId, CancellationToken ct)
+        {
+            try
+            {
+                if (sourceTagId == targetTagId)
+                {
+                    throw new ArgumentException("Source and target tags cannot be the same", nameof(sourceTagId));
+                }
+
+                Model3DTag? sourceTag = await _tagRepository.GetByIdAsync(sourceTagId, ct);
+                if (sourceTag == null)
+                {
+                    throw new KeyNotFoundException($"Source tag {sourceTagId} not found");
+                }
+
+                Model3DTag? targetTag = await _tagRepository.GetByIdAsync(targetTagId, ct);
+                if (targetTag == null)
+                {
+                    throw new KeyNotFoundException($"Target tag {targetTagId} not found");
+                }
+
+                _logger.LogInformation($"Merging tag '{sourceTag.Name}' into '{targetTag.Name}'");
+
+                // Get all models using source tag
+                IReadOnlyList<Model3DTagMapping> sourceMappings = 
+                    await _mappingRepository.GetByTagIdAsync(sourceTagId, ct);
+
+                // Get all models using target tag for duplicate detection
+                IReadOnlyList<Model3DTagMapping> targetMappings = 
+                    await _mappingRepository.GetByTagIdAsync(targetTagId, ct);
+
+                HashSet<Guid> modelsInTarget = new(targetMappings.Select(m => m.Model3DId));
+
+                // Reassign models from source to target (skip duplicates)
+                foreach (var sourceMapping in sourceMappings)
+                {
+                    if (!modelsInTarget.Contains(sourceMapping.Model3DId))
+                    {
+                        // Create new mapping for target tag
+                        Model3DTagMapping newMapping = new Model3DTagMapping
+                        {
+                            Id = Guid.NewGuid(),
+                            Model3DId = sourceMapping.Model3DId,
+                            TagId = targetTagId,
+                            TaggedAt = DateTime.UtcNow
+                        };
+                        await _mappingRepository.AddAsync(newMapping, ct);
+                    }
+                }
+
+                // Remove all source mappings
+                await _mappingRepository.RemoveByTagIdAsync(sourceTagId, ct);
+
+                // Delete source tag
+                await _tagRepository.RemoveAsync(sourceTag, ct);
+
+                // Save all changes
+                await _tagRepository.SaveChangesAsync(ct);
+
+                _logger.LogInformation($"Successfully merged tag '{sourceTag.Name}' into '{targetTag.Name}'");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to merge tag {sourceTagId} into {targetTagId}: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Filters models by tag criteria (include/exclude with AND/OR logic) (Phase 3D).
+        /// </summary>
+        /// <param name="includeTags">Tags to include in results</param>
+        /// <param name="excludeTags">Tags to exclude from results</param>
+        /// <param name="requireAllTags">If true, require ALL include tags (AND); if false, ANY tag (OR)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>List of matching model IDs</returns>
+        public async Task<IReadOnlyList<Guid>> FilterModelsByTagsAsync(
+            IEnumerable<Guid>? includeTags,
+            IEnumerable<Guid>? excludeTags,
+            bool requireAllTags,
+            CancellationToken ct)
+        {
+            try
+            {
+                List<Guid> includeTagList = includeTags?.ToList() ?? [];
+                List<Guid> excludeTagList = excludeTags?.ToList() ?? [];
+
+                _logger.LogInformation($"Filtering models - IncludeTags: {includeTagList.Count}, ExcludeTags: {excludeTagList.Count}, RequireAllTags: {requireAllTags}");
+
+                // Get models for include tags
+                HashSet<Guid> modelSet;
+
+                if (includeTagList.Count > 0)
+                {
+                    if (requireAllTags)
+                    {
+                        // Require ALL tags: start with first tag, then intersect with others
+                        modelSet = new HashSet<Guid>();
+                        for (int i = 0; i < includeTagList.Count; i++)
+                        {
+                            IReadOnlyList<Model3DTagMapping> mappings = 
+                                await _mappingRepository.GetByTagIdAsync(includeTagList[i], ct);
+                            var modelIds = new HashSet<Guid>(mappings.Select(m => m.Model3DId));
+
+                            if (i == 0)
+                            {
+                                modelSet = modelIds;
+                            }
+                            else if (modelSet != null)
+                            {
+                                modelSet.IntersectWith(modelIds);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Require ANY tag: union all models from all tags
+                        modelSet = new HashSet<Guid>();
+                        foreach (var tagId in includeTagList)
+                        {
+                            IReadOnlyList<Model3DTagMapping> mappings = 
+                                await _mappingRepository.GetByTagIdAsync(tagId, ct);
+                            foreach (var modelId in mappings.Select(m => m.Model3DId))
+                            {
+                                modelSet.Add(modelId);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // No include tags - start with all models
+                    modelSet = new HashSet<Guid>();
+                    // TODO: Get all model IDs from database
+                }
+
+                // Remove models with exclude tags
+                if (modelSet != null)
+                {
+                    foreach (var tagId in excludeTagList)
+                    {
+                        IReadOnlyList<Model3DTagMapping> mappings = 
+                            await _mappingRepository.GetByTagIdAsync(tagId, ct);
+                        foreach (var modelId in mappings.Select(m => m.Model3DId))
+                        {
+                            modelSet.Remove(modelId);
+                        }
+                    }
+                }
+
+                var results = (modelSet ?? new HashSet<Guid>()).ToList();
+                _logger.LogInformation($"Filter returned {results.Count} models");
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to filter models by tags: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Gets tag suggestions for autocomplete/input (Phase 3D).
+        /// </summary>
+        /// <param name="partialName">Partial name to match</param>
+        /// <param name="limit">Maximum number of suggestions (default 10)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>Matching tags with usage counts and popular flag</returns>
+        public async Task<IReadOnlyList<TagSuggestionDto>> GetTagSuggestionsAsync(
+            string partialName,
+            int limit,
+            CancellationToken ct)
+        {
+            try
+            {
+                if (limit <= 0)
+                {
+                    limit = 10;
+                }
+
+                // Get search results
+                IReadOnlyList<TagSuggestionDto> searchResults = await SearchTagsAsync(partialName, ct);
+
+                // Get popular tags
+                IReadOnlyList<TagSuggestionDto> popularTags = await GetPopularTagsAsync(limit, ct);
+
+                // Combine and deduplicate: prioritize exact/prefix matches, then popular
+                var suggestions = searchResults
+                    .Take(limit)
+                    .Concat(
+                        popularTags.Where(p => !searchResults.Any(s => s.Id == p.Id))
+                    )
+                    .Take(limit)
+                    .ToList();
+
+                return suggestions;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to get tag suggestions for '{partialName}': {ex.Message}");
+                throw;
+            }
+        }
+
+        #endregion
+
         #region Helper Methods
 
         /// <summary>

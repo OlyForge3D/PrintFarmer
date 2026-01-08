@@ -10,10 +10,12 @@ namespace Farm.Infrastructure.Repositories.Tags
     {
         Task<Model3DTagMapping?> GetByIdAsync(Guid id, CancellationToken ct);
         Task<IReadOnlyList<Model3DTagMapping>> GetByModelIdAsync(Guid modelId, CancellationToken ct);
+        Task<IReadOnlyList<Model3DTagMapping>> GetByTagIdAsync(Guid tagId, CancellationToken ct);
         Task<Model3DTagMapping?> GetMappingAsync(Guid modelId, Guid tagId, CancellationToken ct);
         Task AddAsync(Model3DTagMapping mapping, CancellationToken ct);
         Task RemoveAsync(Model3DTagMapping mapping, CancellationToken ct);
         Task RemoveByModelIdAsync(Guid modelId, CancellationToken ct);
+        Task RemoveByTagIdAsync(Guid tagId, CancellationToken ct);
         Task RemoveByModelAndTagAsync(Guid modelId, Guid tagId, CancellationToken ct);
         Task SaveChangesAsync(CancellationToken ct);
     }

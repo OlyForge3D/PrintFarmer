@@ -628,4 +628,300 @@ public class TagServiceTests
     }
 
     #endregion
+
+    #region Phase 3D: SearchTagsAsync Tests
+
+    [Fact]
+    public async Task SearchTagsAsync_WithValidQuery_ReturnsMatchingTags()
+    {
+        // Arrange
+        var tag1 = new Model3DTag { Id = Guid.NewGuid(), Name = "Material", Color = "#FF0000" };
+        var tag2 = new Model3DTag { Id = Guid.NewGuid(), Name = "Support", Color = "#00FF00" };
+        var tag3 = new Model3DTag { Id = Guid.NewGuid(), Name = "Finish", Color = "#0000FF" };
+
+        _tagRepository.Setup(r => r.ListAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { tag1, tag2, tag3 });
+
+        var mapping1 = new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1.Id, Model3DId = Guid.NewGuid() };
+        var mapping2 = new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1.Id, Model3DId = Guid.NewGuid() };
+        var mapping3 = new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag2.Id, Model3DId = Guid.NewGuid() };
+
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag1.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { mapping1, mapping2 });
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag2.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { mapping3 });
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag3.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Model3DTagMapping>());
+
+        // Act
+        var result = await _service.SearchTagsAsync("mat", CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Single(result);
+        Assert.Equal("Material", result[0].Name);
+        Assert.Equal(2, result[0].UsageCount);
+    }
+
+    [Fact]
+    public async Task SearchTagsAsync_WithEmptyQuery_ReturnsEmptyList()
+    {
+        // Act
+        var result = await _service.SearchTagsAsync("", CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    #endregion
+
+    #region Phase 3D: GetPopularTagsAsync Tests
+
+    [Fact]
+    public async Task GetPopularTagsAsync_ReturnsMostUsedTags()
+    {
+        // Arrange
+        var tag1 = new Model3DTag { Id = Guid.NewGuid(), Name = "Popular1", Color = "#FF0000" };
+        var tag2 = new Model3DTag { Id = Guid.NewGuid(), Name = "Popular2", Color = "#00FF00" };
+        var tag3 = new Model3DTag { Id = Guid.NewGuid(), Name = "Unpopular", Color = "#0000FF" };
+
+        _tagRepository.Setup(r => r.ListAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { tag1, tag2, tag3 });
+
+        var mappings1 = Enumerable.Range(0, 10)
+            .Select(i => new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1.Id, Model3DId = Guid.NewGuid() })
+            .ToList();
+
+        var mappings2 = Enumerable.Range(0, 5)
+            .Select(i => new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag2.Id, Model3DId = Guid.NewGuid() })
+            .ToList();
+
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag1.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappings1.AsReadOnly());
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag2.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappings2.AsReadOnly());
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag3.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Model3DTagMapping>());
+
+        // Act
+        var result = await _service.GetPopularTagsAsync(2, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Count);
+        Assert.Equal("Popular1", result[0].Name);
+        Assert.Equal(10, result[0].UsageCount);
+        Assert.Equal("Popular2", result[1].Name);
+        Assert.Equal(5, result[1].UsageCount);
+        Assert.All(result, tag => Assert.True(tag.IsPopular));
+    }
+
+    #endregion
+
+    #region Phase 3D: GetAnalyticsAsync Tests
+
+    [Fact]
+    public async Task GetAnalyticsAsync_ReturnsCompleteStatistics()
+    {
+        // Arrange
+        var tag1 = new Model3DTag { Id = Guid.NewGuid(), Name = "Tag1", CreatedAt = DateTime.UtcNow.AddDays(-30) };
+        var tag2 = new Model3DTag { Id = Guid.NewGuid(), Name = "Tag2", CreatedAt = DateTime.UtcNow.AddDays(-20) };
+        var tag3 = new Model3DTag { Id = Guid.NewGuid(), Name = "Unused", CreatedAt = DateTime.UtcNow };
+
+        _tagRepository.Setup(r => r.ListAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { tag1, tag2, tag3 });
+
+        var mapping1 = new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1.Id, Model3DId = Guid.NewGuid(), TaggedAt = DateTime.UtcNow.AddHours(-5) };
+        var mapping2 = new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag2.Id, Model3DId = Guid.NewGuid(), TaggedAt = DateTime.UtcNow.AddHours(-2) };
+
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag1.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { mapping1 });
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag2.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { mapping2 });
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag3.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Model3DTagMapping>());
+
+        // Act
+        var result = await _service.GetAnalyticsAsync(CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(3, result.TotalTags);
+        Assert.Equal(2, result.TagsInUse);
+        Assert.Equal(1, result.UnusedTags);
+        Assert.Equal(2, result.TotalModelTagAssociations);
+        Assert.True(result.AverageTagsPerModel > 0);
+        Assert.NotNull(result.TopTags);
+        Assert.NotNull(result.UnusedTagsList);
+    }
+
+    #endregion
+
+    #region Phase 3D: FilterModelsByTagsAsync Tests
+
+    [Fact]
+    public async Task FilterModelsByTagsAsync_WithIncludeAny_ReturnsUnionOfModels()
+    {
+        // Arrange
+        var tag1Id = Guid.NewGuid();
+        var tag2Id = Guid.NewGuid();
+        var model1Id = Guid.NewGuid();
+        var model2Id = Guid.NewGuid();
+        var model3Id = Guid.NewGuid();
+
+        var mappings1 = new[]
+        {
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1Id, Model3DId = model1Id },
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1Id, Model3DId = model2Id }
+        };
+
+        var mappings2 = new[]
+        {
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag2Id, Model3DId = model2Id },
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag2Id, Model3DId = model3Id }
+        };
+
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag1Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappings1);
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag2Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappings2);
+
+        // Act
+        var result = await _service.FilterModelsByTagsAsync(
+            new[] { tag1Id, tag2Id },
+            null,
+            requireAllTags: false,
+            CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(3, result.Count); // Union: model1, model2, model3
+        Assert.Contains(model1Id, result);
+        Assert.Contains(model2Id, result);
+        Assert.Contains(model3Id, result);
+    }
+
+    [Fact]
+    public async Task FilterModelsByTagsAsync_WithExcludeTags_RemovesModels()
+    {
+        // Arrange
+        var tag1Id = Guid.NewGuid();
+        var excludeTagId = Guid.NewGuid();
+        var model1Id = Guid.NewGuid();
+        var model2Id = Guid.NewGuid();
+
+        var mappings1 = new[]
+        {
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1Id, Model3DId = model1Id },
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1Id, Model3DId = model2Id }
+        };
+
+        var excludeMappings = new[]
+        {
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = excludeTagId, Model3DId = model2Id }
+        };
+
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag1Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappings1);
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(excludeTagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(excludeMappings);
+
+        // Act
+        var result = await _service.FilterModelsByTagsAsync(
+            new[] { tag1Id },
+            new[] { excludeTagId },
+            requireAllTags: false,
+            CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Single(result); // Only model1 after excluding model2
+        Assert.Contains(model1Id, result);
+        Assert.DoesNotContain(model2Id, result);
+    }
+
+    #endregion
+
+    #region Phase 3D: MergeTagsAsync Tests
+
+    [Fact]
+    public async Task MergeTagsAsync_ConsolidatesDuplicateTags()
+    {
+        // Arrange
+        var sourceTagId = Guid.NewGuid();
+        var targetTagId = Guid.NewGuid();
+        var model1Id = Guid.NewGuid();
+        var model2Id = Guid.NewGuid();
+
+        var sourceTag = new Model3DTag { Id = sourceTagId, Name = "OldTag" };
+        var targetTag = new Model3DTag { Id = targetTagId, Name = "NewTag" };
+
+        var sourceMappings = new[]
+        {
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = sourceTagId, Model3DId = model1Id },
+            new Model3DTagMapping { Id = Guid.NewGuid(), TagId = sourceTagId, Model3DId = model2Id }
+        };
+
+        var targetMappings = Array.Empty<Model3DTagMapping>();
+
+        _tagRepository.Setup(r => r.GetByIdAsync(sourceTagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(sourceTag);
+        _tagRepository.Setup(r => r.GetByIdAsync(targetTagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(targetTag);
+
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(sourceTagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(sourceMappings);
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(targetTagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(targetMappings);
+
+        // Act
+        await _service.MergeTagsAsync(sourceTagId, targetTagId, CancellationToken.None);
+
+        // Assert
+        _mappingRepository.Verify(r => r.AddAsync(It.IsAny<Model3DTagMapping>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _mappingRepository.Verify(r => r.RemoveByTagIdAsync(sourceTagId, It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.RemoveAsync(sourceTag, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    #endregion
+
+    #region Phase 3D: GetTagSuggestionsAsync Tests
+
+    [Fact]
+    public async Task GetTagSuggestionsAsync_ReturnsSuggestionsAndPopular()
+    {
+        // Arrange
+        var tag1 = new Model3DTag { Id = Guid.NewGuid(), Name = "Material" };
+        var tag2 = new Model3DTag { Id = Guid.NewGuid(), Name = "Popular" };
+        var tag3 = new Model3DTag { Id = Guid.NewGuid(), Name = "VeryPopular" };
+
+        _tagRepository.Setup(r => r.ListAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { tag1, tag2, tag3 });
+
+        var mappings1 = Enumerable.Range(0, 2)
+            .Select(i => new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag1.Id, Model3DId = Guid.NewGuid() })
+            .ToList();
+
+        var mappings2 = Enumerable.Range(0, 20)
+            .Select(i => new Model3DTagMapping { Id = Guid.NewGuid(), TagId = tag3.Id, Model3DId = Guid.NewGuid() })
+            .ToList();
+
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag1.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappings1.AsReadOnly());
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag2.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Model3DTagMapping>());
+        _mappingRepository.Setup(r => r.GetByTagIdAsync(tag3.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappings2.AsReadOnly());
+
+        // Act
+        var result = await _service.GetTagSuggestionsAsync("mat", 10, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.NotEmpty(result);
+        Assert.Contains("Material", result.Select(s => s.Name));
+    }
+
+    #endregion
 }

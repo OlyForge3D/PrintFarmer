@@ -32,6 +32,14 @@ namespace Farm.Infrastructure.Repositories.Tags
                 .ToListAsync(ct);
         }
 
+        public async Task<IReadOnlyList<Model3DTagMapping>> GetByTagIdAsync(Guid tagId, CancellationToken ct)
+        {
+            return await _dbContext.Model3DTagMappings
+                .Where(m => m.TagId == tagId)
+                .OrderBy(m => m.TaggedAt)
+                .ToListAsync(ct);
+        }
+
         public async Task<Model3DTagMapping?> GetMappingAsync(Guid modelId, Guid tagId, CancellationToken ct)
         {
             return await _dbContext.Model3DTagMappings
@@ -57,6 +65,18 @@ namespace Farm.Infrastructure.Repositories.Tags
         {
             List<Model3DTagMapping> mappings = await _dbContext.Model3DTagMappings
                 .Where(m => m.Model3DId == modelId)
+                .ToListAsync(ct);
+
+            if (mappings.Any())
+            {
+                _dbContext.Model3DTagMappings.RemoveRange(mappings);
+            }
+        }
+
+        public async Task RemoveByTagIdAsync(Guid tagId, CancellationToken ct)
+        {
+            List<Model3DTagMapping> mappings = await _dbContext.Model3DTagMappings
+                .Where(m => m.TagId == tagId)
                 .ToListAsync(ct);
 
             if (mappings.Any())

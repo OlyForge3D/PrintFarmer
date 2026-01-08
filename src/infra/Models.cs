@@ -1624,6 +1624,54 @@ public class AssignTagsToModelDto
 }
 
 /// <summary>
+/// Tag suggestion for autocomplete with usage count (Phase 3D)
+/// </summary>
+public class TagSuggestionDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Color { get; set; }
+    public int UsageCount { get; set; } // Number of models using this tag
+    public bool IsPopular { get; set; } // True if in top N tags
+}
+
+/// <summary>
+/// Tag usage statistics for analytics (Phase 3D)
+/// </summary>
+public class TagAnalyticsDto
+{
+    public int TotalTags { get; set; }
+    public int TagsInUse { get; set; } // Tags with at least one model
+    public int UnusedTags { get; set; } // Tags with no models
+    public int TotalModelTagAssociations { get; set; }
+    public double AverageTagsPerModel { get; set; }
+    public IReadOnlyList<TagStatDto>? TopTags { get; set; } // Most used tags
+    public IReadOnlyList<TagStatDto>? UnusedTagsList { get; set; } // For cleanup suggestions
+}
+
+/// <summary>
+/// Individual tag statistics (Phase 3D)
+/// </summary>
+public class TagStatDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int ModelCount { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
+}
+
+/// <summary>
+/// Request to filter models by tags (Phase 3D)
+/// </summary>
+public class FilterModelsByTagsRequestDto
+{
+    public Guid[]? IncludeTags { get; set; } // Tags to include
+    public Guid[]? ExcludeTags { get; set; } // Tags to exclude
+    public bool RequireAllTags { get; set; } = false; // If true, ALL include tags required; if false, ANY
+}
+
+/// <summary>
 /// Request to update 3D model properties
 /// </summary>
 public class UpdateModel3DDto

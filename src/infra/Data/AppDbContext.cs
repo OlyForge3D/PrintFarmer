@@ -726,6 +726,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             // Index for quick tag lookups
             _ = b.HasIndex(t => t.Name).IsUnique();
+
+            // Index for analytics (Phase 3D - tag creation trends)
+            _ = b.HasIndex(t => t.CreatedAt);
         });
 
         // Model3DTagMapping Entity Configuration
