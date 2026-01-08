@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
-import { Button } from "@/common/components/ui/Button";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
 import { QueueJobsTable } from "../components/QueueJobsTable";

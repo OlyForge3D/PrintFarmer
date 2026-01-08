@@ -81,6 +81,7 @@ export function TableFiltersBar({
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Status
           </label>
+          {/* TODO: Replace with FormField + Select component */}
           <select
             value={selectedStatus || ""}
             onChange={handleStatusChange}
@@ -114,6 +115,7 @@ export function TableFiltersBar({
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Material
           </label>
+          {/* TODO: Replace with FormField + Select component */}
           <select
             value={selectedMaterial || ""}
             onChange={handleMaterialChange}

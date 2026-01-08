@@ -112,6 +112,7 @@ export function QueueJobsTable({
                 className="border-b border-gray-200 hover:bg-gray-50"
               >
                 <td className="px-4 py-3">
+                  {/* TODO: Replace with Checkbox component from @/components/ui */}
                   <input
                     type="checkbox"
                     checked={selectedJobs.has(jobWrapper.id)}
@@ -135,6 +136,7 @@ export function QueueJobsTable({
                   </span>
                 </td>
                 <td className="px-4 py-3">
+                  {/* TODO: Replace with Select component wrapped in FormField */}
                   <select
                     value={priority}
                     onChange={(e) =>
