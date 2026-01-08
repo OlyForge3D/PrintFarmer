@@ -62,30 +62,34 @@ export default function TimingTab() {
       {error && <Alert type="error">{error}</Alert>}
 
       {/* Date Range Selector */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
-        <h3 className="text-lg font-semibold text-pf-text-primary mb-4">Timeline Analysis</h3>
+      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 lg:p-6" role="region" aria-label="Timeline analysis filters">
+        <h2 className="text-xl font-semibold text-pf-text-primary mb-4 lg:mb-6">Timeline Analysis</h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
           <div>
-            <label className="block text-sm font-medium text-pf-text-secondary mb-2">
+            <label htmlFor="date-from" className="block text-sm font-medium text-pf-text-primary mb-2">
               From Date
             </label>
             <input
+              id="date-from"
               type="date"
               value={dateRange.from.toISOString().split('T')[0]}
               onChange={(e) => handleDateRangeChange('from', new Date(e.target.value))}
-              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary"
+              className="w-full px-3 py-2.5 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200"
+              aria-label="Select start date for timeline analysis"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-pf-text-secondary mb-2">
+            <label htmlFor="date-to" className="block text-sm font-medium text-pf-text-primary mb-2">
               To Date
             </label>
             <input
+              id="date-to"
               type="date"
               value={dateRange.to.toISOString().split('T')[0]}
               onChange={(e) => handleDateRangeChange('to', new Date(e.target.value))}
-              className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary"
+              className="w-full px-3 py-2.5 bg-pf-bg-2 border border-pf-border rounded text-pf-text-primary focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200"
+              aria-label="Select end date for timeline analysis"
             />
           </div>
         </div>

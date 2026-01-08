@@ -18,16 +18,16 @@ export function DurationComparison({ analytics }: DurationComparisonProps) {
   };
 
   const renderMetricCard = (label: string, value: string | number, subtext?: string, isPercentage = false) => (
-    <div className="bg-pf-bg-2 border border-pf-border rounded p-4">
-      <p className="text-sm text-pf-text-secondary mb-2">{label}</p>
-      <div className="flex items-baseline gap-2">
-        <p className="text-2xl font-bold text-pf-text-primary">
+    <article className="bg-pf-bg-2 border border-pf-border rounded-lg p-3 sm:p-4 hover:border-pf-text-secondary transition-colors duration-200" role="doc-noteref">
+      <p className="text-xs sm:text-sm text-pf-text-secondary mb-2 font-medium">{label}</p>
+      <div className="flex items-baseline gap-1.5 sm:gap-2">
+        <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-pf-text-primary">
           {typeof value === 'number' ? value.toFixed(1) : value}
         </p>
-        {isPercentage && <p className="text-pf-text-secondary">%</p>}
+        {isPercentage && <p className="text-sm sm:text-base text-pf-text-secondary">%</p>}
       </div>
       {subtext && <p className="text-xs text-pf-text-secondary mt-2">{subtext}</p>}
-    </div>
+    </article>
   );
 
   const renderPrinterStats = (printer: DurationStatsDto) => (
@@ -83,12 +83,12 @@ export function DurationComparison({ analytics }: DurationComparisonProps) {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:space-y-8" role="region" aria-label="Duration analytics and comparisons">
       {/* Overall Metrics */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-pf-text-primary mb-6">Overall Duration Analytics</h3>
+      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8">
+        <h2 className="text-xl font-semibold text-pf-text-primary mb-6 lg:mb-8">Overall Duration Analytics</h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 lg:mb-8">
           {renderMetricCard('Total Jobs Analyzed', analytics.totalJobs)}
           {renderMetricCard(
             'Average Estimated Time',
@@ -123,10 +123,10 @@ export function DurationComparison({ analytics }: DurationComparisonProps) {
 
       {/* Per-Printer Metrics */}
       {Object.keys(analytics.byPrinter).length > 0 && (
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-pf-text-primary mb-6">Per-Printer Breakdown</h3>
+        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8">
+          <h3 className="text-lg sm:text-xl font-semibold text-pf-text-primary mb-6 lg:mb-8">Per-Printer Breakdown</h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
             {Object.values(analytics.byPrinter).map((printer) => renderPrinterStats(printer))}
           </div>
         </div>
@@ -134,11 +134,11 @@ export function DurationComparison({ analytics }: DurationComparisonProps) {
 
       {/* Top Performers */}
       {analytics.topPerformers.length > 0 && (
-        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-pf-text-primary mb-4">Top Performers</h3>
-          <p className="text-sm text-pf-text-secondary mb-4">Printers with the most accurate time estimates</p>
+        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8">
+          <h3 className="text-lg sm:text-xl font-semibold text-pf-text-primary mb-2">Top Performers</h3>
+          <p className="text-xs sm:text-sm text-pf-text-secondary mb-4 lg:mb-6">Printers with the most accurate time estimates</p>
 
-          <div className="space-y-3">
+          <div className="space-y-2 sm:space-y-3">
             {analytics.topPerformers.map((printer) => (
               <div key={printer.printerId} className="flex items-center justify-between bg-pf-bg-2 border border-pf-border rounded p-4">
                 <div>

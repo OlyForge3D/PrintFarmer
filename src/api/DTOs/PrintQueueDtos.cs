@@ -1,4 +1,4 @@
-namespace Farm.Api.DTOs;
+﻿namespace Farm.Api.DTOs;
 
 // ============= MAIN RESPONSE DTOs =============
 
@@ -29,15 +29,15 @@ public class QueuedPrintJobDto
     public decimal? RequiredNozzleDiameter { get; set; }
     public string? RequiredMaterialType { get; set; }
     public string[]? RequiredCapabilities { get; set; }
-    
+
     public int? EstimatedPrintTimeSeconds { get; set; }
     public int? EstimatedFilamentUsageGrams { get; set; }
-    
+
     public DateTime? ActualStartTimeUtc { get; set; }
     public DateTime? ActualEndTimeUtc { get; set; }
     public int? ActualPrintTimeSeconds { get; set; }
     public int? ActualFilamentUsageGrams { get; set; }
-    
+
     public string? FailureReason { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }

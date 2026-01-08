@@ -586,7 +586,7 @@ public class PrintJob
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime QueuedAt { get; set; }
-    
+
     // Phase 3C: Timeline tracking
     public ICollection<JobStateHistory> StateHistory { get; } = new List<JobStateHistory>();
 }

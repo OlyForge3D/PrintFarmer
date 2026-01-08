@@ -51,43 +51,43 @@ export function JobTimeline({ events }: JobTimelineProps) {
 
   if (events.length === 0) {
     return (
-      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 text-center">
+      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 lg:p-8 text-center" role="status" aria-live="polite">
         <p className="text-pf-text-secondary">No timeline events found for the selected date range</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
-      <h3 className="text-lg font-semibold text-pf-text-primary mb-6">Job Timeline</h3>
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8" role="region" aria-label="Job execution timeline">
+      <h2 className="text-xl font-semibold text-pf-text-primary mb-6 lg:mb-8">Job Timeline</h2>
 
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4" role="list">
         {events.map((event, index) => (
-          <div key={`${event.jobId}-${index}`} className="flex gap-4">
+          <div key={`${event.jobId}-${index}`} className="flex gap-3 sm:gap-4" role="listitem">
             {/* Timeline bar */}
-            <div className="flex flex-col items-center">
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold text-sm ${getStateColor(event.state)}`}>
+            <div className="flex flex-col items-center flex-shrink-0">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold text-sm ${getStateColor(event.state)}`} title={`Event status: ${event.state}`}>
                 {event.state.substring(0, 1).toUpperCase()}
               </div>
               {index < events.length - 1 && (
-                <div className="w-0.5 h-12 bg-pf-border my-2"></div>
+                <div className="w-0.5 h-12 bg-pf-border my-2" aria-hidden="true"></div>
               )}
             </div>
 
             {/* Event details */}
-            <div className="flex-1 py-2">
-              <div className="flex items-baseline gap-2 mb-1">
-                <h4 className="font-semibold text-pf-text-primary">{event.jobName}</h4>
-                <span className={`px-2 py-1 rounded text-xs font-medium ${getStateColor(event.state)}`}>
+            <div className="flex-1 py-2 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-baseline gap-2 mb-2 sm:mb-3">
+                <h3 className="font-semibold text-pf-text-primary text-base break-words">{event.jobName}</h3>
+                <span className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${getStateColor(event.state)}`}>
                   {event.state}
                 </span>
               </div>
 
-              <p className="text-sm text-pf-text-secondary mb-2">
+              <p className="text-sm text-pf-text-secondary mb-3 break-all">
                 Printer: <span className="text-pf-text-primary font-medium">{event.printerName}</span>
               </p>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-xs sm:text-sm">
                 <div>
                   <p className="text-pf-text-secondary">Started</p>
                   <p className="text-pf-text-primary font-medium">{formatDate(event.enteredAtUtc)}</p>

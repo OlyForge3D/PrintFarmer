@@ -52,26 +52,26 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
   };
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-pf-text-primary mb-2">{history.jobName}</h3>
-        <p className="text-sm text-pf-text-secondary">Job ID: <code className="text-xs">{history.jobId}</code></p>
+    <article className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8" role="region" aria-label="Job state history and timeline">
+      <div className="mb-6 lg:mb-8 border-b border-pf-border pb-4 sm:pb-6">
+        <h2 className="text-xl font-semibold text-pf-text-primary mb-2 break-words">{history.jobName}</h2>
+        <p className="text-xs sm:text-sm text-pf-text-secondary">Job ID: <code className="font-mono text-pf-text-primary bg-pf-bg-2 px-2 py-1 rounded">{history.jobId}</code></p>
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-pf-bg-2 border border-pf-border rounded p-3">
-          <p className="text-xs text-pf-text-secondary mb-1">Total Duration</p>
-          <p className="text-lg font-bold text-pf-text-primary">{formatDuration(history.totalDurationSeconds)}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 lg:mb-8">
+        <div className="bg-pf-bg-2 border border-pf-border rounded-lg p-3 sm:p-4 hover:border-pf-text-secondary transition-colors">
+          <p className="text-xs text-pf-text-secondary mb-2 font-medium">Total Duration</p>
+          <p className="text-lg sm:text-xl font-bold text-pf-text-primary">{formatDuration(history.totalDurationSeconds)}</p>
         </div>
 
-        <div className="bg-pf-bg-2 border border-pf-border rounded p-3">
-          <p className="text-xs text-pf-text-secondary mb-1">Estimated Duration</p>
-          <p className="text-lg font-bold text-pf-text-primary">{formatDuration(history.estimatedDurationSeconds)}</p>
+        <div className="bg-pf-bg-2 border border-pf-border rounded-lg p-3 sm:p-4 hover:border-pf-text-secondary transition-colors">
+          <p className="text-xs text-pf-text-secondary mb-2 font-medium">Estimated Duration</p>
+          <p className="text-lg sm:text-xl font-bold text-pf-text-primary">{formatDuration(history.estimatedDurationSeconds)}</p>
         </div>
 
         {history.variancePercent !== undefined && (
-          <div className="bg-pf-bg-2 border border-pf-border rounded p-3">
+          <div className="bg-pf-bg-2 border border-pf-border rounded-lg p-3 sm:p-4 hover:border-pf-text-secondary transition-colors">
             <p className="text-xs text-pf-text-secondary mb-1">Variance</p>
             <p className={`text-lg font-bold ${history.variancePercent > 0 ? 'text-pf-warning' : 'text-pf-success'}`}>
               {history.variancePercent > 0 ? '+' : ''}{history.variancePercent.toFixed(1)}%
@@ -81,35 +81,37 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
       </div>
 
       {/* State Transitions */}
-      <div>
-        <h4 className="font-semibold text-pf-text-primary mb-4">State Transitions</h4>
+      <section>
+        <h3 className="font-semibold text-pf-text-primary mb-4 text-lg">State Transitions</h3>
 
-        <div className="space-y-2">
+        <div className="space-y-2 sm:space-y-3" role="list">
           {history.transitions.map((transition, index) => (
-            <div key={index}>
+            <div key={index} role="listitem">
               <button
                 onClick={() => setExpandedIndex(expandedIndex === index ? null : index)}
-                className="w-full text-left p-3 bg-pf-bg-2 border border-pf-border rounded hover:border-pf-text-secondary transition-colors"
+                className="w-full text-left p-3 sm:p-4 bg-pf-bg-2 border border-pf-border rounded-lg hover:border-pf-text-secondary hover:bg-pf-bg-3 focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200"
+                aria-expanded={expandedIndex === index}
+                aria-controls={`transition-${index}`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1">
-                    <span className={`inline-block px-3 py-1 rounded text-xs font-medium text-white ${getStateColor(transition.fromState)}`}>
+                <div className="flex items-center justify-between gap-3 sm:gap-4">
+                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                    <span className={`inline-block px-2.5 sm:px-3 py-1 rounded text-xs font-medium text-white whitespace-nowrap ${getStateColor(transition.fromState)}`}>
                       {transition.fromState}
                     </span>
-                    <span className="text-pf-text-secondary">→</span>
-                    <span className={`inline-block px-3 py-1 rounded text-xs font-medium text-white ${getStateColor(transition.toState)}`}>
+                    <span className="text-pf-text-secondary flex-shrink-0" aria-hidden="true">→</span>
+                    <span className={`inline-block px-2.5 sm:px-3 py-1 rounded text-xs font-medium text-white whitespace-nowrap ${getStateColor(transition.toState)}`}>
                       {transition.toState}
                     </span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-pf-text-secondary">{formatDuration(transition.durationInStateSeconds)}</span>
-                    <span className={`transition-transform ${expandedIndex === index ? 'rotate-180' : ''}`}>▼</span>
+                  <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                    <span className="text-xs sm:text-sm text-pf-text-secondary whitespace-nowrap">{formatDuration(transition.durationInStateSeconds)}</span>
+                    <span className={`transition-transform flex-shrink-0 text-pf-text-secondary ${expandedIndex === index ? 'rotate-180' : ''}`} aria-hidden="true">▼</span>
                   </div>
                 </div>
               </button>
 
               {expandedIndex === index && (
-                <div className="bg-pf-bg-2 border border-t-0 border-pf-border rounded-b p-3 text-sm space-y-2">
+                <div id={`transition-${index}`} className="bg-pf-bg-2 border border-t-0 border-pf-border rounded-b-lg p-3 sm:p-4 text-xs sm:text-sm space-y-2 sm:space-y-3">
                   <div>
                     <p className="text-pf-text-secondary">Transitioned</p>
                     <p className="text-pf-text-primary font-mono text-xs">{formatDate(transition.transitionedAtUtc)}</p>
@@ -133,7 +135,7 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
             </div>
           ))}
         </div>
-      </div>
-    </div>
+      </section>
+    </article>
   );
 }

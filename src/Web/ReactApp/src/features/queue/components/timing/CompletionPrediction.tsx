@@ -53,49 +53,49 @@ export function CompletionPrediction({ analytics }: CompletionPredictionProps) {
   };
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6 space-y-6">
-      <h3 className="text-lg font-semibold text-pf-text-primary">Completion Time Predictions</h3>
+    <article className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8" role="region" aria-label="Completion time predictions">
+      <h2 className="text-xl font-semibold text-pf-text-primary">Completion Time Predictions</h2>
 
       {/* Prediction Reliability */}
-      <div className={`border-l-4 border-pf-${getPredictionColor(analytics.overallVariancePercent)} bg-pf-bg-2 rounded p-4`}>
-        <h4 className="font-semibold text-pf-text-primary mb-2">Prediction Reliability</h4>
+      <section className={`border-l-4 border-pf-${getPredictionColor(analytics.overallVariancePercent)} bg-pf-bg-2 rounded-lg p-4 sm:p-5`} role="status">
+        <h3 className="font-semibold text-pf-text-primary mb-2">Prediction Reliability</h3>
         <p className={`text-sm text-pf-${getPredictionColor(analytics.overallVariancePercent)} font-medium`}>
           {getPredictionMessage(analytics.overallVariancePercent)}
         </p>
         <p className="text-sm text-pf-text-secondary mt-2">
           {getDirectionMessage(analytics.overallVariancePercent)}
         </p>
-      </div>
+      </section>
 
       {/* Variance Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-pf-bg-2 border border-pf-border rounded p-4">
-          <p className="text-sm text-pf-text-secondary mb-2">Average Variance</p>
-          <p className={`text-2xl font-bold ${analytics.overallVariancePercent && analytics.overallVariancePercent > 0 ? 'text-pf-warning' : 'text-pf-success'}`}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4" role="list">
+        <article className="bg-pf-bg-2 border border-pf-border rounded-lg p-3 sm:p-4 hover:border-pf-text-secondary transition-colors" role="listitem">
+          <p className="text-xs sm:text-sm text-pf-text-secondary mb-2 font-medium">Average Variance</p>
+          <p className={`text-2xl sm:text-3xl font-bold ${analytics.overallVariancePercent && analytics.overallVariancePercent > 0 ? 'text-pf-warning' : 'text-pf-success'}`}>
             {analytics.overallVariancePercent !== undefined ? `${analytics.overallVariancePercent > 0 ? '+' : ''}${analytics.overallVariancePercent.toFixed(1)}%` : 'N/A'}
           </p>
           <p className="text-xs text-pf-text-secondary mt-2">
             vs estimated time
           </p>
-        </div>
+        </article>
 
-        <div className="bg-pf-bg-2 border border-pf-border rounded p-4">
-          <p className="text-sm text-pf-text-secondary mb-2">Estimate Accuracy</p>
-          <p className={`text-2xl font-bold ${analytics.overallAccuracyPercent && analytics.overallAccuracyPercent > 85 ? 'text-pf-success' : analytics.overallAccuracyPercent && analytics.overallAccuracyPercent > 70 ? 'text-pf-warning' : 'text-pf-danger'}`}>
+        <article className="bg-pf-bg-2 border border-pf-border rounded-lg p-3 sm:p-4 hover:border-pf-text-secondary transition-colors" role="listitem">
+          <p className="text-xs sm:text-sm text-pf-text-secondary mb-2 font-medium">Estimate Accuracy</p>
+          <p className={`text-2xl sm:text-3xl font-bold ${analytics.overallAccuracyPercent && analytics.overallAccuracyPercent > 85 ? 'text-pf-success' : analytics.overallAccuracyPercent && analytics.overallAccuracyPercent > 70 ? 'text-pf-warning' : 'text-pf-danger'}`}>
             {analytics.overallAccuracyPercent !== undefined ? `${analytics.overallAccuracyPercent.toFixed(0)}%` : 'N/A'}
           </p>
           <p className="text-xs text-pf-text-secondary mt-2">
             based on past jobs
           </p>
-        </div>
+        </article>
       </div>
 
       {/* Prediction Recommendations */}
-      <div className="bg-pf-info bg-opacity-10 border border-pf-info border-opacity-30 rounded p-4">
-        <h4 className="font-semibold text-pf-text-primary mb-3 flex items-center gap-2">
+      <section className="bg-pf-info bg-opacity-10 border border-pf-info border-opacity-30 rounded-lg p-4 sm:p-5">
+        <h3 className="font-semibold text-pf-text-primary mb-3 flex items-center gap-2">
           <span className="text-lg">💡</span> Prediction Tips
-        </h4>
-        <ul className="space-y-2 text-sm text-pf-text-secondary">
+        </h3>
+        <ul className="space-y-2 text-xs sm:text-sm text-pf-text-secondary">
           {analytics.overallVariancePercent && analytics.overallVariancePercent > 10 && (
             <li className="flex gap-2">
               <span>•</span>
@@ -119,13 +119,13 @@ export function CompletionPrediction({ analytics }: CompletionPredictionProps) {
             <span>Accuracy improves with consistent printer maintenance and calibration</span>
           </li>
         </ul>
-      </div>
+      </section>
 
       {/* Per-Printer Predictions */}
       {Object.values(analytics.byPrinter).length > 0 && (
-        <div>
-          <h4 className="font-semibold text-pf-text-primary mb-4">Per-Printer Prediction Factors</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <section>
+          <h3 className="font-semibold text-pf-text-primary mb-4 text-lg">Per-Printer Prediction Factors</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             {Object.values(analytics.byPrinter)
               .sort((a, b) => (b.accuracyPercent || 0) - (a.accuracyPercent || 0))
               .map((printer) => (
@@ -155,8 +155,8 @@ export function CompletionPrediction({ analytics }: CompletionPredictionProps) {
                 </div>
               ))}
           </div>
-        </div>
+        </section>
       )}
-    </div>
+    </article>
   );
 }

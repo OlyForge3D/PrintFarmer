@@ -1,4 +1,4 @@
-using Farm.Api.DTOs;
+﻿using Farm.Api.DTOs;
 using Farm.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -47,10 +47,14 @@ public class PrintQueueController(
         try
         {
             if (limit <= 0 || limit > 1000)
+            {
                 return BadRequest(new { error = "Limit must be between 1 and 1000" });
+            }
 
             if (offset < 0)
+            {
                 return BadRequest(new { error = "Offset must be >= 0" });
+            }
 
             var jobs = await _printQueueService.GetAllQueuedJobsAsync(
                 filterStatus, filterModel, filterMaterial, limit, offset, cancellationToken);
@@ -80,7 +84,9 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrEmpty(printerId))
+            {
                 return BadRequest(new { error = "Printer ID is required" });
+            }
 
             var jobs = await _printQueueService.GetPrinterQueueAsync(printerId, limit, cancellationToken);
             return Ok(jobs);
@@ -151,7 +157,9 @@ public class PrintQueueController(
         try
         {
             if (limit <= 0 || limit > 1000)
+            {
                 return BadRequest(new { error = "Limit must be between 1 and 1000" });
+            }
 
             var history = await _printQueueService.GetQueueHistoryAsync(limit, offset, sortBy, cancellationToken);
             return Ok(history);
@@ -181,10 +189,14 @@ public class PrintQueueController(
         try
         {
             if (request == null)
+            {
                 return BadRequest(new { error = "Request body is required" });
+            }
 
             if (string.IsNullOrEmpty(request.GcodeFileId))
+            {
                 return BadRequest(new { error = "G-code file ID is required" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var job = await _printQueueService.EnqueueJobAsync(request, userId, cancellationToken);
@@ -224,7 +236,9 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrEmpty(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var job = await _printQueueService.UpdateJobAsync(jobId, request, userId, cancellationToken);
@@ -260,7 +274,9 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrEmpty(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var job = await _printQueueService.UpdateJobPriorityAsync(jobId, request.NewPriority, userId, cancellationToken);
@@ -295,7 +311,9 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrEmpty(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var job = await _printQueueService.PauseJobAsync(jobId, userId, cancellationToken);
@@ -330,7 +348,9 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrEmpty(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var job = await _printQueueService.ResumeJobAsync(jobId, userId, cancellationToken);
@@ -365,7 +385,9 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrEmpty(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             await _printQueueService.CancelJobAsync(jobId, userId, cancellationToken);
@@ -400,7 +422,9 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrEmpty(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var job = await _printQueueService.RerunJobAsync(jobId, userId, cancellationToken);
@@ -436,7 +460,9 @@ public class PrintQueueController(
         try
         {
             if (request?.JobIds == null || request.JobIds.Count == 0)
+            {
                 return BadRequest(new { error = "Job IDs list is required and cannot be empty" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var result = await _printQueueService.BulkCancelJobsAsync(request.JobIds, userId, cancellationToken);
@@ -466,7 +492,9 @@ public class PrintQueueController(
         try
         {
             if (request?.Moves == null || request.Moves.Count == 0)
+            {
                 return BadRequest(new { error = "Moves list is required and cannot be empty" });
+            }
 
             var userId = User.FindFirst("sub")?.Value ?? "system";
             var result = await _printQueueService.BulkReorderJobsAsync(request.Moves, userId, cancellationToken);
@@ -497,12 +525,16 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var job = await _printQueueService.GetJobByIdAsync(jobId, cancellationToken);
 
             if (job == null)
+            {
                 return NotFound(new { error = $"Job '{jobId}' not found" });
+            }
 
             return Ok(job);
         }
@@ -533,15 +565,21 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             if (updates == null)
+            {
                 return BadRequest(new { error = "Update data is required" });
+            }
 
             var updatedJob = await _printQueueService.UpdateJobDetailsAsync(jobId, updates, cancellationToken);
 
             if (updatedJob == null)
+            {
                 return NotFound(new { error = $"Job '{jobId}' not found" });
+            }
 
             _logger.LogInformation("Job {JobId} details updated", jobId);
             return Ok(updatedJob);
@@ -578,18 +616,26 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             if (request == null)
+            {
                 return BadRequest(new { error = "Notes request is required" });
+            }
 
             if (request.Notes?.Length > 500)
+            {
                 return BadRequest(new { error = "Notes must be 500 characters or less" });
+            }
 
             var success = await _printQueueService.UpdateJobNotesAsync(jobId, request.Notes, cancellationToken);
 
             if (!success)
+            {
                 return NotFound(new { error = $"Job '{jobId}' not found" });
+            }
 
             _logger.LogInformation("Notes updated for job {JobId}", jobId);
             return NoContent();
@@ -652,11 +698,15 @@ public class PrintQueueController(
         try
         {
             if (limit <= 0 || limit > 1000)
+            {
                 return BadRequest(new { error = "Limit must be between 1 and 1000" });
+            }
 
             // Validate date range
             if (dateFrom.HasValue && dateTo.HasValue && dateFrom > dateTo)
+            {
                 return BadRequest(new { error = "dateFrom must be before dateTo" });
+            }
 
             var events = await _printQueueService.GetTimelineAsync(
                 dateFrom, dateTo, printerId, filterStatus, limit, cancellationToken);
@@ -688,10 +738,12 @@ public class PrintQueueController(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 return BadRequest(new { error = "Job ID is required" });
+            }
 
             var history = await _printQueueService.GetJobStateHistoryAsync(jobId, cancellationToken);
-            
+
             _logger.LogInformation("Retrieved state history for job {JobId}", jobId);
             return Ok(history);
         }
@@ -726,7 +778,9 @@ public class PrintQueueController(
         {
             // Validate date range
             if (dateFrom.HasValue && dateTo.HasValue && dateFrom > dateTo)
+            {
                 return BadRequest(new { error = "dateFrom must be before dateTo" });
+            }
 
             var analytics = await _printQueueService.GetDurationAnalyticsAsync(
                 printerId, dateFrom, dateTo, cancellationToken);

@@ -1,4 +1,4 @@
-using Farm.Api.DTOs;
+﻿using Farm.Api.DTOs;
 using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -56,7 +56,7 @@ public class PrintQueueService(
             // Filter by printer model
             if (!string.IsNullOrEmpty(filterModel))
             {
-                query = query.Where(pj => pj.AssignedPrinter != null && 
+                query = query.Where(pj => pj.AssignedPrinter != null &&
                     pj.AssignedPrinter.Model != null &&
                     pj.AssignedPrinter.Model.Name.Contains(filterModel));
             }
@@ -64,7 +64,7 @@ public class PrintQueueService(
             // Filter by material
             if (!string.IsNullOrEmpty(filterMaterial))
             {
-                query = query.Where(pj => (pj.RequiredMaterialType != null && 
+                query = query.Where(pj => (pj.RequiredMaterialType != null &&
                     pj.RequiredMaterialType.Contains(filterMaterial)) ||
                     (pj.GcodeFile != null && pj.GcodeFile.RequiredMaterial != null &&
                     pj.GcodeFile.RequiredMaterial.Contains(filterMaterial)));
@@ -82,7 +82,7 @@ public class PrintQueueService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving all queued jobs with filters: Status={FilterStatus}, Model={FilterModel}, Material={FilterMaterial}", 
+            _logger.LogError(ex, "Error retrieving all queued jobs with filters: Status={FilterStatus}, Model={FilterModel}, Material={FilterMaterial}",
                 filterStatus, filterModel, filterMaterial);
             throw;
         }
@@ -188,7 +188,7 @@ public class PrintQueueService(
         try
         {
             var allCompletedJobs = await _dbContext.PrintJobs
-                .Where(pj => pj.Status == PrintJobStatus.Completed || 
+                .Where(pj => pj.Status == PrintJobStatus.Completed ||
                             pj.Status == PrintJobStatus.Failed ||
                             pj.Status == PrintJobStatus.Cancelled)
                 .ToListAsync(cancellationToken);
@@ -240,12 +240,16 @@ public class PrintQueueService(
         try
         {
             if (string.IsNullOrEmpty(request.GcodeFileId))
+            {
                 throw new ArgumentException("GcodeFileId is required");
+            }
 
             // Verify gcode file exists
             var gcodeFile = await _dbContext.GcodeFiles.FindAsync(new object[] { request.GcodeFileId }, cancellationToken);
             if (gcodeFile == null)
+            {
                 throw new InvalidOperationException($"G-code file {request.GcodeFileId} not found");
+            }
 
             // Create new print job
             var job = new PrintJob
@@ -258,7 +262,7 @@ public class PrintQueueService(
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = request.RequiredMaterialType,
-                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue 
+                EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
                     ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
                     : null,
                 EstimatedFilamentUsage = gcodeFile.EstimatedFilamentWeightG,
@@ -300,23 +304,33 @@ public class PrintQueueService(
         {
             var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
+            {
                 throw new InvalidOperationException($"Print job {jobId} not found");
+            }
 
             // Update fields if provided
             if (request.Priority.HasValue)
+            {
                 job.Priority = request.Priority.Value;
+            }
 
             if (!string.IsNullOrEmpty(request.AssignedPrinterId))
+            {
                 job.AssignedPrinterId = Guid.Parse(request.AssignedPrinterId);
+            }
 
             if (!string.IsNullOrEmpty(request.Status))
             {
                 if (Enum.TryParse<PrintJobStatus>(request.Status, ignoreCase: true, out var newStatus))
+                {
                     job.Status = newStatus;
+                }
             }
 
             if (!string.IsNullOrEmpty(request.FailureReason))
+            {
                 job.FailureReason = request.FailureReason;
+            }
 
             job.UpdatedAt = DateTime.UtcNow;
 
@@ -346,7 +360,9 @@ public class PrintQueueService(
         {
             var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
+            {
                 throw new InvalidOperationException($"Print job {jobId} not found");
+            }
 
             job.Priority = newPriority;
             job.UpdatedAt = DateTime.UtcNow;
@@ -376,10 +392,14 @@ public class PrintQueueService(
         {
             var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
+            {
                 throw new InvalidOperationException($"Print job {jobId} not found");
+            }
 
             if (job.Status != PrintJobStatus.Printing)
+            {
                 throw new InvalidOperationException($"Only printing jobs can be paused. Current status: {job.Status}");
+            }
 
             job.Status = PrintJobStatus.Paused;
             job.UpdatedAt = DateTime.UtcNow;
@@ -409,10 +429,14 @@ public class PrintQueueService(
         {
             var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
+            {
                 throw new InvalidOperationException($"Print job {jobId} not found");
+            }
 
             if (job.Status != PrintJobStatus.Paused)
+            {
                 throw new InvalidOperationException($"Only paused jobs can be resumed. Current status: {job.Status}");
+            }
 
             job.Status = PrintJobStatus.Printing;
             job.UpdatedAt = DateTime.UtcNow;
@@ -442,10 +466,14 @@ public class PrintQueueService(
         {
             var job = await _dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken);
             if (job == null)
+            {
                 throw new InvalidOperationException($"Print job {jobId} not found");
+            }
 
             if (job.Status == PrintJobStatus.Completed || job.Status == PrintJobStatus.Cancelled)
+            {
                 throw new InvalidOperationException($"Cannot cancel a {job.Status} job");
+            }
 
             job.Status = PrintJobStatus.Cancelled;
             job.UpdatedAt = DateTime.UtcNow;
@@ -499,7 +527,7 @@ public class PrintQueueService(
                 }
             }
 
-            _logger.LogInformation("Bulk cancel completed: {SuccessCount} succeeded, {FailureCount} failed", 
+            _logger.LogInformation("Bulk cancel completed: {SuccessCount} succeeded, {FailureCount} failed",
                 result.SuccessfulCount, result.FailedCount);
 
             return result;
@@ -537,7 +565,9 @@ public class PrintQueueService(
                 {
                     var job = await _dbContext.PrintJobs.FindAsync(new object[] { move.JobId }, cancellationToken);
                     if (job == null)
+                    {
                         throw new InvalidOperationException($"Job {move.JobId} not found");
+                    }
 
                     job.QueuePosition = move.NewPosition;
                     job.UpdatedAt = DateTime.UtcNow;
@@ -556,9 +586,11 @@ public class PrintQueueService(
             }
 
             if (result.SuccessfulCount > 0)
+            {
                 await _dbContext.SaveChangesAsync(cancellationToken);
+            }
 
-            _logger.LogInformation("Bulk reorder completed: {SuccessCount} succeeded, {FailureCount} failed", 
+            _logger.LogInformation("Bulk reorder completed: {SuccessCount} succeeded, {FailureCount} failed",
                 result.SuccessfulCount, result.FailedCount);
 
             return result;
@@ -582,7 +614,9 @@ public class PrintQueueService(
         try
         {
             if (string.IsNullOrEmpty(jobId))
+            {
                 throw new ArgumentException("Job ID is required");
+            }
 
             // Find the job to rerun
             var originalJob = await _dbContext.PrintJobs.FirstOrDefaultAsync(j => j.Id == Guid.Parse(jobId), cancellationToken)
@@ -735,7 +769,9 @@ public class PrintQueueService(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 return null;
+            }
 
             var job = await _dbContext.PrintJobs
                 .AsNoTracking()
@@ -762,36 +798,51 @@ public class PrintQueueService(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 throw new ArgumentException("Job ID is required", nameof(jobId));
+            }
 
             if (updates == null)
+            {
                 throw new ArgumentNullException(nameof(updates), "Update data is required");
+            }
 
             var job = await _dbContext.PrintJobs
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
             if (job == null)
+            {
                 return null;
+            }
 
             // Validate and update fields
             if (!string.IsNullOrEmpty(updates.Name))
             {
                 if (updates.Name.Length > 255)
+                {
                     throw new ArgumentException("Job name must be 255 characters or less", nameof(updates.Name));
+                }
+
                 job.Name = updates.Name;
             }
 
             if (updates.Priority.HasValue)
             {
                 if (updates.Priority < 0 || updates.Priority > 100)
+                {
                     throw new ArgumentException("Priority must be between 0 and 100", nameof(updates.Priority));
+                }
+
                 job.Priority = updates.Priority.Value;
             }
 
             if (updates.Notes != null)
             {
                 if (updates.Notes.Length > 500)
+                {
                     throw new ArgumentException("Notes must be 500 characters or less", nameof(updates.Notes));
+                }
+
                 job.Notes = updates.Notes;
             }
 
@@ -843,16 +894,22 @@ public class PrintQueueService(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 throw new ArgumentException("Job ID is required", nameof(jobId));
+            }
 
             if (notes != null && notes.Length > 500)
+            {
                 throw new ArgumentException("Notes must be 500 characters or less", nameof(notes));
+            }
 
             var job = await _dbContext.PrintJobs
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
             if (job == null)
+            {
                 return false;
+            }
 
             job.Notes = notes;
             job.UpdatedAt = DateTime.UtcNow;
@@ -956,14 +1013,18 @@ public class PrintQueueService(
         try
         {
             if (string.IsNullOrWhiteSpace(jobId))
+            {
                 throw new ArgumentException("Job ID is required", nameof(jobId));
+            }
 
             var job = await _dbContext.PrintJobs
                 .Include(pj => pj.StateHistory)
                 .FirstOrDefaultAsync(pj => pj.Id.ToString() == jobId, cancellationToken);
 
             if (job == null)
+            {
                 throw new ArgumentException($"Job {jobId} not found", nameof(jobId));
+            }
 
             // Build state transitions from job history
             var transitions = new List<StateTransitionDto>();
@@ -1173,7 +1234,9 @@ public class PrintQueueService(
     private static decimal? CalculateVariancePercent(int? estimated, int? actual)
     {
         if (!estimated.HasValue || !actual.HasValue || estimated.Value == 0)
+        {
             return null;
+        }
 
         return ((decimal)(actual.Value - estimated.Value) / estimated.Value) * 100;
     }

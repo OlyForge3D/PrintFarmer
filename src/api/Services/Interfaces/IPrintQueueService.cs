@@ -1,4 +1,4 @@
-using Farm.Api.DTOs;
+﻿using Farm.Api.DTOs;
 
 namespace Farm.Api.Services.Interfaces;
 
@@ -8,7 +8,7 @@ namespace Farm.Api.Services.Interfaces;
 public interface IPrintQueueService
 {
     // ============= QUERY OPERATIONS =============
-    
+
     /// <summary>
     /// Get all queued and printing jobs with file metadata
     /// </summary>
@@ -51,7 +51,7 @@ public interface IPrintQueueService
     );
 
     // ============= COMMAND OPERATIONS =============
-    
+
     /// <summary>
     /// Enqueue a print job
     /// </summary>
@@ -196,7 +196,7 @@ public interface IPrintQueueService
     );
 
     // ============= HISTORY OPERATIONS (Phase 2) =============
-    
+
     /// <summary>
     /// Seed print job history from printer history
     /// </summary>
