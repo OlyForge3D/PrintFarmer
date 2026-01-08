@@ -98,5 +98,76 @@ namespace Farm.Infrastructure.Repositories.Tags
         {
             _ = await _dbContext.SaveChangesAsync(ct);
         }
+
+        public async Task<IReadOnlyCollection<Guid>> GetAllModelsAsync(CancellationToken ct)
+        {
+            return await _dbContext.Model3DTagMappings
+                .Select(m => m.Model3DId)
+                .Distinct()
+                .ToListAsync(ct);
+        }
+
+        public async Task<IReadOnlyCollection<Guid>> GetModelsWithTagsAsync(
+            IEnumerable<Guid> tagIds,
+            bool requireAll,
+            CancellationToken ct)
+        {
+            var tagIdList = tagIds?.ToList() ?? new List<Guid>();
+            
+            if (tagIdList.Count == 0)
+            {
+                return Array.Empty<Guid>();
+            }
+
+            IQueryable<Guid> query = _dbContext.Model3DTagMappings
+                .Where(m => tagIdList.Contains(m.TagId))
+                .Select(m => m.Model3DId);
+
+            if (requireAll)
+            {
+                // Require ALL tags: group by model and count, then filter by count
+                var modelIds = await _dbContext.Model3DTagMappings
+                    .Where(m => tagIdList.Contains(m.TagId))
+                    .GroupBy(m => m.Model3DId)
+                    .Where(g => g.Select(m => m.TagId).Distinct().Count() == tagIdList.Count)
+                    .Select(g => g.Key)
+                    .ToListAsync(ct);
+
+                return modelIds;
+            }
+            else
+            {
+                // Require ANY tag: just get distinct model IDs
+                return await query.Distinct().ToListAsync(ct);
+            }
+        }
+
+        public async Task<IReadOnlyCollection<Guid>> GetModelsExcludingTagsAsync(
+            IEnumerable<Guid> tagIds,
+            CancellationToken ct)
+        {
+            var tagIdList = tagIds?.ToList() ?? new List<Guid>();
+            
+            if (tagIdList.Count == 0)
+            {
+                // No tags to exclude - return all models
+                return await GetAllModelsAsync(ct);
+            }
+
+            // Get all models
+            var allModels = await GetAllModelsAsync(ct);
+
+            // Get models that HAVE the excluded tags
+            var modelsWithExcludedTags = await _dbContext.Model3DTagMappings
+                .Where(m => tagIdList.Contains(m.TagId))
+                .Select(m => m.Model3DId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            var excludedSet = new HashSet<Guid>(modelsWithExcludedTags);
+
+            // Return models that DON'T have any excluded tags
+            return allModels.Where(m => !excludedSet.Contains(m)).ToList();
+        }
     }
 }

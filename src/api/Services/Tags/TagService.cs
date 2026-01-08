@@ -839,5 +839,181 @@ namespace Farm.Web.Api.Services.Tags
         }
 
         #endregion
+
+        #region Tag Filtering
+
+        /// <summary>
+        /// Gets models that have all specified tags (require all).
+        /// </summary>
+        /// <param name="tagIds">Collection of tag identifiers that models must have</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs that have all specified tags</returns>
+        /// <remarks>
+        /// Uses efficient querying to avoid N+1 query problems.
+        /// An empty tagIds collection returns all model IDs.
+        /// </remarks>
+        public async Task<IReadOnlyCollection<Guid>> GetModelsWithAllTagsAsync(IEnumerable<Guid> tagIds, CancellationToken ct)
+        {
+            try
+            {
+                var tagIdList = tagIds.ToList();
+                
+                if (tagIdList.Count == 0)
+                {
+                    // No tags specified - return all models
+                    return await _mappingRepository.GetAllModelsAsync(ct);
+                }
+
+                // Get models that have ALL specified tags
+                var modelIds = await _mappingRepository.GetModelsWithTagsAsync(tagIdList, requireAll: true, ct);
+                
+                _logger.LogDebug($"Found {modelIds.Count} models with all {tagIdList.Count} specified tags");
+                return modelIds;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to get models with all tags: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Gets models that have any of the specified tags (require any).
+        /// </summary>
+        /// <param name="tagIds">Collection of tag identifiers - models matching any will be returned</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs that have any of the specified tags</returns>
+        /// <remarks>
+        /// Uses efficient querying to avoid N+1 query problems.
+        /// An empty tagIds collection returns an empty result.
+        /// </remarks>
+        public async Task<IReadOnlyCollection<Guid>> GetModelsWithAnyTagAsync(IEnumerable<Guid> tagIds, CancellationToken ct)
+        {
+            try
+            {
+                var tagIdList = tagIds.ToList();
+                
+                if (tagIdList.Count == 0)
+                {
+                    return Array.Empty<Guid>();
+                }
+
+                // Get models that have ANY of the specified tags
+                var modelIds = await _mappingRepository.GetModelsWithTagsAsync(tagIdList, requireAll: false, ct);
+                
+                _logger.LogDebug($"Found {modelIds.Count} models with any of {tagIdList.Count} specified tags");
+                return modelIds;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to get models with any tag: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Gets models that exclude specific tags.
+        /// </summary>
+        /// <param name="tagIds">Collection of tag identifiers to exclude</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs that do NOT have any of the specified tags</returns>
+        /// <remarks>
+        /// Uses efficient querying to avoid N+1 query problems.
+        /// An empty tagIds collection returns all models.
+        /// </remarks>
+        public async Task<IReadOnlyCollection<Guid>> GetModelsExcludingTagsAsync(IEnumerable<Guid> tagIds, CancellationToken ct)
+        {
+            try
+            {
+                var tagIdList = tagIds.ToList();
+                
+                if (tagIdList.Count == 0)
+                {
+                    // No tags to exclude - return all models
+                    return await _mappingRepository.GetAllModelsAsync(ct);
+                }
+
+                // Get models that DON'T have any of the specified tags
+                var modelIds = await _mappingRepository.GetModelsExcludingTagsAsync(tagIdList, ct);
+                
+                _logger.LogDebug($"Found {modelIds.Count} models excluding {tagIdList.Count} specified tags");
+                return modelIds;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to get models excluding tags: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Complex filtering with include/exclude rules.
+        /// </summary>
+        /// <param name="includeAllTagIds">Models must have ALL of these tags (required)</param>
+        /// <param name="includeAnyTagIds">Models must have ANY of these tags (optional - only if specified)</param>
+        /// <param name="excludeTagIds">Models must NOT have any of these tags</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs matching the complex filter criteria</returns>
+        /// <remarks>
+        /// Filter logic (in order of application):
+        /// 1. Include ALL: Must have all specified tags
+        /// 2. Include ANY: Must have at least one of specified tags (if provided)
+        /// 3. Exclude: Must not have any of specified tags
+        /// 
+        /// Uses efficient querying with optimized database queries to minimize round trips.
+        /// </remarks>
+        public async Task<IReadOnlyCollection<Guid>> GetModelsWithComplexFilterAsync(
+            IEnumerable<Guid> includeAllTagIds,
+            IEnumerable<Guid> includeAnyTagIds,
+            IEnumerable<Guid> excludeTagIds,
+            CancellationToken ct)
+        {
+            try
+            {
+                var includeAllList = includeAllTagIds.ToList();
+                var includeAnyList = includeAnyTagIds.ToList();
+                var excludeList = excludeTagIds.ToList();
+
+                // Start with all models if no include filters
+                IReadOnlyCollection<Guid> resultModels;
+                
+                if (includeAllList.Count > 0)
+                {
+                    // Start with models that have ALL required tags
+                    resultModels = await _mappingRepository.GetModelsWithTagsAsync(includeAllList, requireAll: true, ct);
+                }
+                else if (includeAnyList.Count > 0)
+                {
+                    // Start with models that have ANY of the tags
+                    resultModels = await _mappingRepository.GetModelsWithTagsAsync(includeAnyList, requireAll: false, ct);
+                }
+                else
+                {
+                    // No include filters - start with all models
+                    resultModels = await _mappingRepository.GetAllModelsAsync(ct);
+                }
+
+                // Apply exclusion filter
+                if (excludeList.Count > 0 && resultModels.Count > 0)
+                {
+                    var excludedModels = await _mappingRepository.GetModelsWithTagsAsync(excludeList, requireAll: false, ct);
+                    var excludedSet = new HashSet<Guid>(excludedModels);
+                    resultModels = resultModels.Where(m => !excludedSet.Contains(m)).ToList();
+                }
+
+                _logger.LogDebug(
+                    $"Complex filter returned {resultModels.Count} models " +
+                    $"(includeAll: {includeAllList.Count}, includeAny: {includeAnyList.Count}, exclude: {excludeList.Count})");
+                
+                return resultModels;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to apply complex tag filter: {ex.Message}");
+                throw;
+            }
+        }
+
+        #endregion
     }
 }

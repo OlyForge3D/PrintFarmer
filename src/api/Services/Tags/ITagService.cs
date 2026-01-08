@@ -104,5 +104,43 @@ namespace Farm.Web.Api.Services.Tags
             string partialName,
             int limit,
             CancellationToken ct);
+
+        /// <summary>
+        /// Gets models that have all specified tags (require all).
+        /// </summary>
+        /// <param name="tagIds">Collection of tag identifiers that models must have</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs that have all specified tags</returns>
+        Task<IReadOnlyCollection<Guid>> GetModelsWithAllTagsAsync(IEnumerable<Guid> tagIds, CancellationToken ct);
+
+        /// <summary>
+        /// Gets models that have any of the specified tags (require any).
+        /// </summary>
+        /// <param name="tagIds">Collection of tag identifiers - models matching any will be returned</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs that have any of the specified tags</returns>
+        Task<IReadOnlyCollection<Guid>> GetModelsWithAnyTagAsync(IEnumerable<Guid> tagIds, CancellationToken ct);
+
+        /// <summary>
+        /// Gets models that exclude specific tags.
+        /// </summary>
+        /// <param name="tagIds">Collection of tag identifiers to exclude</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs that do NOT have any of the specified tags</returns>
+        Task<IReadOnlyCollection<Guid>> GetModelsExcludingTagsAsync(IEnumerable<Guid> tagIds, CancellationToken ct);
+
+        /// <summary>
+        /// Complex filtering with include/exclude rules.
+        /// </summary>
+        /// <param name="includeAllTagIds">Models must have ALL of these tags (required)</param>
+        /// <param name="includeAnyTagIds">Models must have ANY of these tags (optional - only if specified)</param>
+        /// <param name="excludeTagIds">Models must NOT have any of these tags</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>Collection of model IDs matching the complex filter criteria</returns>
+        Task<IReadOnlyCollection<Guid>> GetModelsWithComplexFilterAsync(
+            IEnumerable<Guid> includeAllTagIds,
+            IEnumerable<Guid> includeAnyTagIds,
+            IEnumerable<Guid> excludeTagIds,
+            CancellationToken ct);
     }
 }

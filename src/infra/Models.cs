@@ -1672,6 +1672,15 @@ public class FilterModelsByTagsRequestDto
 }
 
 /// <summary>
+/// Response from filtering models by tags (Phase 3D)
+/// </summary>
+public class FilterModelsResponseDto
+{
+    public IReadOnlyList<Guid> ModelIds { get; set; } = [];
+    public int Count { get; set; }
+}
+
+/// <summary>
 /// Request to update 3D model properties
 /// </summary>
 public class UpdateModel3DDto
