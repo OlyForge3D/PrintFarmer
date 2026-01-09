@@ -9,6 +9,7 @@ import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssign
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { Button, Input } from '@/common/components/ui';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
+import TagInput from '@/components/TagInput';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
 // Lazy load heavy three.js based viewers with manual preload support
@@ -132,14 +133,6 @@ export const ModelsPage: React.FC = () => {
     }
   });
 
-  const toggleTag = (tagId: string) => {
-    setSelectedTags(prev =>
-      prev.includes(tagId)
-        ? prev.filter(id => id !== tagId)
-        : [...prev, tagId]
-    );
-  };
-
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -226,34 +219,21 @@ export const ModelsPage: React.FC = () => {
 
           {/* Filters Panel */}
           {showFiltersPanel && (
-            <div className="border-t border-pf-border pt-3 space-y-2">
-              {selectedTags.length > 0 && (
-                <Button onClick={() => setSelectedTags([])} variant="secondary" size="sm" className="w-full text-xs">
-                  Clear All Filters
-                </Button>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                {allTags.length > 0 ? (
-                  allTags.map(tag => (
-                    <Button
-                      key={tag.id}
-                      onClick={() => toggleTag(tag.id)}
-                      variant={selectedTags.includes(tag.id) ? "primary" : "secondary"}
-                      size="sm"
-                      className="flex items-center gap-1.5 text-xs"
-                      title={tag.description}
-                    >
-                      <div
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
-                      />
-                      <span className="truncate">{tag.name}</span>
-                    </Button>
-                  ))
-                ) : (
-                  <p className="text-xs text-pf-text-tertiary col-span-full text-center py-2">No tags available</p>
+            <div className="border-t border-pf-border pt-3 space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-pf-text-primary">Filter by Tags</h3>
+                {selectedTags.length > 0 && (
+                  <Button onClick={() => setSelectedTags([])} variant="secondary" size="sm" className="text-xs">
+                    Clear Filters
+                  </Button>
                 )}
               </div>
+              <TagInput
+                selectedTags={allTags.filter(t => selectedTags.includes(t.id))}
+                onChange={(tags) => setSelectedTags(tags.map(t => t.id))}
+                placeholder="Select tags to filter models..."
+                maxTags={undefined}
+              />
             </div>
           )}
         </div>

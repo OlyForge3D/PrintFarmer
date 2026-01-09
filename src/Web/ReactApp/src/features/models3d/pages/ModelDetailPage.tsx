@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CloseIcon, ArrowLeftIcon, TagIcon, EditIcon, SaveIcon, PlusIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TagEditor } from '@/features/catalog/components/TagEditor';
+import TagInput from '@/components/TagInput';
+import TagDisplay from '@/components/TagDisplay';
 import { Button, Input, FormField, Textarea } from '@/common/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 
@@ -450,26 +452,13 @@ export const ModelDetailPage: React.FC = () => {
 
                 {isEditingTags ? (
                     <div className="space-y-4">
-                        <TagEditor
-                            allTags={allTags}
-                            selectedTagIds={selectedTagIds}
-                            onTagsChange={(tagIds, newTags) => {
-                                setSelectedTagIds(tagIds);
-                                if (newTags && newTags.length > 0) {
-                                    // Accumulate new tags that haven't been created yet
-                                    setNewTags(prev => {
-                                        const accumulated = [...prev];
-                                        for (const newTag of newTags) {
-                                            // Check if we already have this tag
-                                            if (!accumulated.some(t => t.name === newTag.name)) {
-                                                accumulated.push(newTag);
-                                            }
-                                        }
-                                        return accumulated;
-                                    });
-                                }
+                        <TagInput
+                            selectedTags={currentTags}
+                            onChange={(tags) => {
+                                setSelectedTagIds(tags.map(t => t.id));
                             }}
                             placeholder="Search and add tags..."
+                            maxTags={20}
                         />
 
                         {/* Save Button */}
@@ -500,29 +489,15 @@ export const ModelDetailPage: React.FC = () => {
                     </div>
                 ) : (
                     <div>
-                        {currentTags.length > 0 || isEditingTags ? (
+                        {currentTags.length > 0 ? (
                             <div className="flex flex-wrap gap-2 items-center">
                                 {currentTags.map(tag => (
-                                    <div
+                                    <TagDisplay
                                         key={tag.id}
-                                        className="flex items-center gap-1 px-3 py-1 rounded-full text-white text-sm"
-                                        style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
-                                    >
-                                        <span>{tag.name}</span>
-                                        <Button
-                                            type="button"
-                                            onClick={() => {
-                                                setSelectedTagIds(selectedTagIds.filter(id => id !== tag.id));
-                                                setIsEditingTags(true);
-                                            }}
-                                            variant="subtle"
-                                            size="sm"
-                                            className="!p-0 !h-auto ml-1"
-                                            title="Remove tag"
-                                        >
-                                            <CloseIcon className="w-3 h-3" />
-                                        </Button>
-                                    </div>
+                                        tag={tag}
+                                        showRemoveButton={false}
+                                        onClick={() => setIsEditingTags(true)}
+                                    />
                                 ))}
                                 <Button
                                     type="button"
