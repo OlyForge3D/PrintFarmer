@@ -2,6 +2,7 @@
 using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Notifications;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Api.Services.PrintQueue;
@@ -11,11 +12,13 @@ namespace Farm.Api.Services.PrintQueue;
 /// </summary>
 public class PrintQueueService(
     AppDbContext dbContext,
-    ILogger<PrintQueueService> logger
+    ILogger<PrintQueueService> logger,
+    INotificationService? notificationService = null
 ) : IPrintQueueService
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<PrintQueueService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly INotificationService? _notificationService = notificationService;
 
     // ============= QUERY OPERATIONS =============
 
@@ -407,6 +410,9 @@ public class PrintQueueService(
             await _dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Print job {JobId} paused by user {UserId}", jobId, userId);
 
+            // Send notification
+            await SendJobPauseNotificationAsync(job, "Job paused by user", cancellationToken);
+
             return MapToQueuedPrintJobDto(job);
         }
         catch (Exception ex)
@@ -444,6 +450,9 @@ public class PrintQueueService(
             await _dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Print job {JobId} resumed by user {UserId}", jobId, userId);
 
+            // Send notification
+            await SendJobResumeNotificationAsync(job, cancellationToken);
+
             return MapToQueuedPrintJobDto(job);
         }
         catch (Exception ex)
@@ -480,6 +489,9 @@ public class PrintQueueService(
 
             await _dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", jobId, userId);
+
+            // Send notification
+            await SendJobFailureNotificationAsync(job, "Job cancelled by user", cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1239,6 +1251,132 @@ public class PrintQueueService(
         }
 
         return ((decimal)(actual.Value - estimated.Value) / estimated.Value) * 100;
+    }
+
+    // ============= NOTIFICATION HELPERS (Phase 4.3) =============
+
+    /// <summary>
+    /// Send job completion notification to user
+    /// NOTE: This method is reserved for future use when job completion events are refactored
+    /// to trigger through PrintQueueService instead of through background printer services.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("CodeQuality", "IDE0051:Remove unused private members")]
+    private async Task SendJobCompletionNotificationAsync(
+        PrintJob job,
+        CancellationToken cancellationToken = default)
+    {
+        if (_notificationService == null)
+        {
+            _logger.LogWarning("INotificationService not configured - skipping job completion notification for job {JobId}", job.Id);
+            return;
+        }
+
+        try
+        {
+            await _notificationService.SendJobCompletedAsync(
+                job.Id.ToString(),
+                job.Name,
+                job.AssignedPrinter?.Name,
+                cancellationToken);
+
+            _logger.LogInformation("Job completion notification sent for job {JobId}: {JobName}", job.Id, job.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job completion notification for job {JobId}", job.Id);
+            // Don't rethrow - notification failure shouldn't block queue operations
+        }
+    }
+
+    /// <summary>
+    /// Send job failure notification to user
+    /// </summary>
+    private async Task SendJobFailureNotificationAsync(
+        PrintJob job,
+        string? errorMessage = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_notificationService == null)
+        {
+            _logger.LogWarning("INotificationService not configured - skipping job failure notification for job {JobId}", job.Id);
+            return;
+        }
+
+        try
+        {
+            await _notificationService.SendJobFailedAsync(
+                job.Id.ToString(),
+                job.Name,
+                errorMessage ?? "Job failed during printing",
+                cancellationToken);
+
+            _logger.LogInformation("Job failure notification sent for job {JobId}: {JobName}", job.Id, job.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job failure notification for job {JobId}", job.Id);
+            // Don't rethrow - notification failure shouldn't block queue operations
+        }
+    }
+
+    /// <summary>
+    /// Send job pause notification to user
+    /// </summary>
+    private async Task SendJobPauseNotificationAsync(
+        PrintJob job,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_notificationService == null)
+        {
+            _logger.LogWarning("INotificationService not configured - skipping job pause notification for job {JobId}", job.Id);
+            return;
+        }
+
+        try
+        {
+            await _notificationService.SendJobPausedAsync(
+                job.Id.ToString(),
+                job.Name,
+                reason,
+                cancellationToken);
+
+            _logger.LogInformation("Job pause notification sent for job {JobId}: {JobName}", job.Id, job.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job pause notification for job {JobId}", job.Id);
+            // Don't rethrow - notification failure shouldn't block queue operations
+        }
+    }
+
+    /// <summary>
+    /// Send job resume notification to user
+    /// </summary>
+    private async Task SendJobResumeNotificationAsync(
+        PrintJob job,
+        CancellationToken cancellationToken = default)
+    {
+        if (_notificationService == null)
+        {
+            _logger.LogWarning("INotificationService not configured - skipping job resume notification for job {JobId}", job.Id);
+            return;
+        }
+
+        try
+        {
+            await _notificationService.SendJobResumedAsync(
+                job.Id.ToString(),
+                job.Name,
+                cancellationToken);
+
+            _logger.LogInformation("Job resume notification sent for job {JobId}: {JobName}", job.Id, job.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending job resume notification for job {JobId}", job.Id);
+            // Don't rethrow - notification failure shouldn't block queue operations
+        }
     }
 }
 
