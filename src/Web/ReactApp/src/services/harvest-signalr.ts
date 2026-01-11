@@ -78,6 +78,30 @@ export type HarvestFileUpdatedEvent = {
 };
 type HarvestFileUpdatedCallback = (evt: HarvestFileUpdatedEvent) => void;
 
+// Single file harvest event types
+export type SingleFileHarvestStartEvent = {
+  fileName: string;
+  timestamp: string;
+};
+
+export type SingleFileHarvestProgressEvent = {
+  fileName: string;
+  percentComplete: number;
+  message: string;
+  timestamp: string;
+};
+
+export type SingleFileHarvestCompleteEvent = {
+  fileName: string;
+  success: boolean;
+  message: string;
+  timestamp: string;
+};
+
+type SingleFileHarvestStartCallback = (evt: SingleFileHarvestStartEvent) => void;
+type SingleFileHarvestProgressCallback = (evt: SingleFileHarvestProgressEvent) => void;
+type SingleFileHarvestCompleteCallback = (evt: SingleFileHarvestCompleteEvent) => void;
+
 // Harvest discovery restart event type
 export type HarvestDiscoveryRestartedEvent = {
   operationId: string;
@@ -112,6 +136,9 @@ export class SignalRService {
   private harvestOperationCompletedCallbacks: HarvestOperationCompletedCallback[] = [];
   private harvestDiscoveryRestartedCallbacks: HarvestDiscoveryRestartedCallback[] = [];
   private harvestDiscoveryCompleteCallbacks: HarvestDiscoveryCompleteCallback[] = [];
+  private singleFileHarvestStartCallbacks: SingleFileHarvestStartCallback[] = [];
+  private singleFileHarvestProgressCallbacks: SingleFileHarvestProgressCallback[] = [];
+  private singleFileHarvestCompleteCallbacks: SingleFileHarvestCompleteCallback[] = [];
   private jobQueueUpdateCallbacks: JobQueueUpdateCallback[] = [];
   private connectionStateCallbacks: ConnectionStateCallback[] = [];
 
@@ -393,6 +420,48 @@ export class SignalRService {
       });
     });
 
+    // NEW: Single file harvest start event
+    this.connection.on('singlefileharveststart', (data: SingleFileHarvestStartEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Single file harvest started:', data.fileName);
+      }
+      this.singleFileHarvestStartCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in single file harvest start callback:', error);
+        }
+      });
+    });
+
+    // NEW: Single file harvest progress event
+    this.connection.on('singlefileharvestprogress', (data: SingleFileHarvestProgressEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Single file harvest progress:', data.fileName, `${data.percentComplete}%`, data.message);
+      }
+      this.singleFileHarvestProgressCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in single file harvest progress callback:', error);
+        }
+      });
+    });
+
+    // NEW: Single file harvest complete event
+    this.connection.on('singlefileharvestcomplete', (data: SingleFileHarvestCompleteEvent) => {
+      if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
+        console.info('[SignalR] Single file harvest completed:', data.fileName, 'Success:', data.success, 'Message:', data.message);
+      }
+      this.singleFileHarvestCompleteCallbacks.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in single file harvest complete callback:', error);
+        }
+      });
+    });
+
     this.connection.on('jobqueueupdate', (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach(callback => {
         try {
@@ -567,6 +636,40 @@ export class SignalRService {
     };
   }
 
+  // NEW: Single file harvest event subscriptions
+  onSingleFileHarvestStart(callback: SingleFileHarvestStartCallback): () => void {
+    this.singleFileHarvestStartCallbacks.push(callback);
+
+    return () => {
+      const index = this.singleFileHarvestStartCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.singleFileHarvestStartCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  onSingleFileHarvestProgress(callback: SingleFileHarvestProgressCallback): () => void {
+    this.singleFileHarvestProgressCallbacks.push(callback);
+
+    return () => {
+      const index = this.singleFileHarvestProgressCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.singleFileHarvestProgressCallbacks.splice(index, 1);
+      }
+    };
+  }
+
+  onSingleFileHarvestComplete(callback: SingleFileHarvestCompleteCallback): () => void {
+    this.singleFileHarvestCompleteCallbacks.push(callback);
+
+    return () => {
+      const index = this.singleFileHarvestCompleteCallbacks.indexOf(callback);
+      if (index > -1) {
+        this.singleFileHarvestCompleteCallbacks.splice(index, 1);
+      }
+    };
+  }
+
   // ============ Server Method Calls ============
 
   async joinPrinterGroup(printerId: string): Promise<void> {
@@ -626,6 +729,9 @@ export class SignalRService {
     this.harvestOperationCompletedCallbacks = [];
     this.harvestDiscoveryRestartedCallbacks = [];
     this.harvestDiscoveryCompleteCallbacks = [];
+    this.singleFileHarvestStartCallbacks = [];
+    this.singleFileHarvestProgressCallbacks = [];
+    this.singleFileHarvestCompleteCallbacks = [];
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
 

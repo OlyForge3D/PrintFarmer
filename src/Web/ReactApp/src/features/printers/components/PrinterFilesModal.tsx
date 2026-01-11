@@ -4,6 +4,7 @@ import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIco
 import { Button, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
 import { apiClient } from '@/services/api';
+import { signalRService, type SingleFileHarvestProgressEvent, type SingleFileHarvestCompleteEvent } from '@/services/harvest-signalr';
 import { toast } from 'sonner';
 import type { Printer, PrinterFileDto } from '@/types/api';
 
@@ -16,6 +17,11 @@ interface PrinterFilesModalProps {
 type SortBy = 'name' | 'modified' | 'size';
 type SortOrder = 'asc' | 'desc';
 
+interface FileHarvestProgress {
+  percentComplete: number;
+  message: string;
+}
+
 export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModalProps) {
   const [files, setFiles] = useState<PrinterFileDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,7 +32,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
-  const [isHarvesting, setIsHarvesting] = useState<string | null>(null);
+  const [harvestProgress, setHarvestProgress] = useState<Record<string, FileHarvestProgress>>({});
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'print' | 'delete'; file: PrinterFileDto } | null>(null);
 
   const loadFiles = useCallback(async () => {
@@ -49,6 +55,39 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       loadFiles();
     }
   }, [isOpen, printer.id, loadFiles]);
+
+  // Subscribe to single file harvest events
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Subscribe to progress events
+    const unsubscribeProgress = signalRService.onSingleFileHarvestProgress((evt: SingleFileHarvestProgressEvent) => {
+      setHarvestProgress(prev => ({
+        ...prev,
+        [evt.fileName]: {
+          percentComplete: evt.percentComplete,
+          message: evt.message
+        }
+      }));
+    });
+
+    // Subscribe to complete events
+    const unsubscribeComplete = signalRService.onSingleFileHarvestComplete((evt: SingleFileHarvestCompleteEvent) => {
+      // Clear progress after completion
+      setTimeout(() => {
+        setHarvestProgress(prev => {
+          const updated = { ...prev };
+          delete updated[evt.fileName];
+          return updated;
+        });
+      }, 1000); // Show completion for 1 second before clearing
+    });
+
+    return () => {
+      unsubscribeProgress();
+      unsubscribeComplete();
+    };
+  }, [isOpen]);
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -118,22 +157,14 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
 
   const handleHarvestFile = async (fileName: string) => {
     try {
-      setIsHarvesting(fileName);
       // Start a harvest operation for this specific file
-        await apiClient.harvestSingleFile(printer.id, fileName);
-      toast.success(`Started harvesting: ${fileName}`);
-
-      // Reload files after a brief delay to allow harvest to complete
-      // The harvest is queued for background processing
-      setTimeout(() => {
-        loadFiles();
-      }, 2000);
+      await apiClient.harvestSingleFile(printer.id, fileName);
+      // Progress will be shown via the inline progress bar as SignalR events arrive
+      // No toast, no file list reload - progress bar handles UX feedback
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to start harvest';
       toast.error(errorMessage);
       console.error('Error harvesting file:', err);
-    } finally {
-      setIsHarvesting(null);
     }
   };
 
@@ -291,114 +322,136 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                 </div>
 
                 <div className="space-y-2">
-                  {getSortedFiles().map((file) => (
-                    <div
-                      key={file.fileName}
-                      className="relative flex items-center justify-between bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
-                    >
-                      <div className="flex items-center flex-1 min-w-0 gap-3">
-                        {file.thumbnailUrl ? (
-                          <div
-                            className="relative h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-                            onClick={() => setSelectedThumbnail({ fileName: file.fileName, url: file.thumbnailUrl! })}
-                          >
-                            <img
-                              src={file.thumbnailUrl}
-                              alt={file.fileName}
-                              className="h-full w-full object-cover"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none';
-                              }}
-                            />
+                  {getSortedFiles().map((file) => {
+                    const isHarvesting = harvestProgress[file.fileName];
+                    
+                    return (
+                      <div
+                        key={file.fileName}
+                        className="relative flex flex-col bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center flex-1 min-w-0 gap-3">
+                            {file.thumbnailUrl ? (
+                              <div
+                                className="relative h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => setSelectedThumbnail({ fileName: file.fileName, url: file.thumbnailUrl! })}
+                              >
+                                <img
+                                  src={file.thumbnailUrl}
+                                  alt={file.fileName}
+                                  className="h-full w-full object-cover"
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border flex items-center justify-center">
+                                <ImageIcon className="h-6 w-6 text-pf-text-tertiary" />
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-pf-text-primary break-words font-medium">{file.fileName}</p>
+                              <div className="flex gap-4 text-xs text-pf-text-tertiary mt-1">
+                                <span>G-code file</span>
+                                {file.sizeBytes && <span>{formatFileSize(file.sizeBytes)}</span>}
+                                {file.modified && <span>{formatModifiedDate(file.modified)}</span>}
+                              </div>
+                            </div>
                           </div>
-                        ) : (
-                          <div className="h-12 w-12 flex-shrink-0 rounded bg-pf-bg-2 border border-pf-border flex items-center justify-center">
-                            <ImageIcon className="h-6 w-6 text-pf-text-tertiary" />
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-pf-text-primary break-words font-medium">{file.fileName}</p>
-                          <div className="flex gap-4 text-xs text-pf-text-tertiary mt-1">
-                            <span>G-code file</span>
-                            {file.sizeBytes && <span>{formatFileSize(file.sizeBytes)}</span>}
-                            {file.modified && <span>{formatModifiedDate(file.modified)}</span>}
+
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              type="button"
+                              variant="subtle"
+                              size="sm"
+                              onClick={() => handleQueueFile(file.fileName)}
+                              className="!p-2 !h-auto"
+                              title="Queue for printing"
+                              aria-label="Queue for printing"
+                              iconCenter={<PlayIcon className="h-4 w-4" />}
+                            ></Button>
+
+                            <Button
+                              type="button"
+                              variant="subtle"
+                              size="sm"
+                              onClick={() => handleCopyFilename(file.fileName)}
+                              className="!p-2 !h-auto"
+                              title={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
+                              aria-label={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
+                              iconCenter={<CopyIcon className="h-4 w-4" />}
+                            ></Button>
+
+                            <Button
+                              type="button"
+                              variant="subtle"
+                              size="sm"
+                              onClick={() => handleDownloadFile(file.fileName)}
+                              disabled={isDownloading === file.fileName}
+                              className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
+                              aria-label={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
+                              iconCenter={isDownloading === file.fileName ? (
+                                <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <DownloadIcon className="h-4 w-4" />
+                              )}
+                            ></Button>
+
+                            <Button
+                              type="button"
+                              variant="subtle"
+                              size="sm"
+                              onClick={() => handleHarvestFile(file.fileName)}
+                              disabled={!!isHarvesting}
+                              className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={isHarvesting ? 'Harvesting...' : 'Harvest file metadata'}
+                              aria-label={isHarvesting ? 'Harvesting...' : 'Harvest file metadata'}
+                              iconCenter={isHarvesting ? (
+                                <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <SaveIcon className="h-4 w-4" />
+                              )}
+                            ></Button>
+
+                            <Button
+                              type="button"
+                              variant="subtle"
+                              size="sm"
+                              onClick={() => handleDeleteFile(file.fileName)}
+                              disabled={isDeleting === file.fileName}
+                              className="!p-2 !h-auto text-red-500 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
+                              aria-label={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
+                              iconCenter={isDeleting === file.fileName ? (
+                                <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <DeleteIcon className="h-4 w-4" />
+                              )}
+                            ></Button>
                           </div>
                         </div>
+
+                        {/* Inline progress bar for harvest */}
+                        {isHarvesting && (
+                          <div className="mt-4 pt-4 border-t border-pf-border">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs text-pf-text-secondary font-medium">{isHarvesting.message}</span>
+                              <span className="text-xs font-semibold text-pf-accent">{isHarvesting.percentComplete}%</span>
+                            </div>
+                            <div className="w-full h-2 bg-pf-bg-2 rounded-full overflow-hidden border border-pf-border">
+                              <div
+                                className="h-full bg-gradient-to-r from-pf-accent to-cyan-400 transition-all duration-300 ease-out rounded-full"
+                                style={{ width: `${isHarvesting.percentComplete}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
-
-                      <div className="flex items-center gap-2 flex-shrink-0 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          onClick={() => handleQueueFile(file.fileName)}
-                          className="!p-2 !h-auto"
-                          title="Queue for printing"
-                          aria-label="Queue for printing"
-                          iconCenter={<PlayIcon className="h-4 w-4" />}
-                        ></Button>
-
-                        <Button
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          onClick={() => handleCopyFilename(file.fileName)}
-                          className="!p-2 !h-auto"
-                          title={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
-                          aria-label={copiedFile === file.fileName ? 'Copied!' : 'Copy filename'}
-                          iconCenter={<CopyIcon className="h-4 w-4" />}
-                        ></Button>
-
-                        <Button
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          onClick={() => handleDownloadFile(file.fileName)}
-                          disabled={isDownloading === file.fileName}
-                          className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
-                          aria-label={isDownloading === file.fileName ? 'Downloading...' : 'Download file'}
-                          iconCenter={isDownloading === file.fileName ? (
-                            <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <DownloadIcon className="h-4 w-4" />
-                          )}
-                        ></Button>
-
-                        <Button
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          onClick={() => handleHarvestFile(file.fileName)}
-                          disabled={isHarvesting === file.fileName}
-                          className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={isHarvesting === file.fileName ? 'Harvesting...' : 'Harvest file metadata'}
-                          aria-label={isHarvesting === file.fileName ? 'Harvesting...' : 'Harvest file metadata'}
-                          iconCenter={isHarvesting === file.fileName ? (
-                            <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <SaveIcon className="h-4 w-4" />
-                          )}
-                        ></Button>
-
-                        <Button
-                          type="button"
-                          variant="subtle"
-                          size="sm"
-                          onClick={() => handleDeleteFile(file.fileName)}
-                          disabled={isDeleting === file.fileName}
-                          className="!p-2 !h-auto text-red-500 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
-                          aria-label={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
-                          iconCenter={isDeleting === file.fileName ? (
-                            <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <DeleteIcon className="h-4 w-4" />
-                          )}
-                        ></Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

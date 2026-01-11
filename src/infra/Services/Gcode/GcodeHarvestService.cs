@@ -1452,10 +1452,14 @@ public class GcodeHarvestService(
         {
             _logger.LogInformation($"Starting direct harvest for file '{filename}' from printer {printerId}");
 
+            // Broadcast start event
+            await _harvestEventBroadcaster.BroadcastSingleFileHarvestStartAsync(filename, ct);
+
             // Step 1: Validate printer exists
             var printer = await ValidatePrinterAsync(printerId, ct);
             if (printer == null)
             {
+                await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, "Printer not found", ct);
                 return new GcodeHarvestResultDto(
                     Guid.NewGuid(),
                     false,
@@ -1465,9 +1469,11 @@ public class GcodeHarvestService(
             }
 
             // Step 2: Download file from printer
+            await _harvestEventBroadcaster.BroadcastSingleFileHarvestProgressAsync(filename, 10, "Downloading file...", ct);
             var fileContent = await DownloadFileFromPrinterAsync(printerId, filename, ct);
             if (fileContent == null)
             {
+                await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, "File download failed or returned empty content", ct);
                 return new GcodeHarvestResultDto(
                     Guid.NewGuid(),
                     false,
@@ -1477,6 +1483,7 @@ public class GcodeHarvestService(
             }
 
             // Step 3: Get or create root folder for gcode files
+            await _harvestEventBroadcaster.BroadcastSingleFileHarvestProgressAsync(filename, 30, "Processing metadata...", ct);
             var rootFolder = await _unitOfWork.Folders.GetOrCreateFolderAsync("/", "gcode", ct);
             _logger.LogInformation($"Using gcode root folder: {rootFolder.Id}");
 
@@ -1495,10 +1502,13 @@ public class GcodeHarvestService(
                     originalPrinterPath: filename,
                     thumbnailUrl: null,
                     ct: ct);
+                
+                await _harvestEventBroadcaster.BroadcastSingleFileHarvestProgressAsync(filename, 90, "Saving to library...", ct);
             }
             catch (DuplicateFileException ex)
             {
                 _logger.LogWarning($"Duplicate file during harvest: {ex.FileName} - {ex.Message}");
+                await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, $"Duplicate file: {ex.FileName}", ct);
                 return new GcodeHarvestResultDto(
                     Guid.NewGuid(),
                     false,
@@ -1509,6 +1519,7 @@ public class GcodeHarvestService(
             catch (FileStorageException ex)
             {
                 _logger.LogError(ex, $"File storage failed during harvest: {ex.FileName}");
+                await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, $"Failed to store file: {ex.FileName}", ct);
                 return new GcodeHarvestResultDto(
                     Guid.NewGuid(),
                     false,
@@ -1519,6 +1530,7 @@ public class GcodeHarvestService(
             catch (FilePersistenceException ex)
             {
                 _logger.LogError(ex, $"Database persistence failed during harvest: {ex.FileName}");
+                await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, $"Failed to save file to database: {ex.FileName}", ct);
                 return new GcodeHarvestResultDto(
                     Guid.NewGuid(),
                     false,
@@ -1529,6 +1541,7 @@ public class GcodeHarvestService(
             catch (GcodeProcessingException ex)
             {
                 _logger.LogError(ex, $"Gcode processing failed during harvest: {ex.FileName} (Step: {ex.Step})");
+                await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, $"Processing failed: {ex.FileName}", ct);
                 return new GcodeHarvestResultDto(
                     Guid.NewGuid(),
                     false,
@@ -1538,6 +1551,7 @@ public class GcodeHarvestService(
             }
 
             _logger.LogInformation($"Successfully harvested file '{filename}' with ID {gcodeFile.Id}");
+            await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, true, "File harvested successfully", ct);
 
             return new GcodeHarvestResultDto(
                 Guid.NewGuid(),
@@ -1553,6 +1567,7 @@ public class GcodeHarvestService(
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Error harvesting single file '{filename}' from printer {printerId}");
+            await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, $"Error harvesting file: {ex.Message}", ct);
             return new GcodeHarvestResultDto(
                 Guid.NewGuid(),
                 false,
