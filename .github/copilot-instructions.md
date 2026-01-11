@@ -86,11 +86,8 @@ dotnet build ./farm-web.sln -c Release
 cd ./src/Web/ReactApp
 npm run build
 ```
-⚠️ **NOTICE:** A previous snapshot of this repository reported a production build failure with TypeScript errors. In the current workspace the production build completes successfully when running `npm run build`. If you encounter local build failures, use the dev server as a fallback:
-```powershell
-npm run dev  # Development server works fine
-```
-*Note: Production build fails. Development server works. Set timeout to 30+ seconds for dev mode.*
+✅ **Production build succeeds** - 0 TypeScript errors (resolved 2026-01-11).
+*Note: Production build takes ~10 seconds. Set timeout to 30+ seconds.*
 
 **5. Run tests:**
 ```powershell
@@ -106,7 +103,7 @@ npm run test:run
 - **API Tests**: 1572/1572 PASS (4 skipped, 0 failures) - ✅ ALL PASSING
   - Complete coverage including discovery probe validation tests
   - Discovery probes migrated to backend plugins (all tests updated and passing)
-- **React Tests**: 150/150 PASS (all tests passing) - ✅ ALL PASSING
+- **React Tests**: 365/365 PASS (all tests passing) - ✅ ALL PASSING
   - Use `npm run test:run` for non-interactive mode (exits after tests complete)
   - Use `npm test` for interactive watch mode (requires 'q' or 'h' input to exit)
 *Note: .NET tests take ~2m 39s. React tests take ~12 seconds. Set timeout to 180+ seconds for full test suite.*
@@ -123,8 +120,8 @@ dotnet format ./farm-web.sln
 cd ./src/Web/ReactApp
 npm run lint
 ```
-⚠️ **CRITICAL**: React linting currently FAILS with 64 ESLint errors.
-*Note: .NET formatting takes ~104 seconds. React linting fails. Set timeout to 180+ seconds for .NET formatting.*
+✅ **React linting passes with 0 errors** (resolved 2026-01-11).
+*Note: .NET formatting takes ~104 seconds. React linting takes ~30 seconds. Set timeout to 180+ seconds for .NET formatting.*
 
 ### Running the Application
 
@@ -244,13 +241,15 @@ npm run dev
 5. Test SignalR hub connection and printer status updates
 6. **UI Verification**: Application shows setup wizard for administrator account creation
 
-**ACTUAL FUNCTIONALITY STATUS (Validated 2025-09-07):**
+**ACTUAL FUNCTIONALITY STATUS (Validated 2026-01-11):**
 - ✅ API server: Fully functional, all endpoints working
 - ✅ React dev server: Fully functional, UI loads correctly 
 - ✅ Database: Auto-initialization and seeding works
 - ✅ SignalR: Health checks confirm full functionality
-- ❌ Production builds: Cannot create production-ready builds
-- ❌ CI/CD: Tests and linting prevent automated deployments
+- ✅ Production builds: Successful (gcode refactoring, 9.94s build time)
+- ✅ Linting: ESLint passes with 0 errors (resolved 2026-01-11)
+- ✅ Tests: All 365 React tests passing, 1572 API tests passing
+- ✅ CI/CD: Ready for automated deployments (linting and testing verified)
 
 ### Common Build Issues & Solutions
 
@@ -747,23 +746,24 @@ These instructions have been thoroughly tested and validated with .NET 9.0.302 a
 | `dotnet restore ./farm-web.sln` | ~38 seconds | 120 seconds | First run downloads packages (VERIFIED) |
 | `npm install` (React dependencies) | ~38 seconds | 120 seconds | Downloads React packages (VERIFIED) |
 | `dotnet build ./farm-web.sln -c Debug` | ~82 seconds | 150 seconds | Includes compilation warnings (VERIFIED) |
-| `npm run build` (React production build) | **FAILS** | N/A | 97 TypeScript errors prevent build (CRITICAL) |
+| `npm run build` (React production build) | ~10 seconds | 30 seconds | Successful build, 0 errors (VERIFIED 2026-01-11) |
 | `npm run dev` (React dev server) | ~5 seconds | 30 seconds | Development mode works fine (VERIFIED) |
 | `dotnet test ./farm-web.sln -c Release` | ~2m 39s | 180 seconds | 1572/1572 PASS (4 skipped, 0 failures) - ALL PASSING |
-| `npm run test:run` (React tests) | ~12 seconds | 30 seconds | 150/150 PASS - ✅ ALL TESTS PASSING (use for automated testing) |
+| `npm run test:run` (React tests) | ~12 seconds | 30 seconds | 365/365 PASS - ✅ ALL TESTS PASSING (use for automated testing) |
 | `npm test` (React tests) | ~12 seconds | N/A | Interactive watch mode (requires 'q' to exit) |
 | `dotnet format ./farm-web.sln` | ~104 seconds | 180 seconds | Longer than expected (VERIFIED) |
-| `npm run lint` (React linting) | **FAILS** | N/A | 64 ESLint errors (CRITICAL) |
+| `npm run lint` (React linting) | ~30 seconds | 60 seconds | 0 errors, 0 warnings - ✅ PASSING (resolved 2026-01-11) |
 | API server startup | ~15 seconds | 60 seconds | Database initialization (VERIFIED) |
 | React dev server startup | ~5 seconds | 30 seconds | Vite development server (VERIFIED) |
 
 **CRITICAL WARNINGS:**
-- **NEVER CANCEL** commands that appear to hang - they are processing
 - **NEVER CANCEL** builds or long-running commands. Always set appropriate timeouts
-- **ALL API TESTS NOW PASS** - 1572/1572 (0 failures) ✅ Complete test coverage
-- **ALL REACT TESTS NOW PASS** - 150/150 (0 failures) ✅ Use `npm run test:run` for non-interactive testing
-- **Build succeeds with 0 errors** - Only pre-existing warnings remain
+- **ALL API TESTS PASS** - 1572/1572 (0 failures) ✅ Complete test coverage
+- **ALL REACT TESTS PASS** - 365/365 (0 failures) ✅ Use `npm run test:run` for non-interactive testing
+- **ESLint passes** - 0 errors, 0 warnings ✅ (resolved 2026-01-11)
+- **Production build succeeds** - 0 TypeScript errors ✅ (resolved 2026-01-11)
 - **Discovery probe tests passing** - All 4 probes validated and consolidated in backend plugins
+- **GcodeListView refactoring complete** - Reusable component with Printer Model column, thumbnail fallback
 - Build warnings are normal - .NET build will still succeed
 - Database warnings on first run are expected
 - Set bash timeouts to at least 50% longer than typical times shown above
@@ -812,8 +812,11 @@ cd ../../
 # 10. Format .NET code (104 seconds, set timeout 180+)
 dotnet format ./farm-web.sln
 
-# 11. ⚠️ SKIP React linting (currently fails with 64 ESLint errors)
-# cd ./Web/ReactApp && npm run lint  # DON'T RUN - FAILS
+# 11. Run React linting (30 seconds, set timeout 60+)
+cd ./Web/ReactApp
+npm run lint
+# ✅ Should pass with 0 errors, 0 warnings
+cd ../../
 
 # 12. Start API server (Terminal 1)
 dotnet run --project ./api/Farm.Web.Api.csproj

@@ -595,6 +595,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-24">Size</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-24">Nozzle</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-32">Material</th>
+                  <th className="px-4 py-2 text-left font-semibold text-pf-text w-32">Printer Model</th>
                   <th className="px-4 py-2 text-left font-semibold text-pf-text w-40">Modified</th>
                   <th className="px-4 py-2 text-center font-semibold text-pf-text w-12">Action</th>
                 </tr>
@@ -704,6 +705,9 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                               src={file.thumbnailPath}
                               alt={file.fileName}
                               className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
+                              }}
                             />
                             {selectedFiles.length > 1 && selectedFiles.includes(file.path) && (
                               <div className="absolute -top-1 -right-1 bg-pf-primary text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
@@ -731,7 +735,10 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       {file.isDirectory ? '-' : file.extractedNozzleDiameter ? `${file.extractedNozzleDiameter}mm` : '-'}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
-                      {file.isDirectory ? '-' : file.requiredMaterial || '-'}
+                      {file.isDirectory ? '-' : file.requiredMaterial || file.extractedMaterial || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-pf-text-secondary">
+                      {file.isDirectory ? '-' : file.extractedPrinterModel || file.targetModelName || '-'}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
                       {formatDate(file.modifiedAt)}

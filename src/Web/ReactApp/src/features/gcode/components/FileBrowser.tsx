@@ -1,24 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { 
-  ChevronRightIcon,
-  FolderIcon,
-  DocumentIcon,
-  ArrowDownTrayIcon,
-  TrashIcon
-} from '@heroicons/react/24/outline';
+import { ChevronRightIcon } from '@heroicons/react/24/outline';
 import { UploadIcon } from '@/common/components/icons/MdiIcons';
 
 import { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
-import { Button, Checkbox, Input, Select } from '@/common/components/ui';
+import { Button, Input, Select } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
+import { GcodeListView } from '@/features/gcode/components/GcodeListView';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
 import { prefetchFileHash } from '@/features/gcode/hooks/useFileHash';
@@ -64,7 +58,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const [currentPath, setCurrentPath] = useState(initialPath);
-  const [selectedFiles, setSelectedFiles] = useState<GcodeFile[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'date'>('name');
@@ -134,12 +128,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
       if (currentPath === '/' && !harvestId && !printerId) {
         const libraryFiles = await apiClient.queryGcodeLibrary(searchTerm);
         // Map library files to file browser structure (minimal transformation - just add missing fields)
-        const files: GcodeFile[] = libraryFiles.map(f => ({
+        const files: GcodeFile[] = libraryFiles.map((f) => ({
           ...f,
           path: `/${f.fileName}`,
           isDirectory: false,
-          harvestOperationId: undefined
-        }));
+          harvestOperationId: undefined,
+          tags: f.tags ? (Array.isArray(f.tags) && typeof f.tags[0] === 'string' ? [] : f.tags) : undefined
+        })) as GcodeFile[];
         // Calculate total size for library files
         const totalSize = libraryFiles.reduce((sum, f) => sum + (f.fileSize || 0), 0);
         return {
@@ -403,20 +398,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     }
   });
 
-  const handleSelectAll = () => {
-    if (selectedFiles.length === (files?.files?.length ?? 0)) {
-      setSelectedFiles([]);
-    } else {
-      setSelectedFiles(files?.files?.filter((f: GcodeFile) => !f.isDirectory) || []);
-    }
-  };
-
-  const handleDeleteSelected = () => {
+    const handleDeleteSelected = () => {
     if (selectedFiles.length === 0) return;
+    const selectedFileObjects = files?.files?.filter(f => selectedFiles.includes(f.path)) || [];
     setDeleteConfirmDialog({
       isOpen: true,
-      filesToDelete: selectedFiles,
-      fileName: selectedFiles.length === 1 ? selectedFiles[0].fileName : undefined
+      filesToDelete: selectedFileObjects,
+      fileName: selectedFileObjects.length === 1 ? selectedFileObjects[0].fileName : undefined
     });
   };
 
@@ -603,147 +591,45 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           </div>
         ) : (
           // List view (default)
-          <div className="bg-pf-bg-1 rounded-lg shadow-lg border border-pf-border overflow-x-auto">
-            <table className="w-full min-w-max">
-              <thead>
-                <tr className="border-b border-pf-border bg-pf-bg-2">
-                  <th className="px-4 py-3 text-left">
-                    <Checkbox
-                      title="Select all files"
-                      aria-label="Select all files"
-                      checked={selectedFiles.length === (files?.files?.length ?? 0) && (files?.files?.length ?? 0) > 0}
-                      onChange={handleSelectAll}
-                    />
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary">Thumbnail / Name</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-24">Size</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-24">Nozzle</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-32">Material</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-pf-text-primary w-40">Modified</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-pf-text-primary">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-pf-border">
-                {files.files?.map((file: GcodeFile) => (
-                    <SelectableRow key={file.path} className="border-t border-pf-border" isSelected={selectedFiles.includes(file.path)}>
-                      <td className="px-4 py-3">
-                      <Checkbox
-                        checked={selectedFiles.includes(file.path)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedFiles(prev => [...prev, file.path]);
-                          } else {
-                            setSelectedFiles(prev => prev.filter(p => p !== file.path));
-                          }
-                        }}
-                        title={`Select ${file.fileName}`}
-                        aria-label={`Select ${file.fileName}`}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="relative flex-shrink-0">
-                          {!file.isDirectory && file.thumbnailUrl ? (
-                            <img
-                              src={file.thumbnailUrl}
-                              alt={file.fileName}
-                              className="w-10 h-10 rounded object-cover border-2 border-pf-border"
-                              onError={(e) => {
-                                e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIGZpbGw9IiNFNUU3RUIiLz48cmVjdCB4PSI4IiB5PSI4IiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHN0cm9rZT0iIzk1OTdiMCIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+PGNpcmNsZSBjeD0iMjQiIGN5PSIyNCIgcj0iMiIgZmlsbD0iIzk1OTdiMCIvPjwvc3ZnPg=='
-                              }}
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded border-2 border-pf-border bg-pf-bg-2 flex items-center justify-center">
-                              {file.isDirectory ? (
-                                <FolderIcon className="w-5 h-5 text-pf-accent" />
-                              ) : (
-                                <DocumentIcon className="w-5 h-5 text-pf-text-tertiary" />
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div
-                          className="cursor-pointer hover:text-pf-accent"
-                          onClick={() => {
-                            if (file.isDirectory) {
-                              setCurrentPath(file.path);
-                              setPage(1);
-                            }
-                          }}
-                        >
-                          <div className="font-medium text-pf-text-primary">{file.name}</div>
-                          {file.extractedPrinterModel && (
-                            <div className="text-xs text-pf-text-tertiary">{file.extractedPrinterModel}</div>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {!file.isDirectory ? formatBytes(file.fileSize) : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {file.isDirectory ? '-' : file.extractedNozzleDiameter ? `${file.extractedNozzleDiameter}mm` : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {file.isDirectory ? '-' : file.extractedMaterial || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-2">
-                        {!file.isDirectory && (
-                          <>
-                            <Button
-                              onClick={() => downloadMutation.mutate(file.path)}
-                              disabled={downloadMutation.isPending}
-                              variant="secondary"
-                              size="sm"
-                              title="Download File"
-                            >
-                              <ArrowDownTrayIcon className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              onClick={() => {
-                                setDeleteConfirmDialog({
-                                  isOpen: true,
-                                  filesToDelete: [file],
-                                  fileName: file.fileName
-                                });
-                              }}
-                              disabled={deleteMutation.isPending}
-                              variant="danger"
-                              size="sm"
-                              title="Delete File"
-                            >
-                              <TrashIcon className="w-4 h-4" />
-                            </Button>
-                          </>
-                        )}
-                        {file.isDirectory && (
-                          <Button
-                            onClick={() => {
-                              setDeleteConfirmDialog({
-                                isOpen: true,
-                                filesToDelete: [file],
-                                fileName: file.fileName
-                              });
-                            }}
-                            disabled={deleteMutation.isPending}
-                            variant="danger"
-                            size="sm"
-                            title="Delete Folder"
-                          >
-                            <TrashIcon className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </SelectableRow>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <GcodeListView
+            files={files?.files || []}
+            isLoading={isLoading}
+            selectedFiles={selectedFiles}
+            onSelectFile={(file) => {
+              setSelectedFiles(prev => 
+                prev.includes(file.path) 
+                  ? prev.filter(p => p !== file.path)
+                  : [...prev, file.path]
+              );
+            }}
+            onSelectAll={(fileList) => {
+              if (selectedFiles.length === fileList.length) {
+                setSelectedFiles([]);
+              } else {
+                setSelectedFiles(fileList.map(f => f.path));
+              }
+            }}
+            onDelete={(file) => {
+              setDeleteConfirmDialog({
+                isOpen: true,
+                filesToDelete: [file],
+                fileName: file.fileName
+              });
+            }}
+            onDownload={(file) => {
+              downloadMutation.mutate(file.path);
+            }}
+            onNavigate={(file) => {
+              if (file.isDirectory) {
+                setCurrentPath(file.path);
+                setPage(1);
+              }
+            }}
+            formatters={{
+              formatBytes,
+              formatDate: (date) => new Date(date).toLocaleDateString()
+            }}
+          />
         )
       ) : (
         <div className="bg-pf-bg-0 rounded-lg shadow p-8 text-center text-pf-text-secondary">
