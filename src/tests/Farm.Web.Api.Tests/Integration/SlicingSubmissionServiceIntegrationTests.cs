@@ -8,6 +8,7 @@ using Farm.Infrastructure.Repositories.Model;
 using Farm.Web.Api.Services.Slicing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
@@ -40,6 +41,26 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
+    /// <summary>
+    /// Helper method to get or create a model folder for tests
+    /// </summary>
+    private async Task<FolderNode> GetOrCreateModelFolderAsync(AppDbContext context)
+    {
+        var folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
+        if (folder == null)
+        {
+            folder = new FolderNode
+            {
+                Id = Guid.NewGuid(),
+                Path = "/",
+                FolderType = "model"
+            };
+            context.Folders.Add(folder);
+            await context.SaveChangesAsync();
+        }
+        return folder;
+    }
+
     private IFormFile CreateMockFormFile(
         string fileName = "test-model.stl",
         string content = "mock file content")
@@ -64,6 +85,8 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        var folder = await GetOrCreateModelFolderAsync(context);
+
         var filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "_" + fileName);
 
         // Create the actual file
@@ -79,6 +102,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
             FileFormat = ModelFileFormat.STL,
             UploadedAt = DateTime.UtcNow,
             IsValid = true,
+            FolderId = folder.Id,  // Set required FolderId
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -356,6 +380,8 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<ISlicingSubmissionService>();
 
+        var folder = await GetOrCreateModelFolderAsync(context);
+
         // Create model but don't create the actual file
         var nonExistentPath = Path.Combine(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid() + ".stl");
         var model = new Model3D
@@ -368,6 +394,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
             FileFormat = ModelFileFormat.STL,
             UploadedAt = DateTime.UtcNow,
             IsValid = true,
+            FolderId = folder.Id,  // Set required FolderId
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };

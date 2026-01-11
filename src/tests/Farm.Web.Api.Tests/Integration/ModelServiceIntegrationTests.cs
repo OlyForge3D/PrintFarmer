@@ -11,6 +11,7 @@ using Farm.Infrastructure.Repositories.Model;
 using Farm.Web.Api.Services.Model;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -45,12 +46,34 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
+    /// <summary>
+    /// Helper method to get or create a model folder for tests
+    /// </summary>
+    private async Task<FolderNode> GetOrCreateModelFolderAsync(AppDbContext context)
+    {
+        var folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model");
+        if (folder == null)
+        {
+            folder = new FolderNode
+            {
+                Id = Guid.NewGuid(),
+                Path = "/",
+                FolderType = "model"
+            };
+            context.Folders.Add(folder);
+            await context.SaveChangesAsync();
+        }
+        return folder;
+    }
+
     private async Task<Model3D> CreateTestModelAsync(
         string originalFileName = "test-model.stl",
         string? path = null)
     {
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var folder = await GetOrCreateModelFolderAsync(context);
 
         var filePath = Path.Combine(
             Path.GetTempPath(),
@@ -77,6 +100,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
             FileFormat = ModelFileFormat.STL,
             UploadedAt = DateTime.UtcNow,
             IsValid = true,
+            FolderId = folder.Id,  // Set required FolderId
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };

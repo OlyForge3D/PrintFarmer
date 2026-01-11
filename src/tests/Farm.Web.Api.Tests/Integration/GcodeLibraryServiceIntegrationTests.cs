@@ -10,6 +10,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Gcode;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -42,6 +43,26 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
+    /// <summary>
+    /// Helper method to get or create a gcode folder for tests
+    /// </summary>
+    private async Task<FolderNode> GetOrCreateGcodeFolderAsync(AppDbContext context)
+    {
+        var folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
+        if (folder == null)
+        {
+            folder = new FolderNode
+            {
+                Id = Guid.NewGuid(),
+                Path = "/",
+                FolderType = "gcode"
+            };
+            context.Folders.Add(folder);
+            await context.SaveChangesAsync();
+        }
+        return folder;
+    }
+
     #region QueryLibraryAsync Tests
 
     [Fact]
@@ -52,15 +73,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        // Create gcode folder
-        var folder = new FolderNode
-        {
-            Id = Guid.NewGuid(),
-            Path = "/",
-            FolderType = "gcode"
-        };
-        context.Folders.Add(folder);
-        await context.SaveChangesAsync();
+        var folder = await GetOrCreateGcodeFolderAsync(context);
 
         // Create test files with FolderId
         var file1 = new GcodeFile
@@ -104,15 +117,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        // Create gcode folder
-        var folder = new FolderNode
-        {
-            Id = Guid.NewGuid(),
-            Path = "/",
-            FolderType = "gcode"
-        };
-        context.Folders.Add(folder);
-        await context.SaveChangesAsync();
+        var folder = await GetOrCreateGcodeFolderAsync(context);
 
         var uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
         var file = new GcodeFile
@@ -145,15 +150,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        // Create gcode folder
-        var folder = new FolderNode
-        {
-            Id = Guid.NewGuid(),
-            Path = "/",
-            FolderType = "gcode"
-        };
-        context.Folders.Add(folder);
-        await context.SaveChangesAsync();
+        var folder = await GetOrCreateGcodeFolderAsync(context);
 
         var file = new GcodeFile
         {
@@ -186,15 +183,7 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        // Create gcode folder
-        var folder = new FolderNode
-        {
-            Id = Guid.NewGuid(),
-            Path = "/",
-            FolderType = "gcode"
-        };
-        context.Folders.Add(folder);
-        await context.SaveChangesAsync();
+        var folder = await GetOrCreateGcodeFolderAsync(context);
 
         var file = new GcodeFile
         {
@@ -227,10 +216,13 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
+        var folder = await GetOrCreateGcodeFolderAsync(context);
+
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
             FileName = "PETG Fixture.gcode",  // Include extension
+            FolderId = folder.Id,
             FilePath = "/gcodes/petg-fixture.gcode",
             FileSizeBytes = 1024,
             FileHash = "petg-hash",
@@ -261,10 +253,13 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
+        var folder = await GetOrCreateGcodeFolderAsync(context);
+
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
             FileName = "Get Test.gcode",  // Include extension
+            FolderId = folder.Id,
             FilePath = "/gcodes/get-test.gcode",
             FileSizeBytes = 1024,
             FileHash = "get-hash",
@@ -308,10 +303,13 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
+        var folder = await GetOrCreateGcodeFolderAsync(context);
+
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
             FileName = "Delete Test.gcode",  // Include extension
+            FolderId = folder.Id,
             FilePath = "/gcodes/delete-test.gcode",
             FileSizeBytes = 1024,
             FileHash = "delete-hash",
@@ -355,11 +353,14 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
+        var folder = await GetOrCreateGcodeFolderAsync(context);
+
         var uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
             FileName = $"Workflow {uniqueId}.gcode",  // Include extension
+            FolderId = folder.Id,
             FilePath = $"/gcodes/workflow-{uniqueId}.gcode",
             FileSizeBytes = 1024,
             FileHash = $"workflow-hash-{uniqueId}",
