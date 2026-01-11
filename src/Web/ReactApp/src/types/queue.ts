@@ -3,6 +3,8 @@
  * Consolidated from scattered definitions across the queue feature
  */
 
+import type { QueueJob } from './api';
+
 /**
  * Status of a job in the print queue or history
  */
@@ -50,7 +52,7 @@ export interface ModelStats {
   pausedCount: number;
   totalCount: number;
   averageWaitTimeMinutes: number;
-  jobs: any[]; // QueueJob from api.ts
+  jobs: QueueJob[];
 }
 
 /**
@@ -60,15 +62,23 @@ export interface JobDetails {
   id: string;
   name: string;
   status: string;
-  progress?: number;
-  printer?: string;
+  priority: number;
+  queuePosition: number;
+  gcodeFileId: string;
+  fileName?: string;
+  printerId: string;
+  printerName: string;
+  printerModel: string;
+  notes: string;
+  tags: string[];
+  materialType?: string;
+  nozzleDiameter?: number;
+  estimatedPrintTimeSeconds: number;
+  estimatedFilamentUsage?: string;
   createdAt: string;
+  queuedAt?: string;
   startedAt?: string;
   completedAt?: string;
-  estimatedTime?: number;
-  actualTime?: number;
-  // Additional fields as needed
-  [key: string]: any;
 }
 
 /**

@@ -2,30 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CubeIcon, EyeIcon, TagIcon, FileIcon, LayersTripleOutlineIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
-
-export type Model = {
-  id: string;
-  name: string;
-  fileName: string;
-  fileSize: number;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
-  uploadedAt: string;
-  url?: string;
-  thumbnailPath?: string;
-  tags?: Array<{
-    id: string;
-    name: string;
-    color?: string;
-  }>;
-};
-
-interface ModelGridViewProps {
-  models: Model[];
-  isLoading: boolean;
-  onViewerModel: (model: Model) => void;
-  onTagModel: (model: Model) => void;
-  formatFileSize: (bytes: number) => string;
-}
+import type { Model } from '@/types/models';
+import type { ModelGridViewProps } from '@/types/components';
 
 export const ModelGridView: React.FC<ModelGridViewProps> = ({
   models,

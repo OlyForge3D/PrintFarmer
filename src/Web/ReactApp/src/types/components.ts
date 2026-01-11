@@ -3,11 +3,11 @@
  * Consolidated from scattered prop interface definitions across features
  */
 
-import type { Model, ModelTag } from './models';
-import type { HistoryJob, HistoryStats, ModelStats, JobAction, JobStatus, JobDetails, JobDetailsTabType } from './queue';
-import type { FileEntry, FolderNode, HarvestDiscoveredFile, HarvestOptions, HarvestWizardState, FileImportStatus } from './gcode';
-import type { MachineProfile, AvailablePrinter, SliceCompleteResult } from './slicer';
-import type { SystemLog, LogColumnKey, EditingTag, TagOption } from './admin';
+import type { Model } from './models';
+import type { HistoryJob, HistoryStats, ModelStats, JobAction, JobStatus, JobDetails } from './queue';
+import type { FileEntry, HarvestDiscoveredFile, HarvestOptions, FileImportStatus } from './gcode';
+import type { MachineProfile, SliceCompleteResult } from './slicer';
+import type { GcodeFile, Printer, QueueJob } from './api';
 
 // ====================================
 // Models3D Component Props
@@ -53,7 +53,7 @@ export interface JobNotesEditorProps {
 }
 
 export interface TableFiltersBarProps {
-  onFilterChange?: (filters: any) => void;
+  onFilterChange?: (filters: Record<string, unknown>) => void;
   availableFilters?: string[];
 }
 
@@ -64,7 +64,7 @@ export interface HistoryJobCardProps {
 }
 
 export interface QueueJobsTableProps {
-  jobs: any[]; // QueueJob from api.ts
+  jobs: QueueJob[];
   isLoading: boolean;
   onJobAction?: (jobId: string, action: JobAction) => void;
 }
@@ -74,11 +74,15 @@ export interface HistoryStatisticsPanelProps {
 }
 
 export interface ModelFiltersBarProps {
+  models: string[];
   selectedModel: string | null;
-  selectedStatuses: JobStatus[];
   onModelChange: (model: string | null) => void;
-  onStatusesChange: (statuses: JobStatus[]) => void;
-  availableModels?: string[];
+  selectedStatuses: JobStatus[];
+  onStatusChange: (statuses: JobStatus[]) => void;
+  sortBy: "name" | "queue" | "waitTime" | "printing";
+  onSortChange: (sort: "name" | "queue" | "waitTime" | "printing") => void;
+  onRefresh: () => void;
+  isLoading: boolean;
 }
 
 export interface CompletionPredictionProps {
@@ -126,7 +130,7 @@ export interface QueueHistoryTabProps {
 }
 
 export interface HistoryFiltersBarProps {
-  onFilterChange?: (filters: any) => void;
+  onFilterChange?: (filters: Record<string, unknown>) => void;
 }
 
 // ====================================
@@ -134,15 +138,15 @@ export interface HistoryFiltersBarProps {
 // ====================================
 
 export interface GcodeFileCardProps {
-  file: any; // GcodeFile from api.ts
-  onSelect?: (file: any) => void;
-  onDelete?: (file: any) => void;
-  onDownload?: (file: any) => void;
+  file: GcodeFile;
+  onSelect?: (file: GcodeFile) => void;
+  onDelete?: (file: GcodeFile) => void;
+  onDownload?: (file: GcodeFile) => void;
 }
 
 export interface PrinterCardProps {
-  printer: any; // Printer from api.ts
-  onSelect?: (printer: any) => void;
+  printer: Printer;
+  onSelect?: (printer: Printer) => void;
   selected?: boolean;
 }
 
@@ -188,13 +192,13 @@ export interface HarvestOperationDetailsProps {
 }
 
 export interface VirtualizedPrinterGridProps {
-  printers: any[]; // Printer from api.ts
-  onPrinterSelect?: (printer: any) => void;
+  printers: Printer[];
+  onPrinterSelect?: (printer: Printer) => void;
   selectedPrinters?: string[];
 }
 
 export interface HarvestOperationCardProps {
-  operation: any;
+  operation: Record<string, unknown>;
   onViewDetails?: (operationId: string) => void;
 }
 
@@ -207,18 +211,18 @@ export interface HarvestWizardProps {
 export interface QueueGcodeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  gcodeFile?: any; // GcodeFile from api.ts
+  gcodeFile?: GcodeFile;
 }
 
 export interface GcodeListViewProps {
-  files: any[]; // GcodeFile from api.ts
+  files: GcodeFile[];
   isLoading: boolean;
   selectedFiles: string[];
-  onSelectFile: (file: any) => void;
-  onSelectAll: (files: any[]) => void;
-  onDelete: (file: any) => void;
-  onDownload: (file: any) => void;
-  onNavigate: (file: any) => void;
+  onSelectFile: (file: GcodeFile) => void;
+  onSelectAll: (files: GcodeFile[]) => void;
+  onDelete: (file: GcodeFile) => void;
+  onDownload: (file: GcodeFile) => void;
+  onNavigate: (file: GcodeFile) => void;
   formatters: {
     formatBytes: (bytes: number) => string;
     formatDate: (date: string | Date) => string;
@@ -231,15 +235,15 @@ export interface HealthGaugeProps {
 }
 
 export interface HealthStatisticsProps {
-  statistics: any;
+  statistics: Record<string, unknown>;
 }
 
 export interface AuditTimelineProps {
-  audits: any[];
+  audits: Array<Record<string, unknown>>;
 }
 
 export interface IssuesListProps {
-  issues: any[];
+  issues: Array<Record<string, unknown>>;
 }
 
 export interface ExplorerFileBrowserProps {

@@ -10,10 +10,14 @@ export interface User {
   id: string;
   username: string;
   email: string;
-  role: string;
+  firstName?: string;
+  lastName?: string;
   isActive: boolean;
+  emailConfirmed: boolean;
+  lastLogin?: string;
   createdAt: string;
-  lastLoginAt?: string;
+  roles: string[];
+  permissions: string[];
 }
 
 /**
@@ -22,8 +26,10 @@ export interface User {
 export interface Role {
   id: string;
   name: string;
+  displayName: string;
   description?: string;
-  permissions: string[];
+  isSystemRole: boolean;
+  isActive: boolean;
 }
 
 /**
@@ -34,6 +40,7 @@ export interface TagOption {
   name: string;
   color?: string;
   description?: string;
+  usageCount?: number; // Number of models with this tag
 }
 
 /**
@@ -50,14 +57,14 @@ export interface EditingTag {
  * System log entry for the logs page
  */
 export interface SystemLog {
-  id: string;
+  id: number;
   timestamp: string;
-  level: 'debug' | 'info' | 'warning' | 'error' | 'critical';
+  level: string;
   message: string;
-  correlationId?: string;
-  source?: string;
-  metadata?: Record<string, any>;
   exception?: string;
+  source?: string;
+  correlationId?: string;
+  metadata?: string;
 }
 
 /**

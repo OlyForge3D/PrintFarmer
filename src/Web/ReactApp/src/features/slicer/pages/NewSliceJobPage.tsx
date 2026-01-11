@@ -14,22 +14,8 @@ import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import { ProfileSelector } from '@/features/slicer/components/ProfileSelector';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
-
-// Lazy load the 3D model viewer for better performance
-const ModelViewer3D = React.lazy(() =>
-  import('@/features/models3d/components/3d/ModelViewer3D').then(mod => ({ default: mod.ModelViewer }))
-);
-
-// Lightweight model DTO interface for picker (subset of Model3DDto)
-interface ModelListItem {
-  id: string;
-  fileName: string;
-  originalFileName: string;
-  fileFormat: number;
-  uploadedAt: string;
-  filePath?: string;
-}
-
+import type { MaterialType, MaterialPreset } from '@/types/slicer';
+import type { ModelListItem } from '@/types/models';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, FormField, Input, Select, Checkbox, Radio, Textarea, Toggle } from '@/common/components/ui';
 import { LayersIcon, EyeIcon } from '@/common/components/icons/MdiIcons';
@@ -37,13 +23,10 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 
-// Material/Filament type and temperature presets
-type MaterialType = 'PLA' | 'PETG' | 'ABS' | 'TPU' | 'Nylon' | 'Carbon' | 'Other';
-interface MaterialPreset {
-  name: MaterialType;
-  nozzleTemp: number;
-  bedTemp: number;
-}
+// Lazy load the 3D model viewer for better performance
+const ModelViewer3D = React.lazy(() =>
+  import('@/features/models3d/components/3d/ModelViewer3D').then(mod => ({ default: mod.ModelViewer }))
+);
 
 const MATERIAL_PRESETS: Record<MaterialType, MaterialPreset> = {
   'PLA': { name: 'PLA', nozzleTemp: 210, bedTemp: 60 },

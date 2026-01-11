@@ -5,10 +5,7 @@ import { Button, FormField, Input, Checkbox } from '@/common/components/ui';
 import { SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { slicerRegistry } from '@/services/slicerRegistry';
-
-// Lightweight mapping to match server DTOs
-type PerEngineSetting = { path?: string | null; argsTemplate?: string | null };
-type SlicerSettingsDto = { enabled: boolean; perEngine: Record<string, PerEngineSetting>; jitterPercent?: number };
+import type { SlicerSettingsDto } from '@/types/slicer';
 
 export const SlicerSettingsPage: React.FC = () => {
   const queryClient = useQueryClient();

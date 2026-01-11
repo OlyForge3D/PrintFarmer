@@ -1,42 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/common/components/ui/Button';
-import { printQueueService, QueuedPrintJobDto } from '../../../services/printQueueService';
+import { printQueueService } from '../../../services/printQueueService';
 import JobDetailsSection from './JobDetailsSection';
 import JobNotesEditor from './JobNotesEditor';
 import JobTagsEditor from './JobTagsEditor';
 import '../styles/JobDetailsModal.css';
-
-export interface JobDetailsModalProps {
-  jobId: string;
-  isOpen: boolean;
-  onClose: () => void;
-  onSave?: (updatedJob: QueuedPrintJobDto) => void;
-}
-
-interface JobDetails {
-  id: string;
-  name: string;
-  status: string;
-  priority: number;
-  queuePosition: number;
-  gcodeFileId: string;
-  fileName?: string;
-  printerId: string;
-  printerName: string;
-  printerModel: string;
-  notes: string;
-  tags: string[];
-  materialType?: string;
-  nozzleDiameter?: number;
-  estimatedPrintTimeSeconds: number;
-  estimatedFilamentUsage?: string;
-  createdAt: string;
-  queuedAt?: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-type TabType = 'overview' | 'details' | 'timing' | 'history';
+import type { JobDetails } from '@/types/queue';
+import type { JobDetailsModalProps } from '@/types/components';
 
 const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   jobId,
