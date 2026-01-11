@@ -28,29 +28,7 @@ export function CompletionPrediction({ analytics }: CompletionPredictionProps) {
     return 'Jobs typically match estimates';
   };
 
-  const calculateEstimatedCompletion = (estimatedSeconds?: number) => {
-    if (!estimatedSeconds) return null;
-    
-    const now = new Date();
-    const completionMs = now.getTime() + (estimatedSeconds * 1000);
-    const completionTime = new Date(completionMs);
 
-    // Apply variance correction if available
-    if (analytics.overallVariancePercent !== undefined) {
-      const correctedMs = completionMs + (estimatedSeconds * 1000 * (analytics.overallVariancePercent / 100));
-      return new Date(correctedMs);
-    }
-
-    return completionTime;
-  };
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' });
-  };
 
   return (
     <article className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8" role="region" aria-label="Completion time predictions">

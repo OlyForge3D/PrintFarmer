@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { QueuedPrintJobDto } from '../../../types/api';
-import { printQueueService } from '../../../services/printQueueService';
+import { Button } from '@/common/components/ui/Button';
+import { printQueueService, QueuedPrintJobDto } from '../../../services/printQueueService';
 import JobDetailsSection from './JobDetailsSection';
 import JobNotesEditor from './JobNotesEditor';
 import JobTagsEditor from './JobTagsEditor';
@@ -11,7 +11,6 @@ export interface JobDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave?: (updatedJob: QueuedPrintJobDto) => void;
-  onRefresh?: () => void;
 }
 
 interface JobDetails {
@@ -44,7 +43,6 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   isOpen,
   onClose,
   onSave,
-  onRefresh,
 }) => {
   const [jobDetails, setJobDetails] = useState<JobDetails | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,8 +63,9 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
         setError(null);
         
         const response = await printQueueService.getJobDetailsAsync(jobId);
-        setJobDetails(response as any);
-        setEditedDetails(response as any);
+        const jobDetailsData = response as unknown as JobDetails;
+        setJobDetails(jobDetailsData);
+        setEditedDetails(jobDetailsData);
         setIsEditing(false);
         setHasChanges(false);
       } catch (err) {
@@ -93,7 +92,7 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
     setError(null);
   }, [jobDetails]);
 
-  const handleFieldChange = useCallback((field: keyof JobDetails, value: any) => {
+  const handleFieldChange = useCallback((field: keyof JobDetails, value: string | number | undefined) => {
     if (!editedDetails) return;
 
     const updated = { ...editedDetails, [field]: value };
@@ -136,8 +135,9 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
         editedDetails
       );
 
-      setJobDetails(updatedJob as any);
-      setEditedDetails(updatedJob as any);
+      const jobDetailsData = updatedJob as unknown as JobDetails;
+      setJobDetails(jobDetailsData);
+      setEditedDetails(jobDetailsData);
       setIsEditing(false);
       setHasChanges(false);
 
@@ -147,7 +147,7 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
       }
 
       // Show success message
-      console.log('Job updated successfully');
+      if (window.PrintFarmerDebug?.utilities) console.log('Job updated successfully');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update job';
       setError(errorMessage);
@@ -200,28 +200,29 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
             )}
           </div>
 
-          <button
+          <Button
             className="modal-close-button"
             onClick={handleClose}
             aria-label="Close modal"
-            type="button"
+            variant="subtle"
           >
             ✕
-          </button>
+          </Button>
         </div>
 
         {/* Error Message */}
         {error && (
           <div className="modal-error-message" role="alert">
             <strong>Error:</strong> {error}
-            <button
+            <Button
               className="error-dismiss"
               onClick={() => setError(null)}
               aria-label="Dismiss error"
-              type="button"
+              variant="subtle"
+              size="sm"
             >
               ✕
-            </button>
+            </Button>
           </div>
         )}
 
@@ -238,42 +239,46 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
           <>
             {/* Tabs */}
             <div className="modal-tabs">
-              <button
+              <Button
                 className={`tab-button ${activeTab === 'overview' ? 'active' : ''}`}
                 onClick={() => setActiveTab('overview')}
                 role="tab"
                 aria-selected={activeTab === 'overview'}
                 aria-controls="tab-overview"
+                variant="tab"
               >
                 Overview
-              </button>
-              <button
+              </Button>
+              <Button
                 className={`tab-button ${activeTab === 'details' ? 'active' : ''}`}
                 onClick={() => setActiveTab('details')}
                 role="tab"
                 aria-selected={activeTab === 'details'}
                 aria-controls="tab-details"
+                variant="tab"
               >
                 Details
-              </button>
-              <button
+              </Button>
+              <Button
                 className={`tab-button ${activeTab === 'timing' ? 'active' : ''}`}
                 onClick={() => setActiveTab('timing')}
                 role="tab"
                 aria-selected={activeTab === 'timing'}
                 aria-controls="tab-timing"
+                variant="tab"
               >
                 Timing
-              </button>
-              <button
+              </Button>
+              <Button
                 className={`tab-button ${activeTab === 'history' ? 'active' : ''}`}
                 onClick={() => setActiveTab('history')}
                 role="tab"
                 aria-selected={activeTab === 'history'}
                 aria-controls="tab-history"
+                variant="tab"
               >
                 History
-              </button>
+              </Button>
             </div>
 
             {/* Tab Content */}
@@ -416,39 +421,39 @@ const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
         <div className="modal-footer">
           {isEditing ? (
             <>
-              <button
+              <Button
                 className="btn btn-secondary"
                 onClick={handleCancelEdit}
                 disabled={isSaving}
-                type="button"
+                variant="secondary"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 className="btn btn-primary"
                 onClick={handleSave}
                 disabled={!hasChanges || isSaving}
-                type="button"
+                variant="primary"
               >
                 {isSaving ? 'Saving...' : 'Save Changes'}
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button
+              <Button
                 className="btn btn-secondary"
                 onClick={handleClose}
-                type="button"
+                variant="secondary"
               >
                 Close
-              </button>
-              <button
+              </Button>
+              <Button
                 className="btn btn-primary"
                 onClick={handleEditClick}
-                type="button"
+                variant="primary"
               >
                 Edit Details
-              </button>
+              </Button>
             </>
           )}
         </div>

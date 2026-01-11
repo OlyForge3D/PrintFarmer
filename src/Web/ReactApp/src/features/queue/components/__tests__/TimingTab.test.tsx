@@ -1,7 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import TimingTab from '../TimingTab';
-import { printQueueService, TimelineEventDto, DurationAnalyticsDto } from '../../../../services/printQueueService';
+import { printQueueService } from '../../../../services/printQueueService';
 
 vi.mock('../../../../services/printQueueService');
 

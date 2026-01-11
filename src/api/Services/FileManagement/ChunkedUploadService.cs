@@ -202,9 +202,16 @@ public sealed class ChunkedUploadService : IChunkedUploadService
 
         ArgumentNullException.ThrowIfNull(quotaService);
 
+        // Try to get session from memory, or rehydrate from disk if not found
         if (!_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
-            throw new InvalidOperationException($"Upload session '{uploadId}' not found");
+            // Session not in memory - try to recover from persisted metadata on disk
+            // This handles API restarts, load balancing, or other scenarios where in-memory state is lost
+            ChunkedUploadStatus? recoveredStatus = GetOrResumeUpload(uploadId);
+            if (recoveredStatus == null || !_uploadStates.TryGetValue(uploadId, out state))
+            {
+                throw new InvalidOperationException($"Upload session '{uploadId}' not found");
+            }
         }
 
         // Check if paused
@@ -379,9 +386,15 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             return null;
         }
 
+        // Try to get session from memory, or rehydrate from disk if not found
         if (!_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
-            return null;
+            // Session not in memory - try to recover from persisted metadata on disk
+            GetOrResumeUpload(uploadId); // Attempt to rehydrate
+            if (!_uploadStates.TryGetValue(uploadId, out state))
+            {
+                return null;
+            }
         }
 
         if (state.UploadedBytes == state.TotalSize)
@@ -430,9 +443,15 @@ public sealed class ChunkedUploadService : IChunkedUploadService
             return null;
         }
 
+        // Try to get session from memory, or rehydrate from disk if not found
         if (!_uploadStates.TryGetValue(uploadId, out InternalUploadState? state))
         {
-            return null;
+            // Session not in memory - try to recover from persisted metadata on disk
+            GetOrResumeUpload(uploadId); // Attempt to rehydrate
+            if (!_uploadStates.TryGetValue(uploadId, out state))
+            {
+                return null;
+            }
         }
 
         if (state.UploadedBytes == state.TotalSize)

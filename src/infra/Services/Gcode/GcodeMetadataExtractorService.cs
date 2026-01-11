@@ -31,12 +31,28 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
 
             try
             {
-                string[] lines = gcodeContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                string[] allLines = gcodeContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
-                // Parse the first ~500 lines (metadata is typically at the start)
-                List<string> metadataLines = lines.Take(500).ToList();
-                _logger.LogInformation("ExtractMetadataAsync: Processing {LineCount} lines from {TotalLines} total", metadataLines.Count.ToString(), lines.Length.ToString());
+                // Combine first 100 lines and last 600 lines for metadata extraction
+                // Most metadata is in the last 600 lines (CONFIG_BLOCK), but we need the first 100 for basic slicer info
+                List<string> metadataLines = new List<string>();
+                
+                // Add first 100 lines
+                int firstLinesCount = Math.Min(100, allLines.Length);
+                metadataLines.AddRange(allLines.Take(firstLinesCount));
+                _logger.LogInformation("ExtractMetadataAsync: Added {Count} lines from start", firstLinesCount.ToString());
 
+                // Add last 600 lines (if file is long enough)
+                if (allLines.Length > 600)
+                {
+                    int startIndex = allLines.Length - 600;
+                    metadataLines.AddRange(allLines.Skip(startIndex).Take(600));
+                    _logger.LogInformation("ExtractMetadataAsync: Added 600 lines from end (starting at line {StartLine})", startIndex.ToString());
+                }
+
+                _logger.LogInformation("ExtractMetadataAsync: Processing {LineCount} lines total from {TotalLines} total", metadataLines.Count.ToString(), allLines.Length.ToString());
+
+                // Extract all metadata from the combined set
                 ExtractSlicerInfo(metadataLines, metadata);
                 ExtractMaterial(metadataLines, metadata);
                 ExtractNozzleDiameter(metadataLines, metadata);
@@ -44,27 +60,11 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
                 ExtractPrintTime(metadataLines, metadata);
                 ExtractFilamentInfo(metadataLines, metadata);
                 ExtractTemperatures(metadataLines, metadata);
+                ExtractPrinterModel(metadataLines, metadata);
+                ExtractPrintSettingsId(metadataLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: About to extract thumbnail");
                 ExtractThumbnail(metadataLines, metadata);
                 _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
-
-                // Also parse from the end of the file for metadata in CONFIG_BLOCK
-                // Many slicers (OrcaSlicer, PrusaSlicer) put detailed metadata at the end
-                if (lines.Length > 600)
-                {
-                    List<string> endMetadataLines = ExtractConfigBlockLines(lines);
-                    if (endMetadataLines.Count > 0)
-                    {
-                        _logger.LogInformation("ExtractMetadataAsync: Found CONFIG_BLOCK with {LineCount} lines at end of file", endMetadataLines.Count.ToString());
-                        // Re-extract metadata from end, which may override values from start
-                        ExtractMaterial(endMetadataLines, metadata);
-                        ExtractNozzleDiameter(endMetadataLines, metadata);
-                        ExtractLayerHeight(endMetadataLines, metadata);
-                        ExtractPrintTime(endMetadataLines, metadata);
-                        ExtractFilamentInfo(endMetadataLines, metadata);
-                        ExtractTemperatures(endMetadataLines, metadata);
-                    }
-                }
 
                 _logger.LogInformation($"ExtractMetadataAsync: Extracted metadata - Slicer={metadata.SlicerName ?? "(unknown)"} {metadata.SlicerVersion ?? ""}, Material={metadata.Material ?? "(unknown)"}, NozzleDiameter={metadata.NozzleDiameter?.ToString("F1") ?? "0"}, PrintTime={metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0"}min, Filament={metadata.FilamentWeightGrams?.ToString("F1") ?? "0"}g, LayerHeight={metadata.LayerHeight?.ToString("F2") ?? "0"}, BedTemp={metadata.BedTemperature?.ToString("F0") ?? "0"}°C, PrintTemp={metadata.PrintTemperature?.ToString("F0") ?? "0"}°C");
 
@@ -471,34 +471,38 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
         }
     }
 
-    /// <summary>
-    /// Extract metadata lines from the end of a gcode file.
-    /// Many slicers (OrcaSlicer, PrusaSlicer) put comprehensive metadata at the end.
-    /// Reads the last 600 lines to capture all metadata.
-    /// </summary>
-    private List<string> ExtractConfigBlockLines(string[] allLines)
+    private void ExtractPrinterModel(List<string> lines, GcodeMetadataExtracted metadata)
     {
-        List<string> configLines = new List<string>();
-
-        try
+        // OrcaSlicer: "; printer_model = Phrozen Arco 0.4"
+        // Cura: "; machine_name = Prusa CORE One"  
+        // PrusaSlicer: "; printer_model = Prusa MK3S"
+        foreach (string line in lines)
         {
-            // Take the last 600 lines - this works for both OrcaSlicer and PrusaSlicer
-            // (OrcaSlicer metadata starts around 535 lines from end)
-            int startIndex = Math.Max(0, allLines.Length - 600);
-
-            for (int i = startIndex; i < allLines.Length; i++)
+            Match match = Regex.Match(line, @"(?:printer_model|machine_name)\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase);
+            if (match.Success)
             {
-                configLines.Add(allLines[i]);
+                string model = match.Groups[1].Value.Trim();
+                metadata.PrinterModel = model.Trim(';', ' ', '"');
+                _logger.LogInformation("ExtractPrinterModel: Found {Model}", metadata.PrinterModel);
+                break;
             }
-
-            _logger.LogInformation("ExtractConfigBlockLines: Extracted {LineCount} lines from end of file (starting at line {StartLine})",
-                configLines.Count.ToString(), startIndex.ToString());
         }
-        catch (Exception ex)
+    }
+
+    private void ExtractPrintSettingsId(List<string> lines, GcodeMetadataExtracted metadata)
+    {
+        // OrcaSlicer: "; print_settings_id = Standard"
+        // This identifies which slicer Process profile was used
+        foreach (string line in lines)
         {
-            _logger.LogWarning(ex, "Error extracting metadata from end of gcode file");
+            Match match = Regex.Match(line, @"print_settings_id\s*[:=]\s*(.+)$", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                string settingsId = match.Groups[1].Value.Trim();
+                metadata.PrintSettingsId = settingsId.Trim(';', ' ', '"');
+                _logger.LogInformation("ExtractPrintSettingsId: Found {SettingsId}", metadata.PrintSettingsId);
+                break;
+            }
         }
-
-        return configLines;
     }
 }

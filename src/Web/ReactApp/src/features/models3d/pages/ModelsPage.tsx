@@ -1,19 +1,19 @@
 import React, { useState, Suspense } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { DeleteIcon, CloseIcon, LayersTripleOutlineIcon, CubeIcon, EyeIcon, TagIcon, FileIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon } from '@/common/components/icons/MdiIcons';
+import { CloseIcon, CubeIcon, TagIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
+import { TaggingModal } from '@/components/TaggingModal';
 import { Button, Input } from '@/common/components/ui';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import TagInput from '@/components/TagInput';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-import { ExplorerFileBrowser } from '@/features/gcode/components/ExplorerFileBrowser';
-// Lazy load heavy three.js based viewers with manual preload support
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+import { ModelGridView } from '@/features/models3d/components/ModelGridView';
+import { ModelListView } from '@/features/models3d/components/ModelListView';
+import { ExplorerModelListView } from '@/features/models3d/components/ExplorerModelListView';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
 import type { GCodeViewerProps } from '@/features/models3d/components/3d/GCodeViewer3D';
 const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
@@ -24,7 +24,6 @@ const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>
 );
 // Slicing now redirects to NewSliceJobPage for better UX with 3D preview
 // const SlicerConfigModal = lazyWithPreload<{...}>(...)
-import { slicerService } from '@/services/slicerService';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 type Model = {
   id: string;
@@ -33,9 +32,13 @@ type Model = {
   fileSize: number;
   fileType: 'stl' | '3mf' | 'obj' | 'ply';
   uploadedAt: string;
-  url: string;
+  url?: string;
   thumbnailPath?: string;
-  tags?: Array<{ id: string; name: string; color?: string }>;
+  tags?: Array<{
+    id: string;
+    name: string;
+    color?: string;
+  }>;
 };
 
 type ModelTag = { id: string; name: string; color?: string; description?: string };
@@ -50,7 +53,6 @@ interface GCodeFile {
 }
 
 export const ModelsPage: React.FC = () => {
-  const navigate = useNavigate();
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-models-viewmode');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
@@ -61,8 +63,8 @@ export const ModelsPage: React.FC = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
-
-  const queryClient = useQueryClient();
+  const [selectedModelForTagging, setSelectedModelForTagging] = useState<Model | null>(null);
+  const [isTaggingModalOpen, setIsTaggingModalOpen] = useState(false);
 
   // Debounce search query
   React.useEffect(() => {
@@ -123,14 +125,6 @@ export const ModelsPage: React.FC = () => {
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000
-  });
-
-  // Delete mutation
-  const deleteMutation = useMutation({
-    mutationFn: (modelId: string) => slicerService.deleteModel(modelId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['models-search'] });
-    }
   });
 
   const formatFileSize = (bytes: number) => {
@@ -249,215 +243,43 @@ export const ModelsPage: React.FC = () => {
               </p>
             </div>
           ) : viewMode === 'explorer' ? (
-            <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 h-full">
-              <ExplorerFileBrowser endpoint="models" />
-            </div>
+            <ExplorerModelListView
+              onTagModel={(file) => {
+                setSelectedModelForTagging({
+                  id: file.modelId || file.path,
+                  name: file.name || file.fileName,
+                  fileName: file.fileName,
+                  fileSize: file.size,
+                  fileType: (file.fileName?.split('.').pop() || 'stl') as 'stl' | '3mf' | 'obj' | 'ply',
+                  uploadedAt: file.modifiedAt,
+                  thumbnailPath: file.thumbnailPath,
+                  tags: file.tags || []
+                });
+                setIsTaggingModalOpen(true);
+              }}
+            />
           ) : viewMode === 'grid' ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto">
-              {models.map((model: Model) => (
-                <div key={model.id} className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:bg-pf-bg-secondary hover:shadow-lg transition-colors flex flex-col group">
-                  {/* Model Preview */}
-                  <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
-                    {model.thumbnailPath ? (
-                      <img
-                        src={model.thumbnailPath}
-                        alt={model.fileName}
-                        className="w-full h-full object-contain group-hover:scale-105 transition-transform"
-                      />
-                    ) : (
-                      <CubeIcon className="w-12 h-12 text-pf-text-tertiary opacity-30" />
-                    )}
-                  </div>
-
-                  {/* Model Info */}
-                  <div className="p-2.5 flex-1 flex flex-col">
-                    <h3 className="font-semibold text-pf-text-primary line-clamp-2 mb-1.5 text-sm">{model.name}</h3>
-
-                    {/* Tags */}
-                    {model.tags && model.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-0.5 mb-2">
-                        {model.tags.slice(0, 1).map(tag => (
-                          <span
-                            key={tag.id}
-                            className="inline-block px-1.5 py-0.5 text-xs rounded text-white"
-                            style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
-                          >
-                            {tag.name}
-                          </span>
-                        ))}
-                        {model.tags.length > 1 && (
-                          <span className="inline-block px-1.5 py-0.5 text-xs rounded bg-pf-bg-2 text-pf-text-secondary">
-                            +{model.tags.length - 1}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Metadata */}
-                    <div className="text-xs text-pf-text-secondary space-y-0.5 mb-2 flex-1">
-                      {model.fileType && <div className="flex justify-between gap-1"><span>Type:</span> <span className="font-medium text-right">{model.fileType.toUpperCase()}</span></div>}
-                      {typeof model.fileSize === 'number' && <div className="flex justify-between gap-1"><span>Size:</span> <span className="font-medium text-right">{formatFileSize(model.fileSize)}</span></div>}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                      <Button
-                        onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                        onClick={() => setViewerModel(model)}
-                        variant="secondary"
-                        size="sm"
-                        className="flex-1"
-                        title="View 3D Model"
-                      >
-                        <EyeIcon className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        onClick={() => navigate(`/models/${model.id}`)}
-                        variant="secondary"
-                        size="sm"
-                        className="flex-1"
-                        title="View Details"
-                      >
-                        <FileIcon className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
-                        variant="primary"
-                        size="sm"
-                        className="flex-1"
-                        title="Slice Model"
-                      >
-                        <LayersTripleOutlineIcon className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        onClick={() => deleteMutation.mutate(model.id)}
-                        disabled={deleteMutation.isPending}
-                        variant="danger"
-                        size="sm"
-                        className="px-2"
-                        title="Delete Model"
-                      >
-                        <DeleteIcon className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ModelGridView
+              models={models}
+              isLoading={isLoading}
+              onViewerModel={setViewerModel}
+              onTagModel={(model) => {
+                setSelectedModelForTagging(model);
+                setIsTaggingModalOpen(true);
+              }}
+              formatFileSize={formatFileSize}
+            />
           ) : (
-            // List View
-            <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto flex-1">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-pf-border bg-pf-bg-2 sticky top-0">
-                    <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Name</th>
-                    <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Type</th>
-                    <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Size</th>
-                    <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Tags</th>
-                    <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Uploaded</th>
-                    <th className="px-4 py-3 text-right font-semibold text-pf-text-primary">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-pf-border">
-                    {models.map((model: Model) => (
-                      <SelectableRow key={model.id} isSelected={false}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          {/* Thumbnail */}
-                          <div className="w-12 h-12 flex-shrink-0 rounded bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
-                            {model.thumbnailPath ? (
-                              <img
-                                src={model.thumbnailPath}
-                                alt={model.fileName}
-                                className="w-full h-full object-contain"
-                              />
-                            ) : (
-                              <CubeIcon className="w-6 h-6 text-pf-text-tertiary opacity-50" />
-                            )}
-                          </div>
-                          {/* Filename as link, not button */}
-                          <Link
-                            to={`/models/${model.id}`}
-                            className="font-medium text-pf-accent hover:underline text-left min-w-0 truncate"
-                          >
-                            {model.name}
-                          </Link>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-pf-text-secondary text-xs font-medium">
-                        {model.fileType?.toUpperCase() || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-pf-text-secondary text-xs">
-                        {typeof model.fileSize === 'number' ? formatFileSize(model.fileSize) : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {model.tags && model.tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {model.tags.slice(0, 2).map(tag => (
-                              <span
-                                key={tag.id}
-                                className="inline-block px-2 py-0.5 text-xs rounded text-white"
-                                style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
-                              >
-                                {tag.name}
-                              </span>
-                            ))}
-                            {model.tags.length > 2 && (
-                              <span className="text-xs text-pf-text-secondary">+{model.tags.length - 2}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-pf-text-tertiary">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-pf-text-secondary text-xs">
-                        {new Date(model.uploadedAt).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          {model.fileType !== '3mf' && (
-                            <Button
-                              onMouseEnter={() => (ModelViewer as typeof ModelViewer).preload?.()}
-                              onClick={() => setViewerModel(model)}
-                              variant="subtle"
-                              size="sm"
-                              title="View 3D Model"
-                            >
-                              <EyeIcon className="w-4 h-4" />
-                            </Button>
-                          )}
-                          <Button
-                            onClick={() => navigate(`/models/${model.id}`)}
-                            variant="subtle"
-                            size="sm"
-                            title="View Details"
-                          >
-                            <FileIcon className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            onClick={() => navigate(`/jobs/new?modelId=${model.id}`)}
-                            variant="subtle"
-                            size="sm"
-                            title="Slice Model"
-                          >
-                            <LayersTripleOutlineIcon className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            onClick={() => deleteMutation.mutate(model.id)}
-                            disabled={deleteMutation.isPending}
-                            variant="danger"
-                            size="sm"
-                            title="Delete Model"
-                          >
-                            <DeleteIcon className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </SelectableRow>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ModelListView
+              models={models}
+              isLoading={isLoading}
+              onViewerModel={setViewerModel}
+              onTagModel={(model) => {
+                setSelectedModelForTagging(model);
+                setIsTaggingModalOpen(true);
+              }}
+              formatFileSize={formatFileSize}
+            />
           )}
         </div>
       </div>
@@ -552,6 +374,17 @@ export const ModelsPage: React.FC = () => {
         isOpen={showBulkTagModal}
         onClose={() => setShowBulkTagModal(false)}
       />
+
+      {/* Tagging Modal */}
+      {selectedModelForTagging && (
+        <TaggingModal
+          isOpen={isTaggingModalOpen}
+          onClose={() => setIsTaggingModalOpen(false)}
+          objectId={selectedModelForTagging.id}
+          objectType="Model3D"
+          initialTags={selectedModelForTagging.tags || []}
+        />
+      )}
     </PageTemplate>
   );
 };

@@ -34,6 +34,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Model3D> Models3D => Set<Model3D>();
     public DbSet<Model3DTag> Model3DTags => Set<Model3DTag>();
     public DbSet<Model3DTagMapping> Model3DTagMappings => Set<Model3DTagMapping>();
+    public DbSet<Tag> Tags => Set<Tag>();
+    public DbSet<TagMapping> TagMappings => Set<TagMapping>();
     public DbSet<FolderNode> Folders => Set<FolderNode>();
     public DbSet<ProcessProfile> ProcessProfiles => Set<ProcessProfile>();
     public DbSet<MachineProfile> MachineProfiles => Set<MachineProfile>();
@@ -296,16 +298,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
             _ = b.Property(g => g.LastVerificationResult).HasColumnType("TEXT");
 
-            // JSON array properties
-            _ = b.Property(g => g.CompatibleMaterials)
-                .HasConversion(
-                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
-                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
-            _ = b.Property(g => g.TargetPrinterModels)
-                .HasConversion(
-                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
-                    v => v == null ? null : JsonSerializer.Deserialize<string[]>(v, (JsonSerializerOptions?)null));
-
             // Foreign Keys - Use NoAction to avoid cascade conflicts in SQL Server
             _ = b.HasOne(g => g.Folder)
                 .WithMany(f => f.Files)
@@ -315,13 +307,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(g => g.SourcePrinterId)
                 .OnDelete(DeleteBehavior.NoAction);
-            _ = b.HasOne(g => g.TargetPrinter)
+            _ = b.HasOne(g => g.PrinterModel)
                 .WithMany()
-                .HasForeignKey(g => g.TargetPrinterId)
-                .OnDelete(DeleteBehavior.NoAction);
-            _ = b.HasOne(g => g.TargetModel)
-                .WithMany()
-                .HasForeignKey(g => g.TargetModelId)
+                .HasForeignKey(g => g.PrinterModelId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             // Indexes
@@ -330,7 +318,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(g => g.FolderId); // Index for virtual directory queries
             _ = b.HasIndex(g => g.RequiredNozzleDiameter);
             _ = b.HasIndex(g => g.RequiredMaterial);
-            _ = b.HasIndex(g => g.TargetPrinterId);
             _ = b.HasIndex(g => g.SourcePrinterId);
             _ = b.HasIndex(g => g.HealthStatus); // Index for dashboard queries
             _ = b.HasIndex(g => g.LastHealthCheckDate); // Index for recent health checks
@@ -756,6 +743,51 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(tm => tm.TagId);
         });
 
+        // Generic Tag Entity Configuration
+        _ = modelBuilder.Entity<Tag>(b =>
+        {
+            _ = b.HasKey(t => t.Id);
+            _ = b.Property(t => t.Name).IsRequired().HasMaxLength(128);
+            _ = b.Property(t => t.Color).HasMaxLength(7); // Hex color codes
+            _ = b.Property(t => t.Description).HasMaxLength(512);
+
+            // Navigation: Tag -> TagMappings
+            _ = b.HasMany(t => t.TagMappings)
+                .WithOne(tm => tm.Tag)
+                .HasForeignKey(tm => tm.TagId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Index for quick tag lookups
+            _ = b.HasIndex(t => t.Name).IsUnique();
+
+            // Index for analytics (tag creation trends)
+            _ = b.HasIndex(t => t.CreatedAt);
+        });
+
+        // Generic TagMapping Entity Configuration (Polymorphic join table)
+        _ = modelBuilder.Entity<TagMapping>(b =>
+        {
+            _ = b.HasKey(tm => tm.Id);
+            _ = b.Property(tm => tm.TagId).IsRequired();
+            _ = b.Property(tm => tm.ObjectType).IsRequired().HasMaxLength(50); // "Model3D", "GcodeFile", "Printer", etc.
+            _ = b.Property(tm => tm.ObjectId).IsRequired();
+
+            // Foreign Key to Tag
+            _ = b.HasOne(tm => tm.Tag)
+                .WithMany(t => t.TagMappings)
+                .HasForeignKey(tm => tm.TagId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Composite index to prevent duplicate tag assignments
+            _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId, tm.TagId }).IsUnique();
+
+            // Index for finding all objects with a tag
+            _ = b.HasIndex(tm => tm.TagId);
+
+            // Index for finding all tags for an object
+            _ = b.HasIndex(tm => new { tm.ObjectType, tm.ObjectId });
+        });
+
         // FolderNode Entity Configuration
         _ = modelBuilder.Entity<FolderNode>(b =>
         {
@@ -777,8 +809,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Indexes
-            _ = b.HasIndex(f => f.Path).IsUnique();
-            _ = b.HasIndex(f => f.FolderType);
+            _ = b.HasIndex(f => new { f.Path, f.FolderType }).IsUnique();
         });
 
         // ProcessProfile Entity Configuration

@@ -1,5 +1,6 @@
 import { JobStateHistoryDto } from '@/services/printQueueService';
 import { useState } from 'react';
+import { Button } from '@/common/components/ui/Button';
 
 interface JobStateHistoryViewProps {
   history: JobStateHistoryDto;
@@ -87,11 +88,12 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
         <div className="space-y-2 sm:space-y-3" role="list">
           {history.transitions.map((transition, index) => (
             <div key={index} role="listitem">
-              <button
+              <Button
                 onClick={() => setExpandedIndex(expandedIndex === index ? null : index)}
-                className="w-full text-left p-3 sm:p-4 bg-pf-bg-2 border border-pf-border rounded-lg hover:border-pf-text-secondary hover:bg-pf-bg-3 focus:outline-none focus:ring-2 focus:ring-pf-accent focus:border-transparent transition-all duration-200"
+                className="w-full text-left"
                 aria-expanded={expandedIndex === index}
                 aria-controls={`transition-${index}`}
+                variant="subtle"
               >
                 <div className="flex items-center justify-between gap-3 sm:gap-4">
                   <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
@@ -108,7 +110,7 @@ export function JobStateHistoryView({ history }: JobStateHistoryViewProps) {
                     <span className={`transition-transform flex-shrink-0 text-pf-text-secondary ${expandedIndex === index ? 'rotate-180' : ''}`} aria-hidden="true">▼</span>
                   </div>
                 </div>
-              </button>
+              </Button>
 
               {expandedIndex === index && (
                 <div id={`transition-${index}`} className="bg-pf-bg-2 border border-t-0 border-pf-border rounded-b-lg p-3 sm:p-4 text-xs sm:text-sm space-y-2 sm:space-y-3">

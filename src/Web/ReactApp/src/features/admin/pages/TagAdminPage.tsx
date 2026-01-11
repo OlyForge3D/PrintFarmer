@@ -3,8 +3,9 @@ import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Input, FormField, Alert } from '@/common/components/ui';
+import { Button, Input, FormField, Alert, Tabs } from '@/common/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
+import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
 
 interface TagOption {
     id: string;
@@ -23,6 +24,7 @@ interface EditingTag {
 
 export const TagAdminPage: React.FC = () => {
     const queryClient = useQueryClient();
+    const [activeTab, setActiveTab] = useState<'management' | 'analytics'>('management');
     const [showNewTagForm, setShowNewTagForm] = useState(false);
     const [editingTagId, setEditingTagId] = useState<string | null>(null);
     const [newTagName, setNewTagName] = useState('');
@@ -155,7 +157,7 @@ export const TagAdminPage: React.FC = () => {
         return (
             <PageTemplate
                 title="Tag Management"
-                subtitle="Manage all 3D model tags"
+                subtitle="Create, manage, and analyze 3D model tags"
                 icon={TagIcon}
             >
                 <div className="flex items-center justify-center h-64">
@@ -168,11 +170,18 @@ export const TagAdminPage: React.FC = () => {
     return (
         <PageTemplate
             title="Tag Management"
-            subtitle="Manage all 3D model tags"
+            subtitle="Create, manage, and analyze 3D model tags"
             icon={TagIcon}
         >
-            <div className="space-y-6">
-                {/* Create New Tag Form */}
+            <Tabs defaultTab="management" activeTab={activeTab} onTabChange={(tabId) => setActiveTab(tabId as 'management' | 'analytics')}>
+                <Tabs.List>
+                    <Tabs.Tab id="management">Management</Tabs.Tab>
+                    <Tabs.Tab id="analytics">Analytics</Tabs.Tab>
+                </Tabs.List>
+                <Tabs.Panels>
+                    <Tabs.Panel id="management">
+                        <div className="space-y-6">
+                            {/* Create New Tag Form */}
                 <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-6">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-lg font-medium text-pf-text-primary flex items-center gap-2">
@@ -454,7 +463,13 @@ export const TagAdminPage: React.FC = () => {
                         </div>
                     </div>
                 </div>
-            </div>
+                        </div>
+                    </Tabs.Panel>
+            <Tabs.Panel id="analytics">
+                <TagAnalyticsDashboard />
+            </Tabs.Panel>
+        </Tabs.Panels>
+            </Tabs>
         </PageTemplate>
     );
 };

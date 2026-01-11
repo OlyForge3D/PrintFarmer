@@ -496,7 +496,7 @@ namespace Farm.Web.Api.Services.Tags
                             {
                                 modelSet = modelIds;
                             }
-                            else if (modelSet != null)
+                            else
                             {
                                 modelSet.IntersectWith(modelIds);
                             }
@@ -525,20 +525,17 @@ namespace Farm.Web.Api.Services.Tags
                 }
 
                 // Remove models with exclude tags
-                if (modelSet != null)
+                foreach (var tagId in excludeTagList)
                 {
-                    foreach (var tagId in excludeTagList)
+                    IReadOnlyList<Model3DTagMapping> mappings = 
+                        await _mappingRepository.GetByTagIdAsync(tagId, ct);
+                    foreach (var modelId in mappings.Select(m => m.Model3DId))
                     {
-                        IReadOnlyList<Model3DTagMapping> mappings = 
-                            await _mappingRepository.GetByTagIdAsync(tagId, ct);
-                        foreach (var modelId in mappings.Select(m => m.Model3DId))
-                        {
-                            modelSet.Remove(modelId);
-                        }
+                        modelSet.Remove(modelId);
                     }
                 }
 
-                var results = (modelSet ?? new HashSet<Guid>()).ToList();
+                var results = modelSet.ToList();
                 _logger.LogInformation($"Filter returned {results.Count} models");
                 return results;
             }
@@ -1010,6 +1007,121 @@ namespace Farm.Web.Api.Services.Tags
             catch (Exception ex)
             {
                 _logger.LogError($"Failed to apply complex tag filter: {ex.Message}");
+                throw;
+            }
+        }
+
+        #endregion
+
+        #region Gcode File Tagging
+
+        /// <summary>
+        /// Add a tag to a gcode file using the generic TagMapping system
+        /// </summary>
+        public async Task AddTagToGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct)
+        {
+            try
+            {
+                // Verify gcode file exists
+                GcodeFile? gcodeFile = await _unitOfWork.GcodeFiles.GetByIdWithIncludesAsync(gcodeFileId, ct);
+                if (gcodeFile == null)
+                {
+                    _logger.LogError($"Gcode file {gcodeFileId} not found");
+                    throw new KeyNotFoundException($"Gcode file {gcodeFileId} not found");
+                }
+
+                // Verify tag exists (using existing Model3DTag repository)
+                Model3DTag? tag = await _tagRepository.GetByIdAsync(tagId, ct);
+                if (tag == null)
+                {
+                    _logger.LogError($"Tag {tagId} not found");
+                    throw new KeyNotFoundException($"Tag {tagId} not found");
+                }
+
+                // Check if mapping already exists
+                TagMapping? existingMapping = await _unitOfWork.TagMappings.GetMappingAsync("GcodeFile", gcodeFileId, tagId, ct);
+                if (existingMapping != null)
+                {
+                    _logger.LogWarning($"Tag {tagId} already assigned to gcode file {gcodeFileId}");
+                    return; // Idempotent - silently succeed
+                }
+
+                // Create new mapping
+                TagMapping mapping = new TagMapping
+                {
+                    Id = Guid.NewGuid(),
+                    TagId = tagId,
+                    ObjectType = "GcodeFile",
+                    ObjectId = gcodeFileId,
+                    TaggedAt = DateTime.UtcNow
+                };
+
+                await _unitOfWork.TagMappings.AddAsync(mapping, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+                _logger.LogInformation($"Successfully added tag {tagId} to gcode file {gcodeFileId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to add tag {tagId} to gcode file {gcodeFileId}: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Remove a tag from a gcode file
+        /// </summary>
+        public async Task RemoveTagFromGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct)
+        {
+            try
+            {
+                TagMapping? mapping = await _unitOfWork.TagMappings.GetMappingAsync("GcodeFile", gcodeFileId, tagId, ct);
+                if (mapping == null)
+                {
+                    _logger.LogWarning($"Tag {tagId} not assigned to gcode file {gcodeFileId}");
+                    throw new KeyNotFoundException($"Tag {tagId} not assigned to gcode file {gcodeFileId}");
+                }
+
+                await _unitOfWork.TagMappings.RemoveAsync(mapping, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+                _logger.LogInformation($"Successfully removed tag {tagId} from gcode file {gcodeFileId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to remove tag {tagId} from gcode file {gcodeFileId}: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Get all tags assigned to a gcode file
+        /// </summary>
+        public async Task<IReadOnlyList<Model3DTagDto>> GetGcodeFileTagsAsync(Guid gcodeFileId, CancellationToken ct)
+        {
+            try
+            {
+                IReadOnlyList<TagMapping> mappings = await _unitOfWork.TagMappings.GetMappingsByObjectAsync("GcodeFile", gcodeFileId, ct);
+                List<Model3DTagDto> tags = new List<Model3DTagDto>();
+                
+                foreach (TagMapping mapping in mappings)
+                {
+                    Model3DTag? tag = await _tagRepository.GetByIdAsync(mapping.TagId, ct);
+                    if (tag != null)
+                    {
+                        tags.Add(new Model3DTagDto
+                        {
+                            Id = tag.Id,
+                            Name = tag.Name,
+                            Color = tag.Color,
+                            Description = tag.Description
+                        });
+                    }
+                }
+
+                return tags;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to get tags for gcode file {gcodeFileId}: {ex.Message}");
                 throw;
             }
         }

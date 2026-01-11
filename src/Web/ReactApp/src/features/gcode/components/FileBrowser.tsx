@@ -682,10 +682,10 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                       {!file.isDirectory ? formatBytes(file.fileSize) : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {!file.isDirectory && file.extractedNozzleDiameter ? `${file.extractedNozzleDiameter}mm` : '-'}
+                      {file.isDirectory ? '-' : file.extractedNozzleDiameter ? `${file.extractedNozzleDiameter}mm` : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-pf-text-secondary">
-                      {!file.isDirectory ? (file.extractedMaterial || '-') : '-'}
+                      {file.isDirectory ? '-' : file.extractedMaterial || '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-pf-text-secondary">
                       {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : '-'}

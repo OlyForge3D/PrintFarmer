@@ -43,7 +43,7 @@ These are the main documentation files you should read first:
 
 ### Features Deep-Dives
 
-- **[3D_MODEL_TAGGING_SYSTEM.md](./3D_MODEL_TAGGING_SYSTEM.md)** - Model tagging architecture
+- **[TAGGING_SYSTEM.md](./TAGGING_SYSTEM.md)** - Model tagging architecture
 - **[ORCASLICER_PROFILES_HIERARCHY.md](./ORCASLICER_PROFILES_HIERARCHY.md)** - OrcaSlicer profile organization
 - **[SLICER_LIBRARY_ARCHITECTURE.md](./SLICER_LIBRARY_ARCHITECTURE.md)** - Slicer integration architecture
 - **[PRINTER_DISCOVERY_ARCHITECTURE.md](./PRINTER_DISCOVERY_ARCHITECTURE.md)** - Network discovery system

@@ -25,4 +25,6 @@ public class GcodeMetadataExtracted
     public double? PrintTemperature { get; set; } // First layer print/hotend temperature
     public double? BedTemperature { get; set; } // First layer bed temperature
     public byte[]? ThumbnailData { get; set; } // PNG image data extracted from gcode
+    public string? PrinterModel { get; set; } // Printer model file was sliced for (e.g., "Phrozen Arco 0.4")
+    public string? PrintSettingsId { get; set; } // Slicer process profile ID used (e.g., from OrcaSlicer)
 }

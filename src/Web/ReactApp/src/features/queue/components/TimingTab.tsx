@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Alert } from '@/common/components/ui/Alert';
 import { printQueueService, TimelineEventDto, DurationAnalyticsDto } from '@/services/printQueueService';
 import { JobTimeline } from './timing/JobTimeline';
@@ -15,7 +15,7 @@ export default function TimingTab() {
     to: new Date(),
   });
 
-  const loadTimingData = async () => {
+  const loadTimingData = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
@@ -44,11 +44,11 @@ export default function TimingTab() {
       setError(errorMessage);
       setLoading(false);
     }
-  };
+  }, [dateRange]);
 
   useEffect(() => {
     loadTimingData();
-  }, [dateRange]);
+  }, [loadTimingData]);
 
   const handleDateRangeChange = (type: 'from' | 'to', date: Date) => {
     setDateRange((prev) => ({

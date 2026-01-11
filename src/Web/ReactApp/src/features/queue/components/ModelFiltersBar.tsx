@@ -114,10 +114,11 @@ export default function ModelFiltersBar({
         </label>
         <div className="flex flex-wrap gap-2">
           {(["queued", "printing", "paused"] as JobStatus[]).map((status) => (
-            <button
+            <Button
               key={status}
               onClick={() => handleStatusToggle(status)}
               disabled={isLoading}
+              variant="subtle"
               className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
                 selectedStatuses.includes(status)
                   ? status === "queued"
@@ -133,7 +134,7 @@ export default function ModelFiltersBar({
                 : status === "printing"
                   ? `⏱️ Printing (${selectedStatuses.includes("printing") ? "✓" : ""})`
                   : `⏸️ Paused (${selectedStatuses.includes("paused") ? "✓" : ""})`}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

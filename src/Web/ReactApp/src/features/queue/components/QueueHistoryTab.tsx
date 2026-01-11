@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "@/common/components/ui/Alert";
+import { Button } from "@/common/components/ui/Button";
 import HistoryFiltersBar from "./HistoryFiltersBar";
 import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
@@ -67,7 +68,6 @@ export default function QueueHistoryTab({
   
   // Modal
   const [rerunJobId, setRerunJobId] = useState<string | null>(null);
-  const [rerunning, setRerunning] = useState(false);
 
   /**
    * Load history from API
@@ -80,11 +80,11 @@ export default function QueueHistoryTab({
       const response = await printQueueService.getQueueHistoryAsync(pageSize, currentPage * pageSize, sortBy);
       
       // Convert API response to HistoryJob format
-      const historyJobs: HistoryJob[] = (response?.entries || []).map((job: any) => ({
+      const historyJobs: HistoryJob[] = (response?.entries || []).map((job) => ({
         id: job.id,
         name: job.jobName,
         printerName: job.printerName || "Unknown",
-        status: job.status?.toLowerCase() || "completed",
+        status: (job.status?.toLowerCase() || "completed") as "completed" | "failed" | "cancelled",
         completionPercentage: job.completionPercentage || 0,
         startedAt: job.startedAtUtc || new Date().toISOString(),
         completedAt: job.completedAtUtc || null,
@@ -176,7 +176,6 @@ export default function QueueHistoryTab({
     if (!rerunJobId) return;
     
     try {
-      setRerunning(true);
       if (onRerun) {
         await onRerun(rerunJobId);
       }
@@ -185,8 +184,6 @@ export default function QueueHistoryTab({
       await loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to rerun job");
-    } finally {
-      setRerunning(false);
     }
   };
 
@@ -250,20 +247,20 @@ export default function QueueHistoryTab({
               Page {currentPage + 1} of {Math.max(1, totalPages)} | {totalCount} total jobs
             </div>
             <div className="flex gap-2">
-              <button
+              <Button
                 onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                 disabled={!hasPrevPage || loading}
-                className="px-3 py-1 rounded border border-pf-border text-pf-text-secondary hover:bg-pf-bg-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                variant="secondary"
               >
                 ← Previous
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => setCurrentPage(p => p + 1)}
                 disabled={!hasNextPage || loading}
-                className="px-3 py-1 rounded border border-pf-border text-pf-text-secondary hover:bg-pf-bg-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                variant="secondary"
               >
                 Next →
-              </button>
+              </Button>
             </div>
           </div>
         </>

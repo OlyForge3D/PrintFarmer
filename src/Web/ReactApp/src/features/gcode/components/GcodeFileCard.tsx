@@ -3,7 +3,8 @@ import {
   FolderIcon, 
   DocumentIcon, 
   ArrowDownTrayIcon, 
-  TrashIcon 
+  TrashIcon,
+  TagIcon
 } from '@heroicons/react/24/outline';
 import { 
   CubeIcon,
@@ -16,6 +17,7 @@ import { GcodeFile } from '@/types/api';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 import { useState } from 'react';
 import { QueueGcodeModal } from './QueueGcodeModal';
+import { TaggingModal } from '@/components/TaggingModal';
 
 interface GcodeFileCardProps {
   file: GcodeFile;
@@ -46,6 +48,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
   isDeleting = false
 }) => {
   const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [isTaggingOpen, setIsTaggingOpen] = useState(false);
   return (
     <>
     <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:border-pf-accent hover:shadow-lg transition-all flex flex-col group min-h-0">
@@ -72,6 +75,21 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
 
         {/* Metadata */}
         <div className="text-xs text-pf-text-secondary space-y-1 mb-2 flex-1">
+          {/* Tags */}
+          {!file.isDirectory && file.tags && file.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1 border-t border-pf-border/50">
+              {file.tags.map(tag => (
+                <span
+                  key={tag.id}
+                  className="inline-block px-2 py-0.5 rounded text-[10px] font-medium text-white"
+                  style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
+                  title={tag.description}
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          )}
           {/* Basic file info */}
           {!file.isDirectory && file.fileSize && (
             <div className="flex justify-between gap-1">
@@ -205,6 +223,16 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
                 <ArrowDownTrayIcon className="w-4 h-4" />
               </Button>
               <Button
+                onClick={() => setIsTaggingOpen(true)}
+                disabled={isDeleting}
+                variant="secondary"
+                size="sm"
+                className="px-2"
+                title="Tag this file"
+              >
+                <TagIcon className="w-4 h-4" />
+              </Button>
+              <Button
                 onClick={() => setIsQueueOpen(true)}
                 disabled={isDeleting}
                 variant="primary"
@@ -231,6 +259,15 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
     </div>
     {isQueueOpen && (
       <QueueGcodeModal file={file} isOpen={isQueueOpen} onClose={(added) => { setIsQueueOpen(false); if (added) { /* maybe show toast later */ } }} />
+    )}
+    {isTaggingOpen && !file.isDirectory && (
+      <TaggingModal
+        objectId={file.id}
+        objectType="GcodeFile"
+        initialTags={file.tags || []}
+        isOpen={isTaggingOpen}
+        onClose={() => setIsTaggingOpen(false)}
+      />
     )}
     </>
   );

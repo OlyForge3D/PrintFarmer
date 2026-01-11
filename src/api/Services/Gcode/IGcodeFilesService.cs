@@ -212,19 +212,19 @@ namespace Farm.Web.Api.Services.Gcode
         #region Library Operations
 
         /// <summary>
-        /// Queries the G-code library with optional filters for search, material, nozzle diameter, and target printer.
+        /// Queries the G-code library with optional filters for search, material, nozzle diameter, and printer model.
         /// </summary>
         /// <param name="search">Optional search term to match against filenames (case-insensitive partial match).</param>
         /// <param name="material">Optional material filter (e.g., 'PLA', 'PETG') to match RequiredMaterial field.</param>
         /// <param name="nozzleDiameter">Optional nozzle diameter in millimeters (e.g., 0.4, 0.6) to match RequiredNozzleDiameter field.</param>
-        /// <param name="targetPrinterId">Optional printer ID to filter files compatible with a specific printer.</param>
+        /// <param name="printerModelId">Optional printer model ID filter.</param>
         /// <param name="ct">Cancellation token.</param>
         /// <returns>Read-only list of G-code file DTOs matching all specified criteria.</returns>
         /// <remarks>
         /// All filters are optional and combined with AND logic (all must match). Returns empty list if no matches found.
         /// This is the primary method for discovering files based on metadata attributes.
         /// </remarks>
-        Task<IReadOnlyList<GcodeFileDto>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct);
+        Task<IReadOnlyList<GcodeFileDto>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? printerModelId, CancellationToken ct);
 
         /// <summary>
         /// Retrieves a specific G-code file by ID with full metadata and relationships.

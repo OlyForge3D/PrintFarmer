@@ -1022,14 +1022,11 @@ public record GcodeFileDto(
     string[]? Tags = null,
     double? RequiredNozzleDiameter = null,
     string? RequiredMaterial = null,
-    string[]? CompatibleMaterials = null,
     double? EstimatedPrintTimeMinutes = null,
     double? EstimatedFilamentLengthMm = null,
     double? EstimatedFilamentWeightG = null,
-    Guid? TargetPrinterId = null,
-    string? TargetPrinterName = null,
-    Guid? TargetModelId = null,
-    string? TargetModelName = null,
+    Guid? PrinterModelId = null,
+    string? PrinterModelName = null,
     string? SlicerName = null,
     string? SlicerVersion = null,
     bool HasThumbnail = false);
@@ -1044,12 +1041,10 @@ public class CreateGcodeFileDto
     public string[]? Tags { get; set; }
     public double? RequiredNozzleDiameter { get; set; }
     public string? RequiredMaterial { get; set; }
-    public string[]? CompatibleMaterials { get; set; }
     public double? EstimatedPrintTimeMinutes { get; set; }
     public double? EstimatedFilamentLengthMm { get; set; }
     public double? EstimatedFilamentWeightG { get; set; }
-    public Guid? TargetPrinterId { get; set; }
-    public Guid? TargetModelId { get; set; }
+    public Guid? PrinterModelId { get; set; }
     public string? SlicerName { get; set; }
     public string? SlicerVersion { get; set; }
     public string? SlicerSettings { get; set; }
@@ -1064,12 +1059,10 @@ public record UpdateGcodeFileDto(
     string[]? Tags = null,
     double? RequiredNozzleDiameter = null,
     string? RequiredMaterial = null,
-    string[]? CompatibleMaterials = null,
     double? EstimatedPrintTimeMinutes = null,
     double? EstimatedFilamentLengthMm = null,
     double? EstimatedFilamentWeightG = null,
-    Guid? TargetPrinterId = null,
-    Guid? TargetModelId = null,
+    Guid? PrinterModelId = null,
     string? SlicerName = null,
     string? SlicerVersion = null,
     string? SlicerSettings = null);

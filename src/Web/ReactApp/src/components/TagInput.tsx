@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Button } from '@/common/components/ui/Button';
 import { TagDto, TagSuggestionDto, tagService } from '../services/tagService';
 import TagDisplay from './TagDisplay';
 
@@ -287,20 +288,21 @@ export const TagInput: React.FC<TagInputProps> = ({
             className="absolute top-full left-0 right-0 mt-2 bg-white border-2 border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto"
           >
             {currentSuggestions.map((suggestion, index) => (
-              <button
+              <Button
                 key={suggestion.id}
                 onClick={() => addTag(suggestion)}
-                role="option"
-                aria-selected={index === selectedSuggestionIndex}
-                className={`w-full px-4 py-2 text-left transition-colors duration-150 flex justify-between items-center ${
+                variant={index === selectedSuggestionIndex ? 'primary' : 'subtle'}
+                className={`w-full px-4 py-2 text-left justify-between flex items-center ${
                   index === selectedSuggestionIndex
                     ? 'bg-indigo-100 text-indigo-900'
                     : 'hover:bg-gray-100'
                 }`}
+                aria-selected={index === selectedSuggestionIndex}
+                role="option"
               >
                 <span>{suggestion.name}</span>
                 <span className="text-xs text-gray-500">({suggestion.usageCount})</span>
-              </button>
+              </Button>
             ))}
           </div>
         )}

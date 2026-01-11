@@ -30,6 +30,7 @@ public class PrintQueueController(
     /// <param name="filterMaterial">Filter by material type</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("")]
     [ProducesResponseType(typeof(List<QueuedPrintJobWithFileMetaDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -215,44 +216,6 @@ public class PrintQueueController(
         {
             _logger.LogError(ex, "Error enqueueing print job");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to enqueue job" });
-        }
-    }
-
-    /// <summary>
-    /// Update a print job
-    /// </summary>
-    [HttpPut("jobs/{jobId}")]
-    [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> UpdateJobAsync(
-        [FromRoute] string jobId,
-        [FromBody] UpdateQueueJobRequest request,
-        CancellationToken cancellationToken = default
-    )
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(jobId))
-            {
-                return BadRequest(new { error = "Job ID is required" });
-            }
-
-            var userId = User.FindFirst("sub")?.Value ?? "system";
-            var job = await _printQueueService.UpdateJobAsync(jobId, request, userId, cancellationToken);
-
-            return Ok(job);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(new { error = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating job {JobId}", jobId);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update job" });
         }
     }
 
@@ -512,6 +475,7 @@ public class PrintQueueController(
     /// Get detailed information about a specific job including notes and tags
     /// </summary>
     /// <param name="jobId">The ID of the job to retrieve</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("jobs/{jobId}")]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -550,6 +514,7 @@ public class PrintQueueController(
     /// </summary>
     /// <param name="jobId">The ID of the job to update</param>
     /// <param name="updates">The job fields to update</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}")]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -601,6 +566,7 @@ public class PrintQueueController(
     /// </summary>
     /// <param name="jobId">The ID of the job</param>
     /// <param name="request">The notes update request</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}/notes")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

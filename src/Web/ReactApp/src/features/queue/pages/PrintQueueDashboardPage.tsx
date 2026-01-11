@@ -262,7 +262,7 @@ export function PrintQueueDashboardPage() {
               onRerun={handleRerunJob}
               onViewDetails={(jobId) => {
                 // TODO: Navigate to job details page
-                console.log("View job details:", jobId);
+              if (window.PrintFarmerDebug?.utilities) console.log("View job details:", jobId);
               }}
             />
           </Tabs.Panel>

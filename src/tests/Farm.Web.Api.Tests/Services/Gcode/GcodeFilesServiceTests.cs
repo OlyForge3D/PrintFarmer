@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
@@ -67,7 +68,8 @@ public class GcodeFilesServiceTests
         storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
 
         var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -123,7 +125,8 @@ public class GcodeFilesServiceTests
             .ReturnsAsync(metadata);
 
         var mockFolderService = CreateFolderServiceMock("prints/models");
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
         GcodeFile? result = await service.FinalizeChunkedUploadAsync(
@@ -218,8 +221,9 @@ public class GcodeFilesServiceTests
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object, thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
         GcodeFileListResponse response = await service.ListAsync(
@@ -295,7 +299,8 @@ public class GcodeFilesServiceTests
         repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
@@ -357,7 +362,8 @@ public class GcodeFilesServiceTests
         repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act
@@ -435,7 +441,8 @@ public class GcodeFilesServiceTests
         repo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = new GcodeFilesService(repo.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object);
 
         // Act

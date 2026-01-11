@@ -1,3 +1,4 @@
+import { Button } from "@/common/components/ui/Button";
 import { HistoryJob } from "./QueueHistoryTab";
 
 interface HistoryJobCardProps {
@@ -63,7 +64,6 @@ export default function HistoryJobCard({
     if (!job.completedAt) return "In progress";
     
     const completedDate = new Date(job.completedAt);
-    const startedDate = new Date(job.startedAt);
     
     const now = new Date();
     const diffMs = now.getTime() - completedDate.getTime();
@@ -139,20 +139,22 @@ export default function HistoryJobCard({
       {/* Actions */}
       <div className="flex gap-2 pt-3 border-t border-pf-border">
         {job.status === "completed" && (
-          <button
+          <Button
             onClick={onRerun}
-            className="flex-1 px-3 py-2 rounded text-sm font-medium bg-pf-bg-1 border border-pf-border text-pf-text-primary hover:bg-pf-bg-2 transition-colors"
+            className="flex-1 px-3 py-2 rounded text-sm font-medium"
+            variant="secondary"
           >
             ↻ Rerun
-          </button>
+          </Button>
         )}
         {onViewDetails && (
-          <button
+          <Button
             onClick={() => onViewDetails(job.id)}
-            className="flex-1 px-3 py-2 rounded text-sm font-medium bg-pf-bg-1 border border-pf-border text-pf-text-primary hover:bg-pf-bg-2 transition-colors"
+            className="flex-1 px-3 py-2 rounded text-sm font-medium"
+            variant="secondary"
           >
             View Details →
-          </button>
+          </Button>
         )}
       </div>
     </div>

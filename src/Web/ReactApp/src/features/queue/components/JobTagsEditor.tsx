@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Button } from '@/common/components/ui/Button';
 
 export interface JobTagsEditorProps {
   tags: string[];
@@ -130,15 +131,16 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
             {localTags.map((tag) => (
               <div key={tag} className="tag-chip" role="status" aria-label={`Tag: ${tag}`}>
                 <span className="tag-text">{tag}</span>
-                <button
-                  type="button"
+                <Button
                   className="tag-remove-button"
                   onClick={() => removeTag(tag)}
                   aria-label={`Remove tag ${tag}`}
                   title={`Remove tag ${tag}`}
+                  variant="subtle"
+                  size="sm"
                 >
                   ✕
-                </button>
+                </Button>
               </div>
             ))}
           </div>

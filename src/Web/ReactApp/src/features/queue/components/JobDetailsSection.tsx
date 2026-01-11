@@ -11,7 +11,7 @@ export interface JobDetailsSectionProps {
     materialType?: string;
   };
   isEditing: boolean;
-  onFieldChange: (field: string, value: any) => void;
+  onFieldChange: (field: keyof JobDetailsSectionProps['jobDetails'], value: string | number | undefined) => void;
 }
 
 const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({

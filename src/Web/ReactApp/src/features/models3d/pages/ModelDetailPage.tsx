@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CloseIcon, ArrowLeftIcon, TagIcon, EditIcon, SaveIcon, PlusIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { TagEditor } from '@/features/catalog/components/TagEditor';
 import TagInput from '@/components/TagInput';
 import TagDisplay from '@/components/TagDisplay';
 import { Button, Input, FormField, Textarea } from '@/common/components/ui';
@@ -64,7 +63,7 @@ export const ModelDetailPage: React.FC = () => {
     });
 
     // Fetch all available tags
-    const { data: allTags = [] } = useQuery<TagOption[]>({
+    useQuery<TagOption[]>({
         queryKey: ['model-tags'],
         queryFn: async () => {
             const response = await fetch(`${getApiBaseUrl()}/3d-models/tags`, {

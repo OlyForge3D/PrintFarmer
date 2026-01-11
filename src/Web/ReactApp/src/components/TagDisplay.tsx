@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '@/common/components/ui/Button';
 import { TagDto } from '../services/tagService';
 
 export interface TagDisplayProps {
@@ -91,17 +92,18 @@ export const TagDisplay: React.FC<TagDisplayProps> = ({
       </span>
 
       {showRemoveButton && (
-        <button
+        <Button
           onClick={handleRemoveClick}
           onKeyDown={handleRemoveKeyDown}
-          type="button"
-          className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-white hover:bg-opacity-30 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-0 focus:ring-white"
+          className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-white hover:bg-opacity-30 transition-colors duration-150"
           aria-label={`Remove tag ${tag.name}`}
           title={`Remove ${tag.name}`}
           disabled={disabled}
+          variant="subtle"
+          size="sm"
         >
           <span className="text-xs font-bold leading-none">×</span>
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -174,10 +174,52 @@ namespace Farm.Web.Api.Tests
                 var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await context.Database.EnsureDeletedAsync();
                 await context.Database.EnsureCreatedAsync();
+                
+                // Seed root folders for gcode and models to match production behavior
+                await SeedRootFoldersAsync(context);
             }
             finally
             {
                 await scope.DisposeAsync();
+            }
+        }
+
+        private async Task SeedRootFoldersAsync(AppDbContext context)
+        {
+            try
+            {
+                // Ensure root "/" folder exists for "gcode" category
+                var existingGcodeRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");
+                if (existingGcodeRoot == null)
+                {
+                    context.Folders.Add(new FolderNode
+                    {
+                        Id = Guid.NewGuid(),
+                        Path = "/",
+                        FolderType = "gcode",
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+
+                // Ensure root "/" folder exists for "models" category
+                var existingModelsRoot = await context.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "models");
+                if (existingModelsRoot == null)
+                {
+                    context.Folders.Add(new FolderNode
+                    {
+                        Id = Guid.NewGuid(),
+                        Path = "/",
+                        FolderType = "models",
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+
+                await context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("UNIQUE constraint") == true)
+            {
+                // Folders already exist - this is fine, just continue
+                context.ChangeTracker.Clear();
             }
         }
 

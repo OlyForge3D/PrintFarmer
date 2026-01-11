@@ -77,16 +77,16 @@ export default function ModelFilteredJobsTab({
         0
       );
       // Convert API response to QueueJob format
-      const queueJobs: QueueJob[] = response.map((job: any) => ({
-        id: job.id,
-        name: job.fileName,
-        printerModel: job.printerModel || "Unknown",
-        material: job.material || "Unknown",
-        estimatedTime: job.estimatedTime || 0,
-        progress: job.progress || 0,
-        status: job.status?.toLowerCase() || "queued",
-        createdAt: job.createdAt || new Date().toISOString(),
-        startedAt: job.startedAt,
+      const queueJobs: QueueJob[] = response.map((item) => ({
+        id: item.id || item.job.id,
+        name: item.fileMetadata?.fileName || item.job.name || "Unknown",
+        printerModel: item.printerMetadata?.modelName || "Unknown",
+        material: item.fileMetadata?.materialType || "Unknown",
+        estimatedTime: item.fileMetadata?.estimatedPrintTimeSeconds || item.job.estimatedPrintTimeSeconds || 0,
+        progress: 0,
+        status: item.job.status?.toLowerCase() || "queued",
+        createdAt: item.fileMetadata?.createdAtUtc || item.job.createdAtUtc || new Date().toISOString(),
+        startedAt: item.job.actualStartTimeUtc,
       }));
       setJobs(queueJobs);
     } catch (err) {

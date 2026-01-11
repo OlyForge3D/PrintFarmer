@@ -34,12 +34,6 @@ export interface TagAnalyticsDto {
 /**
  * API response wrapper for lists
  */
-interface ApiListResponse<T> {
-  data: T[];
-  count: number;
-  success: boolean;
-}
-
 /**
  * Tag service for API integration
  * Handles all tag-related API calls with error handling and caching

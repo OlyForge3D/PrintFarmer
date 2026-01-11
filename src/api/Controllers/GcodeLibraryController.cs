@@ -26,11 +26,11 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
         FromQuery] string? search = null,
         [FromQuery] string? material = null,
         [FromQuery] double? nozzleDiameter = null,
-        [FromQuery] Guid? targetPrinterId = null)
+        [FromQuery] Guid? printerModelId = null)
     {
         try
         {
-            IReadOnlyList<GcodeFileDto> result = await gcodeService.QueryLibraryAsync(search, material, nozzleDiameter, targetPrinterId, CancellationToken.None);
+            IReadOnlyList<GcodeFileDto> result = await gcodeService.QueryLibraryAsync(search, material, nozzleDiameter, printerModelId, CancellationToken.None);
             return Ok(result);
         }
         catch (Exception ex)

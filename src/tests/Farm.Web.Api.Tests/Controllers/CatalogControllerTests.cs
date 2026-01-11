@@ -16,15 +16,13 @@ public class CatalogControllerTests
 {
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
     private readonly Mock<ICatalogService> _catalogServiceMock;
-    private readonly Mock<ITagService> _tagServiceMock;
     private readonly CatalogController _controller;
 
     public CatalogControllerTests()
     {
         _loggerMock = new Mock<IUnifiedLoggingService>();
         _catalogServiceMock = new Mock<ICatalogService>();
-        _tagServiceMock = new Mock<ITagService>();
-        _controller = new CatalogController(_loggerMock.Object, _catalogServiceMock.Object, _tagServiceMock.Object);
+        _controller = new CatalogController(_loggerMock.Object, _catalogServiceMock.Object);
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext()

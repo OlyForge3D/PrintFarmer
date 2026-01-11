@@ -820,7 +820,7 @@ public class PrintQueueService(
             {
                 if (updates.Name.Length > 255)
                 {
-                    throw new ArgumentException("Job name must be 255 characters or less", nameof(updates.Name));
+                    throw new ArgumentException("Job name must be 255 characters or less", nameof(updates));
                 }
 
                 job.Name = updates.Name;
@@ -830,7 +830,7 @@ public class PrintQueueService(
             {
                 if (updates.Priority < 0 || updates.Priority > 100)
                 {
-                    throw new ArgumentException("Priority must be between 0 and 100", nameof(updates.Priority));
+                    throw new ArgumentException("Priority must be between 0 and 100", nameof(updates));
                 }
 
                 job.Priority = updates.Priority.Value;
@@ -840,7 +840,7 @@ public class PrintQueueService(
             {
                 if (updates.Notes.Length > 500)
                 {
-                    throw new ArgumentException("Notes must be 500 characters or less", nameof(updates.Notes));
+                    throw new ArgumentException("Notes must be 500 characters or less", nameof(updates));
                 }
 
                 job.Notes = updates.Notes;

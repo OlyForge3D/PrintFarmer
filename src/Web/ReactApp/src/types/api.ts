@@ -758,6 +758,7 @@ export interface GcodeFile {
   isDirectory: boolean;
   harvestOperationId?: string;
   thumbnailUrl?: string;
+  tags?: Array<{ id: string; name: string; color?: string; description?: string }>; // Tags applied to this gcode file
   // Extracted metadata from G-code
   extractedSlicerName?: string;
   extractedSlicerVersion?: string;

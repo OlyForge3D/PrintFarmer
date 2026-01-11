@@ -1,5 +1,5 @@
 import { TimelineEventDto } from '@/services/printQueueService';
-import { formatDistanceToNow, formatISO } from 'date-fns';
+import { formatISO } from 'date-fns';
 
 interface JobTimelineProps {
   events: TimelineEventDto[];

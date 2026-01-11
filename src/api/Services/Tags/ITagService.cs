@@ -142,5 +142,20 @@ namespace Farm.Web.Api.Services.Tags
             IEnumerable<Guid> includeAnyTagIds,
             IEnumerable<Guid> excludeTagIds,
             CancellationToken ct);
+
+        /// <summary>
+        /// Add a tag to a gcode file
+        /// </summary>
+        Task AddTagToGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct);
+
+        /// <summary>
+        /// Remove a tag from a gcode file
+        /// </summary>
+        Task RemoveTagFromGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct);
+
+        /// <summary>
+        /// Get all tags assigned to a gcode file
+        /// </summary>
+        Task<IReadOnlyList<Model3DTagDto>> GetGcodeFileTagsAsync(Guid gcodeFileId, CancellationToken ct);
     }
 }

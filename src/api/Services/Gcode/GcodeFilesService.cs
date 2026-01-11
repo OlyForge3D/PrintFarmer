@@ -4,12 +4,15 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Gcode;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
@@ -17,6 +20,7 @@ using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.FileManagement;
 using Farm.Web.Api.Services.FolderManagement;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Gcode
 {
@@ -42,9 +46,10 @@ namespace Farm.Web.Api.Services.Gcode
     /// library services, providing a single source of truth for G-code file management.
     /// </para>
     /// </remarks>
-    public class GcodeFilesService : IGcodeFilesService
+    public class GcodeFilesService : IGcodeFilesService, IGcodeFileProcessingService
     {
         private readonly IGcodeRepository _gcodeRepo;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly IUnifiedLoggingService _logger;
         private readonly IStoragePathService _storagePathService;
         private readonly IGcodeMetadataExtractorService _metadataExtractor;
@@ -56,6 +61,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// Initializes a new instance of the <see cref="GcodeFilesService"/> class.
         /// </summary>
         /// <param name="gcodeRepo">Repository for G-code file database operations.</param>
+        /// <param name="unitOfWork">Unit of work for coordinated database operations.</param>
         /// <param name="logger">Logging service for diagnostic and error logging.</param>
         /// <param name="storagePathService">Service providing paths to storage directories.</param>
         /// <param name="metadataExtractor">Service for extracting metadata from G-code files.</param>
@@ -65,6 +71,7 @@ namespace Farm.Web.Api.Services.Gcode
         /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
         public GcodeFilesService(
             IGcodeRepository gcodeRepo,
+            IUnitOfWork unitOfWork,
             IUnifiedLoggingService logger,
             IStoragePathService storagePathService,
             IGcodeMetadataExtractorService metadataExtractor,
@@ -73,6 +80,7 @@ namespace Farm.Web.Api.Services.Gcode
             IStoredFileOperationsService fileOperations)
         {
             _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
+            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
             _metadataExtractor = metadataExtractor ?? throw new ArgumentNullException(nameof(metadataExtractor));
@@ -245,7 +253,7 @@ namespace Farm.Web.Api.Services.Gcode
                     ThumbnailPath: thumbnailUrl,
                     GcodeFileId: null,
                     DirectoryId: null,
-                    TargetModelName: file.TargetModel?.Name,
+                    TargetModelName: file.PrinterModel?.Name,
                     RequiredMaterial: file.RequiredMaterial,
                     ExtractedSlicerName: file.SlicerName,
                     ExtractedSlicerVersion: file.SlicerVersion,
@@ -253,7 +261,7 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedFilamentLength: file.EstimatedFilamentLengthMm,
                     ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
                     ExtractedMaterial: file.RequiredMaterial,
-                    ExtractedPrinterModel: file.TargetModel?.Name,
+                    ExtractedPrinterModel: file.PrinterModel?.Name,
                     ExtractedHotendTemp: file.PrintTemperature,
                     ExtractedBedTemp: file.BedTemperature
                 ));
@@ -412,7 +420,7 @@ namespace Farm.Web.Api.Services.Gcode
                     ThumbnailPath: thumbnailUrl,
                     GcodeFileId: file.Id.ToString(),  // GUID as string for file ID
                     DirectoryId: null,
-                    TargetModelName: file.TargetModel?.Name,  // Include printer model name
+                    TargetModelName: file.PrinterModel?.Name,  // Include printer model name
                     RequiredMaterial: file.RequiredMaterial,  // Include required filament type
                     ExtractedSlicerName: file.SlicerName,
                     ExtractedSlicerVersion: file.SlicerVersion,
@@ -420,7 +428,7 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedFilamentLength: file.EstimatedFilamentLengthMm,
                     ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
                     ExtractedMaterial: file.RequiredMaterial,
-                    ExtractedPrinterModel: file.TargetModel?.Name,
+                    ExtractedPrinterModel: file.PrinterModel?.Name,
                     ExtractedHotendTemp: file.PrintTemperature,
                     ExtractedBedTemp: file.BedTemperature
                 ));
@@ -1296,18 +1304,56 @@ namespace Farm.Web.Api.Services.Gcode
             string normalizedVirtualDir = NormalizeVirtualPath(virtualDirectory ?? "/");
             var targetFolder = await _folderService.GetOrCreateFolderAsync(normalizedVirtualDir, "gcode", ct);
 
-            // Create database record
-            GcodeFile gcodeFile = new()
+            // Resolve printer model from extracted metadata
+            Guid? printerModelId = await _gcodeRepo.ResolvePrinterModelIdAsync(metadata?.PrinterModel, ct);
+
+            return BuildGcodeFileEntityFromMetadata(
+                fileId,
+                originalFileName,
+                fileHash,
+                fileSizeBytes,
+                targetFolder.Id,
+                metadata,
+                thumbnailPath,
+                GcodeSource.Upload,
+                fileExtension,
+                resolvedPrinterModelId: printerModelId
+            );
+        }
+
+        /// <summary>
+        /// Build a GcodeFile entity from extracted metadata and file info.
+        /// This is the unified method used by all code paths (upload, single harvest, bulk harvest).
+        /// Storage directory is obtained from IStoragePathService internally.
+        /// </summary>
+        internal GcodeFile BuildGcodeFileEntityFromMetadata(
+            Guid fileId,
+            string originalFileName,
+            string fileHash,
+            long fileSizeBytes,
+            Guid folderId,
+            GcodeMetadataExtracted? metadata,
+            string? thumbnailPath,
+            GcodeSource source,
+            string fileExtension = ".gcode",
+            Guid? sourcePrinterId = null,
+            string? originalPrinterPath = null,
+            Guid? resolvedPrinterModelId = null)
+        {
+            return new GcodeFile
             {
                 Id = fileId,
-                Name = originalFileName,  // Store user-provided filename for display
+                Name = originalFileName,
                 FileName = $"{fileId}{fileExtension}",
-                FolderId = targetFolder.Id,
-                FilePath = storageDir,
+                FolderId = folderId,
+                FilePath = "/",  // Virtual folder path - always root for stored files
                 FileSizeBytes = fileSizeBytes,
                 FileHash = fileHash,
                 UploadedAt = DateTime.UtcNow,
-                Source = GcodeSource.Upload,
+                Source = source,
+                SourcePrinterId = sourcePrinterId,
+                OriginalPrinterPath = originalPrinterPath,
+                PrinterModelId = resolvedPrinterModelId, // Source printer model from gcode metadata
                 RequiredNozzleDiameter = metadata?.NozzleDiameter,
                 RequiredMaterial = metadata?.Material,
                 EstimatedPrintTimeMinutes = metadata?.EstimatedPrintTimeMinutes,
@@ -1315,23 +1361,25 @@ namespace Farm.Web.Api.Services.Gcode
                 EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
                 SlicerName = metadata?.SlicerName,
                 SlicerVersion = metadata?.SlicerVersion,
+                PrintSettingsId = metadata?.PrintSettingsId,
+                LayerHeight = metadata?.LayerHeight,
+                PrintTemperature = metadata?.PrintTemperature,
+                BedTemperature = metadata?.BedTemperature,
                 ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
-
-            return gcodeFile;
         }
 
         #endregion
 
         /// <summary>
-        /// Queries the G-code library with optional filters for search, material, nozzle diameter, and target printer.
+        /// Queries the G-code library with optional filters for search, material, nozzle diameter, and printer model.
         /// </summary>
         /// <param name="search">Optional search term to match against filenames (case-insensitive partial match).</param>
         /// <param name="material">Optional material filter (e.g., 'PLA', 'PETG') to match RequiredMaterial field.</param>
         /// <param name="nozzleDiameter">Optional nozzle diameter in millimeters (e.g., 0.4, 0.6) to match RequiredNozzleDiameter field.</param>
-        /// <param name="targetPrinterId">Optional printer ID to filter files compatible with a specific printer.</param>
+        /// <param name="printerModelId">Optional printer model ID to filter files by the model used when slicing.</param>
         /// <param name="ct">Cancellation token for canceling async operation.</param>
         /// <returns>
         /// A read-only list of G-code file DTOs matching all specified criteria. Empty list if no matches found.
@@ -1346,9 +1394,9 @@ namespace Farm.Web.Api.Services.Gcode
         /// matching for string fields. Returned DTOs include thumbnail URLs and all metadata.
         /// </para>
         /// </remarks>
-        public async Task<IReadOnlyList<GcodeFileDto>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct)
+        public async Task<IReadOnlyList<GcodeFileDto>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? printerModelId, CancellationToken ct)
         {
-            List<GcodeFile> files = await _gcodeRepo.QueryLibraryAsync(search, material, nozzleDiameter, targetPrinterId, ct);
+            List<GcodeFile> files = await _gcodeRepo.QueryLibraryAsync(search, material, nozzleDiameter, printerModelId, ct);
             return files.Select(file => MapToDto(file)).ToArray();
         }
 
@@ -1461,12 +1509,10 @@ namespace Farm.Web.Api.Services.Gcode
                 Tags = metadata.Tags != null ? string.Join(',', metadata.Tags) : null,
                 RequiredNozzleDiameter = metadata.RequiredNozzleDiameter,
                 RequiredMaterial = metadata.RequiredMaterial,
-                CompatibleMaterials = metadata.CompatibleMaterials,
                 EstimatedPrintTimeMinutes = metadata.EstimatedPrintTimeMinutes,
                 EstimatedFilamentLengthMm = metadata.EstimatedFilamentLengthMm,
                 EstimatedFilamentWeightG = metadata.EstimatedFilamentWeightG,
-                TargetPrinterId = metadata.TargetPrinterId,
-                TargetModelId = metadata.TargetModelId,
+                PrinterModelId = metadata.PrinterModelId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -1531,19 +1577,9 @@ namespace Farm.Web.Api.Services.Gcode
                 file.RequiredMaterial = request.RequiredMaterial;
             }
 
-            if (request.CompatibleMaterials != null)
+            if (request.PrinterModelId.HasValue)
             {
-                file.CompatibleMaterials = request.CompatibleMaterials;
-            }
-
-            if (request.TargetPrinterId.HasValue)
-            {
-                file.TargetPrinterId = request.TargetPrinterId.Value;
-            }
-
-            if (request.TargetModelId.HasValue)
-            {
-                file.TargetModelId = request.TargetModelId.Value;
+                file.PrinterModelId = request.PrinterModelId.Value;
             }
 
             file.UpdatedAt = DateTime.UtcNow;
@@ -1703,18 +1739,201 @@ namespace Farm.Web.Api.Services.Gcode
                 Tags: file.Tags?.Split(',', StringSplitOptions.RemoveEmptyEntries),
                 RequiredNozzleDiameter: file.RequiredNozzleDiameter,
                 RequiredMaterial: file.RequiredMaterial,
-                CompatibleMaterials: file.CompatibleMaterials,
                 EstimatedPrintTimeMinutes: file.EstimatedPrintTimeMinutes,
                 EstimatedFilamentLengthMm: file.EstimatedFilamentLengthMm,
                 EstimatedFilamentWeightG: file.EstimatedFilamentWeightG,
-                TargetPrinterId: file.TargetPrinterId,
-                TargetPrinterName: file.TargetPrinter?.Name,
-                TargetModelId: file.TargetModelId,
-                TargetModelName: file.TargetModel?.Name,
+                PrinterModelId: file.PrinterModelId,
+                PrinterModelName: file.PrinterModel?.Name,
                 SlicerName: file.SlicerName,
                 SlicerVersion: file.SlicerVersion,
                 HasThumbnail: !string.IsNullOrEmpty(file.ThumbnailFileName)
             );
+        }
+
+        /// <summary>
+        /// Unified method for processing and storing G-code files from any source
+        /// (upload, single harvest, bulk harvest, or future sources).
+        /// 
+        /// Handles all file processing: storage, hash calculation, duplicate detection,
+        /// metadata extraction, thumbnail processing, entity creation, and database persistence.
+        /// </summary>
+        /// <param name="fileContent">The raw file content bytes</param>
+        /// <param name="originalFileName">Original filename as provided by source</param>
+        /// <param name="folderId">Virtual folder ID where file should be organized</param>
+        /// <param name="virtualDirectory">Virtual directory path (e.g., '/', '/subfolder'). Defaults to '/'.</param>
+        /// <param name="sourcePrinterId">Optional printer ID if harvested from a specific printer</param>
+        /// <param name="originalPrinterPath">Optional original path on printer if harvested</param>
+        /// <param name="thumbnailUrl">Optional thumbnail URL from printer API (harvest only)</param>
+        /// <param name="fileId">Optional specific ID for the file. If null, a new GUID is generated.</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>The saved GcodeFile entity with all metadata populated</returns>
+        /// <remarks>
+        /// This method consolidates all file handling logic:
+        /// 1. Stores file to disk with GUID-based filename
+        /// 2. Calculates SHA256 hash and checks for duplicates
+        /// 3. Extracts metadata from G-code (slicer, temps, filament, etc.)
+        /// 4. Processes and extracts thumbnail image
+        /// 5. Creates GcodeFile entity with complete metadata
+        /// 6. Saves to database
+        /// 
+        /// If a duplicate file is detected (same hash), an exception is thrown allowing
+        /// the caller to decide whether to skip, replace, or re-import.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">Thrown if a duplicate file already exists</exception>
+        public async Task<GcodeFile> ProcessAndStoreGcodeFileAsync(
+            byte[] fileContent,
+            string originalFileName,
+            Guid folderId,
+            string? virtualDirectory = null,
+            Guid? sourcePrinterId = null,
+            string? originalPrinterPath = null,
+            string? thumbnailUrl = null,
+            Guid? fileId = null,
+            CancellationToken ct = default)
+        {
+            if (fileContent == null || fileContent.Length == 0)
+                throw new ArgumentException("File content cannot be null or empty", nameof(fileContent));
+            if (string.IsNullOrWhiteSpace(originalFileName))
+                throw new ArgumentException("Original file name cannot be null or empty", nameof(originalFileName));
+
+            fileId ??= Guid.NewGuid();
+            virtualDirectory = NormalizeVirtualPath(virtualDirectory ?? "/");
+
+            _logger.LogInformation($"ProcessAndStoreGcodeFileAsync: Starting for {originalFileName} (folderId={folderId})");
+
+            // Step 1: Store file to disk
+            string storageDir = _storagePathService.GetGcodeStorageDirectory();
+            _ = Directory.CreateDirectory(storageDir);
+            
+            string fileExtension = Path.GetExtension(originalFileName);
+            string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
+            
+            await System.IO.File.WriteAllBytesAsync(finalFilePath, fileContent, ct);
+            _logger.LogInformation($"File stored at {finalFilePath}");
+
+            // Step 2: Calculate hash and check for duplicates
+            string fileHash;
+            using (var hashStream = new MemoryStream(fileContent))
+            using (var sha256 = SHA256.Create())
+            {
+                byte[] hashBytes = await sha256.ComputeHashAsync(hashStream, ct);
+                fileHash = Convert.ToHexString(hashBytes);
+            }
+            _logger.LogInformation($"Calculated file hash: {fileHash.Substring(0, 8)}...");
+
+            // Check for duplicates (allow if from same source/printer path, but otherwise reject)
+            var existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
+            if (existingFile != null && existingFile.Id != fileId)
+            {
+                // Clean up the file we just wrote
+                try { System.IO.File.Delete(finalFilePath); }
+                catch { /* Ignore cleanup errors */ }
+                
+                throw new InvalidOperationException(
+                    $"Duplicate file detected: {existingFile.Name} (hash: {fileHash.Substring(0, 8)}...)");
+            }
+
+            // Step 3: Extract metadata
+            GcodeMetadataExtracted? metadata = null;
+            try
+            {
+                string gcodeText = Encoding.UTF8.GetString(fileContent);
+                metadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
+                _logger.LogInformation("Metadata extracted successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract metadata from G-code");
+            }
+
+            // Step 4: Process thumbnail (from URL first, then extraction)
+            string? thumbnailPath = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(thumbnailUrl))
+                {
+                    // Try to download from printer API URL
+                    thumbnailPath = await ProcessThumbnailFromUrlAsync(thumbnailUrl, fileId.Value, storageDir, ct);
+                }
+                
+                // If no URL or URL download failed, try extracting from G-code
+                if (string.IsNullOrEmpty(thumbnailPath))
+                {
+                    thumbnailPath = await ExtractThumbnailAsync(finalFilePath, ct);
+                }
+                
+                if (!string.IsNullOrEmpty(thumbnailPath))
+                {
+                    _logger.LogInformation($"Thumbnail processed: {Path.GetFileName(thumbnailPath)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error processing thumbnail");
+            }
+
+            // Step 5: Create entity with all metadata
+            // Resolve printer model from extracted metadata
+            Guid? printerModelId = await _gcodeRepo.ResolvePrinterModelIdAsync(metadata?.PrinterModel, ct);
+
+            var gcodeFile = BuildGcodeFileEntityFromMetadata(
+                fileId.Value,
+                originalFileName,
+                fileHash,
+                fileContent.Length,
+                folderId,
+                metadata,
+                thumbnailPath,
+                sourcePrinterId.HasValue ? GcodeSource.Harvested : GcodeSource.Upload,
+                ".gcode",
+                sourcePrinterId,
+                originalPrinterPath,
+                resolvedPrinterModelId: printerModelId);
+
+            // Step 6: Save to database
+            await _unitOfWork.GcodeFiles.AddAsync(gcodeFile, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            _logger.LogInformation($"GcodeFile {fileId} saved to database successfully");
+            return gcodeFile;
+        }
+
+        /// <summary>
+        /// Helper method to process thumbnail from printer API URL
+        /// </summary>
+        private async Task<string?> ProcessThumbnailFromUrlAsync(
+            string thumbnailUrl,
+            Guid fileId,
+            string storageDir,
+            CancellationToken ct)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(thumbnailUrl))
+                    return null;
+
+                // Download thumbnail from URL
+                using var httpClient = new System.Net.Http.HttpClient();
+                var response = await httpClient.GetAsync(thumbnailUrl, ct);
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning($"Failed to download thumbnail from URL: {response.StatusCode}");
+                    return null;
+                }
+
+                // Save thumbnail
+                byte[] thumbnailData = await response.Content.ReadAsByteArrayAsync(ct);
+                string thumbnailPath = Path.Combine(storageDir, $"{fileId}_thumb.png");
+                await System.IO.File.WriteAllBytesAsync(thumbnailPath, thumbnailData, ct);
+                
+                return thumbnailPath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error downloading thumbnail from URL");
+                return null;
+            }
         }
     }
 }

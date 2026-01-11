@@ -9,6 +9,7 @@ using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Repositories.Tags;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork
 {
@@ -26,6 +27,8 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         private IModel3DFileRepository? _model3dFileRepository;
         private ILocationRepository? _locationRepository;
         private IQueueRepository? _queueRepository;
+        private ITagRepository? _tagRepository;
+        private ITagMappingRepository? _tagMappingRepository;
 
         public AppUnitOfWork(AppDbContext db)
         {
@@ -72,6 +75,18 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         /// Coordinated with printer and gcode operations for job queue management.
         /// </summary>
         public IQueueRepository Queue => _queueRepository ??= new EfQueueRepository(_db);
+
+        /// <summary>
+        /// Lazy-initializes the Tag repository, reusing the same DbContext.
+        /// Coordinated with tag mapping operations for generic tagging support.
+        /// </summary>
+        public ITagRepository Tags => _tagRepository ??= new EfTagRepository(_db);
+
+        /// <summary>
+        /// Lazy-initializes the Tag Mapping repository, reusing the same DbContext.
+        /// Supports polymorphic tagging for gcode files, models, printers, and other objects.
+        /// </summary>
+        public ITagMappingRepository TagMappings => _tagMappingRepository ??= new EfTagMappingRepository(_db);
 
         /// <summary>
         /// Persists all pending changes from both repositories in a single atomic transaction.

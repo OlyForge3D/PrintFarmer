@@ -40,9 +40,9 @@ public class EfPrintersRepository : IPrintersRepository
 
         // Clean up dependent records that have NoAction delete behavior to prevent FK constraint violations
 
-        // Remove GcodeFile records that reference this printer as source or target
+        // Remove GcodeFile records that reference this printer as source
         List<GcodeFile> gcodeFilesReferencing = await _db.GcodeFiles
-            .Where(gf => gf.SourcePrinterId == trackedPrinter.Id || gf.TargetPrinterId == trackedPrinter.Id)
+            .Where(gf => gf.SourcePrinterId == trackedPrinter.Id)
             .ToListAsync(ct);
         if (gcodeFilesReferencing.Any())
         {

@@ -1,27 +1,29 @@
 # Print Queue System Redesign - Implementation & Plan
 
-**Last Updated**: January 8, 2026 (Phase 3C Kickoff)  
-**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete | ✅ Phase 3A Complete | ✅ Phase 3B Complete | 🔜 Phase 3C (Timeline & History - IN PROGRESS)  
-**Target**: Unified print queue dashboard with model-based filtering, history integration, advanced job control, and timeline visualization
+**Last Updated**: January 10, 2026 (Phase 3D.5 Complete - Tag Analytics & Polish)  
+**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete | ✅ Phase 3A Complete | ✅ Phase 3B Complete | ✅ Phase 3C-3D Complete | ✅ Phase 3D.5 Complete (FINAL)  
+**Target**: Unified print queue dashboard with model-based filtering, history integration, advanced job control, timeline visualization, and gcode file tagging
 
 ## 🎯 Quick Status
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| **Backend API** | ✅ Complete | 13 REST endpoints + 5 job control endpoints (pause/resume/cancel/rerun/bulk-cancel) = 18 total, 22 service methods |
-| **Frontend Dashboard** | ✅ Functional | Stats cards, filters, job list, all 3 tabs, job control buttons fully functional |
+| **Backend API** | ✅ Complete | 18 REST endpoints + tag management endpoints, full polymorphic tagging support |
+| **Frontend Dashboard** | ✅ Complete | Stats cards, filters, job list, all tabs, job control, tag analytics |
 | **Tab Navigation (Phase 2A)** | ✅ Complete | All Jobs, By Model, History tabs with proper state management |
 | **Model Filtering (Phase 2B)** | ✅ Complete | 4 components: ModelFilteredJobsTab, ModelFiltersBar, ModelStatisticsPanel, ModelJobsCard |
 | **History & Stats (Phase 2C)** | ✅ Complete | 4 components: QueueHistoryTab, HistoryFiltersBar, HistoryStatisticsPanel, HistoryJobCard |
 | **Rerun Functionality (Phase 2C.5)** | ✅ Complete | Backend POST endpoint + frontend callback, confirmation modal, auto-refresh |
 | **Job Control Operations (Phase 3B)** | ✅ Complete | Pause/Resume/Cancel/Rerun with state validation, confirmation modals, error handling, audit logging |
 | **Job Details Modal (Phase 3A)** | ✅ Complete | Edit job name, priority, notes, tags with backend integration |
+| **Tag Analytics Dashboard (Phase 3D.5)** | ✅ Complete | Comprehensive analytics, usage trends, tag management interface |
+| **GcodeFile Tagging (Phase 3D.5)** | ✅ Complete | Polymorphic tagging system, API endpoints, full CRUD support |
 | **Navigation** | ✅ Complete | Linked in nav bar as "Print Queue" → `/printQueue` |
 | **Code Cleanup** | ✅ Complete | Old queue routes/files removed, no dead code |
 | **Design System** | ✅ Complete | 100% PrintFarmer tokens applied, no white backgrounds |
 | **Authentication** | ✅ Complete | Auth headers automatically injected, JWT claims extracted for userId |
-| **Build Status** | ✅ Passing | Backend: 0 errors | Frontend: 0 errors (Release configuration) |
-| **Unit Tests** | ✅ Complete | 291/292 React tests passing, all queue/filter tests passing, 0 TypeScript errors |
+| **Build Status** | ✅ Passing | Backend: 0 errors, 0 warnings | Frontend: 0 errors (Release configuration) |
+| **Unit Tests** | ✅ Complete | 449/449 React tests passing, 1672/1672 .NET tests passing, 0 TypeScript errors |
 
 **URL**: http://10.0.0.20:8080/printQueue (Docker) | http://localhost:3000/printQueue (dev)
 

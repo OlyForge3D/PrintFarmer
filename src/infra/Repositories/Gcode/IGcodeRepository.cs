@@ -18,15 +18,15 @@ namespace Farm.Infrastructure.Repositories.Gcode
     {
         /// <summary>
         /// Searches the G-code library using metadata filters.
-        /// Supports material type, nozzle diameter, and target printer filtering.
+        /// Supports material type, nozzle diameter, and printer model filtering.
         /// </summary>
         /// <param name="search">Optional full-text search term applied to file names and descriptions</param>
         /// <param name="material">Optional filter by required material (e.g., "PLA", "PETG")</param>
         /// <param name="nozzleDiameter">Optional filter by required nozzle diameter in mm (fuzzy match ±0.001mm)</param>
-        /// <param name="targetPrinterId">Optional filter by target printer ID</param>
+        /// <param name="printerModelId">Optional filter by printer model ID (model used when slicing the file)</param>
         /// <param name="ct">Cancellation token for async operation</param>
         /// <returns>List of GcodeFile entities matching criteria, ordered by upload date (newest first)</returns>
-        Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct);
+        Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? printerModelId, CancellationToken ct);
 
         /// <summary>
         /// Retrieves a single G-code file by ID with related entities (printer, model) included.
@@ -107,6 +107,16 @@ namespace Farm.Infrastructure.Repositories.Gcode
         /// <param name="ct">Cancellation token for async operation</param>
         /// <returns>Dictionary mapping printer ID to latest harvest operation ID (null if no operations exist)</returns>
         Task<Dictionary<Guid, Guid?>> GetLatestHarvestOperationIdsByPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct);
+
+        /// <summary>
+        /// Resolves a printer model name to its database ID.
+        /// Attempts exact match first, then strips nozzle sizes (e.g., "Phrozen Arco 0.4" → "Phrozen Arco").
+        /// Used for matching gcode metadata extracted model names to database PrinterModel records.
+        /// </summary>
+        /// <param name="extractedModelName">The printer model name extracted from gcode metadata</param>
+        /// <param name="ct">Cancellation token for async operation</param>
+        /// <returns>The PrinterModel ID if found, null otherwise</returns>
+        Task<Guid?> ResolvePrinterModelIdAsync(string? extractedModelName, CancellationToken ct);
 
         /// <summary>
         /// Adds a new G-code file entity to the database (does not persist changes immediately).

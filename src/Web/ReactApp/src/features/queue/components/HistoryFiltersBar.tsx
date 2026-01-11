@@ -1,6 +1,5 @@
 import { useCallback } from "react";
 import { Button } from "@/common/components/ui/Button";
-import { Input } from "@/common/components/ui/Input";
 import { Select } from "@/common/components/ui/Select";
 
 interface HistoryFiltersBarProps {
@@ -78,7 +77,7 @@ export default function HistoryFiltersBar({
         </label>
         <div className="flex gap-2 flex-wrap">
           {["completed", "failed", "cancelled"].map((status) => (
-            <button
+            <Button
               key={status}
               onClick={() => handleStatusToggle(status)}
               className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
@@ -90,11 +89,12 @@ export default function HistoryFiltersBar({
                     : "bg-pf-warning text-white"
                   : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2"
               }`}
+              variant="subtle"
             >
               {status === "completed" && "✓ Completed"}
               {status === "failed" && "✗ Failed"}
               {status === "cancelled" && "◯ Cancelled"}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -145,13 +145,14 @@ export default function HistoryFiltersBar({
             { label: "90 Days", days: 90 },
             { label: "All Time", days: null },
           ].map((range) => (
-            <button
+            <Button
               key={range.label}
               onClick={() => handleQuickDateRange(range.days)}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2 transition-colors"
+              className="px-3 py-1.5 rounded text-sm font-medium"
+              variant="secondary"
             >
               {range.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -162,18 +163,17 @@ export default function HistoryFiltersBar({
           <label className="block text-sm font-medium text-pf-text-primary mb-2">
             Sort By
           </label>
-          <select
+          <Select
             value={sortBy}
-            onChange={(e) =>
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
               onSortChange(e.target.value as "newest" | "oldest" | "duration" | "model")
             }
-            className="w-full px-3 py-2 border border-pf-border rounded bg-pf-bg-0 text-pf-text-primary"
           >
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
             <option value="duration">Duration (Long First)</option>
             <option value="model">Model Name</option>
-          </select>
+          </Select>
         </div>
         <div className="flex items-end">
           <Button

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -18,13 +19,12 @@ namespace Farm.Infrastructure.Repositories.Gcode
             _db = db ?? throw new ArgumentNullException(nameof(db));
         }
 
-        public async Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? targetPrinterId, CancellationToken ct)
+        public async Task<List<GcodeFile>> QueryLibraryAsync(string? search, string? material, double? nozzleDiameter, Guid? printerModelId, CancellationToken ct)
         {
             // Load all files with includes first (required for SQLite compatibility with string.Contains)
             List<GcodeFile> allFiles = await _db.GcodeFiles
                 .Include(g => g.SourcePrinter)
-                .Include(g => g.TargetPrinter)
-                .Include(g => g.TargetModel)
+                .Include(g => g.PrinterModel)
                 .ToListAsync(ct);
 
             // Apply client-side filtering for case-insensitive search
@@ -49,9 +49,9 @@ namespace Farm.Infrastructure.Repositories.Gcode
                 query = query.Where(g => g.RequiredNozzleDiameter != null && Math.Abs(g.RequiredNozzleDiameter.Value - nd) < 0.001);
             }
 
-            if (targetPrinterId.HasValue)
+            if (printerModelId.HasValue)
             {
-                query = query.Where(g => g.TargetPrinterId == targetPrinterId.Value);
+                query = query.Where(g => g.PrinterModelId == printerModelId.Value);
             }
 
             return query.OrderByDescending(g => g.UploadedAt).ToList();
@@ -61,8 +61,7 @@ namespace Farm.Infrastructure.Repositories.Gcode
         {
             return _db.GcodeFiles
                 .Include(g => g.SourcePrinter)
-                .Include(g => g.TargetPrinter)
-                .Include(g => g.TargetModel)
+                .Include(g => g.PrinterModel)
                 .FirstOrDefaultAsync(g => g.Id == id, ct);
         }
 
@@ -183,18 +182,18 @@ namespace Farm.Infrastructure.Repositories.Gcode
 
             // Get files by finding the folder with matching path
             // For root directory ("/"), also include files with NULL folder (orphaned files)
-            // Include TargetModel for displaying printer model information in file browser
+            // Include PrinterModel for displaying printer model information in file browser
             if (directory == "/")
             {
                 return await _db.GcodeFiles
-                    .Include(g => g.TargetModel)
+                    .Include(g => g.PrinterModel)
                     .Where(g => (g.Folder != null && g.Folder.Path == directory) || g.Folder == null)
                     .ToListAsync(ct);
             }
             else
             {
                 return await _db.GcodeFiles
-                    .Include(g => g.TargetModel)
+                    .Include(g => g.PrinterModel)
                     .Where(g => g.Folder != null && g.Folder.Path == directory)
                     .ToListAsync(ct);
             }
@@ -242,6 +241,32 @@ namespace Farm.Infrastructure.Repositories.Gcode
         {
             _ = _db.GcodeFiles.Remove(file);
             return Task.CompletedTask;
+        }
+
+        public async Task<Guid?> ResolvePrinterModelIdAsync(string? extractedModelName, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(extractedModelName))
+            {
+                return null;
+            }
+
+            try
+            {
+                // First, try exact match
+                var exactMatch = await _db.Models
+                    .FirstOrDefaultAsync(m => m.Name != null && m.Name.Equals(extractedModelName, StringComparison.OrdinalIgnoreCase), ct);
+                
+                if (exactMatch != null)
+                {
+                    return exactMatch.Id;
+                }
+
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public Task SaveChangesAsync(CancellationToken ct) => _db.SaveChangesAsync(ct);

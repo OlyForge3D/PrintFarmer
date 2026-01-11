@@ -260,7 +260,7 @@ public abstract class StoredFile
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty; // Original filename for display
     public string FileName { get; set; } = string.Empty; // GUID-based filename on disk
-    public Guid? FolderId { get; set; } // Foreign key to FolderNode entity
+    public Guid FolderId { get; set; } // Foreign key to FolderNode entity - REQUIRED
     public FolderNode? Folder { get; set; } // Navigation property to FolderNode
     public string FilePath { get; set; } = string.Empty; // Directory path where file is stored
     public string? ThumbnailFileName { get; set; } // Just the thumbnail filename (stored in same directory as file)
@@ -286,26 +286,26 @@ public class GcodeFile : StoredFile
     public DateTime? LastSeenOnPrinter { get; set; } // Last time this file was seen during harvest
     public double? RequiredNozzleDiameter { get; set; } // e.g., 0.4mm
     public string? RequiredMaterial { get; set; } // e.g., "PLA", "PETG"
-    public string[]? CompatibleMaterials { get; set; } // JSON array of compatible materials
     public double? EstimatedPrintTimeMinutes { get; set; }
     public double? EstimatedFilamentLengthMm { get; set; }
     public double? EstimatedFilamentWeightG { get; set; }
-    public Guid? TargetPrinterId { get; set; }
-    public Printer? TargetPrinter { get; set; }
-    public Guid? TargetModelId { get; set; }
-    public PrinterModel? TargetModel { get; set; }
+    public Guid? PrinterModelId { get; set; } // Printer model this file was sliced for (extracted from gcode metadata)
+    public PrinterModel? PrinterModel { get; set; }
     public string? SlicerName { get; set; } // e.g., "PrusaSlicer", "Cura"
     public string? SlicerVersion { get; set; }
     public string? SlicerSettings { get; set; } // JSON dump of key settings
+    public string? PrintSettingsId { get; set; } // Slicer process profile name (e.g., "Standard", "Draft") - different from printer model
     public double? LayerHeight { get; set; }
     public double? InfillPercentage { get; set; }
     public double? PrintTemperature { get; set; } // First layer print/hotend temperature
     public double? BedTemperature { get; set; } // First layer bed temperature
     public double? PrintSpeed { get; set; }
-    public string[]? TargetPrinterModels { get; set; } // JSON field
 
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
+    
+    // Navigation property for tags (via generic TagMapping)
+    public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
 }
 
 public enum GcodeSource
@@ -922,8 +922,39 @@ public class Model3DTagMapping
     public Model3DTag? Tag { get; set; }
 }
 
+/// <summary>/// Generic tag that can be applied to any taggable object (Model3D, GcodeFile, Printer, etc.)
+/// For backward compatibility, Model3DTag is maintained but shares the same tag pool as generic tags.
+/// </summary>
+public class Tag
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty; // e.g., "functional", "decorative", "tools"
+    public string? Color { get; set; } // Optional hex color for UI display (e.g., "#FF5733")
+    public string? Description { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    // Navigation
+    public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
+}
+
 /// <summary>
-/// Queue item for G-code harvest operations. Decouples the API request from the background processing.
+/// Polymorphic join table for many-to-many relationship between any taggable object and Tag.
+/// The ObjectType discriminator determines what type of object is being tagged (Model3D, GcodeFile, etc.)
+/// </summary>
+public class TagMapping
+{
+    public Guid Id { get; set; }
+    public Guid TagId { get; set; }
+    public string ObjectType { get; set; } = string.Empty; // "Model3D", "GcodeFile", "Printer", etc.
+    public Guid ObjectId { get; set; } // FK to the actual object (could be Model3DId, GcodeFileId, PrinterId, etc.)
+    public DateTime TaggedAt { get; set; }
+
+    // Navigation property
+    public Tag? Tag { get; set; }
+}
+
+/// <summary>/// Queue item for G-code harvest operations. Decouples the API request from the background processing.
 /// Allows multiple harvest requests to be queued and processed sequentially or with priority.
 /// </summary>
 public class GcodeHarvestQueueItem

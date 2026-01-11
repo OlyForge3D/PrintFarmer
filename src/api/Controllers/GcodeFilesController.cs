@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services; // needed for IGcodeUploadSettings
 using Farm.Web.Api.Services.FileManagement;
+using Farm.Web.Api.Services.Tags;
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
@@ -33,7 +34,8 @@ public class GcodeFilesController(
     Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,
     Farm.Web.Api.Services.FileManagement.IChunkedUploadService chunkedUploadService,
     Farm.Web.Api.Services.FileManagement.IFileManagementService fileManagementService,
-    IStoragePathService storagePathService
+    IStoragePathService storagePathService,
+    ITagService tagService
 ) : ControllerBase
 {
     // Dynamic allowed extensions supplied by runtime settings service.
@@ -942,7 +944,101 @@ public class GcodeFilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto(false, $"Failed to move files: {ex.GetType().Name}"));
         }
     }
+
+    // ================================================================================
+    // Tagging endpoints for Gcode Files
+    // ================================================================================
+
+    /// <summary>
+    /// Add a tag to a gcode file
+    /// </summary>
+    /// <param name="gcodeFileId">Gcode file ID</param>
+    /// <param name="tagId">Tag ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content if successful</returns>
+    [HttpPost("{gcodeFileId:guid}/tags/{tagId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> AddTagToGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct = default)
+    {
+        try
+        {
+            logger.LogInformation($"AddTagToGcodeFileAsync called: gcodeFileId={gcodeFileId}, tagId={tagId}");
+            await tagService.AddTagToGcodeFileAsync(gcodeFileId, tagId, ct);
+            logger.LogInformation($"Successfully added tag {tagId} to gcode file {gcodeFileId}");
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            logger.LogWarning($"Gcode file or tag not found: {ex.Message}");
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Failed to add tag {tagId} to gcode file {gcodeFileId}: {ex.GetType().Name} - {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to add tag to gcode file" });
+        }
+    }
+
+    /// <summary>
+    /// Remove a tag from a gcode file
+    /// </summary>
+    /// <param name="gcodeFileId">Gcode file ID</param>
+    /// <param name="tagId">Tag ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>No content if successful</returns>
+    [HttpDelete("{gcodeFileId:guid}/tags/{tagId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> RemoveTagFromGcodeFileAsync(Guid gcodeFileId, Guid tagId, CancellationToken ct = default)
+    {
+        try
+        {
+            logger.LogInformation($"RemoveTagFromGcodeFileAsync called: gcodeFileId={gcodeFileId}, tagId={tagId}");
+            await tagService.RemoveTagFromGcodeFileAsync(gcodeFileId, tagId, ct);
+            logger.LogInformation($"Successfully removed tag {tagId} from gcode file {gcodeFileId}");
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            logger.LogWarning($"Tag not found on gcode file: {ex.Message}");
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Failed to remove tag {tagId} from gcode file {gcodeFileId}: {ex.GetType().Name} - {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to remove tag from gcode file" });
+        }
+    }
+
+    /// <summary>
+    /// Get all tags for a gcode file
+    /// </summary>
+    /// <param name="gcodeFileId">Gcode file ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of tags</returns>
+    [HttpGet("{gcodeFileId:guid}/tags")]
+    [ProducesResponseType(typeof(IReadOnlyList<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetGcodeFileTagsAsync(Guid gcodeFileId, CancellationToken ct = default)
+    {
+        try
+        {
+            logger.LogInformation($"GetGcodeFileTagsAsync called: gcodeFileId={gcodeFileId}");
+            IReadOnlyList<object> tags = await tagService.GetGcodeFileTagsAsync(gcodeFileId, ct);
+            logger.LogInformation($"Retrieved {tags.Count} tags for gcode file {gcodeFileId}");
+            return Ok(tags);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Failed to get tags for gcode file {gcodeFileId}: {ex.GetType().Name} - {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve tags" });
+        }
+    }
 }
+
 
 // ---------------- Additional DTOs for move & settings ----------------
 public record MoveGcodeFilesRequest(

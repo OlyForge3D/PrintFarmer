@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Textarea } from '@/common/components/ui/Textarea';
 
 export interface JobNotesEditorProps {
   notes: string;
@@ -63,7 +64,7 @@ const JobNotesEditor: React.FC<JobNotesEditorProps> = ({
   if (isEditing) {
     return (
       <div className="notes-editor editing">
-        <textarea
+        <Textarea
           value={localNotes}
           onChange={handleNotesChange}
           onBlur={handleBlur}

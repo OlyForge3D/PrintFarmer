@@ -281,10 +281,27 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
     private Model3D CreateAndPersistModel3D(string fileName, FileHealthStatus healthStatus)
     {
+        // Root folder should already exist from database seeding, but if not, create it
+        var rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "models");
+        if (rootFolder == null)
+        {
+            rootFolder = new FolderNode
+            {
+                Id = Guid.NewGuid(),
+                Path = "/",
+                FolderType = "models",
+                CreatedAt = DateTime.UtcNow
+            };
+            _dbContext.Folders.Add(rootFolder);
+            _dbContext.SaveChanges();
+        }
+
         Model3D model = new Model3D
         {
             Id = Guid.NewGuid(),
+            Name = fileName,
             FileName = fileName,
+            FolderId = rootFolder.Id,
             FilePath = Path.Combine(_modelStoragePath, fileName),
             FileHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLower(),
             FileSizeBytes = 2048,
@@ -303,11 +320,28 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
 
     private GcodeFile CreateAndPersistGcodeFile(string fileName, FileHealthStatus healthStatus)
     {
+        // Root folder should already exist from database seeding, but if not, create it
+        var rootFolder = _dbContext.Folders.FirstOrDefault(f => f.Path == "/" && f.FolderType == "gcode");
+        if (rootFolder == null)
+        {
+            rootFolder = new FolderNode
+            {
+                Id = Guid.NewGuid(),
+                Path = "/",
+                FolderType = "gcode",
+                CreatedAt = DateTime.UtcNow
+            };
+            _dbContext.Folders.Add(rootFolder);
+            _dbContext.SaveChanges();
+        }
+
         string filePath = Path.Combine(_gcodeStoragePath, fileName);
         GcodeFile gcode = new GcodeFile
         {
             Id = Guid.NewGuid(),
+            Name = fileName,
             FileName = fileName,
+            FolderId = rootFolder.Id,
             FilePath = filePath,
             FileHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLower(),
             FileSizeBytes = 4096,

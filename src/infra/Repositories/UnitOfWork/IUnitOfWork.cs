@@ -8,6 +8,7 @@ using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.Model;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Repositories.Tags;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork
 {
@@ -65,6 +66,19 @@ namespace Farm.Infrastructure.Repositories.UnitOfWork
         /// Coordinated with printer and gcode operations via shared DbContext.
         /// </summary>
         IQueueRepository Queue { get; }
+
+        /// <summary>
+        /// Repository for tag persistence and retrieval (generic tags).
+        /// Coordinated with tag mapping operations via shared DbContext.
+        /// </summary>
+        ITagRepository Tags { get; }
+
+        /// <summary>
+        /// Repository for polymorphic tag mappings across all object types.
+        /// Supports tagging gcode files, models, printers, etc.
+        /// Coordinated with tag operations via shared DbContext.
+        /// </summary>
+        ITagMappingRepository TagMappings { get; }
 
         /// <summary>
         /// Persists all changes made to entities tracked by any repository in this Unit of Work.

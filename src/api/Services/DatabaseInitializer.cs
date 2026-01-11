@@ -154,6 +154,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
         await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
         await SeedAuthenticationDataAsync();
+        await SeedRootFoldersAsync();    // Seed root "/" folders for gcode and models to prevent race conditions
     }
 
     private async Task SeedCatalogDataAsync()
@@ -602,6 +603,51 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
         }
     }
     // === END: Seeding logic merged from DatabaseSeeder ===
+
+    /// <summary>
+    /// Seeds root folders ("/") for gcode and models folder types.
+    /// This prevents race conditions when multiple concurrent uploads try to create the root folder simultaneously.
+    /// </summary>
+    private async Task SeedRootFoldersAsync()
+    {
+        try
+        {
+            // Ensure root "/" folder exists for "gcode" folder type
+            string folderPath = "/";
+            string[] folderTypes = new[] { "gcode", "models" };
+
+            foreach (string folderType in folderTypes)
+            {
+                bool rootExists = await _context.Folders.AnyAsync(f => f.Path == folderPath && f.FolderType == folderType);
+                if (!rootExists)
+                {
+                    _context.Folders.Add(new FolderNode
+                    {
+                        Id = Guid.NewGuid(),
+                        Path = folderPath,
+                        FolderType = folderType,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            try
+            {
+                _ = await _context.SaveChangesAsync();
+                _logger.LogInformation("[DB] Root folders ('/') seeded successfully for gcode and models types");
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Ignore duplicate key errors - root folder already exists (possibly created by another instance)
+                _logger.LogDebug("[DB] Root folders already exist (duplicate key handled gracefully)");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DB] Failed to seed root folders");
+            throw;
+        }
+    }
 
     /// <summary>
     /// Validate database connection without initializing
