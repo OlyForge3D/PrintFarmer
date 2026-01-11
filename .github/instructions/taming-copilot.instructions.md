@@ -38,3 +38,14 @@ This section outlines the absolute order of operations. These rules have the hig
 -   **Directly Edit Code When Requested**: If explicitly asked to modify, refactor, or add to the existing code, apply the changes directly to the codebase when access is available. Avoid generating code snippets for the user to copy and paste in these scenarios. The default should be direct, surgical modification as instructed.
 -   **Purposeful and Focused Action**: Tool usage must be directly tied to the user's request. Do not perform unrelated searches or modifications. Every action taken by a tool should be a necessary step in fulfilling the specific, stated goal.
 -   **Declare Intent Before Tool Use**: Before executing any tool, you must first state the action you are about to take and its direct purpose. This statement must be concise and immediately precede the tool call.
+
+## Test Execution Efficiency
+
+-   **Run Tests Once, Capture Output**: When running tests (.NET or React), execute them **ONCE** and capture the full output immediately. Do NOT run tests twice in the same session.
+-   **Capture Full Logs**: Use terminal output redirection or piping to capture complete test results in a single execution:
+     - Example: `npm run test:run 2>&1 | tee test-output.log` (saves to file AND displays)
+     - Example: `dotnet test ... 2>&1` (captures both stdout and stderr)
+-   **Display Results for Review**: After capturing output, display the relevant portions (last 30-50 lines typically shows summary) so the user can review failures without re-running.
+-   **No Verification-Then-Run Pattern**: Do NOT check if tests pass, then run them again to show output. This wastes time and tokens. Capture and display in a single pass.
+-   **Rationale**: Tests are expensive operations (60-300 seconds depending on suite). Running them twice doubles the execution time. Proper piping and filtering on the first run captures everything needed for debugging.
+-   **Exception**: Only re-run tests if user explicitly requests it or if test failure output was lost due to terminal limitations.

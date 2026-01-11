@@ -617,6 +617,9 @@ public class PrintJob
 
     // Phase 4.1: Job Scheduling (one-to-one relationship)
     public JobSchedule? Schedule { get; set; }
+
+    // Phase 4.2: Completion Statistics (one-to-one relationship)
+    public PrintJobStatistics? Statistics { get; set; }
 }
 
 /// <summary>
@@ -633,6 +636,38 @@ public class JobStateHistory
     public TimeSpan? DurationInState { get; set; } // How long job stayed in FromState
     public string? Notes { get; set; } // Optional notes about the transition
     public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Records job completion statistics for predictive modeling (Phase 4.2)
+/// One-to-one relationship with PrintJob (optional, only filled after job completes)
+/// </summary>
+public class PrintJobStatistics
+{
+    public Guid Id { get; set; }
+    public Guid PrintJobId { get; set; }
+    public PrintJob PrintJob { get; set; } = null!;
+
+    // Duration tracking
+    public long? ActualDurationMs { get; set; }        // Actual time taken in milliseconds
+    public long? EstimatedDurationMs { get; set; }     // Time from gcode estimate in milliseconds
+
+    // Job characteristics
+    public Guid? PrinterModelId { get; set; }
+    public PrinterModel? PrinterModel { get; set; }
+    public string? Material { get; set; }              // PLA, ABS, PETG, TPU, etc.
+    public int? NozzleTemperature { get; set; }        // Celsius
+    public int? BedTemperature { get; set; }           // Celsius
+    public int SpeedPercentage { get; set; } = 100;    // % of normal speed
+
+    // Outcome
+    public bool IsSuccess { get; set; }
+    public string? FailureReason { get; set; }         // Why it failed if IsSuccess=false
+    public DateTime? CompletedAtUtc { get; set; }
+
+    // Audit
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 // User Management and Authentication System

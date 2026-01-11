@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Select } from '@/common/components/ui/Select';
 import { Location, locationService } from '@/services/locationService';
 
 export interface LocationSelectorProps {
@@ -43,13 +44,11 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
         {label}
         {required && <span style={{ color: 'var(--pf-error)' }} className="ml-1">*</span>}
       </label>
-      {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-      <select
+      <Select
         id="location"
         value={value || ''}
         onChange={(e) => onChange(e.target.value || null)}
         disabled={disabled || loading}
-        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
       >
         <option value="">
           {required ? 'Select a location' : 'No location (unassigned)'}
@@ -59,7 +58,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
             {location.name} ({location.printerCount} printers)
           </option>
         ))}
-      </select>
+      </Select>
       {error && <p className="mt-1 text-sm" style={{ color: 'var(--pf-error)' }}>{error}</p>}
     </div>
   );

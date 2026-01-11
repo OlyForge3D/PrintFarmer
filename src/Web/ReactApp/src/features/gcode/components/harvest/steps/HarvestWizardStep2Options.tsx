@@ -1,5 +1,6 @@
 import React, { useState, forwardRef, useImperativeHandle } from 'react';
 import type { HarvestOptions } from '../HarvestWizard';
+import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 
@@ -157,13 +158,10 @@ export const HarvestWizardStep2Options = forwardRef<
 
       <div className="space-y-3">
         <label htmlFor="includeSubdirs" className="flex items-center gap-3 cursor-pointer">
-          {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-          <input
+          <Checkbox
             id="includeSubdirs"
-            type="checkbox"
             checked={localOptions.includeSubdirectories}
             onChange={e => handleIncludeSubdirectoriesChange(e.target.checked)}
-            className="rounded border-pf-border"
             title="Include files in subdirectories"
           />
           <span className="text-sm text-pf-text-primary">Include subdirectories</span>

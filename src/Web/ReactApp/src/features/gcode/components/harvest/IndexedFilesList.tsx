@@ -5,6 +5,7 @@ import type { HarvestFileDiscoveredEvent, HarvestFileProgress, HarvestFileUpdate
 import { toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';
+import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Select } from '@/common/components/ui/Select';
 import { Modal } from '@/common/components/ui/Modal';
 import { ArrowLeftIcon, ArrowRightIcon, ChevronsLeftIcon, ChevronsRightIcon } from '@/common/components/icons/MdiIcons';
@@ -379,8 +380,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
           <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-30">
             <tr>
               <th className="p-2 border-b border-pf-border whitespace-nowrap">
-                {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-                <input type="checkbox" checked={paginatedFiles.length > 0 && paginatedFiles.every(f => selected.has(f.id))} onChange={e => setSelected(e.target.checked ? new Set([...selected, ...paginatedFiles.map(f => f.id)]) : new Set([...selected].filter(id => !paginatedFiles.map(f => f.id).includes(id))))} title="Select all files on this page" aria-label="Select all files on this page" />
+                <Checkbox checked={paginatedFiles.length > 0 && paginatedFiles.every(f => selected.has(f.id))} onChange={e => setSelected(e.target.checked ? new Set([...selected, ...paginatedFiles.map(f => f.id)]) : new Set([...selected].filter(id => !paginatedFiles.map(f => f.id).includes(id))))} title="Select all files on this page" aria-label="Select all files on this page" />
               </th>
               <th className="p-2 border-b border-pf-border text-left whitespace-nowrap">File</th>
               {files.some(f => f.progress) && (
@@ -403,8 +403,7 @@ export const IndexedFilesList: React.FC<IndexedFilesListProps> = ({ operationId,
                   aria-label={`File ${file.fileName}, status: ${status}${error ? ', error: ' + error : ''}`}
                 >
                   <td className="p-2 border-b border-pf-border text-center">
-                    {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-                    <input type="checkbox" checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.fileName}`} aria-label={`Select file ${file.fileName}`} />
+                    <Checkbox checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.fileName}`} aria-label={`Select file ${file.fileName}`} />
                   </td>
                   <td className="p-2 border-b border-pf-border font-mono text-pf-primary" title={file.filePath}>
                     <div className="flex items-center gap-2">

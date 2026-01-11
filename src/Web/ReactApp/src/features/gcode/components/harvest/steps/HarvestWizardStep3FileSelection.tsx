@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CheckCircleIcon, AlertCircleIcon, LoaderIcon } from '@/common/components/icons/MdiIcons';
 import type { HarvestOptions, HarvestDiscoveredFile } from '../HarvestWizard';
 import { Button } from '@/common/components/ui/Button';
+import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Alert } from '@/common/components/ui/Alert';
 
 interface HarvestWizardStep3FileSelectionProps {
@@ -104,14 +105,11 @@ export function HarvestWizardStep3FileSelection({
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 bg-pf-surface border border-pf-border rounded-lg">
             <label htmlFor="selectAll" className="flex items-center gap-3 cursor-pointer">
-              {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-              <input
+              <Checkbox
                 id="selectAll"
-                type="checkbox"
                 checked={allSelected}
                 onChange={handleToggleAll}
                 title="Select all files"
-                className="rounded border-pf-border"
               />
               <span className="text-sm font-medium text-pf-text-primary">
                 Select All ({selectedFileIds.size}/{files.length})
@@ -125,13 +123,11 @@ export function HarvestWizardStep3FileSelection({
                 key={file.id}
                 className="flex items-start gap-3 p-3 hover:bg-pf-hover rounded cursor-pointer transition-colors"
               >
-                {/* eslint-disable-next-line local/pf-no-raw-html-controls */}
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selectedFileIds.has(file.id)}
                   onChange={() => handleToggleFile(file.id)}
                   title={`Select ${file.name}`}
-                  className="rounded border-pf-border mt-1 flex-shrink-0"
+                  className="mt-1 flex-shrink-0"
                 />
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-pf-text-primary truncate">

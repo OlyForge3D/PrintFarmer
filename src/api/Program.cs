@@ -369,6 +369,10 @@ builder.Services.AddScoped<Farm.Api.Services.Interfaces.IPrintQueueService, Farm
 // Job Scheduling Service (Phase 4.1)
 builder.Services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
 
+// Prediction Service (Phase 4.2)
+builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobStatisticsRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobStatisticsRepository>();
+builder.Services.AddScoped<Farm.Infrastructure.Services.PredictionService>();
+
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 if (isMonolithicDeployment)

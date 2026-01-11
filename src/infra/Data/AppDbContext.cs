@@ -27,6 +27,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<JobStateHistory> JobStateHistories => Set<JobStateHistory>();
     public DbSet<JobSchedule> JobSchedules => Set<JobSchedule>();
     public DbSet<JobExecution> JobExecutions => Set<JobExecution>();
+    public DbSet<PrintJobStatistics> PrintJobStatistics => Set<PrintJobStatistics>();
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
@@ -467,6 +468,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(je => new { je.JobScheduleId, je.ScheduledExecutionTime });
             _ = b.HasIndex(je => je.Status);
             _ = b.HasIndex(je => je.ScheduledExecutionTime);
+        });
+
+        // PrintJobStatistics Entity Configuration (Phase 4.2)
+        _ = modelBuilder.Entity<PrintJobStatistics>(b =>
+        {
+            _ = b.HasKey(s => s.Id);
+            _ = b.Property(s => s.Material).HasMaxLength(100);
+            _ = b.Property(s => s.FailureReason).HasMaxLength(500);
+            _ = b.Property(s => s.CreatedAtUtc).IsRequired();
+            _ = b.Property(s => s.UpdatedAtUtc).IsRequired();
+
+            // Foreign Key - one-to-one relationship with PrintJob
+            _ = b.HasOne(s => s.PrintJob)
+                .WithOne(j => j.Statistics)
+                .HasForeignKey<PrintJobStatistics>(s => s.PrintJobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Foreign Key to PrinterModel (optional)
+            _ = b.HasOne(s => s.PrinterModel)
+                .WithMany()
+                .HasForeignKey(s => s.PrinterModelId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Indexes for prediction queries
+            _ = b.HasIndex(s => s.CompletedAtUtc);
+            _ = b.HasIndex(s => s.IsSuccess);
+            _ = b.HasIndex(s => new { s.PrinterModelId, s.Material, s.IsSuccess });
+            _ = b.HasIndex(s => new { s.PrinterModelId, s.Material, s.CompletedAtUtc });
         });
 
         // Printer Capabilities Entity Configuration - REMOVED (merged into Printer entity)

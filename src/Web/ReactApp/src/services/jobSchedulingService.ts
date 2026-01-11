@@ -90,8 +90,8 @@ export const jobSchedulingService = {
         `${API_BASE}/${jobId}`
       );
       return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 404) {
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
         return null;
       }
       throw error;

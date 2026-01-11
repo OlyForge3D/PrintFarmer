@@ -7,24 +7,21 @@ public class GcodeProcessingException : Exception
 {
     public string? FileName { get; }
     public string? Step { get; }
-    public Dictionary<string, object> ContextData { get; }
+    public Dictionary<string, object> ContextData { get; } = new();
 
     public GcodeProcessingException()
         : base()
     {
-        ContextData = new();
     }
 
     public GcodeProcessingException(string message)
         : base(message)
     {
-        ContextData = new();
     }
 
     public GcodeProcessingException(string message, Exception innerException)
         : base(message, innerException)
     {
-        ContextData = new();
     }
 
 #pragma warning disable S3427 // This is a valid exception class with multiple constructors for convenience
@@ -33,7 +30,6 @@ public class GcodeProcessingException : Exception
     {
         FileName = fileName;
         Step = step;
-        ContextData = new();
     }
 #pragma warning restore S3427
 

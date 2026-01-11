@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui/Button';
+import { Select } from '@/common/components/ui/Select';
 import { Modal } from '@/common/components/modals/Modal';
 import { jobSchedulingService } from '@/services/jobSchedulingService';
 import { ScheduledJobDto, TimeZoneDto } from '@/types/jobScheduling';
@@ -13,7 +14,6 @@ interface JobSchedulerProps {
 
 export const JobScheduler: React.FC<JobSchedulerProps> = ({
   jobId,
-  jobName,
   onScheduleSuccess,
 }) => {
   const [scheduledTime, setScheduledTime] = useState<string>('');
@@ -223,17 +223,17 @@ export const JobScheduler: React.FC<JobSchedulerProps> = ({
             <label className="block text-sm font-medium text-pf-text-primary mb-1">
               Timezone
             </label>
-            <select
+            <Select
               value={selectedTimeZone}
               onChange={(e) => setSelectedTimeZone(e.target.value)}
-              className="w-full rounded-sm border border-pf-border bg-pf-bg-0 text-pf-text-primary px-3 py-2 text-sm focus:border-pf-accent focus:outline-none focus:ring-1 focus:ring-pf-accent"
+              aria-label="Select timezone"
             >
               {timeZones.map((tz) => (
                 <option key={tz.id} value={tz.id}>
                   {tz.displayName} ({tz.offset})
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* Recurrence Pattern */}
@@ -241,16 +241,16 @@ export const JobScheduler: React.FC<JobSchedulerProps> = ({
             <label className="block text-sm font-medium text-pf-text-primary mb-1">
               Recurrence (Optional)
             </label>
-            <select
+            <Select
               value={recurrencePattern}
               onChange={(e) => setRecurrencePattern(e.target.value)}
-              className="w-full rounded-sm border border-pf-border bg-pf-bg-0 text-pf-text-primary px-3 py-2 text-sm focus:border-pf-accent focus:outline-none focus:ring-1 focus:ring-pf-accent"
+              aria-label="Select recurrence pattern"
             >
               <option value="">One-time</option>
               <option value="Daily">Daily</option>
               <option value="Weekly">Weekly</option>
               <option value="Monthly">Monthly</option>
-            </select>
+            </Select>
           </div>
 
           {/* Recurrence End Date */}
