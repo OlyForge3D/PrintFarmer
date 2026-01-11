@@ -236,6 +236,30 @@ public class PrinterModelFilamentType
     public FilamentType? FilamentType { get; set; }
 }
 
+/// <summary>
+/// Maps slicer-specific printer model names to canonical PrinterModel entries.
+/// For example, PrusaSlicer calls a model "COREONEL" while OrcaSlicer calls it "Prusa CORE One",
+/// but both refer to the same physical printer in our catalog.
+/// </summary>
+public class PrinterModelAlias
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    /// <summary>
+    /// The canonical PrinterModel this alias refers to
+    /// </summary>
+    public Guid PrinterModelId { get; set; }
+    public PrinterModel? PrinterModel { get; set; }
+    /// <summary>
+    /// The slicer-specific name (e.g., "COREONEL", "Phrozen Arco", "Prusa CORE One")
+    /// </summary>
+    public string SlicerModelName { get; set; } = string.Empty;
+    /// <summary>
+    /// The slicer type (e.g., "PrusaSlicer", "OrcaSlicer", "Cura") - optional, if null applies to all slicers
+    /// </summary>
+    public string? SlicerType { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class SpoolmanConfig
 {
     public int Id { get; set; } // Single row table; use Id = 1
@@ -289,20 +313,22 @@ public class GcodeFile : StoredFile
     public double? EstimatedPrintTimeMinutes { get; set; }
     public double? EstimatedFilamentLengthMm { get; set; }
     public double? EstimatedFilamentWeightG { get; set; }
-    public Guid? PrinterModelId { get; set; } // Printer model this file was sliced for (extracted from gcode metadata)
+    public string? ExtractedPrinterModelName { get; set; } // Raw printer model name extracted from gcode (before resolution to PrinterModelId)
+    public Guid? PrinterModelId { get; set; } // Printer model this file was sliced for (resolved from extracted name)
     public PrinterModel? PrinterModel { get; set; }
     public string? SlicerName { get; set; } // e.g., "PrusaSlicer", "Cura"
     public string? SlicerVersion { get; set; }
     public string? PrintSettingsId { get; set; } // Slicer process profile name (e.g., "Standard", "Draft") - different from printer model
     public double? LayerHeight { get; set; }
     public double? InfillPercentage { get; set; }
+    public int? Perimeters { get; set; } // Number of perimeter/wall loops
     public double? PrintTemperature { get; set; } // First layer print/hotend temperature
     public double? BedTemperature { get; set; } // First layer bed temperature
     public double? PrintSpeed { get; set; }
 
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
-    
+
     // Navigation property for tags (via generic TagMapping)
     public ICollection<TagMapping> TagMappings { get; set; } = new List<TagMapping>();
 }

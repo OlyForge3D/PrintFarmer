@@ -767,6 +767,7 @@ export interface GcodeFile {
   extractedNozzleDiameter?: number;
   extractedMaterial?: string;
   extractedPrinterModel?: string;
+  extractedPrinterModelName?: string; // Raw extracted printer model name (fallback if resolution failed)
   extractedHotendTemp?: number;
   extractedBedTemp?: number;
 }

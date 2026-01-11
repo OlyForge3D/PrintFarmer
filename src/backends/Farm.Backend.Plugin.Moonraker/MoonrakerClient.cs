@@ -1415,11 +1415,11 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
-            
+
             _logger.LogDebug($"[Moonraker] Downloading file from URL: {uri}");
-            
+
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
-            
+
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogWarning($"[Moonraker] Download failed: StatusCode={resp.StatusCode}, ReasonPhrase='{resp.ReasonPhrase}', URL='{uri}'");
@@ -1427,7 +1427,7 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
             }
 
             byte[] content = await resp.Content.ReadAsByteArrayAsync(cts.Token);
-            
+
             if (content == null || content.Length == 0)
             {
                 _logger.LogWarning($"[Moonraker] Download returned empty content for file '{filename}'. StatusCode={resp.StatusCode}, ContentLength={resp.Content.Headers.ContentLength}, ContentType={resp.Content.Headers.ContentType}");

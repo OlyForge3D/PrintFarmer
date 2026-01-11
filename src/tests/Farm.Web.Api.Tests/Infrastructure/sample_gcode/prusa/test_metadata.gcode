@@ -15167,7 +15167,7 @@ M73 Q100 S0
 ; perimeter_extrusion_width = 0.45
 ; perimeter_generator = arachne
 ; perimeter_speed = 170
-; perimeters = 2
+; perimeters = 7
 ; physical_printer_settings_id = 
 ; post_process = 
 ; prefer_clockwise_movements = 0

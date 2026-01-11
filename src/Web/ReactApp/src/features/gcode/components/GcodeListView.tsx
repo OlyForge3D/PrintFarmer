@@ -144,7 +144,7 @@ export const GcodeListView: React.FC<GcodeListViewProps> = ({
                 {file.isDirectory ? '—' : file.extractedMaterial || '—'}
               </td>
               <td className="px-4 py-3 text-pf-text-secondary text-xs">
-                {file.isDirectory ? '—' : file.extractedPrinterModel || '—'}
+                {file.isDirectory ? '—' : file.extractedPrinterModel || file.extractedPrinterModelName || '—'}
               </td>
               <td className="px-4 py-3 text-pf-text-secondary text-xs">
                 {file.uploadedAt ? formatDate(String(file.uploadedAt)) : '—'}

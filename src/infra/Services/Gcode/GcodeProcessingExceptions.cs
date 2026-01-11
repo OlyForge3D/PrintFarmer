@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Gcode;
+﻿namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Base exception for gcode file processing failures
@@ -8,6 +8,24 @@ public class GcodeProcessingException : Exception
     public string? FileName { get; }
     public string? Step { get; }
     public Dictionary<string, object> ContextData { get; }
+
+    public GcodeProcessingException()
+        : base()
+    {
+        ContextData = new();
+    }
+
+    public GcodeProcessingException(string message)
+        : base(message)
+    {
+        ContextData = new();
+    }
+
+    public GcodeProcessingException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+        ContextData = new();
+    }
 
     public GcodeProcessingException(string message, string? fileName = null, string? step = null, Exception? innerException = null)
         : base(message, innerException)
@@ -27,11 +45,20 @@ public class GcodeProcessingException : Exception
     {
         var parts = new List<string> { base.ToString() };
         if (!string.IsNullOrEmpty(FileName))
+        {
             parts.Add($"FileName: {FileName}");
+        }
+
         if (!string.IsNullOrEmpty(Step))
+        {
             parts.Add($"Step: {Step}");
+        }
+
         if (ContextData.Any())
+        {
             parts.Add($"Context: {string.Join(", ", ContextData.Select(kvp => $"{kvp.Key}={kvp.Value}"))}");
+        }
+
         return string.Join(" | ", parts);
     }
 }
@@ -41,6 +68,15 @@ public class GcodeProcessingException : Exception
 /// </summary>
 public class FileDownloadException : GcodeProcessingException
 {
+    public FileDownloadException()
+        : base() { }
+
+    public FileDownloadException(string message)
+        : base(message) { }
+
+    public FileDownloadException(string message, Exception innerException)
+        : base(message, innerException) { }
+
     public FileDownloadException(string fileName, string message, Exception? innerException = null)
         : base(message, fileName, "FileDownload", innerException) { }
 }
@@ -50,6 +86,15 @@ public class FileDownloadException : GcodeProcessingException
 /// </summary>
 public class MetadataExtractionException : GcodeProcessingException
 {
+    public MetadataExtractionException()
+        : base() { }
+
+    public MetadataExtractionException(string message)
+        : base(message) { }
+
+    public MetadataExtractionException(string message, Exception innerException)
+        : base(message, innerException) { }
+
     public MetadataExtractionException(string fileName, string message, Exception? innerException = null)
         : base(message, fileName, "MetadataExtraction", innerException) { }
 }
@@ -59,6 +104,15 @@ public class MetadataExtractionException : GcodeProcessingException
 /// </summary>
 public class ThumbnailProcessingException : GcodeProcessingException
 {
+    public ThumbnailProcessingException()
+        : base() { }
+
+    public ThumbnailProcessingException(string message)
+        : base(message) { }
+
+    public ThumbnailProcessingException(string message, Exception innerException)
+        : base(message, innerException) { }
+
     public ThumbnailProcessingException(string fileName, string message, Exception? innerException = null)
         : base(message, fileName, "ThumbnailProcessing", innerException) { }
 }
@@ -68,6 +122,15 @@ public class ThumbnailProcessingException : GcodeProcessingException
 /// </summary>
 public class FileStorageException : GcodeProcessingException
 {
+    public FileStorageException()
+        : base() { }
+
+    public FileStorageException(string message)
+        : base(message) { }
+
+    public FileStorageException(string message, Exception innerException)
+        : base(message, innerException) { }
+
     public FileStorageException(string fileName, string message, Exception? innerException = null)
         : base(message, fileName, "FileStorage", innerException) { }
 }
@@ -78,6 +141,15 @@ public class FileStorageException : GcodeProcessingException
 public class DuplicateFileException : GcodeProcessingException
 {
     public string? ExistingFileId { get; }
+
+    public DuplicateFileException()
+        : base() { }
+
+    public DuplicateFileException(string message)
+        : base(message) { }
+
+    public DuplicateFileException(string message, Exception innerException)
+        : base(message, innerException) { }
 
     public DuplicateFileException(string fileName, string existingFileId, string fileHash)
         : base($"Duplicate file detected: {fileHash}", fileName, "DuplicateCheck")
@@ -93,6 +165,15 @@ public class DuplicateFileException : GcodeProcessingException
 /// </summary>
 public class FilePersistenceException : GcodeProcessingException
 {
+    public FilePersistenceException()
+        : base() { }
+
+    public FilePersistenceException(string message)
+        : base(message) { }
+
+    public FilePersistenceException(string message, Exception innerException)
+        : base(message, innerException) { }
+
     public FilePersistenceException(string fileName, string message, Exception? innerException = null)
         : base(message, fileName, "DatabasePersistence", innerException) { }
 }

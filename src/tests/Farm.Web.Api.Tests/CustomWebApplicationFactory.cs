@@ -174,7 +174,7 @@ namespace Farm.Web.Api.Tests
                 var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await context.Database.EnsureDeletedAsync();
                 await context.Database.EnsureCreatedAsync();
-                
+
                 // Seed root folders for gcode and models to match production behavior
                 await SeedRootFoldersAsync(context);
             }

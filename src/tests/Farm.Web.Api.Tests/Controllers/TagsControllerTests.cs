@@ -1,4 +1,4 @@
-using Farm.Api.Controllers;
+﻿using Farm.Api.Controllers;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Services.Tags;
@@ -37,7 +37,7 @@ public class TagsControllerTests
             new Model3DTagDto { Id = Guid.NewGuid(), Name = "Support", Color = "#FF0000" },
             new Model3DTagDto { Id = Guid.NewGuid(), Name = "Miniature", Color = "#00FF00" }
         } as IReadOnlyList<Model3DTagDto>;
-        
+
         _tagServiceMock
             .Setup(s => s.GetAllTagsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(tags);
@@ -99,7 +99,7 @@ public class TagsControllerTests
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Support Required", UsageCount = 5 },
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Support Structures", UsageCount = 3 }
         } as IReadOnlyList<TagSuggestionDto>;
-        
+
         _tagServiceMock
             .Setup(s => s.SearchTagsAsync(searchQuery, It.IsAny<CancellationToken>()))
             .ReturnsAsync(results);
@@ -167,7 +167,7 @@ public class TagsControllerTests
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Print Test", UsageCount = 150 },
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Support", UsageCount = 120 }
         } as IReadOnlyList<TagSuggestionDto>;
-        
+
         _tagServiceMock
             .Setup(s => s.GetPopularTagsAsync(10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(popularTags);
@@ -189,7 +189,7 @@ public class TagsControllerTests
         {
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Tag1", UsageCount = 100 }
         } as IReadOnlyList<TagSuggestionDto>;
-        
+
         _tagServiceMock
             .Setup(s => s.GetPopularTagsAsync(count, It.IsAny<CancellationToken>()))
             .ReturnsAsync(popularTags);
@@ -283,7 +283,7 @@ public class TagsControllerTests
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Support", UsageCount = 50 },
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Super Detail", UsageCount = 10 }
         } as IReadOnlyList<TagSuggestionDto>;
-        
+
         _tagServiceMock
             .Setup(s => s.GetTagSuggestionsAsync(query, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(suggestions);
@@ -324,7 +324,7 @@ public class TagsControllerTests
         {
             new TagSuggestionDto { Id = Guid.NewGuid(), Name = "Test", UsageCount = 100 }
         } as IReadOnlyList<TagSuggestionDto>;
-        
+
         _tagServiceMock
             .Setup(s => s.GetTagSuggestionsAsync(query, limit, It.IsAny<CancellationToken>()))
             .ReturnsAsync(suggestions);

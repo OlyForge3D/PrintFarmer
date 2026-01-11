@@ -311,7 +311,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
             _ = await db.SaveChangesAsync();
         }
 
-        bool existsModel = await db.Models.AnyAsync(m => m.ManufacturerId == existingManufacturer.Id && m.Name.ToLower() == "x1 carbon");
+        bool existsModel = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == existingManufacturer.Id && m.Name.ToLower() == "x1 carbon");
         if (!existsModel)
         {
             PrinterModel printerModel = new PrinterModel
@@ -327,7 +327,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
                 MaxHotendTemp = 300,
                 IsActive = true
             };
-            _ = db.Models.Add(printerModel);
+            _ = db.PrinterModels.Add(printerModel);
             _ = await db.SaveChangesAsync();
         }
     }

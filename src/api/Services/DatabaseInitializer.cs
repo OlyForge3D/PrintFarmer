@@ -256,10 +256,10 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 {
                     continue;
                 }
-                bool exists = await _context.Models.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
+                bool exists = await _context.PrinterModels.AnyAsync(pm => pm.ManufacturerId == m.Id && pm.Name == modelName);
                 if (!exists)
                 {
-                    _ = _context.Models.Add(new PrinterModel
+                    _ = _context.PrinterModels.Add(new PrinterModel
                     {
                         Id = Guid.NewGuid(),
                         Name = modelName,
@@ -306,7 +306,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
                 string manufacturerName,
                 _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, string supportedMaterials, _) in modelSeeds)
             {
-                PrinterModel? model = await _context.Models
+                PrinterModel? model = await _context.PrinterModels
                     .FirstOrDefaultAsync(m => m.Name == modelName &&
                                            m.Manufacturer != null &&
                                            m.Manufacturer.Name == manufacturerName);
@@ -395,7 +395,7 @@ public class DatabaseInitializer(AppDbContext context, IUnifiedLoggingService lo
     public async Task<PrinterModel> GetUnknownModelAsync()
     {
         Manufacturer unknownMfg = await GetUnknownManufacturerAsync();
-        PrinterModel? unknownModel = await _context.Models.FirstOrDefaultAsync(m =>
+        PrinterModel? unknownModel = await _context.PrinterModels.FirstOrDefaultAsync(m =>
             m.ManufacturerId == unknownMfg.Id && m.Name == "Unknown Model");
         return unknownModel ?? throw new InvalidOperationException("Unknown model not found. Ensure SeedCatalogDataAsync() has been called.");
     }

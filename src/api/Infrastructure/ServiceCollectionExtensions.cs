@@ -564,6 +564,7 @@ public static class ServiceCollectionExtensions
         _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
 
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IPrinterModelAliasService, Farm.Infrastructure.Services.Gcode.PrinterModelAliasService>();
         _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService>(sp =>
             (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<Services.Gcode.IGcodeFilesService>());

@@ -435,10 +435,10 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         // Attach models to the resolved manufacturer id and save
         foreach (PrinterModel? pm in printerModels)
         {
-            bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                _ = db.Models.Add(pm);
+                _ = db.PrinterModels.Add(pm);
             }
         }
         _ = await db.SaveChangesAsync();
@@ -479,10 +479,10 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
 
         foreach (PrinterModel? pm in printerModels)
         {
-            bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                _ = db.Models.Add(pm);
+                _ = db.PrinterModels.Add(pm);
             }
         }
         _ = await db.SaveChangesAsync();
@@ -523,10 +523,10 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
 
         foreach (PrinterModel? pm in printerModels)
         {
-            bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                _ = db.Models.Add(pm);
+                _ = db.PrinterModels.Add(pm);
             }
         }
         _ = await db.SaveChangesAsync();
@@ -578,10 +578,10 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
 
         foreach (PrinterModel? pm in printerModels)
         {
-            bool exists = await db.Models.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+            bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
             if (!exists)
             {
-                _ = db.Models.Add(pm);
+                _ = db.PrinterModels.Add(pm);
             }
         }
         _ = await db.SaveChangesAsync();

@@ -23,7 +23,7 @@ public static class TestHelpers
         Guid modelId = Guid.Empty;
         if (manufacturerId != Guid.Empty)
         {
-            PrinterModel? unknownModel = await db.Models.FirstOrDefaultAsync(m => m.Name == "Unknown Model" && m.ManufacturerId == manufacturerId);
+            PrinterModel? unknownModel = await db.PrinterModels.FirstOrDefaultAsync(m => m.Name == "Unknown Model" && m.ManufacturerId == manufacturerId);
             if (unknownModel != null)
             {
                 modelId = unknownModel.Id;

@@ -893,7 +893,7 @@ public class GcodeHarvestService(
                 // This handles: storage (we already did this, but service will overwrite), hash, duplicate check,
                 // metadata extraction, thumbnail processing, entity creation, and database save
                 _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Processing file '{discoveredFile.FileName}' via GcodeFileProcessingService");
-                
+
                 GcodeFile gcodeFile;
                 try
                 {
@@ -916,7 +916,7 @@ public class GcodeHarvestService(
                         ct: ct);
 
                     _logger.LogDebugWithSource($"[IMPORT-LIFECYCLE] Created GcodeFile via service: Id={gcodeFile.Id}, FolderId={targetFolder.Id}, PrinterModelId={gcodeFile.PrinterModelId}");
-                    
+
                     // Update discovered file hash from the gcodeFile
                     discoveredFile.FileHash = gcodeFile.FileHash;
                 }
@@ -1502,7 +1502,7 @@ public class GcodeHarvestService(
                     originalPrinterPath: filename,
                     thumbnailUrl: null,
                     ct: ct);
-                
+
                 await _harvestEventBroadcaster.BroadcastSingleFileHarvestProgressAsync(filename, 90, "Saving to library...", ct);
             }
             catch (DuplicateFileException ex)

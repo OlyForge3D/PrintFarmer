@@ -210,7 +210,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - Create initial printer with no location
         var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
         var ip = GetNextIpAddress();
         var initialPrinter = new Printer
@@ -291,7 +291,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - Create a printer with location
         var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
         var ip = GetNextIpAddress();
         var printer = new Printer
@@ -338,7 +338,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - Create a printer with location
         var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
         var ip = GetNextIpAddress();
         var printer = new Printer
@@ -389,7 +389,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - Create printer with location
         var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
         var ip = GetNextIpAddress();
         var printer = new Printer
@@ -428,7 +428,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange - Create printer without location
         var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
         var ip = GetNextIpAddress();
         var printer = new Printer
@@ -469,7 +469,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
     {
         // Arrange
         var manufacturerId = (await _dbContext.Manufacturers.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
-        var modelId = (await _dbContext.Models.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
+        var modelId = (await _dbContext.PrinterModels.FirstOrDefaultAsync())?.Id ?? Guid.NewGuid();
 
         var ip = GetNextIpAddress();
         var printer = new Printer

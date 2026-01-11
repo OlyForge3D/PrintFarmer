@@ -1,5 +1,7 @@
-﻿using Farm.Infrastructure.Services.Gcode;
+﻿using System.Text.RegularExpressions;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Tests.Utilities;
 using FluentAssertions;
 using Moq;
 
@@ -9,11 +11,22 @@ public class GcodeMetadataExtractorServiceTests
 {
     private readonly Mock<IUnifiedLoggingService> _loggerMock;
     private readonly GcodeMetadataExtractorService _service;
+    private readonly bool _useConsoleLogging = false; // Set to true to see detailed logs during debugging
 
     public GcodeMetadataExtractorServiceTests()
     {
-        _loggerMock = new Mock<IUnifiedLoggingService>();
-        _service = new GcodeMetadataExtractorService(_loggerMock.Object);
+        if (_useConsoleLogging)
+        {
+            // Use console logger for debugging
+            var consoleLogger = new ConsoleLoggingService(nameof(GcodeMetadataExtractorService));
+            _service = new GcodeMetadataExtractorService(consoleLogger);
+        }
+        else
+        {
+            // Use mock logger (default behavior)
+            _loggerMock = new Mock<IUnifiedLoggingService>();
+            _service = new GcodeMetadataExtractorService(_loggerMock.Object);
+        }
     }
 
     [Fact]
@@ -418,19 +431,19 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_ProcessesFirstAndLast500Lines()
     {
-        // Metadata is now processed from both first 500 and last 500 lines
-        // Create file with > 1000 lines so metadata at line 501 won't be in last 500
+        // Metadata is processed from first 200 and last 1000 lines
+        // Create file with > 2200 lines so metadata at line 501 won't be in first 200 or last 1000
         var lines = new List<string>();
         lines.AddRange(Enumerable.Range(0, 500).Select(i => $"G1 X{i} Y{i}"));
-        lines.Add("; filament_type = PLA"); // Line 501 - not in first 500, not in last 500
-        lines.AddRange(Enumerable.Range(0, 600).Select(i => $"G1 X{i}"));  // Total > 1100 lines
+        lines.Add("; filament_type = PLA"); // Line 501 - not in first 200, not in last 1000
+        lines.AddRange(Enumerable.Range(0, 1700).Select(i => $"G1 X{i}"));  // Total > 2200 lines
 
         string gcodeContent = string.Join("\n", lines);
 
         var result = await _service.ExtractMetadataAsync(gcodeContent);
 
         result.Should().NotBeNull();
-        result.Material.Should().BeNull(); // Metadata at line 501 is not in first or last 500 lines
+        result.Material.Should().BeNull(); // Metadata at line 501 is not in first 200 or last 1000 lines
     }
 
     [Fact]
@@ -634,6 +647,11 @@ G28
         // Filament weight - also from CONFIG_BLOCK
         result.FilamentWeightGrams.Should().BeApproximately(10.55, 0.5);
 
+        // Printer model - extracted from CONFIG_BLOCK
+        // OrcaSlicer file has: ; printer_model = Phrozen Arco
+        result.PrinterModel.Should().NotBeNullOrWhiteSpace("OrcaSlicer file should contain printer_model");
+        result.PrinterModel.Should().Be("Phrozen Arco");
+
         // Thumbnail is in the header and should be extracted
         result.ThumbnailData.Should().NotBeNull();
         result.ThumbnailData!.Length.Should().BeGreaterThan(0);
@@ -686,6 +704,11 @@ G28
         // Filament weight - also from CONFIG_BLOCK
         result.FilamentWeightGrams.Should().BeApproximately(8.81, 0.5);
 
+        // Printer model - extracted from CONFIG_BLOCK
+        // PrusaSlicer file has: ; printer_model = COREONEL
+        result.PrinterModel.Should().NotBeNullOrWhiteSpace("PrusaSlicer file should contain printer_model");
+        result.PrinterModel.Should().Be("COREONEL");
+
         // Thumbnail (PrusaSlicer uses thumbnail_QOI format) is in header and should be extracted
         result.ThumbnailData.Should().NotBeNull();
         result.ThumbnailData!.Length.Should().BeGreaterThan(0);
@@ -704,5 +727,146 @@ G28
         result.Should().NotBeNull();
         result.BedTemperature.Should().Be(60);
         result.PrintTemperature.Should().Be(210);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesRealPrusaSlicerGcodeFile_ExtractsInfill()
+    {
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "prusa",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.InfillPercentage.Should().Be(15.0);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ParsesRealOrcaSlicerGcodeFile_ExtractsInfill()
+    {
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "orca",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.InfillPercentage.Should().Be(15.0);
+    }
+
+    [Fact]
+    public void TestRegexMatching()
+    {
+        // Test that the regex pattern actually matches the lines in the file
+        string line1 = "; perimeters = 7";
+        string line2 = "; wall_loops = 5";
+
+        var pattern = @"(?:wall_loops|perimeters)\s*[:=]\s*(\d+)";
+
+        var match1 = Regex.Match(line1, pattern, RegexOptions.IgnoreCase);
+        var match2 = Regex.Match(line2, pattern, RegexOptions.IgnoreCase);
+
+        match1.Success.Should().BeTrue("Prusa perimeters line should match");
+        match1.Groups[1].Value.Should().Be("7", "Should extract 7 from Prusa line");
+
+        match2.Success.Should().BeTrue("Orca wall_loops line should match");
+        match2.Groups[1].Value.Should().Be("5", "Should extract 5 from Orca line");
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_DebugPrusaPerimeters()
+    {
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "prusa",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+
+        // Check if perimeters line is in the content
+        var hasPerimeters = gcodeContent.Contains("; perimeters = 7");
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        // Force failure with detailed debug info if not matching
+        if (result.Perimeters != 7)
+        {
+            throw new InvalidOperationException(
+                $"PRUSA EXTRACTION DEBUG: " +
+                $"Expected=7, Actual={result.Perimeters}, " +
+                $"Infill={result.InfillPercentage}, " +
+                $"Slicer={result.SlicerName}, " +
+                $"HasPerimeters={hasPerimeters}");
+        }
+
+        result.Perimeters.Should().Be(7);
+    }
+
+
+
+    [Fact]
+    public async Task ExtractMetadataAsync_DebugOrcaPerimeters()
+    {
+        string testProjectPath = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "..", "..", ".."
+        ));
+
+        string filePath = Path.Combine(
+            testProjectPath,
+            "Infrastructure",
+            "sample_gcode",
+            "orca",
+            "test_metadata.gcode"
+        );
+
+        string gcodeContent = await File.ReadAllTextAsync(filePath);
+
+        // Check if wall_loops line is in the content
+        var hasWallLoops = gcodeContent.Contains("; wall_loops = 5");
+
+        var result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        // Force failure with detailed debug info if not matching
+        if (result.Perimeters != 5)
+        {
+            throw new InvalidOperationException(
+                $"ORCA EXTRACTION DEBUG: " +
+                $"Expected=5, Actual={result.Perimeters}, " +
+                $"Infill={result.InfillPercentage}, " +
+                $"Slicer={result.SlicerName}, " +
+                $"HasWallLoops={hasWallLoops}");
+        }
+
+        result.Perimeters.Should().Be(5);
     }
 }

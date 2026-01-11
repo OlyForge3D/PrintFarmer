@@ -1065,6 +1065,7 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("size")] long Size,
     [property: JsonPropertyName("modifiedAt")] DateTime ModifiedAt,
     [property: JsonPropertyName("isDirectory")] bool IsDirectory,
+    [property: JsonPropertyName("name")] string? Name = null,  // Original filename for display
     [property: JsonPropertyName("harvestOperationId")] Guid? HarvestOperationId = null,
     [property: JsonPropertyName("thumbnailPath")] string? ThumbnailPath = null,
     [property: JsonPropertyName("gcodeFileId")] string? GcodeFileId = null,  // Include file ID for efficient lookups (GUID as string)
@@ -1079,6 +1080,10 @@ public record GcodeFileEntryDto(
     [property: JsonPropertyName("extractedNozzleDiameter")] double? ExtractedNozzleDiameter = null,  // Millimeters
     [property: JsonPropertyName("extractedMaterial")] string? ExtractedMaterial = null,
     [property: JsonPropertyName("extractedPrinterModel")] string? ExtractedPrinterModel = null,
+    [property: JsonPropertyName("extractedPrinterModelName")] string? ExtractedPrinterModelName = null,  // Raw extracted name (fallback if resolution failed)
+    [property: JsonPropertyName("extractedLayerHeight")] double? ExtractedLayerHeight = null,  // Millimeters
+    [property: JsonPropertyName("extractedInfill")] double? ExtractedInfill = null,  // Percentage
+    [property: JsonPropertyName("extractedPerimeters")] int? ExtractedPerimeters = null,  // Number of perimeter loops
     [property: JsonPropertyName("extractedHotendTemp")] double? ExtractedHotendTemp = null,  // Celsius
     [property: JsonPropertyName("extractedBedTemp")] double? ExtractedBedTemp = null  // Celsius
 );

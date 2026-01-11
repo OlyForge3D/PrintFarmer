@@ -73,14 +73,23 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
 
     // Subscribe to complete events
     const unsubscribeComplete = signalRService.onSingleFileHarvestComplete((evt: SingleFileHarvestCompleteEvent) => {
-      // Clear progress after completion
+      // Mark as complete with 100% to show final state
+      setHarvestProgress(prev => ({
+        ...prev,
+        [evt.fileName]: {
+          percentComplete: 100,
+          message: evt.success ? 'Harvested successfully' : 'Harvest failed'
+        }
+      }));
+      
+      // Clear progress after showing completion for 3 seconds
       setTimeout(() => {
         setHarvestProgress(prev => {
           const updated = { ...prev };
           delete updated[evt.fileName];
           return updated;
         });
-      }, 1000); // Show completion for 1 second before clearing
+      }, 3000); // Show completion for 3 seconds before clearing, prevents accidental re-clicks
     });
 
     return () => {

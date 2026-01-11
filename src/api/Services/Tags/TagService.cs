@@ -223,7 +223,7 @@ namespace Farm.Web.Api.Services.Tags
                     if (tag.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase))
                     {
                         // Count how many models use this tag
-                        IReadOnlyList<Model3DTagMapping> mappings = 
+                        IReadOnlyList<Model3DTagMapping> mappings =
                             await _mappingRepository.GetByTagIdAsync(tag.Id, ct);
                         int usageCount = mappings.Count;
 
@@ -268,7 +268,7 @@ namespace Farm.Web.Api.Services.Tags
                 List<(Model3DTag tag, int count)> tagsWithCounts = new();
                 foreach (var tag in allTags)
                 {
-                    IReadOnlyList<Model3DTagMapping> mappings = 
+                    IReadOnlyList<Model3DTagMapping> mappings =
                         await _mappingRepository.GetByTagIdAsync(tag.Id, ct);
                     if (mappings.Count > 0)
                     {
@@ -318,7 +318,7 @@ namespace Farm.Web.Api.Services.Tags
 
                 foreach (var tag in allTags)
                 {
-                    IReadOnlyList<Model3DTagMapping> mappings = 
+                    IReadOnlyList<Model3DTagMapping> mappings =
                         await _mappingRepository.GetByTagIdAsync(tag.Id, ct);
                     int modelCount = mappings.Count;
 
@@ -335,15 +335,15 @@ namespace Farm.Web.Api.Services.Tags
                         Name = tag.Name,
                         ModelCount = modelCount,
                         CreatedAt = tag.CreatedAt,
-                        LastUsedAt = mappings.Count > 0 
-                            ? mappings.Max(m => m.TaggedAt) 
+                        LastUsedAt = mappings.Count > 0
+                            ? mappings.Max(m => m.TaggedAt)
                             : null
                     });
                 }
 
                 // Calculate averages
-                double averageTagsPerModel = totalTags > 0 
-                    ? (double)totalAssociations / tagsInUse 
+                double averageTagsPerModel = totalTags > 0
+                    ? (double)totalAssociations / tagsInUse
                     : 0;
 
                 // Get top 10 tags
@@ -412,11 +412,11 @@ namespace Farm.Web.Api.Services.Tags
                 _logger.LogInformation($"Merging tag '{sourceTag.Name}' into '{targetTag.Name}'");
 
                 // Get all models using source tag
-                IReadOnlyList<Model3DTagMapping> sourceMappings = 
+                IReadOnlyList<Model3DTagMapping> sourceMappings =
                     await _mappingRepository.GetByTagIdAsync(sourceTagId, ct);
 
                 // Get all models using target tag for duplicate detection
-                IReadOnlyList<Model3DTagMapping> targetMappings = 
+                IReadOnlyList<Model3DTagMapping> targetMappings =
                     await _mappingRepository.GetByTagIdAsync(targetTagId, ct);
 
                 HashSet<Guid> modelsInTarget = new(targetMappings.Select(m => m.Model3DId));
@@ -488,7 +488,7 @@ namespace Farm.Web.Api.Services.Tags
                         modelSet = new HashSet<Guid>();
                         for (int i = 0; i < includeTagList.Count; i++)
                         {
-                            IReadOnlyList<Model3DTagMapping> mappings = 
+                            IReadOnlyList<Model3DTagMapping> mappings =
                                 await _mappingRepository.GetByTagIdAsync(includeTagList[i], ct);
                             var modelIds = new HashSet<Guid>(mappings.Select(m => m.Model3DId));
 
@@ -508,7 +508,7 @@ namespace Farm.Web.Api.Services.Tags
                         modelSet = new HashSet<Guid>();
                         foreach (var tagId in includeTagList)
                         {
-                            IReadOnlyList<Model3DTagMapping> mappings = 
+                            IReadOnlyList<Model3DTagMapping> mappings =
                                 await _mappingRepository.GetByTagIdAsync(tagId, ct);
                             foreach (var modelId in mappings.Select(m => m.Model3DId))
                             {
@@ -527,7 +527,7 @@ namespace Farm.Web.Api.Services.Tags
                 // Remove models with exclude tags
                 foreach (var tagId in excludeTagList)
                 {
-                    IReadOnlyList<Model3DTagMapping> mappings = 
+                    IReadOnlyList<Model3DTagMapping> mappings =
                         await _mappingRepository.GetByTagIdAsync(tagId, ct);
                     foreach (var modelId in mappings.Select(m => m.Model3DId))
                     {
@@ -854,7 +854,7 @@ namespace Farm.Web.Api.Services.Tags
             try
             {
                 var tagIdList = tagIds.ToList();
-                
+
                 if (tagIdList.Count == 0)
                 {
                     // No tags specified - return all models
@@ -863,7 +863,7 @@ namespace Farm.Web.Api.Services.Tags
 
                 // Get models that have ALL specified tags
                 var modelIds = await _mappingRepository.GetModelsWithTagsAsync(tagIdList, requireAll: true, ct);
-                
+
                 _logger.LogDebug($"Found {modelIds.Count} models with all {tagIdList.Count} specified tags");
                 return modelIds;
             }
@@ -889,7 +889,7 @@ namespace Farm.Web.Api.Services.Tags
             try
             {
                 var tagIdList = tagIds.ToList();
-                
+
                 if (tagIdList.Count == 0)
                 {
                     return Array.Empty<Guid>();
@@ -897,7 +897,7 @@ namespace Farm.Web.Api.Services.Tags
 
                 // Get models that have ANY of the specified tags
                 var modelIds = await _mappingRepository.GetModelsWithTagsAsync(tagIdList, requireAll: false, ct);
-                
+
                 _logger.LogDebug($"Found {modelIds.Count} models with any of {tagIdList.Count} specified tags");
                 return modelIds;
             }
@@ -923,7 +923,7 @@ namespace Farm.Web.Api.Services.Tags
             try
             {
                 var tagIdList = tagIds.ToList();
-                
+
                 if (tagIdList.Count == 0)
                 {
                     // No tags to exclude - return all models
@@ -932,7 +932,7 @@ namespace Farm.Web.Api.Services.Tags
 
                 // Get models that DON'T have any of the specified tags
                 var modelIds = await _mappingRepository.GetModelsExcludingTagsAsync(tagIdList, ct);
-                
+
                 _logger.LogDebug($"Found {modelIds.Count} models excluding {tagIdList.Count} specified tags");
                 return modelIds;
             }
@@ -973,7 +973,7 @@ namespace Farm.Web.Api.Services.Tags
 
                 // Start with all models if no include filters
                 IReadOnlyCollection<Guid> resultModels;
-                
+
                 if (includeAllList.Count > 0)
                 {
                     // Start with models that have ALL required tags
@@ -1001,7 +1001,7 @@ namespace Farm.Web.Api.Services.Tags
                 _logger.LogDebug(
                     $"Complex filter returned {resultModels.Count} models " +
                     $"(includeAll: {includeAllList.Count}, includeAny: {includeAnyList.Count}, exclude: {excludeList.Count})");
-                
+
                 return resultModels;
             }
             catch (Exception ex)
@@ -1101,7 +1101,7 @@ namespace Farm.Web.Api.Services.Tags
             {
                 IReadOnlyList<TagMapping> mappings = await _unitOfWork.TagMappings.GetMappingsByObjectAsync("GcodeFile", gcodeFileId, ct);
                 List<Model3DTagDto> tags = new List<Model3DTagDto>();
-                
+
                 foreach (TagMapping mapping in mappings)
                 {
                     Model3DTag? tag = await _tagRepository.GetByIdAsync(mapping.TagId, ct);

@@ -249,6 +249,7 @@ namespace Farm.Web.Api.Services.Gcode
                     Size: file.FileSizeBytes,
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
+                    Name: file.Name,  // Original filename for display
                     HarvestOperationId: harvestOpId,
                     ThumbnailPath: thumbnailUrl,
                     GcodeFileId: null,
@@ -262,6 +263,10 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
                     ExtractedMaterial: file.RequiredMaterial,
                     ExtractedPrinterModel: file.PrinterModel?.Name,
+                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,  // Raw extracted name for fallback
+                    ExtractedLayerHeight: file.LayerHeight,
+                    ExtractedInfill: file.InfillPercentage,
+                    ExtractedPerimeters: file.Perimeters,
                     ExtractedHotendTemp: file.PrintTemperature,
                     ExtractedBedTemp: file.BedTemperature
                 ));
@@ -416,6 +421,7 @@ namespace Farm.Web.Api.Services.Gcode
                     Size: file.FileSizeBytes,
                     ModifiedAt: file.UploadedAt,
                     IsDirectory: false,
+                    Name: file.Name,  // Original filename for display
                     HarvestOperationId: null,
                     ThumbnailPath: thumbnailUrl,
                     GcodeFileId: file.Id.ToString(),  // GUID as string for file ID
@@ -429,6 +435,10 @@ namespace Farm.Web.Api.Services.Gcode
                     ExtractedNozzleDiameter: file.RequiredNozzleDiameter,
                     ExtractedMaterial: file.RequiredMaterial,
                     ExtractedPrinterModel: file.PrinterModel?.Name,
+                    ExtractedPrinterModelName: file.ExtractedPrinterModelName,  // Raw extracted name for fallback
+                    ExtractedLayerHeight: file.LayerHeight,
+                    ExtractedInfill: file.InfillPercentage,
+                    ExtractedPerimeters: file.Perimeters,
                     ExtractedHotendTemp: file.PrintTemperature,
                     ExtractedBedTemp: file.BedTemperature
                 ));
@@ -548,7 +558,14 @@ namespace Farm.Web.Api.Services.Gcode
 
             // Return the virtual path using the display name (original filename), not the GUID
             string virtualFilePath = CombineVirtual(virtualDir, gcodeFile.FileName);
-            return new GcodeFileEntryDto(virtualFilePath, gcodeFile.FileName, gcodeFile.FileSizeBytes, info.LastWriteTimeUtc, false);
+            return new GcodeFileEntryDto(
+                Path: virtualFilePath,
+                FileName: gcodeFile.FileName,
+                Name: gcodeFile.Name,  // Original filename for display
+                Size: gcodeFile.FileSizeBytes,
+                ModifiedAt: info.LastWriteTimeUtc,
+                IsDirectory: false
+            );
         }
 
         /// <summary>
@@ -708,7 +725,14 @@ namespace Farm.Web.Api.Services.Gcode
                     (string? fullTarget, string? safeName) = await SaveUploadedFileAsync(f, targetDirFullPath, ct);
                     System.IO.FileInfo info = new(fullTarget);
                     string virtualFilePath = CombineVirtual(virtualDir, safeName);
-                    created.Add(new GcodeFileEntryDto(virtualFilePath, safeName, info.Length, info.LastWriteTimeUtc, false));
+                    created.Add(new GcodeFileEntryDto(
+                        Path: virtualFilePath,
+                        FileName: safeName,
+                        Name: null,  // No name yet for temporary files not in database
+                        Size: info.Length,
+                        ModifiedAt: info.LastWriteTimeUtc,
+                        IsDirectory: false
+                    ));
                 }
                 catch (Exception exFile)
                 {
@@ -1353,6 +1377,7 @@ namespace Farm.Web.Api.Services.Gcode
                 Source = source,
                 SourcePrinterId = sourcePrinterId,
                 OriginalPrinterPath = originalPrinterPath,
+                ExtractedPrinterModelName = metadata?.PrinterModel,  // Store raw extracted name for debugging/fallback
                 PrinterModelId = resolvedPrinterModelId, // Source printer model from gcode metadata
                 RequiredNozzleDiameter = metadata?.NozzleDiameter,
                 RequiredMaterial = metadata?.Material,
@@ -1363,6 +1388,8 @@ namespace Farm.Web.Api.Services.Gcode
                 SlicerVersion = metadata?.SlicerVersion,
                 PrintSettingsId = metadata?.PrintSettingsId,
                 LayerHeight = metadata?.LayerHeight,
+                InfillPercentage = metadata?.InfillPercentage,
+                Perimeters = metadata?.Perimeters,
                 PrintTemperature = metadata?.PrintTemperature,
                 BedTemperature = metadata?.BedTemperature,
                 ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
@@ -1475,10 +1502,10 @@ namespace Farm.Web.Api.Services.Gcode
             try
             {
                 _logger.LogInformation($"[GcodeUpload] Processing uploaded file: {file.FileName}");
-                
+
                 // Use default folder (root) for uploads - can be organized later via file organization features
                 Guid defaultFolderId = Guid.Empty; // Represents library root/default folder
-                
+
                 GcodeFile gcodeFile = await ProcessAndStoreGcodeFileAsync(
                     fileContent: fileContent,
                     originalFileName: string.IsNullOrEmpty(metadata.FileName) ? file.FileName : metadata.FileName,
@@ -1502,7 +1529,7 @@ namespace Farm.Web.Api.Services.Gcode
 
                 // Save merged metadata
                 await _gcodeRepo.SaveChangesAsync(ct);
-                
+
                 _logger.LogInformation($"[GcodeUpload] File successfully processed and stored: {gcodeFile.Id}");
 
                 GcodeFile? saved = await _gcodeRepo.GetByIdWithIncludesAsync(gcodeFile.Id, ct);
@@ -1788,9 +1815,14 @@ namespace Farm.Web.Api.Services.Gcode
             CancellationToken ct = default)
         {
             if (fileContent == null || fileContent.Length == 0)
+            {
                 throw new ArgumentException("File content cannot be null or empty", nameof(fileContent));
+            }
+
             if (string.IsNullOrWhiteSpace(originalFileName))
+            {
                 throw new ArgumentException("Original file name cannot be null or empty", nameof(originalFileName));
+            }
 
             fileId ??= Guid.NewGuid();
             virtualDirectory = NormalizeVirtualPath(virtualDirectory ?? "/");
@@ -1800,10 +1832,10 @@ namespace Farm.Web.Api.Services.Gcode
             // Step 1: Store file to disk
             string storageDir = _storagePathService.GetGcodeStorageDirectory();
             _ = Directory.CreateDirectory(storageDir);
-            
+
             string fileExtension = Path.GetExtension(originalFileName);
             string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
-            
+
             try
             {
                 await System.IO.File.WriteAllBytesAsync(finalFilePath, fileContent, ct);
@@ -1831,9 +1863,10 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 _logger.LogWarning($"[GcodeProcessing] Duplicate file detected: {originalFileName} matches existing file {existingFile.Id}");
                 // Clean up the file we just wrote
-                try { System.IO.File.Delete(finalFilePath); }
+                try
+                { System.IO.File.Delete(finalFilePath); }
                 catch (Exception ex) { _logger.LogWarning(ex, $"[GcodeProcessing] Failed to clean up duplicate file: {finalFilePath}"); }
-                
+
                 throw new DuplicateFileException(originalFileName, existingFile.Id.ToString(), fileHash);
             }
 
@@ -1862,14 +1895,14 @@ namespace Farm.Web.Api.Services.Gcode
                     // Try to download from printer API URL
                     thumbnailPath = await ProcessThumbnailFromUrlAsync(thumbnailUrl, fileId.Value, storageDir, ct);
                 }
-                
+
                 // If no URL or URL download failed, try extracting from G-code
                 if (string.IsNullOrEmpty(thumbnailPath))
                 {
                     _logger.LogDebug($"[GcodeProcessing] Attempting thumbnail extraction from G-code file");
                     thumbnailPath = await ExtractThumbnailAsync(finalFilePath, ct);
                 }
-                
+
                 if (!string.IsNullOrEmpty(thumbnailPath))
                 {
                     _logger.LogInformation($"[GcodeProcessing] Thumbnail processed: {Path.GetFileName(thumbnailPath)}");
@@ -1915,7 +1948,8 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 _logger.LogError(ex, $"[GcodeProcessing] Failed to persist GcodeFile to database: {originalFileName}");
                 // Clean up the stored file since database save failed
-                try { System.IO.File.Delete(finalFilePath); }
+                try
+                { System.IO.File.Delete(finalFilePath); }
                 catch (Exception deleteEx) { _logger.LogWarning(deleteEx, $"[GcodeProcessing] Failed to clean up file after database error: {finalFilePath}"); }
                 throw new FilePersistenceException(originalFileName, $"Failed to save file to database: {ex.Message}", ex);
             }
@@ -1935,12 +1969,14 @@ namespace Farm.Web.Api.Services.Gcode
             try
             {
                 if (string.IsNullOrWhiteSpace(thumbnailUrl))
+                {
                     return null;
+                }
 
                 // Download thumbnail from URL
                 using var httpClient = new System.Net.Http.HttpClient();
                 var response = await httpClient.GetAsync(thumbnailUrl, ct);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning($"Failed to download thumbnail from URL: {response.StatusCode}");
@@ -1951,7 +1987,7 @@ namespace Farm.Web.Api.Services.Gcode
                 byte[] thumbnailData = await response.Content.ReadAsByteArrayAsync(ct);
                 string thumbnailPath = Path.Combine(storageDir, $"{fileId}_thumb.png");
                 await System.IO.File.WriteAllBytesAsync(thumbnailPath, thumbnailData, ct);
-                
+
                 return thumbnailPath;
             }
             catch (Exception ex)

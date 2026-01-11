@@ -83405,7 +83405,7 @@ PRINT_END
 ; wall_distribution_count = 1
 ; wall_filament = 1
 ; wall_generator = classic
-; wall_loops = 2
+; wall_loops = 5
 ; wall_sequence = outer wall/inner wall
 ; wall_transition_angle = 10
 ; wall_transition_filter_deviation = 25%

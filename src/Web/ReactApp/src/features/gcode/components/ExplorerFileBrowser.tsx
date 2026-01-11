@@ -738,7 +738,7 @@ export const ExplorerFileBrowser: React.FC<ExplorerFileBrowserProps> = ({
                       {file.isDirectory ? '-' : file.requiredMaterial || file.extractedMaterial || '-'}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
-                      {file.isDirectory ? '-' : file.extractedPrinterModel || file.targetModelName || '-'}
+                      {file.isDirectory ? '-' : file.extractedPrinterModel || file.extractedPrinterModelName || file.targetModelName || '-'}
                     </td>
                     <td className="px-4 py-3 text-pf-text-secondary">
                       {formatDate(file.modifiedAt)}

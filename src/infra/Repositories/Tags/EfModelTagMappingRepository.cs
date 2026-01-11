@@ -113,7 +113,7 @@ namespace Farm.Infrastructure.Repositories.Tags
             CancellationToken ct)
         {
             var tagIdList = tagIds?.ToList() ?? new List<Guid>();
-            
+
             if (tagIdList.Count == 0)
             {
                 return Array.Empty<Guid>();
@@ -147,7 +147,7 @@ namespace Farm.Infrastructure.Repositories.Tags
             CancellationToken ct)
         {
             var tagIdList = tagIds?.ToList() ?? new List<Guid>();
-            
+
             if (tagIdList.Count == 0)
             {
                 // No tags to exclude - return all models

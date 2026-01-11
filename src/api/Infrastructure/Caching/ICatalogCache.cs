@@ -68,7 +68,7 @@ internal sealed class CatalogCache(IMemoryCache cache, Microsoft.Extensions.Opti
         IDbContextFactory<AppDbContext> dbFactory2 = _dbFactory ??= _services.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = dbFactory2.CreateDbContext();
 
-        IQueryable<PrinterModel> q = db.Models.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
+        IQueryable<PrinterModel> q = db.PrinterModels.AsNoTracking().Include(m => m.SupportedFilamentTypes).ThenInclude(sf => sf.FilamentType).AsQueryable();
         if (manufacturerId is Guid mid2)
         {
             q = q.Where(m => m.ManufacturerId == mid2);

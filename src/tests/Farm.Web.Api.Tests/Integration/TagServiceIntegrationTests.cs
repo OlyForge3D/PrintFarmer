@@ -8,6 +8,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services.Tags;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -44,23 +45,30 @@ public class TagServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Create models folder
-        var folder = new FolderNode
+        // Get or create models folder
+        var folder = await context.Folders.FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "model3d");
+        if (folder == null)
         {
-            Id = Guid.NewGuid(),
-            Path = "/",
-            FolderType = "model3d"
-        };
-        context.Folders.Add(folder);
-        await context.SaveChangesAsync();
+            folder = new FolderNode
+            {
+                Id = Guid.NewGuid(),
+                Path = "/",
+                FolderType = "model3d"
+            };
+            context.Folders.Add(folder);
+            await context.SaveChangesAsync();
+        }
+
+        // Use unique fileName to avoid issues with FileHash uniqueness
+        var uniqueFileName = $"{Guid.NewGuid()}-{fileName}";
 
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
             Name = fileName,
-            FileName = fileName,
+            FileName = uniqueFileName,
             FolderId = folder.Id,
-            FilePath = $"/models/{fileName}",
+            FilePath = $"/models/{uniqueFileName}",
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),
             FileFormat = ModelFileFormat.STL,

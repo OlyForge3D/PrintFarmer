@@ -15,7 +15,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<Spool> Spools => Set<Spool>();
     public DbSet<Manufacturer> Manufacturers => Set<Manufacturer>();
-    public DbSet<PrinterModel> Models => Set<PrinterModel>();
+    public DbSet<PrinterModel> PrinterModels => Set<PrinterModel>();
+    public DbSet<PrinterModelAlias> PrinterModelAliases => Set<PrinterModelAlias>();
     public DbSet<FilamentType> FilamentTypes => Set<FilamentType>();
     public DbSet<PrinterModelFilamentType> PrinterModelFilamentTypes => Set<PrinterModelFilamentType>();
     public DbSet<SpoolmanConfig> SpoolmanConfigs => Set<SpoolmanConfig>();
@@ -263,6 +264,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
              .WithMany(f => f.PrinterModels)
              .HasForeignKey(pf => pf.FilamentTypeId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        _ = modelBuilder.Entity<PrinterModelAlias>(b =>
+        {
+            _ = b.HasKey(a => a.Id);
+            _ = b.Property(a => a.SlicerModelName).IsRequired().HasMaxLength(256);
+            _ = b.Property(a => a.SlicerType).HasMaxLength(128);
+            _ = b.Property(a => a.CreatedAt).IsRequired();
+            _ = b.HasOne(a => a.PrinterModel)
+             .WithMany()
+             .HasForeignKey(a => a.PrinterModelId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // Unique constraint: SlicerModelName + SlicerType (NULL safe)
+            _ = b.HasIndex(a => new { a.PrinterModelId, a.SlicerModelName, a.SlicerType }).IsUnique();
         });
 
         _ = modelBuilder.Entity<Spool>(b =>
