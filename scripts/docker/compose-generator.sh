@@ -179,6 +179,7 @@ parse_args() {
     INCLUDE_REGISTRY="false"
     INCLUDE_DISCOVERY="false"
     ENABLE_ORCA_WORKER=""
+    ENABLE_PGADMIN="false"
     API_PORT=""
     DB_PROVIDER="${DB_PROVIDER:-postgres}"
     KEEP_GENERATED="true"
@@ -204,6 +205,8 @@ parse_args() {
                 INCLUDE_DISCOVERY="true"; shift ;;
             --enable-orca-worker)
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
+            --enable-pgadmin)
+                ENABLE_PGADMIN="true"; shift ;;
             --db-provider)
                 DB_PROVIDER="$2"; shift 2 ;;
             --cleanup-generated)
@@ -706,6 +709,21 @@ generate_compose() {
         fi
     else
         log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
+    fi
+    
+    # Conditionally merge pgAdmin addon if enabled and using PostgreSQL
+    if [[ "$ENABLE_PGADMIN" == "true" ]]; then
+        local db_provider_lower=$(printf '%s' "$DB_PROVIDER" | tr '[:upper:]' '[:lower:]')
+        if [[ "$db_provider_lower" == "postgres" || "$db_provider_lower" == "postgresql" ]]; then
+            if merge_addon_services "$compose_file" "pgadmin"; then
+                log_info "Merged pgAdmin service (ENABLE_PGADMIN=$ENABLE_PGADMIN)"
+                addons_merged=true
+            else
+                log_warning "Failed to merge pgAdmin service, continuing without it"
+            fi
+        else
+            log_warning "pgAdmin is only supported with PostgreSQL database (current: $DB_PROVIDER, skipping)"
+        fi
     fi
     
     if [[ "$addons_merged" == "true" ]]; then

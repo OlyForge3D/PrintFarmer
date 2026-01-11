@@ -49,6 +49,7 @@ AUTO_ADMIN=false
 AUTO_ADMIN_USERNAME=""
 AUTO_ADMIN_PASSWORD=""
 AUTO_ADMIN_EMAIL=""
+ENABLE_PGADMIN=false
 # Build verbosity: quiet (default), minimal, normal, detailed
 BUILD_VERBOSITY="${BUILD_VERBOSITY:-quiet}"
 # Compose up option to pass --remove-orphans (default true)
@@ -754,6 +755,17 @@ generate_deployment_config() {
     # Add database provider configuration
     if [ -n "${DB_PROVIDER:-}" ]; then
         generator_args+=("--db-provider" "$DB_PROVIDER")
+    fi
+    
+    # Add pgAdmin configuration (only for PostgreSQL)
+    if [ "$ENABLE_PGADMIN" = "true" ]; then
+        db_provider_lower=$(echo "${DB_PROVIDER:-postgres}" | tr '[:upper:]' '[:lower:]')
+        if [ "$db_provider_lower" = "postgres" ] || [ "$db_provider_lower" = "postgresql" ]; then
+            generator_args+=("--enable-pgadmin")
+        else
+            print_warning "pgAdmin is only supported with PostgreSQL. Skipping pgAdmin deployment."
+            ENABLE_PGADMIN=false
+        fi
     fi
     
     # Set output directory
@@ -1789,6 +1801,7 @@ tear_down_deployment() {
         print_info "Tearing down compose project: env_file='${env_file:-<none>}' compose_file='$compose_file'"
 
         # Preferred ordered list: stop frontends and API first, then workers, then monitoring/telemetry, then database
+        # NOTE: pgAdmin is NOT in this list - it is intentionally preserved during teardown for debugging
         local ordered_services=(frontend api orcaslicer-worker orcaslicer-worker-multistage worker prometheus grafana jaeger otel-collector database registry)
 
         # If an env file was provided, load its variables and pass it to docker compose commands
@@ -1954,6 +1967,11 @@ tear_down_deployment() {
         external_profiles_path=$(grep "^EXTERNAL_PROFILES_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
         external_app_data_path=$(grep "^EXTERNAL_APP_DATA_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
         external_database_path=$(grep "^EXTERNAL_DATABASE_PATH=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        # Also load feature flags
+        local cfg_pgadmin=$(grep "^ENABLE_PGADMIN=" ./.deploy-config 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        if [ -n "$cfg_pgadmin" ]; then
+            ENABLE_PGADMIN="$cfg_pgadmin"
+        fi
     else
         print_info "No .deploy-config found - checking environment variables..."
     fi
@@ -2218,6 +2236,7 @@ COMPOSE GENERATOR OPTIONS:
         --include-security  Include security configurations
         --include-registry  Include local Docker registry
         --include-discovery Include network printer discovery service (microservices only)
+        --enable-pgadmin    Deploy pgAdmin 4 for PostgreSQL database debugging (PostgreSQL only)
         --output-dir DIR    Output directory for generated files (default: repository root)
 
 VERIFY / UTILITY OPTIONS:
@@ -2537,6 +2556,7 @@ EOF
 ENVIRONMENT=$ENVIRONMENT
 ENABLE_SWAGGER=$ENABLE_SWAGGER
 ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
+ENABLE_PGADMIN=$ENABLE_PGADMIN
 
 # Observability & Monitoring Configuration
 INCLUDE_MONITORING=${INCLUDE_MONITORING:-false}
@@ -5722,6 +5742,13 @@ display_final_info() {
     
     echo -e "${BLUE}  ❤️  Health Check: http://$SERVER_HOST:$HTTP_PORT/healthz${NC}"
     
+    # Show pgAdmin URL if enabled
+    if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DRY_RUN" != "true" ]; then
+        echo -e "${BLUE}  🐘 pgAdmin (Database): http://$SERVER_HOST:5050/pgadmin${NC}"
+        echo -e "       ${YELLOW}Credentials: admin@printfarmer.local / adminpass${NC}"
+        echo -e "       ${YELLOW}Network Access: http://$(hostname -I | awk '{print $1}'):5050/pgadmin${NC}"
+    fi
+    
     # Show localhost alternative if we're showing an IP
     if [ "$SERVER_HOST" != "localhost" ]; then
         echo -e "${BLUE}  📍 Local access: http://localhost:$HTTP_PORT${NC}"
@@ -5871,6 +5898,57 @@ redeploy_existing() {
     print_info "All containers have been rebuilt and restarted with the same configuration."
     
     exit 0
+}
+
+# Handle pgAdmin deployment check/deployment
+deploy_pgadmin_if_needed() {
+    if [ "$ENABLE_PGADMIN" != "true" ] || [ "$DRY_RUN" = "true" ]; then
+        return 0
+    fi
+    
+    # Check if pgAdmin container is already running
+    if docker ps -a --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
+        print_info "pgAdmin container already deployed"
+        
+        # Check if it's running
+        if docker ps --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
+            print_success "pgAdmin is running and accessible"
+        else
+            print_info "pgAdmin container exists but is not running. Starting it..."
+            if docker start printfarmer-pgadmin; then
+                print_success "pgAdmin container started"
+            else
+                print_error "Failed to start pgAdmin container"
+            fi
+        fi
+    else
+        print_info "Deploying pgAdmin container..."
+        
+        # Check if docker-compose includes pgAdmin (it should if ENABLE_PGADMIN was true)
+        if docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" ps --services 2>/dev/null | grep -qx "pgadmin"; then
+            # pgAdmin is in the compose file, try to start it
+            if docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" up -d pgadmin; then
+                print_success "pgAdmin container deployed successfully"
+                
+                # Wait for pgAdmin to be healthy
+                local retries=30
+                while [ $retries -gt 0 ]; do
+                    if docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" exec -T pgadmin wget --spider -q http://localhost:80/pgadmin4/misc/ping 2>/dev/null; then
+                        print_success "pgAdmin is healthy and ready"
+                        return 0
+                    fi
+                    sleep 2
+                    retries=$((retries - 1))
+                done
+                
+                print_warning "pgAdmin is running but health check timed out - it may still be initializing"
+            else
+                print_error "Failed to deploy pgAdmin container"
+            fi
+        else
+            print_warning "pgAdmin service not found in compose file - was the compose file generated with ENABLE_PGADMIN?"
+        fi
+    fi
 }
 
 # Main execution
@@ -6087,6 +6165,9 @@ main() {
     
     deploy_containers
     
+    # Deploy pgAdmin if requested
+    deploy_pgadmin_if_needed || print_warning "pgAdmin deployment encountered issues"
+    
     # Run auto-admin setup if requested
     setup_initial_admin || true
     
@@ -6286,6 +6367,10 @@ while [ $# -gt 0 ]; do
             ;;
         --auto-admin-email=*)
             AUTO_ADMIN_EMAIL="${1#--auto-admin-email=}"
+            shift
+            ;;
+        --enable-pgadmin)
+            ENABLE_PGADMIN=true
             shift
             ;;
         --config-file=*)

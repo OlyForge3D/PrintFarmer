@@ -1,0 +1,15 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "PrintFarmer PostgreSQL",
+      "Group": "Servers",
+      "Host": "database",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "${POSTGRES_USER:-postgres}",
+      "Password": "${POSTGRES_PASSWORD}",
+      "SSLMode": "prefer",
+      "Comment": "Auto-configured PrintFarmer PostgreSQL database"
+    }
+  }
+}
