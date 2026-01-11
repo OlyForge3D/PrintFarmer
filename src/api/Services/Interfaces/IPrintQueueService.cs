@@ -1,4 +1,4 @@
-﻿using Farm.Api.DTOs;
+﻿using Farm.Web.Api.DTOs.PrintQueue;
 
 namespace Farm.Api.Services.Interfaces;
 

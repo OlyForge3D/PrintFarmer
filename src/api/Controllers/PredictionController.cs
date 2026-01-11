@@ -82,8 +82,8 @@ public class PredictionController(PredictionService predictionService) : Control
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Dictionary of material statistics</returns>
     [HttpGet("stats/by-material")]
-    [ProducesResponseType(typeof(Dictionary<string, DurationStatsDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<Dictionary<string, DurationStatsDto>>> GetMaterialStatsAsync(
+    [ProducesResponseType(typeof(Dictionary<string, PredictionDurationStatsDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<Dictionary<string, PredictionDurationStatsDto>>> GetMaterialStatsAsync(
         [FromQuery] string? material = null,
         [FromQuery] Guid? printerId = null,
         [FromQuery] int minSampleSize = 3,
@@ -108,9 +108,9 @@ public class PredictionController(PredictionService predictionService) : Control
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Duration statistics for the model</returns>
     [HttpGet("stats/model/{modelId:guid}")]
-    [ProducesResponseType(typeof(DurationStatsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PredictionDurationStatsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<DurationStatsDto>> GetModelStatsAsync(
+    public async Task<ActionResult<PredictionDurationStatsDto>> GetModelStatsAsync(
         Guid modelId,
         [FromQuery] string? material = null,
         CancellationToken cancellationToken = default)

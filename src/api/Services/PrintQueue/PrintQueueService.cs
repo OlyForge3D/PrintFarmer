@@ -1,4 +1,4 @@
-﻿using Farm.Api.DTOs;
+﻿using Farm.Web.Api.DTOs.PrintQueue;
 using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -1174,7 +1174,7 @@ public class PrintQueueService(
             var variance = avgEstimated > 0 ? ((avgActual - avgEstimated) / avgEstimated) * 100 : 0;
 
             // Group by printer for detailed stats
-            var byPrinter = new Dictionary<string, Farm.Api.DTOs.DurationStatsDto>();
+            var byPrinter = new Dictionary<string, DurationStatsDto>();
             foreach (var printerGroup in jobs.GroupBy(j => j.AssignedPrinterId))
             {
                 var printerJobs = printerGroup.ToList();
@@ -1200,7 +1200,7 @@ public class PrintQueueService(
                     ? ((printerAvgAct - printerAvgEst) / printerAvgEst) * 100
                     : 0;
 
-                byPrinter[printerIdStr] = new Farm.Api.DTOs.DurationStatsDto
+                byPrinter[printerIdStr] = new DurationStatsDto
                 {
                     PrinterId = printerIdStr,
                     PrinterName = printerName,
