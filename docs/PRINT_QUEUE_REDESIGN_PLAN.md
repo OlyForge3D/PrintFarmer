@@ -1238,13 +1238,585 @@ POST   /api/printQueue/jobs/bulk-cancel         - Cancel multiple jobs
 - Phase 4.2: Predictive Completion Estimates  
 - Phase 4.3: Notification System
 - Phase 4.4: Smart Retry & Error Handling
-- Phase 4.5: Load Balancing Across Printers
+- Phase 4.5: Missing Features Consolidation
+- Phase 5: Load Balancing Across Printers
+- Phase 6: Auto-Enqueue from File Uploads
 
 ---
 
-## Phase 5: Auto-Enqueue from File Uploads (Deferred/Future)
+## Phase 4.5: Missing Features Consolidation
 
-**Status**: 📋 Planned (Post-Phase 4)
+**Status**: 📋 Planned (Post-Phase 4.4, ~2-3 weeks)
+
+**Objectives**:
+- Implement all remaining core features blocking full print queue system completion
+- Address infrastructure gaps discovered during Phase 4 development
+- Enable comprehensive job history tracking and visualization
+- Complete notification system and tag management
+- Finalize SDCP backend integration
+
+**Features**:
+
+### 4.5.1: Job History Seeding from Printers (Phase 2 Completion)
+**Status**: Infrastructure exists, implementation pending
+
+**Background**: The print queue system tracks jobs enqueued through PrintFarmer, but printers may have print history from external sources (web UI, physical buttons, etc.). This feature enables importing that history.
+
+**Requirements**:
+- Implement `PrintQueueService.SeedHistoryFromPrintersAsync()` (currently stubbed at line 696)
+- Query each printer's history via `PrintersService.GetHistoryListAsync()`
+- Map `HistoryJob` entities to `PrintJob` domain entities
+- Handle deduplication (prevent duplicate imports of same jobs)
+- Only import jobs not already in PrintFarmer queue
+- Preserve original completion timestamps
+
+**Implementation Details**:
+- **Database**: Use existing PrintJobs table (no schema changes)
+- **API Endpoint**: `POST /api/printers/history/seed` (admin-only, with confirmation)
+- **Endpoint**: `POST /api/printers/{printerId}/history/seed` (single printer)
+- **Response**: `{ imported: number, skipped: number, errors: string[] }`
+- **Audit**: Log all imported jobs with source printer and import timestamp
+- **State**: Set imported jobs to "Completed" status with original completion time
+- **Error Handling**: Continue on individual failures, report summary at end
+
+**Business Value**: 
+- Understand total machine hours incurred (including external jobs)
+- Build complete job history for analytics and reporting
+- Enable historical analysis across all printer activity
+
+**Files to Modify**:
+- `src/infra/Services/PrintQueue/PrintQueueService.cs` - Implement SeedHistoryFromPrintersAsync()
+- `src/api/Controllers/PrintersController.cs` - Add two new endpoints
+- `src/api/DTOs/PrintQueue/` - Add SeedHistoryRequestDto, SeedHistoryResponseDto
+- `src/infra/Repositories/PrintQueue/PrintJobRepository.cs` - Add GetByPrinterAndStartTimeAsync() for deduplication
+
+**Timeline**: 3-4 days
+
+---
+
+### 4.5.2: Timeline & History Visualization (Phase 3C Completion)
+**Status**: Designed, implementation pending
+
+**Background**: Currently history is viewed in table format. Phase 3C adds timeline visualization for better understanding of job progression and state transitions.
+
+**Requirements**:
+- Timeline tab showing jobs as horizontal bars (Gantt-style)
+- Job state history tracking (when jobs transition states: Queued→Printing→Completed)
+- Duration comparison across printers and models
+- Completion prediction accuracy comparison
+- State transition timestamps for audit trail
+
+**Implementation Details**:
+- **Database Schema**:
+  - New `JobStateHistory` entity: `{ JobId, OldState, NewState, ChangedAt, ChangedBy, Reason }`
+  - New `PrintJobs` column: `ScheduledStartTime` (nullable, for scheduled jobs)
+  - Index on `(JobId, ChangedAt)` for efficient queries
+  
+- **Entities** (EF Core):
+  ```csharp
+  public class JobStateHistory
+  {
+      public Guid Id { get; set; }
+      public Guid JobId { get; set; }
+      public PrintJobState OldState { get; set; }
+      public PrintJobState NewState { get; set; }
+      public DateTime ChangedAt { get; set; }
+      public string ChangedBy { get; set; } // User ID or system
+      public string Reason { get; set; } // Optional: why state changed
+      public PrintJob PrintJob { get; set; }
+  }
+  ```
+
+- **API Endpoints**:
+  - `GET /api/printQueue/timeline?startDate=&endDate=&modelId=&status=` - Get timeline data
+  - `GET /api/printQueue/jobs/{jobId}/history` - State history for specific job
+  - `GET /api/printQueue/analytics/predictions` - Prediction accuracy metrics
+
+- **Service Methods**:
+  - `GetTimelineDataAsync(DateTime start, DateTime end, filters)` - Fetch timeline jobs
+  - `GetJobStateHistoryAsync(Guid jobId)` - Get all state transitions for job
+  - `GetPredictionAccuracyAsync(DateTime start, DateTime end)` - Compare predictions vs actuals
+
+- **React Components**:
+  - `JobTimelineTab.tsx` - Tab container for timeline view
+  - `JobTimelineChart.tsx` - Gantt-style job visualization (using react-gantt-chart or react-vis)
+  - `JobStateHistoryPanel.tsx` - State transition details
+  - `DurationComparisonChart.tsx` - Compare job durations across printers
+  - `PredictionAccuracyPanel.tsx` - Show prediction vs actual times
+
+**Business Value**:
+- Visual understanding of job flow and bottlenecks
+- Identify patterns in job duration and success rates
+- Validate prediction accuracy improvements
+- Audit trail of all state changes
+
+**Files to Modify**:
+- `src/infra/Data/PrintFarmerDbContext.cs` - Add JobStateHistory DbSet
+- `src/infra/Entities/PrintJob.cs` - Add ScheduledStartTime property, StateHistory navigation
+- `src/infra/Repositories/PrintQueue/PrintJobRepository.cs` - Add timeline queries
+- `src/api/Controllers/PrintQueueController.cs` - Add 3 new endpoints
+- `src/api/DTOs/PrintQueue/` - Add JobStateHistoryDto, TimelineDataDto
+- `src/infra/Services/PrintQueue/PrintQueueService.cs` - Add timeline service methods
+- `src/Web/ReactApp/src/features/queue/components/` - Add 5 new React components
+- Database migration for JobStateHistory table
+
+**Timeline**: 5-6 days
+
+---
+
+### 4.5.3: Notification Preferences Repository (Phase 4.3 Completion)
+**Status**: Service exists, repository implementation pending
+
+**Background**: Notification system is implemented (email/push), but users cannot customize preferences. This completes user preference management.
+
+**Requirements**:
+- Store user notification preferences (by type and channel)
+- Support per-printer notification settings
+- Allow muting notifications temporarily or permanently
+- Track notification history and read status
+- Default preferences for new users
+
+**Implementation Details**:
+- **Database Schema**:
+  - `NotificationPreferences` entity: `{ UserId, PrinterId, EmailOnCompletion, EmailOnFailure, PushOnCompletion, PushOnFailure, Enabled }`
+  - `NotificationHistory` entity: `{ Id, UserId, JobId, Type, Channel, SentAt, ReadAt }`
+  - Index on `(UserId, PrinterId)` and `(UserId, SentAt)`
+
+- **Entities** (EF Core):
+  ```csharp
+  public class NotificationPreference
+  {
+      public Guid Id { get; set; }
+      public Guid UserId { get; set; }
+      public Guid? PrinterId { get; set; } // null = global preference
+      public bool EmailOnCompletion { get; set; } = true;
+      public bool EmailOnFailure { get; set; } = true;
+      public bool PushOnCompletion { get; set; } = true;
+      public bool PushOnFailure { get; set; } = true;
+      public bool Enabled { get; set; } = true;
+      public DateTime CreatedAt { get; set; }
+      public DateTime UpdatedAt { get; set; }
+  }
+  
+  public class NotificationHistory
+  {
+      public Guid Id { get; set; }
+      public Guid UserId { get; set; }
+      public Guid? JobId { get; set; }
+      public string Type { get; set; } // "Completion", "Failure", etc.
+      public string Channel { get; set; } // "Email", "Push"
+      public DateTime SentAt { get; set; }
+      public DateTime? ReadAt { get; set; }
+      public string Content { get; set; }
+  }
+  ```
+
+- **API Endpoints**:
+  - `GET /api/notifications/preferences` - Get user preferences
+  - `PUT /api/notifications/preferences` - Update preferences
+  - `GET /api/notifications/preferences/printers/{printerId}` - Printer-specific preferences
+  - `PUT /api/notifications/preferences/printers/{printerId}` - Update printer preferences
+  - `GET /api/notifications/history?limit=20&offset=0` - Notification history
+  - `PUT /api/notifications/{notificationId}/read` - Mark as read
+  - `POST /api/notifications/mute?duration=1h` - Mute temporarily
+
+- **Service Methods**:
+  - `GetUserPreferencesAsync(Guid userId)` - Fetch all preferences
+  - `GetPrinterPreferencesAsync(Guid userId, Guid printerId)` - Printer-specific
+  - `UpdatePreferencesAsync(Guid userId, NotificationPreferenceDto)` - Save preferences
+  - `GetHistoryAsync(Guid userId, int limit, int offset)` - History pagination
+
+- **React Components**:
+  - `NotificationPreferencesPage.tsx` - Settings page
+  - `GlobalPreferencesPanel.tsx` - Global notification settings
+  - `PrinterPreferencesPanel.tsx` - Per-printer settings
+  - `NotificationHistoryPanel.tsx` - View past notifications
+  - `MuteNotificationsDialog.tsx` - Temporary mute UI
+
+**Business Value**:
+- Users control notification fatigue
+- Per-printer notification targeting (silence noisy printers)
+- Audit of all notifications sent
+- Compliance with notification preferences
+
+**Files to Modify**:
+- `src/infra/Data/PrintFarmerDbContext.cs` - Add DbSets for preferences/history
+- `src/infra/Entities/` - Add NotificationPreference, NotificationHistory entities
+- `src/infra/Repositories/Notifications/` - Add preference and history repositories
+- `src/api/Controllers/NotificationsController.cs` - Add 7 new endpoints
+- `src/api/DTOs/Notifications/` - Add preference DTOs
+- `src/infra/Services/Notifications/NotificationService.cs` - Check preferences before sending
+- `src/Web/ReactApp/src/pages/NotificationPreferencesPage.tsx` - Settings UI (4 components)
+- Database migration for NotificationPreference and NotificationHistory tables
+
+**Timeline**: 3-4 days
+
+---
+
+### 4.5.4: Advanced Tag Management (Phase 3D Completion)
+**Status**: Partial implementation, completion pending
+
+**Background**: Tag system exists with basic support. Phase 3D adds full filtering, analytics, and tag management utilities.
+
+**Requirements**:
+- Tag-based filtering in queue and history
+- Tag suggestions/autocomplete during job creation
+- Tag cleanup utilities (merge duplicates, delete unused)
+- Tag usage analytics and trends
+- Tag import/export for backup and transfer
+
+**Implementation Details**:
+- **New API Endpoints**:
+  - `GET /api/tags?modelId=&usage=&orderBy=` - List tags with usage stats
+  - `GET /api/tags/{tagId}/usage` - Tag usage analytics
+  - `POST /api/tags/suggestions?prefix=` - Autocomplete suggestions
+  - `POST /api/tags/merge` - Merge duplicate tags
+  - `POST /api/tags/{tagId}/delete` - Delete unused tags
+  - `POST /api/tags/export` - Export all tags as JSON
+  - `POST /api/tags/import` - Import tags from JSON
+
+- **Service Methods**:
+  - `GetTagsWithUsageAsync(filters)` - Tags sorted by usage
+  - `GetSuggestionsAsync(prefix)` - Autocomplete from existing tags
+  - `MergeTagsAsync(sourceTagId, targetTagId)` - Consolidate duplicates
+  - `DeleteUnusedTagsAsync()` - Cleanup operation
+  - `ExportTagsAsync()` - Backup as JSON
+  - `ImportTagsAsync(json)` - Restore from backup
+
+- **React Components**:
+  - `TagFilterPanel.tsx` - Filter by tags in queue/history
+  - `TagAutocompleteInput.tsx` - Suggest tags during entry
+  - `TagManagementPage.tsx` - Admin page for tag operations
+  - `TagUsageChart.tsx` - Visualize tag usage trends
+  - `TagMergeDialog.tsx` - UI for tag consolidation
+
+**Business Value**:
+- Cleaner tag organization (no duplicates)
+- Better filtering and discovery
+- Tag usage insights
+- Data portability (export/import)
+
+**Files to Modify**:
+- `src/infra/Repositories/Tags/ITagRepository.cs` - Add new query methods
+- `src/infra/Repositories/Tags/EfTagRepository.cs` - Implement queries
+- `src/api/Controllers/TagsController.cs` - Add 7 new endpoints
+- `src/api/DTOs/Tags/` - Add TagUsageDto, TagSuggestionDto
+- `src/infra/Services/Tags/TagService.cs` - Add merge/cleanup/import/export methods
+- `src/Web/ReactApp/src/features/queue/` - Add 5 new components and integrate filters
+- `src/Web/ReactApp/src/pages/TagManagementPage.tsx` - New admin page
+
+**Timeline**: 3-4 days
+
+---
+
+### 4.5.5: SDCP File Operations (Backend Completion)
+**Status**: Discovery implemented, file operations pending
+
+**Background**: SDCP (Simple Data Communication Protocol) backend supports discovery but file operations (list, upload, delete) are stubbed.
+
+**Requirements**:
+- Implement file listing from SDCP printers
+- Implement file upload to SDCP printers
+- Implement file deletion from SDCP printers
+- Handle file metadata (size, modified time, etc.)
+- Error handling for network timeouts and failures
+
+**Implementation Details**:
+- **File**: `src/backends/Farm.Backend.Plugin.Sdcp/Clients/SdcpClient.cs`
+
+- **New Methods**:
+  ```csharp
+  // List files on printer
+  Task<SdcpFileInfoDto[]> ListFilesAsync(string host, int port, CancellationToken cancellationToken)
+  
+  // Upload file to printer
+  Task UploadFileAsync(string host, int port, string filename, byte[] content, CancellationToken cancellationToken)
+  
+  // Delete file from printer
+  Task DeleteFileAsync(string host, int port, string filename, CancellationToken cancellationToken)
+  
+  // Get file info (size, modification time)
+  Task<SdcpFileInfoDto> GetFileInfoAsync(string host, int port, string filename, CancellationToken cancellationToken)
+  ```
+
+- **Protocol Details**:
+  - UDP packets with command format: `{ "cmd": "list_files" }` / `{ "cmd": "upload", "filename": "...", "data": "..." }`
+  - Response format: `{ "status": "ok", "files": [...] }` or `{ "status": "error", "message": "..." }`
+  - Timeout handling: 5-second socket timeout per operation
+
+- **DTO**:
+  ```csharp
+  public class SdcpFileInfoDto
+  {
+      public string Filename { get; set; }
+      public long SizeBytes { get; set; }
+      public DateTime ModifiedTime { get; set; }
+  }
+  ```
+
+- **Error Handling**:
+  - Timeout → `SdcpConnectionException`
+  - Invalid response → `SdcpProtocolException`
+  - File not found → `SdcpFileNotFoundException`
+
+**Business Value**:
+- Complete SDCP backend functionality
+- Support for printers that only expose SDCP interface
+- File management from PrintFarmer UI
+
+**Files to Modify**:
+- `src/backends/Farm.Backend.Plugin.Sdcp/Clients/SdcpClient.cs` - Implement 4 new methods
+- `src/backends/Farm.Backend.Plugin.Sdcp/DTOs/SdcpFileInfoDto.cs` - Create if missing
+- `src/backends/Farm.Backend.Plugin.Sdcp/Exceptions/` - Add exception types if missing
+- `src/infra/Services/Printers/PrintersService.cs` - Integrate file operations with unified API
+- Tests: `src/tests/Farm.Web.Api.Tests/Backends/Sdcp/SdcpClientTests.cs`
+
+**Timeline**: 2-3 days
+
+---
+
+### 4.5.6: Predictive Estimates Refinement with Model Detection
+**Status**: Baseline implemented, model-specific refinement pending
+
+**Background**: Predictive estimates currently use global averages. This adds per-model training and detection.
+
+**Requirements**:
+- Detect printer model during job start (from API query)
+- Apply model-specific prediction weights
+- Store model information with each job for analysis
+- Train separate estimates per model
+- Handle model changes gracefully
+
+**Implementation Details**:
+- **Database Changes**:
+  - Add `PrintJobs.PrinterModel` (string, nullable) - detected model name
+  - Add `PrintJobs.ActualDuration` (decimal?, nullable) - minutes taken
+  - Add index on `(PrinterModel, Status)` for model-specific queries
+
+- **Service Enhancement** (`EstimationService.cs`):
+  ```csharp
+  // Calculate estimate with model weighting
+  Task<EstimationResultDto> PredictDurationAsync(
+      Guid jobId, 
+      Guid printerId, 
+      Guid fileId,
+      string printerModel = null)
+  
+  // Get model-specific stats
+  Task<ModelEstimationStatsDto> GetModelStatsAsync(string printerModel)
+  
+  // Detect model from printer status
+  Task<string> DetectPrinterModelAsync(string printerHost, string backendType)
+  ```
+
+- **Calculation Adjustment**:
+  - Global average duration: D_global
+  - Model-specific average: D_model (only if >20 samples)
+  - Weight factor: w_model = min(1.0, samples_model / 20)
+  - Adjusted estimate: D_adjusted = (D_global × (1 - w_model)) + (D_model × w_model)
+  - Result in ± range: [D_adjusted × 0.85, D_adjusted × 1.15]
+
+- **React Components**:
+  - Show model in job details: "Prusa CORE One (0.4 nozzle)"
+  - Display model-specific accuracy: "91% accuracy for this model"
+  - Prediction breakdown: "Global: 45min, Model-specific: 42min → 42min ±7min"
+
+**Business Value**:
+- More accurate predictions for recurring printer models
+- Better scheduling accuracy
+- Confidence levels tied to data quality (more samples = higher confidence)
+
+**Files to Modify**:
+- `src/infra/Entities/PrintJob.cs` - Add PrinterModel, ActualDuration properties
+- `src/infra/Services/Estimation/EstimationService.cs` - Add model-specific logic
+- `src/infra/Repositories/PrintQueue/PrintJobRepository.cs` - Add model statistics queries
+- `src/api/DTOs/Estimation/EstimationResultDto.cs` - Include model info in response
+- `src/Web/ReactApp/src/features/queue/components/JobDetailsModal.tsx` - Display model and confidence
+- Database migration for new columns
+
+**Timeline**: 2-3 days
+
+---
+
+## Phase 4.5: Implementation Plan
+
+**Overall Status**: 🔄 KICKOFF (Ready for implementation)
+
+**Estimated Total Duration**: 16-19 days (~3-4 weeks)
+
+**Resource Requirements**:
+- Backend Developer: Full-time (16 days)
+- Frontend Developer: Part-time weeks 2-4 (10 days)  
+- QA/Testing: Part-time throughout (5 days)
+- Database Admin: 1-2 days (migrations)
+
+### Implementation Schedule
+
+**Week 1: Foundation & Database Setup (Days 1-5)**
+
+**Days 1-2: Database Migrations**
+- Create EF Core migration for JobStateHistory table (Phase 4.5.2)
+- Create migration for NotificationPreference and NotificationHistory tables (Phase 4.5.3)
+- Add columns to PrintJobs: ScheduledStartTime, PrinterModel, ActualDuration
+- Create performance indexes: (JobId, ChangedAt), (UserId, PrinterId), (PrinterModel, Status)
+- Seed default notification preferences for existing users
+- Verify migrations work with all supported database providers
+- **Deliverable**: Clean migrations, no rollback issues
+
+**Days 3-4: Job State History Service**
+- Implement IJobStateHistoryService interface and JobStateHistoryService class
+- Create JobStateHistoryRepository with LINQ queries
+- Implement RecordStateChangeAsync() and GetHistoryAsync()
+- Implement GetTimelineDataAsync(start, end, filters)
+- Add state change recording to PrintQueueService at transitions
+- Write 20+ unit tests for state history service
+- **Deliverable**: State changes automatically recorded and queryable
+
+**Day 5: Job History Seeding (Phase 4.5.1)**
+- Implement SeedHistoryFromPrintersAsync() in PrintQueueService (line 696)
+- Implement GetHistoryListAsync(printerId) in PrintersService
+- Create deduplication logic by (PrinterId, StartTime)
+- Implement API endpoints: POST /api/printers/history/seed (all and per-printer)
+- Create SeedHistoryRequestDto and SeedHistoryResponseDto
+- Implement audit logging of imported jobs
+- Write 8+ integration tests
+- **Deliverable**: Job history seeding fully functional with error handling
+
+**Week 2: API Endpoints & Services (Days 6-16)**
+
+**Days 6-7: Notification Preferences System (Phase 4.5.3)**
+- Create NotificationPreferencesRepository with full CRUD queries
+- Implement NotificationPreferencesService
+- Create NotificationHistoryRepository and service methods
+- Implement 7 API endpoints for notification management
+- Integrate preference checking in NotificationService before sending
+- Create DTOs: NotificationPreferenceDto, NotificationHistoryDto
+- Write 15+ unit tests and 8+ integration tests
+- **Deliverable**: Complete notification preference system
+
+**Days 8-9: Timeline Data & Analytics (Phase 4.5.2)**
+- Create TimelineService with GetTimelineDataAsync(), GetJobStateHistoryAsync(), GetPredictionAccuracyAsync()
+- Implement 3 API endpoints: timeline query, job history, prediction accuracy
+- Create DTOs: JobStateHistoryDto, TimelineDataDto, PredictionAccuracyDto
+- Write 12+ unit tests and 6+ integration tests
+- **Deliverable**: Timeline data queryable and analytics available
+
+**Days 10-11: Tag Management Enhancements (Phase 4.5.4)**
+- Enhance TagService with GetTagsWithUsageAsync(), GetSuggestionsAsync(), MergeTagsAsync()
+- Add DeleteUnusedTagsAsync(), ExportTagsAsync(), ImportTagsAsync()
+- Create 7 API endpoints for tag management and operations
+- Create TagUsageDto and TagSuggestionDto
+- Write 14+ unit tests
+- **Deliverable**: Advanced tag management system complete
+
+**Days 12-13: SDCP File Operations (Phase 4.5.5)**
+- Implement SdcpClient methods: ListFilesAsync(), UploadFileAsync(), DeleteFileAsync(), GetFileInfoAsync()
+- Create SdcpFileInfoDto class
+- Create exception types: SdcpConnectionException, SdcpProtocolException, SdcpFileNotFoundException
+- Implement timeout handling (5-second socket timeout)
+- Write 16+ unit tests with mocked UDP
+- **Deliverable**: SDCP file operations fully functional
+
+**Days 14-16: Predictive Estimates Refinement (Phase 4.5.6)**
+- Update migrations to add PrinterModel and ActualDuration to PrintJobs
+- Enhance EstimationService with model-specific logic
+- Implement PredictDurationAsync(), GetModelStatsAsync(), DetectPrinterModelAsync()
+- Implement weight-based calculation: (global_avg × global_weight) + (model_avg × model_weight)
+- Update API response DTOs with model info and confidence
+- Create ModelEstimationStatsDto
+- Write 12+ unit tests and 8+ integration tests
+- **Deliverable**: Model-aware estimation system functional
+
+**Week 3: React Frontend Implementation (Days 17-22)**
+
+**Days 17-18: Timeline & Job History (Phase 4.5.2)**
+- Create 5 React components: JobTimelineTab, JobTimelineChart, JobStateHistoryPanel, DurationComparisonChart, PredictionAccuracyPanel
+- Integrate into PrintQueueDashboardPage
+- Wire up API calls to timeline endpoints
+- Add date range picker for timeline filtering
+- Write 12+ component tests
+- **Deliverable**: Timeline visualization fully functional and integrated
+
+**Days 19-20: Notifications & Tags (Phase 4.5.3, 4.5.4)**
+- Create 10 React components: NotificationPreferencesPage, GlobalPreferencesPanel, PrinterPreferencesPanel, NotificationHistoryPanel, MuteNotificationsDialog, TagFilterPanel, TagAutocompleteInput, TagManagementPage, TagUsageChart, TagMergeDialog
+- Create 2 new pages: NotificationPreferencesPage, TagManagementPage
+- Write 16+ component tests
+- **Deliverable**: Notification preferences and tag management UI complete
+
+**Days 21-22: Job Details & Model Info (Phase 4.5.6)**
+- Update JobDetailsModal to display printer model, prediction confidence, state history
+- Add model autocomplete in job creation
+- Display actual vs predicted duration in history
+- Show per-model statistics on model filter tab
+- Write 8+ component tests
+- **Deliverable**: Job details enhanced with model information
+
+**Week 4: Integration, Testing & Deployment (Days 23-26)**
+
+**Days 23-24: Integration & Testing**
+- Full end-to-end testing of all Phase 4.5 features
+- Test all 28+ API endpoints with various inputs
+- Test React components on different screen sizes (responsive)
+- Test database operations with all 4 providers
+- Performance testing: 1000+ jobs, 3+ months data, 100+ tags
+- Accessibility testing (WCAG 2.2 AA compliance)
+- Load testing: 100+ jobs completing simultaneously
+- **Deliverable**: All tests passing, no regressions
+
+**Days 25-26: Documentation & Release**
+- Update API documentation with 28+ new endpoints
+- Update README and database schema documentation
+- Create upgrade guide for current deployments
+- Update PRINT_QUEUE_REDESIGN_PLAN.md with completion notes
+- Tag release version (v4.5.0) in Git
+- Prepare release notes
+- **Deliverable**: Complete documentation and release ready
+
+### Success Criteria
+
+**Code Quality**:
+- ✅ 0 compiler errors, 0 ESLint errors
+- ✅ Code coverage ≥80% for new code
+- ✅ All tests passing (.NET 1700+, React 380+)
+- ✅ Follows project conventions
+
+**Functionality**:
+- ✅ All 6 sub-phases (4.5.1-4.5.6) fully implemented
+- ✅ All 28+ new API endpoints operational
+- ✅ All 13+ new React components working
+- ✅ Database migrations successful on all providers
+- ✅ No breaking changes
+
+**Performance**:
+- ✅ Job seeding: <5 seconds per 100 jobs
+- ✅ Timeline queries: <1 second per 1000 jobs
+- ✅ Tag suggestions: <500ms autocomplete
+- ✅ Notification sending: <100ms per notification
+
+---
+
+## Phase 5: Load Balancing Across Printers (DEFERRED)
+
+**Status**: 🔄 DEFERRED (Post-Phase 4.5, ~2 weeks)
+
+**Objectives**:
+- Distribute print jobs across available printers based on capacity, speed, and reliability
+- Enable auto-assignment of jobs to optimal printer
+
+**Features**:
+- Multi-factor scoring: queue depth, printer speed, failure rate, specialization
+- Auto-assignment strategy: first-available, best-fit, round-robin
+- Printer capabilities/specialization (e.g., "high-speed", "fine-detail")
+- Load balancing dashboard showing printer utilization
+- Configurable load balancing policies
+
+**Timeline**: 2-3 weeks
+
+---
+
+## Phase 6: Auto-Enqueue from File Uploads (DEFERRED)
+
+**Status**: 🔄 DEFERRED (Post-Phase 5, TBD)
 
 **Objectives**:
 - Auto-queueing from file uploads without user interaction
@@ -1255,7 +1827,7 @@ POST   /api/printQueue/jobs/bulk-cancel         - Cancel multiple jobs
 - Default material/priority assignment
 - Load-balanced printer selection
 
-**Timeline**: TBD (Post-Phase 4, ~1-2 weeks)
+**Timeline**: TBD (Post-Phase 5, ~1-2 weeks)
 
 ---
 
