@@ -15,29 +15,7 @@ import { Button, Input, Select, FormField, Alert, Checkbox, Modal } from '@/comm
 import { TableSkeleton } from '@/common/components/skeletons/TableSkeleton';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-
-interface User {
-  id: string;
-  username: string;
-  email: string;
-  firstName?: string;
-  lastName?: string;
-  isActive: boolean;
-  emailConfirmed: boolean;
-  lastLogin?: string;
-  createdAt: string;
-  roles: string[];
-  permissions: string[];
-}
-
-interface Role {
-  id: string;
-  name: string;
-  displayName: string;
-  description?: string;
-  isSystemRole: boolean;
-  isActive: boolean;
-}
+import type { User, Role } from '@/types/admin';
 
 export function UserManagementPage() {
   const { hasRole } = useAuth();

@@ -6,21 +6,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Input, FormField, Alert, Tabs } from '@/common/components/ui';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
-
-interface TagOption {
-    id: string;
-    name: string;
-    color?: string;
-    description?: string;
-    usageCount?: number; // Number of models with this tag
-}
-
-interface EditingTag {
-    id: string;
-    name: string;
-    color?: string;
-    description?: string;
-}
+import type { TagOption, EditingTag } from '@/types/admin';
 
 export const TagAdminPage: React.FC = () => {
     const queryClient = useQueryClient();

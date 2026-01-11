@@ -6,32 +6,8 @@ import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { printQueueService } from "@/services/printQueueService";
-
-export interface HistoryJob {
-  id: string;
-  name: string;
-  printerName: string;
-  status: "completed" | "failed" | "cancelled";
-  completionPercentage: number;
-  startedAt: string;
-  completedAt: string | null;
-  durationSeconds: number;
-  failureReason?: string;
-}
-
-export interface HistoryStats {
-  totalCompleted: number;
-  totalFailed: number;
-  totalCancelled: number;
-  successRate: number;
-  averageDurationMinutes: number;
-  failureReasons: { [key: string]: number };
-}
-
-interface QueueHistoryTabProps {
-  onRerun?: (jobId: string) => Promise<void>;
-  onViewDetails?: (jobId: string) => void;
-}
+import type { HistoryJob } from "@/types/queue";
+import type { QueueHistoryTabProps } from "@/types/components";
 
 /**
  * QueueHistoryTab Component

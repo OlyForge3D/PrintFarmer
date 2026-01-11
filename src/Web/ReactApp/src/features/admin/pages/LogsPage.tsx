@@ -2,21 +2,9 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { SystemLog, LogColumnKey } from '@/types/admin';
 
-interface SystemLog {
-  id: number;
-  timestamp: string;
-  level: string;
-  message: string;
-  exception?: string;
-  source?: string;
-  correlationId?: string;
-  metadata?: string;
-}
-
-type ColumnKey = 'timestamp' | 'level' | 'message' | 'correlationId' | 'source' | 'metadata' | 'exception';
-
-const DEFAULT_COLUMNS: Record<ColumnKey, { label: string; default: boolean }> = {
+const DEFAULT_COLUMNS: Record<LogColumnKey, { label: string; default: boolean }> = {
   timestamp: { label: 'Timestamp', default: true },
   level: { label: 'Level', default: true },
   message: { label: 'Message', default: true },
@@ -33,7 +21,7 @@ export function LogsPage() {
   const [loading, setLoading] = useState(false);
   const [useAdvancedQuery, setUseAdvancedQuery] = useState(false);
   const [queryString, setQueryString] = useState("");
-  const [visibleColumns, setVisibleColumns] = useState<Record<ColumnKey, boolean>>(() => {
+  const [visibleColumns, setVisibleColumns] = useState<Record<LogColumnKey, boolean>>(() => {
     const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
     if (saved) {
       try {
@@ -41,12 +29,12 @@ export function LogsPage() {
       } catch {
         return Object.fromEntries(
           Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
-        ) as Record<ColumnKey, boolean>;
+        ) as Record<LogColumnKey, boolean>;
       }
     }
     return Object.fromEntries(
       Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
-    ) as Record<ColumnKey, boolean>;
+    ) as Record<LogColumnKey, boolean>;
   });
   const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
   const [filters, setFilters] = useState({
@@ -62,14 +50,14 @@ export function LogsPage() {
     localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns));
   }, [visibleColumns]);
 
-  const toggleColumn = (column: ColumnKey) => {
+  const toggleColumn = (column: LogColumnKey) => {
     setVisibleColumns(prev => ({ ...prev, [column]: !prev[column] }));
   };
 
   const resetColumns = () => {
     const defaults = Object.fromEntries(
       Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
-    ) as Record<ColumnKey, boolean>;
+    ) as Record<LogColumnKey, boolean>;
     setVisibleColumns(defaults);
   };
 
@@ -209,8 +197,8 @@ export function LogsPage() {
           {Object.entries(DEFAULT_COLUMNS).map(([key, { label }]) => (
             <label key={key} className="flex items-center gap-2 cursor-pointer">
               <Checkbox
-                checked={visibleColumns[key as ColumnKey]}
-                onChange={() => toggleColumn(key as ColumnKey)}
+                checked={visibleColumns[key as LogColumnKey]}
+                onChange={() => toggleColumn(key as LogColumnKey)}
               />
               <span className="text-sm text-pf-text-secondary">{label}</span>
             </label>

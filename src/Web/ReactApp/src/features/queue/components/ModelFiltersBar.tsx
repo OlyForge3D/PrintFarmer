@@ -1,20 +1,8 @@
 import { Button } from "@/common/components/ui/Button";
 import { Select } from "@/common/components/ui/Select";
 import { ChangeEvent } from "react";
-
-type JobStatus = "queued" | "printing" | "paused" | "completed" | "failed";
-
-interface ModelFiltersBarProps {
-  models: string[];
-  selectedModel: string | null;
-  onModelChange: (model: string | null) => void;
-  selectedStatuses: JobStatus[];
-  onStatusChange: (statuses: JobStatus[]) => void;
-  sortBy: "name" | "queue" | "waitTime" | "printing";
-  onSortChange: (sort: "name" | "queue" | "waitTime" | "printing") => void;
-  onRefresh: () => void;
-  isLoading: boolean;
-}
+import type { JobStatus } from "@/types/queue";
+import type { ModelFiltersBarProps } from "@/types/components";
 
 /**
  * ModelFiltersBar Component

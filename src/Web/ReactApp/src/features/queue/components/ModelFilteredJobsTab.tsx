@@ -5,28 +5,8 @@ import { Alert } from "@/common/components/ui/Alert";
 import ModelFiltersBar from "./ModelFiltersBar";
 import ModelStatisticsPanel from "./ModelStatisticsPanel";
 import ModelJobsCard from "./ModelJobsCard";
-
-type JobStatus = "queued" | "printing" | "paused" | "completed" | "failed";
-
-/**
- * Statistics calculated for a single printer model
- */
-export interface ModelStats {
-  name: string;
-  queuedCount: number;
-  printingCount: number;
-  pausedCount: number;
-  totalCount: number;
-  averageWaitTimeMinutes: number;
-  jobs: QueueJob[];
-}
-
-interface ModelFilteredJobsTabProps {
-  onViewAllJobs?: (modelName: string) => void;
-  onJobAction?: (jobId: string, action: JobAction) => Promise<void>;
-}
-
-export type JobAction = "pause" | "resume" | "cancel" | "priority";
+import type { JobStatus, JobAction, ModelStats } from "@/types/queue";
+import type { ModelFilteredJobsTabProps } from "@/types/components";
 
 /**
  * ModelFilteredJobsTab Component

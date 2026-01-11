@@ -549,6 +549,39 @@ export function PrinterCard({ printer, isSelected, onSelect }: PrinterCardProps)
 - Hook names start with `use` (e.g., `usePrinter`)
 - Keep hooks focused on single concern
 
+### TypeScript Type Organization
+
+All TypeScript types are organized in feature-based files in `src/types/`:
+
+| File | Purpose | Key Types |
+|------|---------|-----------|
+| `api.ts` | Backend API DTOs | Printer, GcodeFile, QueueJob, PrinterBackend |
+| `models.ts` | 3D model management | Model, ModelTag, ModelListItem |
+| `queue.ts` | Print queue management | JobStatus, JobAction, HistoryJob, ModelStats |
+| `gcode.ts` | G-code file management | GCodeFile, FileEntry, HarvestDiscoveredFile |
+| `slicer.ts` | Slicer configuration | MaterialType, SlicerSettingsDto, MaterialPreset |
+| `admin.ts` | Admin interface | User, Role, SystemLog, TagOption |
+| `components.ts` | Component props | 77+ component prop interfaces |
+
+**Import patterns:**
+```tsx
+// Feature types
+import type { Model, ModelTag } from '@/types/models';
+import type { JobStatus, HistoryJob } from '@/types/queue';
+
+// Component props
+import type { ModelGridViewProps } from '@/types/components';
+
+// API types
+import type { Printer, GcodeFile } from '@/types/api';
+```
+
+**Guidelines:**
+- Add new types to the appropriate feature file
+- Use named exports for all types
+- Add JSDoc comments explaining the purpose
+- Avoid circular imports between type files
+
 ## Testing Components
 
 ```tsx

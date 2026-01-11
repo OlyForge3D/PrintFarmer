@@ -3,30 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { CubeIcon, EyeIcon, TagIcon, FileIcon, LayersTripleOutlineIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
-
-export type Model = {
-  id: string;
-  name: string;
-  fileName: string;
-  fileSize: number;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
-  uploadedAt: string;
-  url?: string;
-  thumbnailPath?: string;
-  tags?: Array<{
-    id: string;
-    name: string;
-    color?: string;
-  }>;
-};
-
-interface ModelListViewProps {
-  models: Model[];
-  isLoading: boolean;
-  onViewerModel: (model: Model) => void;
-  onTagModel: (model: Model) => void;
-  formatFileSize: (bytes: number) => string;
-}
+import type { Model } from '@/types/models';
+import type { ModelListViewProps } from '@/types/components';
 
 export const ModelListView: React.FC<ModelListViewProps> = ({
   models,

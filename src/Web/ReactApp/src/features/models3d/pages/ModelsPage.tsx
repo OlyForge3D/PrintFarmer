@@ -25,32 +25,8 @@ const GCodeViewer = lazyWithPreload<GCodeViewerProps, React.FC<GCodeViewerProps>
 // Slicing now redirects to NewSliceJobPage for better UX with 3D preview
 // const SlicerConfigModal = lazyWithPreload<{...}>(...)
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
-type Model = {
-  id: string;
-  name: string;
-  fileName: string;
-  fileSize: number;
-  fileType: 'stl' | '3mf' | 'obj' | 'ply';
-  uploadedAt: string;
-  url?: string;
-  thumbnailPath?: string;
-  tags?: Array<{
-    id: string;
-    name: string;
-    color?: string;
-  }>;
-};
-
-type ModelTag = { id: string; name: string; color?: string; description?: string };
-
-interface GCodeFile {
-  id: string;
-  name: string;
-  url: string;
-  printTime?: number;
-  filamentUsed?: number;
-  layerCount?: number;
-}
+import type { Model, ModelTag } from '@/types/models';
+import type { GCodeFile } from '@/types/gcode';
 
 export const ModelsPage: React.FC = () => {
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-models-viewmode');
