@@ -1194,23 +1194,51 @@ POST   /api/printQueue/jobs/bulk-cancel         - Cancel multiple jobs
 
 ---
 
-## Phase 4: Automation & Intelligence (Future)
+## Phase 4: Automation & Intelligence (Current)
+
+**Status**: 🔄 KICKOFF (January 11, 2026)
 
 **Objectives**:
-- Auto-queueing from file uploads
 - Smart scheduling
 - Predictive estimates
 - Notification system
+- Smart retry mechanism
+- Load-balancing across printers
+
+**Features**:
+- Schedule jobs for specific times with timezone support
+- Predict completion time per job (±15% accuracy)
+- Notify on completion/failure (email/push)
+- Smart retry on failed jobs with exponential backoff
+- Load-balancing across printers based on queue depth
+
+**Note**: Auto-enqueue from file uploads has been **deferred to Phase 5 (Future)**.
+
+**Timeline**: 2-3 weeks
+
+**Current Phase Order**:
+- Phase 4.1: Job Scheduling
+- Phase 4.2: Predictive Completion Estimates  
+- Phase 4.3: Notification System
+- Phase 4.4: Smart Retry & Error Handling
+- Phase 4.5: Load Balancing Across Printers
+
+---
+
+## Phase 5: Auto-Enqueue from File Uploads (Deferred/Future)
+
+**Status**: 📋 Planned (Post-Phase 4)
+
+**Objectives**:
+- Auto-queueing from file uploads without user interaction
 
 **Features**:
 - Auto-enqueue uploaded files (skip modal)
-- Schedule jobs for specific times
-- Predict completion time per job
-- Notify on completion/failure
-- Smart retry on failed jobs
-- Load-balancing across printers
+- Global and per-printer auto-enqueue settings
+- Default material/priority assignment
+- Load-balanced printer selection
 
-**Timeline**: 3-4 weeks
+**Timeline**: TBD (Post-Phase 4, ~1-2 weeks)
 
 ---
 
