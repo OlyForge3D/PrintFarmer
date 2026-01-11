@@ -1,6 +1,6 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure;
+using Farm.Web.Api.DTOs.Auth;
 
 namespace Farm.Web.Api.Services.PasswordPolicy;
 

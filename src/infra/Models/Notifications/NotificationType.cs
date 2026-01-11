@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain.Notifications;
+﻿namespace Farm.Infrastructure.Domain.Notifications;
 
 public enum NotificationType
 {

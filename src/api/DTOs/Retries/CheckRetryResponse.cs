@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.DTOs.Retries;
+﻿namespace Farm.Web.Api.DTOs.Retries;
 
 /// <summary>
 /// Response indicating whether a job should be automatically retried.

@@ -1229,7 +1229,9 @@ public class RetryPolicy
     public int GetDelaySeconds(int attemptNumber)
     {
         if (attemptNumber < 1)
+        {
             return 0;
+        }
 
         var delaySeconds = (int)Math.Min(
             InitialDelaySeconds * Math.Pow(ExponentialBase, attemptNumber - 1),

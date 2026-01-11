@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.DTOs.Retries;
+﻿namespace Farm.Web.Api.DTOs.Retries;
 
 /// <summary>
 /// Represents a single job retry attempt record.

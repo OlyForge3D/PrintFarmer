@@ -1,4 +1,4 @@
-using Farm.Api.Services.Interfaces;
+﻿using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Web.Api.DTOs.Retries;
@@ -81,19 +81,27 @@ public class RetriesController : ControllerBase
         {
             // Validation
             if (request.MaxRetries < 0 || request.MaxRetries > 10)
+            {
                 return BadRequest("MaxRetries must be between 0 and 10");
+            }
 
             if (request.InitialDelaySeconds < 1 || request.InitialDelaySeconds > 3600)
+            {
                 return BadRequest("InitialDelaySeconds must be between 1 and 3600");
+            }
 
             if (request.ExponentialBase < 1.0 || request.ExponentialBase > 5.0)
+            {
                 return BadRequest("ExponentialBase must be between 1.0 and 5.0");
+            }
 
             if (request.MaxDelaySeconds < request.InitialDelaySeconds)
+            {
                 return BadRequest("MaxDelaySeconds must be >= InitialDelaySeconds");
+            }
 
             var currentPolicy = await _retryService.GetRetryPolicyAsync(cancellationToken);
-            
+
             currentPolicy.IsEnabled = request.IsEnabled;
             currentPolicy.MaxRetries = request.MaxRetries;
             currentPolicy.InitialDelaySeconds = request.InitialDelaySeconds;
@@ -140,7 +148,9 @@ public class RetriesController : ControllerBase
             // Verify job exists
             var job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
             if (job is null)
+            {
                 return NotFound($"Job {jobId} not found");
+            }
 
             var retries = await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
             var dtos = retries.Select(r => MapToDto(r)).ToList();
@@ -172,7 +182,9 @@ public class RetriesController : ControllerBase
         {
             var retry = await _retryService.GetRetryAsync(retryId, cancellationToken);
             if (retry is null)
+            {
                 return NotFound($"Retry {retryId} not found");
+            }
 
             return Ok(MapToDto(retry));
         }
@@ -231,11 +243,15 @@ public class RetriesController : ControllerBase
             // Verify job exists
             var job = await _printQueueService.GetJobByIdAsync(jobId.ToString(), cancellationToken);
             if (job is null)
+            {
                 return NotFound($"Job {jobId} not found");
+            }
 
             // Validate error category
             if (!Enum.TryParse<ErrorCategory>(request.ErrorCategory, out var category))
+            {
                 return BadRequest($"Invalid error category: {request.ErrorCategory}");
+            }
 
             var shouldRetry = await _retryService.ShouldRetryAsync(jobId, category, cancellationToken);
 
