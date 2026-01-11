@@ -614,6 +614,9 @@ public class PrintJob
 
     // Phase 3C: Timeline tracking
     public ICollection<JobStateHistory> StateHistory { get; } = new List<JobStateHistory>();
+
+    // Phase 4.1: Job Scheduling (one-to-one relationship)
+    public JobSchedule? Schedule { get; set; }
 }
 
 /// <summary>
@@ -1031,4 +1034,103 @@ public enum GcodeHarvestQueueItemStatus
     Completed = 2,    // Successfully completed
     Failed = 3,       // Failed during processing
     Cancelled = 4     // Cancelled by user
+}
+
+/// <summary>
+/// Phase 4.1: Job Scheduling
+/// Represents scheduling configuration for a print job.
+/// Separate table to keep PrintJob clean (only for scheduled jobs, not on-demand).
+/// One-to-one relationship with PrintJob.
+/// </summary>
+public class JobSchedule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>
+    /// Foreign key to PrintJob
+    /// </summary>
+    public Guid PrintJobId { get; set; }
+    public PrintJob PrintJob { get; set; } = null!;
+
+    /// <summary>
+    /// Scheduled start time in UTC
+    /// </summary>
+    public DateTime ScheduledStartTime { get; set; }
+
+    /// <summary>
+    /// Timezone for display/input (e.g., "America/New_York", "UTC")
+    /// </summary>
+    public string TimeZone { get; set; } = "UTC";
+
+    /// <summary>
+    /// Recurrence pattern if job should repeat (null = one-time)
+    /// Values: "Daily", "Weekly", "Monthly", null
+    /// </summary>
+    public string? RecurrencePattern { get; set; }
+
+    /// <summary>
+    /// When recurrence should end (null = indefinite for recurring jobs)
+    /// </summary>
+    public DateTime? RecurrenceEndDate { get; set; }
+
+    /// <summary>
+    /// Is this scheduled job currently active
+    /// </summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Is this scheduled job paused (can be resumed)
+    /// </summary>
+    public bool IsPaused { get; set; } = false;
+
+    /// <summary>
+    /// When the job was originally scheduled
+    /// </summary>
+    public DateTime ScheduledAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Navigation property to execution history (for recurring jobs)
+    /// </summary>
+    public ICollection<JobExecution> Executions { get; set; } = new List<JobExecution>();
+}
+
+/// <summary>
+/// Phase 4.1: Job Execution Tracking
+/// Tracks execution history for scheduled jobs (especially recurring ones)
+/// </summary>
+public class JobExecution
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>
+    /// Foreign key to JobSchedule
+    /// </summary>
+    public Guid JobScheduleId { get; set; }
+    public JobSchedule JobSchedule { get; set; } = null!;
+
+    /// <summary>
+    /// When this execution was scheduled to run
+    /// </summary>
+    public DateTime ScheduledExecutionTime { get; set; }
+
+    /// <summary>
+    /// When this execution actually started (null if not started yet)
+    /// </summary>
+    public DateTime? ActualStartTime { get; set; }
+
+    /// <summary>
+    /// Execution status: Pending, Running, Completed, Failed, Cancelled
+    /// </summary>
+    public string Status { get; set; } = "Pending";
+
+    /// <summary>
+    /// Result message or error details
+    /// </summary>
+    public string? Message { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

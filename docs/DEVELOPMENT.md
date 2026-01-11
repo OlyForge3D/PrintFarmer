@@ -601,6 +601,14 @@ kill -9 <PID>
 
 ## Resources
 
+### PrintFarmer Documentation
+
+- **[UI & Styling Index](./UI_STYLING_INDEX.md)** - Quick reference to UI component guidelines and controls
+  - [CONTROLS_GUIDE.md](./CONTROLS_GUIDE.md) - Complete reference for buttons, forms, alerts, tables, modals, and more
+  - Located in: `src/Web/ReactApp/src/styles/controls.css` (1,401 lines of centralized control styles)
+
+### External Resources
+
 - [ASP.NET Core Docs](https://docs.microsoft.com/aspnet/)
 - [React Docs](https://react.dev)
 - [TypeScript Handbook](https://www.typescriptlang.org/docs/)

@@ -25,6 +25,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
     public DbSet<JobStateHistory> JobStateHistories => Set<JobStateHistory>();
+    public DbSet<JobSchedule> JobSchedules => Set<JobSchedule>();
+    public DbSet<JobExecution> JobExecutions => Set<JobExecution>();
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
@@ -426,6 +428,45 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // Indexes
             _ = b.HasIndex(h => h.JobId);
             _ = b.HasIndex(h => h.TransitionedAtUtc).IsDescending();
+        });
+
+        // JobSchedule Entity Configuration (Phase 4.1)
+        _ = modelBuilder.Entity<JobSchedule>(b =>
+        {
+            _ = b.HasKey(js => js.Id);
+            _ = b.Property(js => js.TimeZone).IsRequired().HasDefaultValue("UTC");
+            _ = b.Property(js => js.IsActive).HasDefaultValue(true);
+            _ = b.Property(js => js.IsPaused).HasDefaultValue(false);
+
+            // Foreign Key - one-to-one relationship with PrintJob
+            _ = b.HasOne(js => js.PrintJob)
+                .WithOne(j => j.Schedule)
+                .HasForeignKey<JobSchedule>(js => js.PrintJobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for querying
+            _ = b.HasIndex(js => js.ScheduledStartTime);
+            _ = b.HasIndex(js => js.IsActive);
+            _ = b.HasIndex(js => new { js.IsActive, js.IsPaused });
+        });
+
+        // JobExecution Entity Configuration (Phase 4.1)
+        _ = modelBuilder.Entity<JobExecution>(b =>
+        {
+            _ = b.HasKey(je => je.Id);
+            _ = b.Property(je => je.Status).IsRequired().HasMaxLength(50);
+            _ = b.Property(je => je.Message).HasMaxLength(500);
+
+            // Foreign Key
+            _ = b.HasOne(je => je.JobSchedule)
+                .WithMany(js => js.Executions)
+                .HasForeignKey(je => je.JobScheduleId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes for querying execution history
+            _ = b.HasIndex(je => new { je.JobScheduleId, je.ScheduledExecutionTime });
+            _ = b.HasIndex(je => je.Status);
+            _ = b.HasIndex(je => je.ScheduledExecutionTime);
         });
 
         // Printer Capabilities Entity Configuration - REMOVED (merged into Printer entity)
