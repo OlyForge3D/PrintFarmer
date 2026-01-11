@@ -1047,7 +1047,6 @@ public class CreateGcodeFileDto
     public Guid? PrinterModelId { get; set; }
     public string? SlicerName { get; set; }
     public string? SlicerVersion { get; set; }
-    public string? SlicerSettings { get; set; }
 }
 
 /// <summary>

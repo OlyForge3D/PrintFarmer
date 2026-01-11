@@ -52,11 +52,23 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
-        // Create test files
+        // Create gcode folder
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = "/",
+            FolderType = "gcode"
+        };
+        context.Folders.Add(folder);
+        await context.SaveChangesAsync();
+
+        // Create test files with FolderId
         var file1 = new GcodeFile
         {
             Id = Guid.NewGuid(),
+            Name = "File 1",
             FileName = "File 1",
+            FolderId = folder.Id,
             FilePath = "/gcodes/file1.gcode",
             FileSizeBytes = 1024,
             FileHash = "hash1",
@@ -65,7 +77,9 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var file2 = new GcodeFile
         {
             Id = Guid.NewGuid(),
+            Name = "File 2",
             FileName = "File 2",
+            FolderId = folder.Id,
             FilePath = "/gcodes/file2.gcode",
             FileSizeBytes = 2048,
             FileHash = "hash2",
@@ -90,11 +104,23 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
+        // Create gcode folder
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = "/",
+            FolderType = "gcode"
+        };
+        context.Folders.Add(folder);
+        await context.SaveChangesAsync();
+
         var uniqueId = Guid.NewGuid().ToString().Substring(0, 8);
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
+            Name = "Benchmark Test.gcode",
             FileName = "Benchmark Test.gcode",  // Include extension
+            FolderId = folder.Id,
             FilePath = $"/gcodes/benchmark-{uniqueId}.gcode",
             FileSizeBytes = 1024,
             FileHash = $"hash-{uniqueId}",
@@ -119,10 +145,22 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
+        // Create gcode folder
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = "/",
+            FolderType = "gcode"
+        };
+        context.Folders.Add(folder);
+        await context.SaveChangesAsync();
+
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
+            Name = "PLA Test",
             FileName = "PLA Test.gcode",  // Include extension
+            FolderId = folder.Id,
             FilePath = "/gcodes/pla-test.gcode",
             FileSizeBytes = 1024,
             FileHash = "pla-hash",
@@ -148,10 +186,22 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<IGcodeFilesService>();
 
+        // Create gcode folder
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = "/",
+            FolderType = "gcode"
+        };
+        context.Folders.Add(folder);
+        await context.SaveChangesAsync();
+
         var file = new GcodeFile
         {
             Id = Guid.NewGuid(),
+            Name = "0.4mm Nozzle",
             FileName = "0.4mm Nozzle.gcode",  // Include extension
+            FolderId = folder.Id,
             FilePath = "/gcodes/nozzle-04.gcode",
             FileSizeBytes = 1024,
             FileHash = "nozzle-hash",
@@ -338,3 +388,4 @@ public class GcodeLibraryServiceIntegrationTests : IAsyncLifetime
 
     #endregion
 }
+

@@ -44,10 +44,22 @@ public class TagServiceIntegrationTests : IAsyncLifetime
         using var scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        // Create models folder
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = "/",
+            FolderType = "model3d"
+        };
+        context.Folders.Add(folder);
+        await context.SaveChangesAsync();
+
         var model = new Model3D
         {
             Id = Guid.NewGuid(),
+            Name = fileName,
             FileName = fileName,
+            FolderId = folder.Id,
             FilePath = $"/models/{fileName}",
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),

@@ -1393,14 +1393,20 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
     }
 
     /// <summary>
-    /// Download a file
+    /// Download a file from Moonraker
     /// </summary>
+    /// <remarks>
+    /// Moonraker filenames come with "gcodes/" prefix (e.g., "gcodes/file.gcode").
+    /// The URL constructed is: /server/files/gcodes/...
+    /// </remarks>
     public async Task<byte[]?> DownloadFileAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
+        _logger.LogInformation($"[Moonraker] DownloadFileAsync starting: filename='{filename}', baseUrl='{baseUrl}'");
+
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(30)); // Allow more time for downloads
+            cts.CancelAfter(TimeSpan.FromSeconds(900)); // 15 minutes for large file downloads
 
             // Encode each path segment separately to preserve forward slashes
             // e.g., "folder/subfolder/file.gcode" -> "folder/subfolder/file.gcode" (only special chars encoded)
@@ -1409,16 +1415,41 @@ public class MoonrakerClient(HttpClient http, IUnifiedLoggingService logger) : P
 
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/files/gcodes/{encodedFilename}");
+            
+            _logger.LogDebug($"[Moonraker] Downloading file from URL: {uri}");
+            
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            
             if (!resp.IsSuccessStatusCode)
             {
+                _logger.LogWarning($"[Moonraker] Download failed: StatusCode={resp.StatusCode}, ReasonPhrase='{resp.ReasonPhrase}', URL='{uri}'");
                 return null;
             }
 
-            return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            byte[] content = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            
+            if (content == null || content.Length == 0)
+            {
+                _logger.LogWarning($"[Moonraker] Download returned empty content for file '{filename}'. StatusCode={resp.StatusCode}, ContentLength={resp.Content.Headers.ContentLength}, ContentType={resp.Content.Headers.ContentType}");
+                return null;
+            }
+
+            _logger.LogInformation($"[Moonraker] Successfully downloaded file '{filename}': {content.Length} bytes");
+            return content;
         }
-        catch
+        catch (OperationCanceledException ex)
         {
+            _logger.LogWarning(ex, $"[Moonraker] Download timeout for file '{filename}' after 30 seconds");
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, $"[Moonraker] HTTP error downloading file '{filename}': {ex.Message}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[Moonraker] Unexpected error downloading file '{filename}': {ex.GetType().Name}: {ex.Message}");
             return null;
         }
     }

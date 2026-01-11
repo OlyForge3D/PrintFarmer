@@ -1462,66 +1462,62 @@ namespace Farm.Web.Api.Services.Gcode
             ArgumentNullException.ThrowIfNull(file);
             ArgumentNullException.ThrowIfNull(metadata);
 
-            // Compute hash
-            string hash;
-            using (Stream stream = file.OpenReadStream())
-            using (SHA256 sha256 = SHA256.Create())
+            // Read file content for processing
+            byte[] fileContent;
+            using (MemoryStream ms = new())
             {
-                byte[] hashBytes = await sha256.ComputeHashAsync(stream, ct);
-                hash = Convert.ToHexString(hashBytes);
+                await file.CopyToAsync(ms, ct);
+                fileContent = ms.ToArray();
             }
 
-            // Check duplicate
-            GcodeFile? existing = await _gcodeRepo.FindByHashAsync(hash, ct);
-            if (existing is not null)
+            // Use ProcessAndStoreGcodeFileAsync for unified metadata extraction and storage
+            // This ensures all metadata is properly extracted from the file content and stored
+            try
             {
+                _logger.LogInformation($"[GcodeUpload] Processing uploaded file: {file.FileName}");
+                
+                // Use default folder (root) for uploads - can be organized later via file organization features
+                Guid defaultFolderId = Guid.Empty; // Represents library root/default folder
+                
+                GcodeFile gcodeFile = await ProcessAndStoreGcodeFileAsync(
+                    fileContent: fileContent,
+                    originalFileName: string.IsNullOrEmpty(metadata.FileName) ? file.FileName : metadata.FileName,
+                    folderId: defaultFolderId,
+                    ct: ct);
+
+                // Merge user-provided metadata with extracted metadata
+                if (!string.IsNullOrEmpty(metadata.Description))
+                {
+                    gcodeFile.Description = metadata.Description;
+                }
+                if (metadata.Tags != null && metadata.Tags.Any())
+                {
+                    gcodeFile.Tags = string.Join(',', metadata.Tags);
+                }
+                // User-provided printer model overrides extracted one
+                if (metadata.PrinterModelId.HasValue)
+                {
+                    gcodeFile.PrinterModelId = metadata.PrinterModelId.Value;
+                }
+
+                // Save merged metadata
+                await _gcodeRepo.SaveChangesAsync(ct);
+                
+                _logger.LogInformation($"[GcodeUpload] File successfully processed and stored: {gcodeFile.Id}");
+
+                GcodeFile? saved = await _gcodeRepo.GetByIdWithIncludesAsync(gcodeFile.Id, ct);
+                return MapToDto(saved!);
+            }
+            catch (DuplicateFileException)
+            {
+                _logger.LogWarning($"[GcodeUpload] Duplicate file detected: {file.FileName}");
                 throw new InvalidOperationException("duplicate");
             }
-
-            // Use StoragePathService to get the correct gcode storage directory
-            string libraryPath = _storagePathService.GetGcodeStorageDirectory();
-            string libraryRootFull = Path.GetFullPath(libraryPath);
-            _ = Directory.CreateDirectory(libraryRootFull);
-
-            // Save file
-            string fileName = $"{Guid.NewGuid()}.gcode";
-            string filePathFull = Path.GetFullPath(Path.Combine(libraryRootFull, fileName));
-            if (!filePathFull.StartsWith(libraryRootFull, StringComparison.Ordinal))
+            catch (Exception ex)
             {
-                throw new InvalidOperationException("Invalid file path");
+                _logger.LogError(ex, $"[GcodeUpload] Error processing uploaded file: {file.FileName} - {ex.GetType().Name}: {ex.Message}");
+                throw;
             }
-
-            await using (FileStream fs = System.IO.File.Create(filePathFull))
-            {
-                await file.CopyToAsync(fs, ct);
-            }
-
-            GcodeFile gcodeFile = new()
-            {
-                Id = Guid.NewGuid(),
-                FileName = string.IsNullOrEmpty(metadata.FileName) ? file.FileName : metadata.FileName,
-                FilePath = libraryRootFull, // Store directory path
-                FileSizeBytes = file.Length,
-                FileHash = hash,
-                UploadedAt = DateTime.UtcNow,
-                Source = GcodeSource.Upload,
-                Description = metadata.Description,
-                Tags = metadata.Tags != null ? string.Join(',', metadata.Tags) : null,
-                RequiredNozzleDiameter = metadata.RequiredNozzleDiameter,
-                RequiredMaterial = metadata.RequiredMaterial,
-                EstimatedPrintTimeMinutes = metadata.EstimatedPrintTimeMinutes,
-                EstimatedFilamentLengthMm = metadata.EstimatedFilamentLengthMm,
-                EstimatedFilamentWeightG = metadata.EstimatedFilamentWeightG,
-                PrinterModelId = metadata.PrinterModelId,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            await _gcodeRepo.AddAsync(gcodeFile, ct);
-            await _gcodeRepo.SaveChangesAsync(ct);
-
-            GcodeFile? saved = await _gcodeRepo.GetByIdWithIncludesAsync(gcodeFile.Id, ct);
-            return MapToDto(saved!);
         }
 
         /// <summary>
@@ -1808,8 +1804,16 @@ namespace Farm.Web.Api.Services.Gcode
             string fileExtension = Path.GetExtension(originalFileName);
             string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
             
-            await System.IO.File.WriteAllBytesAsync(finalFilePath, fileContent, ct);
-            _logger.LogInformation($"File stored at {finalFilePath}");
+            try
+            {
+                await System.IO.File.WriteAllBytesAsync(finalFilePath, fileContent, ct);
+                _logger.LogInformation($"[GcodeProcessing] File stored at {finalFilePath} ({fileContent.Length} bytes)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[GcodeProcessing] Failed to store file to disk: {originalFileName}");
+                throw new FileStorageException(originalFileName, $"Failed to write file to disk: {ex.Message}", ex);
+            }
 
             // Step 2: Calculate hash and check for duplicates
             string fileHash;
@@ -1825,12 +1829,12 @@ namespace Farm.Web.Api.Services.Gcode
             var existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
             if (existingFile != null && existingFile.Id != fileId)
             {
+                _logger.LogWarning($"[GcodeProcessing] Duplicate file detected: {originalFileName} matches existing file {existingFile.Id}");
                 // Clean up the file we just wrote
                 try { System.IO.File.Delete(finalFilePath); }
-                catch { /* Ignore cleanup errors */ }
+                catch (Exception ex) { _logger.LogWarning(ex, $"[GcodeProcessing] Failed to clean up duplicate file: {finalFilePath}"); }
                 
-                throw new InvalidOperationException(
-                    $"Duplicate file detected: {existingFile.Name} (hash: {fileHash.Substring(0, 8)}...)");
+                throw new DuplicateFileException(originalFileName, existingFile.Id.ToString(), fileHash);
             }
 
             // Step 3: Extract metadata
@@ -1838,12 +1842,14 @@ namespace Farm.Web.Api.Services.Gcode
             try
             {
                 string gcodeText = Encoding.UTF8.GetString(fileContent);
+                _logger.LogDebug($"[GcodeProcessing] Extracting metadata from {originalFileName} ({gcodeText.Length} chars)");
                 metadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
-                _logger.LogInformation("Metadata extracted successfully");
+                _logger.LogInformation($"[GcodeProcessing] Metadata extracted: printer={metadata?.PrinterModel}, material={metadata?.Material}, time={metadata?.EstimatedPrintTimeMinutes}m");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to extract metadata from G-code");
+                _logger.LogWarning(ex, $"[GcodeProcessing] Failed to extract metadata from {originalFileName}: {ex.GetType().Name}: {ex.Message}");
+                // Continue without metadata - it's not fatal
             }
 
             // Step 4: Process thumbnail (from URL first, then extraction)
@@ -1852,6 +1858,7 @@ namespace Farm.Web.Api.Services.Gcode
             {
                 if (!string.IsNullOrWhiteSpace(thumbnailUrl))
                 {
+                    _logger.LogDebug($"[GcodeProcessing] Attempting thumbnail download from URL: {thumbnailUrl}");
                     // Try to download from printer API URL
                     thumbnailPath = await ProcessThumbnailFromUrlAsync(thumbnailUrl, fileId.Value, storageDir, ct);
                 }
@@ -1859,17 +1866,23 @@ namespace Farm.Web.Api.Services.Gcode
                 // If no URL or URL download failed, try extracting from G-code
                 if (string.IsNullOrEmpty(thumbnailPath))
                 {
+                    _logger.LogDebug($"[GcodeProcessing] Attempting thumbnail extraction from G-code file");
                     thumbnailPath = await ExtractThumbnailAsync(finalFilePath, ct);
                 }
                 
                 if (!string.IsNullOrEmpty(thumbnailPath))
                 {
-                    _logger.LogInformation($"Thumbnail processed: {Path.GetFileName(thumbnailPath)}");
+                    _logger.LogInformation($"[GcodeProcessing] Thumbnail processed: {Path.GetFileName(thumbnailPath)}");
+                }
+                else
+                {
+                    _logger.LogDebug($"[GcodeProcessing] No thumbnail available for {originalFileName}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error processing thumbnail");
+                _logger.LogWarning(ex, $"[GcodeProcessing] Error processing thumbnail for {originalFileName}: {ex.GetType().Name}: {ex.Message}");
+                // Continue without thumbnail - it's not fatal
             }
 
             // Step 5: Create entity with all metadata
@@ -1891,10 +1904,22 @@ namespace Farm.Web.Api.Services.Gcode
                 resolvedPrinterModelId: printerModelId);
 
             // Step 6: Save to database
-            await _unitOfWork.GcodeFiles.AddAsync(gcodeFile, ct);
-            await _unitOfWork.SaveChangesAsync(ct);
+            try
+            {
+                _logger.LogDebug($"[GcodeProcessing] Persisting GcodeFile entity to database: {fileId}");
+                await _unitOfWork.GcodeFiles.AddAsync(gcodeFile, ct);
+                await _unitOfWork.SaveChangesAsync(ct);
+                _logger.LogInformation($"[GcodeProcessing] GcodeFile {fileId} saved to database successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[GcodeProcessing] Failed to persist GcodeFile to database: {originalFileName}");
+                // Clean up the stored file since database save failed
+                try { System.IO.File.Delete(finalFilePath); }
+                catch (Exception deleteEx) { _logger.LogWarning(deleteEx, $"[GcodeProcessing] Failed to clean up file after database error: {finalFilePath}"); }
+                throw new FilePersistenceException(originalFileName, $"Failed to save file to database: {ex.Message}", ex);
+            }
 
-            _logger.LogInformation($"GcodeFile {fileId} saved to database successfully");
             return gcodeFile;
         }
 

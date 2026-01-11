@@ -33,21 +33,22 @@ public class GcodeMetadataExtractorService : IGcodeMetadataExtractorService
             {
                 string[] allLines = gcodeContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
-                // Combine first 100 lines and last 600 lines for metadata extraction
-                // Most metadata is in the last 600 lines (CONFIG_BLOCK), but we need the first 100 for basic slicer info
+                // Combine first 200 lines and last 1000 lines for metadata extraction
+                // Most metadata (including embedded thumbnails) is in the last 1000 lines (CONFIG_BLOCK),
+                // but we need the first 200 for basic slicer info and comments
                 List<string> metadataLines = new List<string>();
                 
-                // Add first 100 lines
-                int firstLinesCount = Math.Min(100, allLines.Length);
+                // Add first 200 lines
+                int firstLinesCount = Math.Min(200, allLines.Length);
                 metadataLines.AddRange(allLines.Take(firstLinesCount));
                 _logger.LogInformation("ExtractMetadataAsync: Added {Count} lines from start", firstLinesCount.ToString());
 
-                // Add last 600 lines (if file is long enough)
-                if (allLines.Length > 600)
+                // Add last 1000 lines (if file is long enough)
+                if (allLines.Length > 1000)
                 {
-                    int startIndex = allLines.Length - 600;
-                    metadataLines.AddRange(allLines.Skip(startIndex).Take(600));
-                    _logger.LogInformation("ExtractMetadataAsync: Added 600 lines from end (starting at line {StartLine})", startIndex.ToString());
+                    int startIndex = allLines.Length - 1000;
+                    metadataLines.AddRange(allLines.Skip(startIndex).Take(1000));
+                    _logger.LogInformation("ExtractMetadataAsync: Added 1000 lines from end (starting at line {StartLine})", startIndex.ToString());
                 }
 
                 _logger.LogInformation("ExtractMetadataAsync: Processing {LineCount} lines total from {TotalLines} total", metadataLines.Count.ToString(), allLines.Length.ToString());

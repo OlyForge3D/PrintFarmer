@@ -252,13 +252,23 @@ namespace Farm.Infrastructure.Repositories.Gcode
 
             try
             {
-                // First, try exact match
+                // First, try exact match (case-insensitive)
                 var exactMatch = await _db.Models
                     .FirstOrDefaultAsync(m => m.Name != null && m.Name.Equals(extractedModelName, StringComparison.OrdinalIgnoreCase), ct);
                 
                 if (exactMatch != null)
                 {
                     return exactMatch.Id;
+                }
+
+                // Second, try partial/contains match (case-insensitive) if exact match fails
+                // This handles cases where metadata has "Prusa CORE One" but DB has "Prusa CORE One 0.4mm"
+                var partialMatch = await _db.Models
+                    .FirstOrDefaultAsync(m => m.Name != null && m.Name.Contains(extractedModelName, StringComparison.OrdinalIgnoreCase), ct);
+                
+                if (partialMatch != null)
+                {
+                    return partialMatch.Id;
                 }
 
                 return null;

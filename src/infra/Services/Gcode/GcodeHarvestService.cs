@@ -1496,12 +1496,43 @@ public class GcodeHarvestService(
                     thumbnailUrl: null,
                     ct: ct);
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Duplicate"))
+            catch (DuplicateFileException ex)
             {
+                _logger.LogWarning($"Duplicate file during harvest: {ex.FileName} - {ex.Message}");
                 return new GcodeHarvestResultDto(
                     Guid.NewGuid(),
                     false,
-                    ex.Message,
+                    $"Duplicate file: {ex.FileName}",
+                    0, 0,
+                    new[] { ex.Message });
+            }
+            catch (FileStorageException ex)
+            {
+                _logger.LogError(ex, $"File storage failed during harvest: {ex.FileName}");
+                return new GcodeHarvestResultDto(
+                    Guid.NewGuid(),
+                    false,
+                    $"Failed to store file: {ex.FileName}",
+                    0, 0,
+                    new[] { ex.Message });
+            }
+            catch (FilePersistenceException ex)
+            {
+                _logger.LogError(ex, $"Database persistence failed during harvest: {ex.FileName}");
+                return new GcodeHarvestResultDto(
+                    Guid.NewGuid(),
+                    false,
+                    $"Failed to save file to database: {ex.FileName}",
+                    0, 0,
+                    new[] { ex.Message });
+            }
+            catch (GcodeProcessingException ex)
+            {
+                _logger.LogError(ex, $"Gcode processing failed during harvest: {ex.FileName} (Step: {ex.Step})");
+                return new GcodeHarvestResultDto(
+                    Guid.NewGuid(),
+                    false,
+                    $"Processing failed: {ex.FileName}",
                     0, 0,
                     new[] { ex.Message });
             }

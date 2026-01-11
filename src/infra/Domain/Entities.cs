@@ -293,7 +293,6 @@ public class GcodeFile : StoredFile
     public PrinterModel? PrinterModel { get; set; }
     public string? SlicerName { get; set; } // e.g., "PrusaSlicer", "Cura"
     public string? SlicerVersion { get; set; }
-    public string? SlicerSettings { get; set; } // JSON dump of key settings
     public string? PrintSettingsId { get; set; } // Slicer process profile name (e.g., "Standard", "Draft") - different from printer model
     public double? LayerHeight { get; set; }
     public double? InfillPercentage { get; set; }

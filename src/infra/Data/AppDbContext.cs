@@ -294,7 +294,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.Property(g => g.SlicerName).HasMaxLength(128);
             _ = b.Property(g => g.SlicerVersion).HasMaxLength(64);
             _ = b.Property(g => g.RequiredMaterial).HasMaxLength(64);
-            _ = b.Property(g => g.SlicerSettings).HasColumnType("TEXT");
             _ = b.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
             _ = b.Property(g => g.LastVerificationResult).HasColumnType("TEXT");
 
