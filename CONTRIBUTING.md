@@ -76,12 +76,102 @@ dotnet test .\src\farm-web.sln -c Debug
 
 ## Code style and formatting
 - C#: prefer conventional .NET style (PascalCase for types/members, camelCase for locals/params).
+- TypeScript: Use camelCase for variables/functions, PascalCase for components/types, strict mode enabled
 - Run formatter/analyzers locally:
 ```powershell
 # Format C# code in the solution
 cd .\src
 dotnet format .\farm-web.sln
+
+# Lint React/TypeScript code
+cd .\src\Web\ReactApp
+npm run lint
 ```
+
+## Tag Management System
+
+PrintFarmer includes a comprehensive **polymorphic tagging system** for organizing 3D models and G-code files. See `docs/TAGGING_SYSTEM.md` for complete details.
+
+### Quick Tag System Overview
+
+**For End Users:**
+- Navigate to `Admin → Tag Management` to create/manage tags
+- Edit model tags in the Models page detail view
+- Use bulk tagging for multiple models at once
+- View tag analytics in the `Admin → Tag Management → Analytics` tab
+
+**For Developers Adding Tags to New Objects:**
+
+1. **Create Mapping Entity** (e.g., `PrinterTag` for tagging printers):
+   ```csharp
+   public class PrinterTag
+   {
+       public Guid PrinterId { get; set; }
+       public Guid TagId { get; set; }
+       public DateTime TaggedAt { get; set; }
+       
+       public Printer Printer { get; set; }
+       public Tag Tag { get; set; }
+   }
+   ```
+
+2. **Configure in DbContext:**
+   ```csharp
+   modelBuilder.Entity<PrinterTag>()
+       .HasKey(pt => new { pt.PrinterId, pt.TagId });
+   
+   modelBuilder.Entity<PrinterTag>()
+       .HasOne(pt => pt.Printer)
+       .WithMany(p => p.TagMappings)
+       .HasForeignKey(pt => pt.PrinterId)
+       .OnDelete(DeleteBehavior.Cascade);
+   
+   modelBuilder.Entity<PrinterTag>()
+       .HasOne(pt => pt.Tag)
+       .WithMany()
+       .HasForeignKey(pt => pt.TagId)
+       .OnDelete(DeleteBehavior.Cascade);
+   ```
+
+3. **Add Repository Interface:**
+   ```csharp
+   public interface IPrinterTagRepository
+   {
+       Task<IEnumerable<Tag>> GetTagsForPrinterAsync(Guid printerId);
+       Task AddTagToPrinterAsync(Guid printerId, Guid tagId);
+       Task RemoveTagFromPrinterAsync(Guid printerId, Guid tagId);
+   }
+   ```
+
+4. **Add Controller Endpoints:**
+   ```csharp
+   [HttpPost("{printerId}/tags/{tagId}")]
+   public async Task<IActionResult> AddTag(Guid printerId, Guid tagId)
+   {
+       await _printerTagRepository.AddTagToPrinterAsync(printerId, tagId);
+       return Ok();
+   }
+   ```
+
+5. **Test thoroughly** and update documentation.
+
+**Tag Name Normalization:**
+- All tag names are automatically normalized to PascalCase
+- "my-tag" → "MyTag", "MY_TAG" → "MyTag", "my tag" → "MyTag"
+- Ensures consistency and prevents duplicate tags with different cases
+
+**Polymorphic Architecture Benefits:**
+- One `Tag` entity shared across all object types (3D Models, G-code Files, Printers, etc.)
+- Single tag management interface for all taggable objects
+- Efficient queries with type-specific mapping tables
+- Easy to extend to new object types
+
+For comprehensive guidance, see `docs/TAGGING_SYSTEM.md` which includes:
+- Full architecture documentation
+- User workflows (creating, assigning, bulk tagging)
+- API endpoint reference
+- Component guide
+- Developer guide for extending the system
 
 ## EF Core and SQLite
 - The application includes startup safety for SQLite to ease local development.
