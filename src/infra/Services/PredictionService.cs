@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -179,7 +179,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Gets duration statistics for a printer model and material combination
     /// </summary>
-    public async Task<DurationStatsDto?> GetDurationStatsAsync(
+    public async Task<PredictionDurationStatsDto?> GetDurationStatsAsync(
         Guid? modelId = null,
         string? material = null,
         DateTime? fromDate = null,
@@ -247,7 +247,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
         var totalCount = stats.Count;
         var successCount = stats.Count(s => s.IsSuccess);
 
-        return new DurationStatsDto
+        return new PredictionDurationStatsDto
         {
             TotalJobs = totalCount,
             SuccessfulJobs = successCount,
@@ -294,7 +294,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
     /// <summary>
     /// Gets material statistics across all printers
     /// </summary>
-    public async Task<Dictionary<string, DurationStatsDto>> GetMaterialStatsAsync(
+    public async Task<Dictionary<string, PredictionDurationStatsDto>> GetMaterialStatsAsync(
         Guid? printerId = null,
         CancellationToken cancellationToken = default)
     {
@@ -311,7 +311,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             .GroupBy(s => s.Material!)
             .ToList();
 
-        var result = new Dictionary<string, DurationStatsDto>();
+        var result = new Dictionary<string, PredictionDurationStatsDto>();
 
         foreach (var group in groupedByMaterial)
         {
@@ -333,7 +333,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
 
             var variance = CalculateVariance(validDurations, avg);
 
-            result[group.Key] = new DurationStatsDto
+            result[group.Key] = new PredictionDurationStatsDto
             {
                 TotalJobs = group.Count(),
                 SuccessfulJobs = group.Count(s => s.IsSuccess),
@@ -453,9 +453,9 @@ public class CompletionPredictionDto
 }
 
 /// <summary>
-/// DTO for duration statistics
+/// DTO for duration statistics from prediction service
 /// </summary>
-public class DurationStatsDto
+public class PredictionDurationStatsDto
 {
     public int TotalJobs { get; set; }
     public int SuccessfulJobs { get; set; }

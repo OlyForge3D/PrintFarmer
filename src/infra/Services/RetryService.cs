@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories;
@@ -93,7 +93,7 @@ public class RetryService : IRetryService
     {
         // Get existing policy or create default
         var policy = await _dbContext.RetryPolicies.FirstOrDefaultAsync(cancellationToken);
-        
+
         if (policy is null)
         {
             _logger.LogInformation("No retry policy found, creating default");
@@ -106,7 +106,7 @@ public class RetryService : IRetryService
                 MaxDelaySeconds = 3600,
                 RetryOnErrorCategories = "Recoverable"
             };
-            
+
             _dbContext.RetryPolicies.Add(policy);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
@@ -245,10 +245,14 @@ public class RetryService : IRetryService
         jobRetry.UpdatedAt = DateTime.UtcNow;
 
         if (notes is not null)
+        {
             jobRetry.Notes = notes;
+        }
 
         if (actualRetryTime.HasValue)
+        {
             jobRetry.ActualRetryTime = actualRetryTime;
+        }
 
         _dbContext.JobRetries.Update(jobRetry);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -273,7 +277,9 @@ public class RetryService : IRetryService
     public TimeSpan CalculateRetryDelay(int attemptNumber, RetryPolicy policy)
     {
         if (attemptNumber < 1)
+        {
             return TimeSpan.Zero;
+        }
 
         var delaySeconds = (int)Math.Min(
             policy.InitialDelaySeconds * Math.Pow(policy.ExponentialBase, attemptNumber - 1),

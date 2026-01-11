@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -42,11 +42,15 @@ public class JobSchedulingService
             .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken);
 
         if (job == null)
+        {
             throw new InvalidOperationException($"Print job '{jobId}' not found");
+        }
 
         // Validate timezone
         if (!TryGetTimeZoneInfo(timeZone, out var tzInfo))
+        {
             throw new ArgumentException($"Invalid timezone: {timeZone}");
+        }
 
         // Convert input time from user timezone to UTC
         var utcTime = ConvertToUtc(scheduledStartTime, tzInfo);
@@ -101,11 +105,15 @@ public class JobSchedulingService
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
 
         if (schedule == null)
+        {
             throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        }
 
         // Validate timezone
         if (!TryGetTimeZoneInfo(timeZone, out var tzInfo))
+        {
             throw new ArgumentException($"Invalid timezone: {timeZone}");
+        }
 
         // Convert to UTC
         var utcTime = ConvertToUtc(newScheduledTime, tzInfo);
@@ -131,7 +139,9 @@ public class JobSchedulingService
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
 
         if (schedule == null)
+        {
             throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        }
 
         schedule.IsActive = false;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -150,7 +160,9 @@ public class JobSchedulingService
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
 
         if (schedule == null)
+        {
             throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        }
 
         schedule.IsPaused = true;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -169,7 +181,9 @@ public class JobSchedulingService
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
 
         if (schedule == null)
+        {
             throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        }
 
         schedule.IsPaused = false;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -194,10 +208,14 @@ public class JobSchedulingService
             .AsQueryable();
 
         if (dateFrom.HasValue)
+        {
             query = query.Where(js => js.ScheduledStartTime >= dateFrom.Value);
+        }
 
         if (dateTo.HasValue)
+        {
             query = query.Where(js => js.ScheduledStartTime <= dateTo.Value);
+        }
 
         var schedules = await query
             .OrderBy(js => js.ScheduledStartTime)
@@ -228,7 +246,9 @@ public class JobSchedulingService
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
 
         if (schedule == null)
+        {
             return null;
+        }
 
         return new ScheduledJobDto
         {
@@ -353,7 +373,9 @@ public class JobSchedulingService
     public DateTime ConvertFromUtc(DateTime utcTime, string timeZoneId)
     {
         if (!TryGetTimeZoneInfo(timeZoneId, out var tzInfo))
+        {
             return utcTime; // Fall back to UTC
+        }
 
         return TimeZoneInfo.ConvertTimeFromUtc(utcTime, tzInfo);
     }

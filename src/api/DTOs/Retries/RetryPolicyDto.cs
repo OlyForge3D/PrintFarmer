@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.DTOs.Retries;
+﻿namespace Farm.Web.Api.DTOs.Retries;
 
 /// <summary>
 /// Represents the current job retry policy configuration.

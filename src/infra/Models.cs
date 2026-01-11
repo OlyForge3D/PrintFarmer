@@ -2709,3 +2709,16 @@ public static class PrinterBackendHelpers
     public static int GetDefaultPort(PrinterBackend backend) =>
         backend == PrinterBackend.Moonraker ? 7125 : 80;
 }
+
+/// <summary>
+/// DTO for reporting print job status and all available properties.
+/// Used by both API controllers and infrastructure services.
+/// </summary>
+public class PrintJobStatusDto
+{
+    public string? State { get; set; }
+    public double? Progress { get; set; }
+    public string? JobName { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public string? Error { get; set; }
+}

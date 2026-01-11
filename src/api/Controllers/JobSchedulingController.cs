@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -141,7 +141,9 @@ public class JobSchedulingController : ControllerBase
     {
         var result = await _schedulingService.GetScheduledJobAsync(jobId, cancellationToken);
         if (result == null)
+        {
             return NotFound(new { error = $"No scheduling found for job '{jobId}'" });
+        }
 
         return Ok(result);
     }

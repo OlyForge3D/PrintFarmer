@@ -1,4 +1,4 @@
-﻿namespace Farm.Api.DTOs;
+﻿namespace Farm.Web.Api.DTOs.PrintQueue;
 
 // ============= MAIN RESPONSE DTOs =============
 
