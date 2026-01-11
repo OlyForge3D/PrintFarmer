@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,7 +20,6 @@ public class PredictionController(PredictionService predictionService) : Control
     /// Get predicted completion time for a job
     /// </summary>
     /// <param name="jobId">The job ID to predict for</param>
-    /// <param name="job">The print job entity (injected via resolver)</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Prediction with estimated completion time and confidence level</returns>
     [HttpGet("jobs/{jobId:guid}/completion")]
@@ -30,19 +27,16 @@ public class PredictionController(PredictionService predictionService) : Control
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CompletionPredictionDto>> GetCompletionPredictionAsync(
         Guid jobId,
-        [FromServices] AppDbContext dbContext,
         CancellationToken cancellationToken)
     {
         try
         {
-            var job = await dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken: cancellationToken);
-            if (job == null)
-            {
-                return NotFound($"Job {jobId} not found");
-            }
-
-            var prediction = await predictionService.PredictCompletionTimeAsync(jobId, job, cancellationToken);
+            var prediction = await predictionService.PredictCompletionTimeByJobIdAsync(jobId, cancellationToken);
             return Ok(prediction);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {
@@ -145,8 +139,8 @@ public class PredictionController(PredictionService predictionService) : Control
     /// <summary>
     /// Record a job completion for learning (admin only)
     /// </summary>
+    /// <param name="jobId">The job ID to record completion for</param>
     /// <param name="request">Completion record request</param>
-    /// <param name="dbContext">Database context</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Success response</returns>
     [HttpPost("jobs/{jobId:guid}/record-completion")]
@@ -156,30 +150,27 @@ public class PredictionController(PredictionService predictionService) : Control
     public async Task<IActionResult> RecordCompletionAsync(
         Guid jobId,
         [FromBody] RecordCompletionRequest request,
-        [FromServices] AppDbContext dbContext,
         CancellationToken cancellationToken)
     {
         try
         {
             if (request.ActualDurationMs <= 0)
             {
-                return BadRequest("ActualDurationMs must be greater than 0");
+                return BadRequest(new { error = "ActualDurationMs must be greater than 0" });
             }
 
-            var job = await dbContext.PrintJobs.FindAsync(new object[] { jobId }, cancellationToken: cancellationToken);
-            if (job == null)
-            {
-                return NotFound($"Job {jobId} not found");
-            }
-
-            await predictionService.RecordJobCompletionAsync(
-                job,
+            await predictionService.RecordCompletionByJobIdAsync(
+                jobId,
                 request.ActualDurationMs,
                 request.IsSuccess,
                 request.FailureReason,
                 cancellationToken);
 
             return Ok(new { message = "Completion recorded successfully" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {

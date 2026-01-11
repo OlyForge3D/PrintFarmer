@@ -12,7 +12,7 @@ namespace Farm.Infrastructure.Services;
 /// Service for predicting job completion times based on historical data (Phase 4.2)
 /// Analyzes past job durations to estimate future job completion with confidence levels
 /// </summary>
-public class PredictionService(IPrintJobStatisticsRepository repository)
+public class PredictionService(IPrintJobStatisticsRepository repository, IQueueRepository queueRepository)
 {
     /// <summary>
     /// Calculates the confidence level based on sample size
@@ -105,6 +105,48 @@ public class PredictionService(IPrintJobStatisticsRepository repository)
     }
 
     /// <summary>
+    /// Predicts the completion time for a print job by job ID (controller-friendly overload)
+    /// Looks up the job entity internally before prediction
+    /// </summary>
+    /// <param name="jobId">The job ID to predict for</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Prediction DTO with estimated completion time and confidence level</returns>
+    /// <exception cref="InvalidOperationException">Thrown when job is not found</exception>
+    public async Task<CompletionPredictionDto> PredictCompletionTimeByJobIdAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await queueRepository.FindByIdAsync(jobId, cancellationToken)
+            ?? throw new InvalidOperationException($"Job {jobId} not found");
+
+        return await PredictCompletionTimeAsync(jobId, job, cancellationToken);
+    }
+
+    /// <summary>
+    /// Records actual job completion for learning (controller-friendly overload)
+    /// Looks up the job entity internally before recording
+    /// </summary>
+    /// <param name="jobId">The job ID to record completion for</param>
+    /// <param name="actualDurationMs">Actual duration in milliseconds</param>
+    /// <param name="isSuccess">Whether the job completed successfully</param>
+    /// <param name="failureReason">Reason for failure if not successful</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Completion task</returns>
+    /// <exception cref="InvalidOperationException">Thrown when job is not found</exception>
+    public async Task RecordCompletionByJobIdAsync(
+        Guid jobId,
+        long actualDurationMs,
+        bool isSuccess,
+        string? failureReason = null,
+        CancellationToken cancellationToken = default)
+    {
+        var job = await queueRepository.FindByIdAsync(jobId, cancellationToken)
+            ?? throw new InvalidOperationException($"Job {jobId} not found");
+
+        await RecordJobCompletionAsync(job, actualDurationMs, isSuccess, failureReason, cancellationToken);
+    }
+
+    /// <summary>
     /// Records actual job completion for learning
     /// </summary>
     public async Task RecordJobCompletionAsync(
@@ -121,7 +163,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository)
             Id = Guid.NewGuid(),
             PrintJobId = job.Id,
             ActualDurationMs = actualDurationMs,
-            EstimatedDurationMs = job.EstimatedPrintTime?.TotalMilliseconds as long?,
+            EstimatedDurationMs = job.EstimatedPrintTime != null ? (long)job.EstimatedPrintTime.Value.TotalMilliseconds : null,
             PrinterModelId = GetPrinterModelId(job),
             Material = job.RequiredMaterialType,
             IsSuccess = isSuccess,
@@ -212,8 +254,8 @@ public class PredictionService(IPrintJobStatisticsRepository repository)
             SuccessRate = totalCount > 0 ? (double)successCount / totalCount : 0,
             AverageDuration = TimeSpan.FromMilliseconds(avg),
             MedianDuration = TimeSpan.FromMilliseconds(median),
-            MinDuration = TimeSpan.FromMilliseconds(validDurations.First()),
-            MaxDuration = TimeSpan.FromMilliseconds(validDurations.Last()),
+            MinDuration = TimeSpan.FromMilliseconds(validDurations[0]),
+            MaxDuration = TimeSpan.FromMilliseconds(validDurations[validDurations.Count - 1]),
             StandardDeviation = variance,
             Variance = variance * variance,
             Material = material,
@@ -298,8 +340,8 @@ public class PredictionService(IPrintJobStatisticsRepository repository)
                 SuccessRate = (double)group.Count(s => s.IsSuccess) / group.Count(),
                 AverageDuration = TimeSpan.FromMilliseconds(avg),
                 MedianDuration = TimeSpan.FromMilliseconds(median),
-                MinDuration = TimeSpan.FromMilliseconds(validDurations.First()),
-                MaxDuration = TimeSpan.FromMilliseconds(validDurations.Last()),
+                MinDuration = TimeSpan.FromMilliseconds(validDurations[0]),
+                MaxDuration = TimeSpan.FromMilliseconds(validDurations[validDurations.Count - 1]),
                 StandardDeviation = variance,
                 Variance = variance * variance,
                 Material = group.Key
@@ -343,12 +385,14 @@ public class PredictionService(IPrintJobStatisticsRepository repository)
     /// <summary>
     /// Helper: Get printer model ID from job
     /// </summary>
+#pragma warning disable S1172 // Parameter is reserved for future implementation
     private static Guid? GetPrinterModelId(PrintJob job)
     {
         // TODO: Implement logic to get printer model from assigned printer or gcode file metadata
-        // For now, return null
+        // For now, return null - job parameter reserved for future implementation
         return null;
     }
+#pragma warning restore S1172
 
     /// <summary>
     /// Helper: Calculate estimated completion time
@@ -367,6 +411,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository)
     /// <summary>
     /// Helper: Generate human-friendly prediction note
     /// </summary>
+#pragma warning disable S1172 // Parameter is reserved for future implementation
     private static string GeneratePredictionNote(ConfidenceLevel confidence, int sampleSize, string? material, Guid? modelId)
     {
         var materialStr = !string.IsNullOrWhiteSpace(material) ? $" {material}" : "";
@@ -377,6 +422,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository)
             _ => $"Based on {sampleSize}{materialStr} job(s). Limited historical data - actual time may vary."
         };
     }
+#pragma warning restore S1172
 }
 
 /// <summary>

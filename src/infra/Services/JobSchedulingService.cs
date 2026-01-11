@@ -82,7 +82,7 @@ public class JobSchedulingService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation($"[JobScheduling] Scheduled job '{jobId}' for {utcTime:O} (timezone: {timeZone})");
+        _logger.LogInformation("[JobScheduling] Scheduled job '{JobId}' for {ScheduledTime} (timezone: {TimeZone})", jobId, utcTime, timeZone);
 
         return await GetScheduledJobAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException("Failed to retrieve scheduled job");
@@ -116,7 +116,7 @@ public class JobSchedulingService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation($"[JobScheduling] Rescheduled job '{jobId}' to {utcTime:O}");
+        _logger.LogInformation("[JobScheduling] Rescheduled job '{JobId}' to {ScheduledTime}", jobId, utcTime);
 
         return await GetScheduledJobAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException("Failed to retrieve scheduled job");
@@ -138,7 +138,7 @@ public class JobSchedulingService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation($"[JobScheduling] Cancelled scheduling for job '{jobId}'");
+        _logger.LogInformation("[JobScheduling] Cancelled scheduling for job '{JobId}'", jobId);
     }
 
     /// <summary>
@@ -157,7 +157,7 @@ public class JobSchedulingService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation($"[JobScheduling] Paused scheduling for job '{jobId}'");
+        _logger.LogInformation("[JobScheduling] Paused scheduling for job '{JobId}'", jobId);
     }
 
     /// <summary>
@@ -176,7 +176,7 @@ public class JobSchedulingService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation($"[JobScheduling] Resumed scheduling for job '{jobId}'");
+        _logger.LogInformation("[JobScheduling] Resumed scheduling for job '{JobId}'", jobId);
     }
 
     /// <summary>
@@ -307,7 +307,7 @@ public class JobSchedulingService
                 await _context.SaveChangesAsync(cancellationToken);
 
                 _logger.LogInformation(
-                    $"[JobScheduling] Triggered scheduled job '{schedule.PrintJobId}' at {now:O}");
+                    "[JobScheduling] Triggered scheduled job '{JobId}' at {ExecutionTime}", schedule.PrintJobId, now);
 
                 // If no recurrence, mark as inactive
                 if (string.IsNullOrEmpty(schedule.RecurrencePattern))
@@ -318,7 +318,7 @@ public class JobSchedulingService
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[JobScheduling] Failed to trigger job '{schedule.PrintJobId}': {ex.Message}");
+                _logger.LogError("[JobScheduling] Failed to trigger job '{JobId}': {ExceptionMessage}", schedule.PrintJobId, ex.Message);
             }
         }
     }

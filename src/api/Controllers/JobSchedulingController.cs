@@ -53,12 +53,12 @@ public class JobSchedulingController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning($"Invalid scheduling request: {ex.Message}");
+            _logger.LogWarning("Invalid scheduling request: {ExceptionMessage}", ex.Message);
             return BadRequest(new { error = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning($"Job not found: {ex.Message}");
+            _logger.LogWarning("Job not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
     }
@@ -87,12 +87,12 @@ public class JobSchedulingController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning($"Invalid rescheduling request: {ex.Message}");
+            _logger.LogWarning("Invalid rescheduling request: {ExceptionMessage}", ex.Message);
             return BadRequest(new { error = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning($"Job scheduling not found: {ex.Message}");
+            _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
     }
@@ -112,7 +112,7 @@ public class JobSchedulingController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning($"Job scheduling not found: {ex.Message}");
+            _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
     }
@@ -186,7 +186,7 @@ public class JobSchedulingController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning($"Job scheduling not found: {ex.Message}");
+            _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
     }
@@ -206,7 +206,7 @@ public class JobSchedulingController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning($"Job scheduling not found: {ex.Message}");
+            _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
         }
     }

@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Domain.Notifications;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -53,6 +54,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     // File Health & Consistency Auditing
     public DbSet<FileHealthAudit> FileHealthAudits => Set<FileHealthAudit>();
+
+    // Notifications & User Communication
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
@@ -1189,6 +1194,56 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(a => a.AuditType);
             _ = b.HasIndex(a => a.HasIssues);
             _ = b.HasIndex(a => new { a.AuditType, a.AuditDate }).IsDescending(false, true); // Composite for type+recent queries
+        });
+
+        // Notification Entity Configuration (Phase 4.3)
+        _ = modelBuilder.Entity<Notification>(b =>
+        {
+            _ = b.HasKey(n => n.Id);
+            _ = b.Property(n => n.UserId).IsRequired();
+            _ = b.Property(n => n.Type).IsRequired();
+            _ = b.Property(n => n.Subject).IsRequired().HasMaxLength(255);
+            _ = b.Property(n => n.Body).IsRequired().HasColumnType("TEXT");
+            _ = b.Property(n => n.IsRead).IsRequired().HasDefaultValue(false);
+            _ = b.Property(n => n.CreatedAt).IsRequired();
+
+            // Foreign Keys
+            _ = b.HasOne(n => n.User)
+                .WithMany()
+                .HasForeignKey(n => n.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            _ = b.HasOne(n => n.Job)
+                .WithMany()
+                .HasForeignKey(n => n.JobId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Indexes for efficient querying
+            _ = b.HasIndex(n => n.UserId);
+            _ = b.HasIndex(n => new { n.UserId, n.IsRead });
+            _ = b.HasIndex(n => n.Type);
+            _ = b.HasIndex(n => n.JobId);
+            _ = b.HasIndex(n => n.CreatedAt).IsDescending(); // Most recent first
+            _ = b.HasIndex(n => n.ExpiresAt); // For cleanup queries
+        });
+
+        // NotificationPreferences Entity Configuration (Phase 4.3)
+        _ = modelBuilder.Entity<NotificationPreferences>(b =>
+        {
+            _ = b.HasKey(np => np.Id);
+            _ = b.Property(np => np.UserId).IsRequired();
+            _ = b.Property(np => np.Frequency).IsRequired().HasDefaultValue(NotificationFrequency.RealTime);
+            _ = b.Property(np => np.RetentionDays).IsRequired().HasDefaultValue(30);
+            _ = b.Property(np => np.UpdatedAt).IsRequired();
+
+            // Foreign Key - one-to-one relationship with User
+            _ = b.HasOne(np => np.User)
+                .WithOne()
+                .HasForeignKey<NotificationPreferences>(np => np.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Unique constraint - one preferences per user
+            _ = b.HasIndex(np => np.UserId).IsUnique();
         });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
