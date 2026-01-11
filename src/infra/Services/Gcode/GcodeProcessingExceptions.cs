@@ -27,6 +27,7 @@ public class GcodeProcessingException : Exception
         ContextData = new();
     }
 
+#pragma warning disable S3427 // This is a valid exception class with multiple constructors for convenience
     public GcodeProcessingException(string message, string? fileName = null, string? step = null, Exception? innerException = null)
         : base(message, innerException)
     {
@@ -34,6 +35,7 @@ public class GcodeProcessingException : Exception
         Step = step;
         ContextData = new();
     }
+#pragma warning restore S3427
 
     public GcodeProcessingException AddContext(string key, object value)
     {
