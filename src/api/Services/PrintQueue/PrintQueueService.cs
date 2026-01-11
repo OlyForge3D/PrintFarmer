@@ -2,6 +2,7 @@
 using Farm.Api.Services.Interfaces;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Notifications;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,12 +14,14 @@ namespace Farm.Api.Services.PrintQueue;
 public class PrintQueueService(
     AppDbContext dbContext,
     ILogger<PrintQueueService> logger,
-    INotificationService? notificationService = null
+    INotificationService? notificationService = null,
+    IRetryService? retryService = null
 ) : IPrintQueueService
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ILogger<PrintQueueService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly INotificationService? _notificationService = notificationService;
+    private readonly IRetryService? _retryService = retryService;
 
     // ============= QUERY OPERATIONS =============
 
@@ -1171,7 +1174,7 @@ public class PrintQueueService(
             var variance = avgEstimated > 0 ? ((avgActual - avgEstimated) / avgEstimated) * 100 : 0;
 
             // Group by printer for detailed stats
-            var byPrinter = new Dictionary<string, DurationStatsDto>();
+            var byPrinter = new Dictionary<string, Farm.Api.DTOs.DurationStatsDto>();
             foreach (var printerGroup in jobs.GroupBy(j => j.AssignedPrinterId))
             {
                 var printerJobs = printerGroup.ToList();
@@ -1197,7 +1200,7 @@ public class PrintQueueService(
                     ? ((printerAvgAct - printerAvgEst) / printerAvgEst) * 100
                     : 0;
 
-                byPrinter[printerIdStr] = new DurationStatsDto
+                byPrinter[printerIdStr] = new Farm.Api.DTOs.DurationStatsDto
                 {
                     PrinterId = printerIdStr,
                     PrinterName = printerName,
@@ -1377,6 +1380,80 @@ public class PrintQueueService(
             _logger.LogError(ex, "Error sending job resume notification for job {JobId}", job.Id);
             // Don't rethrow - notification failure shouldn't block queue operations
         }
+    }
+
+    // ============= RETRY OPERATIONS (Phase 4.4) =============
+
+    /// <summary>
+    /// Handle job failure and initiate retry if appropriate
+    /// </summary>
+    public async Task HandleJobFailureWithRetryAsync(
+        Guid jobId,
+        string failureReason,
+        ErrorCategory errorCategory,
+        CancellationToken cancellationToken = default)
+    {
+        if (_retryService == null)
+        {
+            _logger.LogWarning("IRetryService not configured - skipping retry handling for job {JobId}", jobId);
+            return;
+        }
+
+        try
+        {
+            var shouldRetry = await _retryService.ShouldRetryAsync(jobId, errorCategory, cancellationToken);
+
+            if (shouldRetry)
+            {
+                var jobRetry = await _retryService.CreateRetryAsync(
+                    jobId,
+                    errorCategory,
+                    failureReason,
+                    cancellationToken);
+
+                _logger.LogInformation(
+                    "Job {JobId} failure handled with retry: Attempt={Attempt}, ScheduledTime={ScheduledTime}",
+                    jobId, jobRetry.AttemptNumber, jobRetry.ScheduledRetryTime);
+            }
+            else
+            {
+                _logger.LogInformation("Job {JobId} failure not eligible for retry: {Reason}",
+                    jobId, failureReason);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error handling job failure with retry for job {JobId}", jobId);
+            // Don't rethrow - retry handling failure shouldn't block queue operations
+        }
+    }
+
+    /// <summary>
+    /// Get retry history for a specific job
+    /// </summary>
+    public async Task<IEnumerable<JobRetry>> GetJobRetryHistoryAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_retryService == null)
+        {
+            return Enumerable.Empty<JobRetry>();
+        }
+
+        return await _retryService.GetRetryHistoryAsync(jobId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Get all pending retries that are due to execute
+    /// </summary>
+    public async Task<IEnumerable<JobRetry>> GetDueRetriesAsync(CancellationToken cancellationToken = default)
+    {
+        if (_retryService == null)
+        {
+            return Enumerable.Empty<JobRetry>();
+        }
+
+        return await _retryService.GetDueRetriesAsync(cancellationToken);
     }
 }
 

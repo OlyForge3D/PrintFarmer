@@ -373,6 +373,9 @@ builder.Services.AddScoped<Farm.Infrastructure.Services.JobSchedulingService>();
 builder.Services.AddScoped<Farm.Infrastructure.Repositories.Queue.IPrintJobStatisticsRepository, Farm.Infrastructure.Repositories.Queue.EfPrintJobStatisticsRepository>();
 builder.Services.AddScoped<Farm.Infrastructure.Services.PredictionService>();
 
+// Retry Service (Phase 4.4)
+builder.Services.AddScoped<Farm.Infrastructure.Services.IRetryService, Farm.Infrastructure.Services.RetryService>();
+
 // SPA services (only for monolithic deployments)
 bool isMonolithicDeployment = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
 if (isMonolithicDeployment)

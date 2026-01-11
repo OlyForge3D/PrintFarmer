@@ -620,6 +620,17 @@ public class PrintJob
 
     // Phase 4.2: Completion Statistics (one-to-one relationship)
     public PrintJobStatistics? Statistics { get; set; }
+
+    // Phase 4.4: Job Retry History
+    /// <summary>
+    /// Retry history where THIS job is the original failed job
+    /// </summary>
+    public ICollection<JobRetry> RetriesAsOriginal { get; } = new List<JobRetry>();
+
+    /// <summary>
+    /// Retry history where THIS job is a retry attempt (reference to original in JobRetry.OriginalJobId)
+    /// </summary>
+    public ICollection<JobRetry> RetriesAsAttempt { get; } = new List<JobRetry>();
 }
 
 /// <summary>
@@ -1165,6 +1176,153 @@ public class JobExecution
     /// Result message or error details
     /// </summary>
     public string? Message { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Retry policy configuration for failed print jobs
+/// Controls automatic retry behavior with exponential backoff
+/// </summary>
+public class RetryPolicy
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>
+    /// Enable automatic retry on job failure
+    /// </summary>
+    public bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of retry attempts (not counting original attempt)
+    /// </summary>
+    public int MaxRetries { get; set; } = 3;
+
+    /// <summary>
+    /// Initial delay in seconds before first retry (e.g., 60 = 1 minute)
+    /// </summary>
+    public int InitialDelaySeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Exponential backoff multiplier (e.g., 2.0 = delay doubles each retry)
+    /// Attempt 1: 60s, Attempt 2: 120s, Attempt 3: 240s, Attempt 4: 480s
+    /// </summary>
+    public double ExponentialBase { get; set; } = 2.0;
+
+    /// <summary>
+    /// Maximum delay cap in seconds (prevents infinite backoff growth)
+    /// </summary>
+    public int MaxDelaySeconds { get; set; } = 3600; // 1 hour
+
+    /// <summary>
+    /// Categories of errors that should trigger automatic retry
+    /// </summary>
+    public string RetryOnErrorCategories { get; set; } = "Recoverable"; // Comma-separated: "Recoverable,Unknown"
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Calculate delay in seconds for a given retry attempt number (1-based)
+    /// </summary>
+    public int GetDelaySeconds(int attemptNumber)
+    {
+        if (attemptNumber < 1)
+            return 0;
+
+        var delaySeconds = (int)Math.Min(
+            InitialDelaySeconds * Math.Pow(ExponentialBase, attemptNumber - 1),
+            MaxDelaySeconds
+        );
+
+        return Math.Max(delaySeconds, InitialDelaySeconds); // Never return less than initial delay
+    }
+}
+
+/// <summary>
+/// Error category classification for retry logic
+/// </summary>
+public enum ErrorCategory
+{
+    /// <summary>
+    /// Unknown error category - needs manual investigation (default)
+    /// </summary>
+    Unknown = 0,
+
+    /// <summary>
+    /// Network timeouts, printer offline, temporary printer errors - should retry
+    /// </summary>
+    Recoverable = 1,
+
+    /// <summary>
+    /// Invalid gcode file, unsupported printer, hardware failure - don't retry
+    /// </summary>
+    Permanent = 2
+}
+
+/// <summary>
+/// Retry history for failed print jobs
+/// Tracks original failure, retry attempts, and outcomes
+/// </summary>
+public class JobRetry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>
+    /// Original job ID that failed
+    /// </summary>
+    public Guid OriginalJobId { get; set; }
+
+    /// <summary>
+    /// Navigation property to original print job
+    /// </summary>
+    public virtual PrintJob? OriginalJob { get; set; }
+
+    /// <summary>
+    /// New job ID created for this retry attempt
+    /// </summary>
+    public Guid RetryJobId { get; set; }
+
+    /// <summary>
+    /// Navigation property to retry print job
+    /// </summary>
+    public virtual PrintJob? RetryJob { get; set; }
+
+    /// <summary>
+    /// Attempt number (1 = first retry, 2 = second retry, etc.)
+    /// </summary>
+    public int AttemptNumber { get; set; }
+
+    /// <summary>
+    /// Category of the original failure
+    /// </summary>
+    public ErrorCategory ErrorCategory { get; set; }
+
+    /// <summary>
+    /// Detailed failure reason from the printer/system
+    /// </summary>
+    public string FailureReason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When the retry was scheduled to begin
+    /// </summary>
+    public DateTime ScheduledRetryTime { get; set; }
+
+    /// <summary>
+    /// When the retry actually started
+    /// </summary>
+    public DateTime? ActualRetryTime { get; set; }
+
+    /// <summary>
+    /// Status: Pending, Running, Succeeded, Failed
+    /// </summary>
+    public string Status { get; set; } = "Pending"; // Pending, Running, Succeeded, Failed
+
+    /// <summary>
+    /// Additional notes about the retry attempt
+    /// </summary>
+    public string? Notes { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

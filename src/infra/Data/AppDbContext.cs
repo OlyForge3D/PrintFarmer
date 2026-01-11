@@ -29,6 +29,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<JobSchedule> JobSchedules => Set<JobSchedule>();
     public DbSet<JobExecution> JobExecutions => Set<JobExecution>();
     public DbSet<PrintJobStatistics> PrintJobStatistics => Set<PrintJobStatistics>();
+    public DbSet<RetryPolicy> RetryPolicies => Set<RetryPolicy>();
+    public DbSet<JobRetry> JobRetries => Set<JobRetry>();
     public DbSet<Toolhead> Toolheads => Set<Toolhead>();
     public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
     public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
@@ -501,6 +503,53 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             _ = b.HasIndex(s => s.IsSuccess);
             _ = b.HasIndex(s => new { s.PrinterModelId, s.Material, s.IsSuccess });
             _ = b.HasIndex(s => new { s.PrinterModelId, s.Material, s.CompletedAtUtc });
+        });
+
+        // RetryPolicy Entity Configuration (Phase 4.4)
+        _ = modelBuilder.Entity<RetryPolicy>(b =>
+        {
+            _ = b.HasKey(r => r.Id);
+            _ = b.Property(r => r.IsEnabled).HasDefaultValue(true);
+            _ = b.Property(r => r.MaxRetries).HasDefaultValue(3);
+            _ = b.Property(r => r.InitialDelaySeconds).HasDefaultValue(60);
+            _ = b.Property(r => r.ExponentialBase).HasDefaultValue(2.0);
+            _ = b.Property(r => r.MaxDelaySeconds).HasDefaultValue(3600);
+            _ = b.Property(r => r.RetryOnErrorCategories).HasMaxLength(100).HasDefaultValue("Recoverable");
+            _ = b.Property(r => r.CreatedAt).IsRequired();
+            _ = b.Property(r => r.UpdatedAt).IsRequired();
+
+            // No indexes needed - typically only one global retry policy, accessed infrequently
+        });
+
+        // JobRetry Entity Configuration (Phase 4.4)
+        _ = modelBuilder.Entity<JobRetry>(b =>
+        {
+            _ = b.HasKey(jr => jr.Id);
+            _ = b.Property(jr => jr.AttemptNumber).IsRequired();
+            _ = b.Property(jr => jr.ErrorCategory).HasConversion<int>();
+            _ = b.Property(jr => jr.FailureReason).IsRequired().HasMaxLength(500);
+            _ = b.Property(jr => jr.Status).IsRequired().HasMaxLength(50).HasDefaultValue("Pending");
+            _ = b.Property(jr => jr.Notes).HasMaxLength(500);
+            _ = b.Property(jr => jr.CreatedAt).IsRequired();
+            _ = b.Property(jr => jr.UpdatedAt).IsRequired();
+
+            // Foreign Keys - many-to-one relationships with PrintJobs
+            _ = b.HasOne(jr => jr.OriginalJob)
+                .WithMany()
+                .HasForeignKey(jr => jr.OriginalJobId)
+                .OnDelete(DeleteBehavior.Restrict); // Prevent deleting original job if retry exists
+
+            _ = b.HasOne(jr => jr.RetryJob)
+                .WithMany()
+                .HasForeignKey(jr => jr.RetryJobId)
+                .OnDelete(DeleteBehavior.Restrict); // Prevent deleting retry job if history exists
+
+            // Indexes for querying retry history
+            _ = b.HasIndex(jr => jr.OriginalJobId);
+            _ = b.HasIndex(jr => jr.RetryJobId);
+            _ = b.HasIndex(jr => new { jr.OriginalJobId, jr.AttemptNumber });
+            _ = b.HasIndex(jr => jr.Status);
+            _ = b.HasIndex(jr => jr.ScheduledRetryTime);
         });
 
         // Printer Capabilities Entity Configuration - REMOVED (merged into Printer entity)

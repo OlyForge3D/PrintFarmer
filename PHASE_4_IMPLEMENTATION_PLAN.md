@@ -545,81 +545,64 @@ function NotificationCenter() {
 
 ---
 
-### Phase 4.4: Smart Retry & Error Handling (Days 7-8) - NOT STARTED
+### Phase 4.4: Smart Retry & Error Handling (Days 7-8) - ✅ COMPLETE (Jan 11, 2026)
 
 **Objective**: Automatically retry failed jobs with exponential backoff
 
-**Features**:
-- Configurable retry strategy
-- Exponential backoff
-- Error categorization (recoverable/permanent)
-- Retry history tracking
-- Admin control over retry settings
+**Features Implemented**:
+- ✅ Configurable retry strategy (get/update policy)
+- ✅ Exponential backoff with configurable delay and multiplier
+- ✅ Error categorization (Recoverable, Temporary, Hardware, Material)
+- ✅ Retry history tracking and audit trail
+- ✅ Admin control over retry settings via REST API
+- ✅ Complete API documentation with ProducesResponseType attributes
 
-**Backend Implementation**:
+**Deliverables**:
 
-**Service Layer**:
-```csharp
-/// <summary>
-/// Retry a failed job
-/// </summary>
-public async Task<PrintJobDto> RetryJobAsync(
-    string failedJobId,
-    int maxRetries = 3,
-    CancellationToken cancellationToken = default)
-{
-    // Get original job
-    // Validate it failed
-    // Create new job with same parameters
-    // Track original job ID for history
-    // Return new job
-}
+**Domain Models** (`src/infrastructure/Domain/Entities.cs`):
+- `RetryPolicy` - Global retry configuration with exponential backoff calculation
+- `JobRetry` - Individual retry attempt tracking with audit fields
+- `ErrorCategory` enum - Error classification for selective retry
 
-/// <summary>
-/// Get retry configuration
-/// </summary>
-public async Task<RetryPolicyDto> GetRetryPolicyAsync(CancellationToken cancellationToken)
-{
-    // Return current retry configuration
-}
-```
+**Data Access Layer** (`src/infrastructure/Repositories/`):
+- `IJobRetryRepository` - Query and persist retry records
+- `IRetryPolicyRepository` - Manage global retry policy
+- Comprehensive indexing on OriginalJobId, Status, ScheduledRetryTime
 
-**Models**:
-```csharp
-public class RetryPolicy
-{
-    public string Id { get; set; }
-    public bool IsEnabled { get; set; } = true;
-    public int MaxRetries { get; set; } = 3;
-    public int InitialDelaySeconds { get; set; } = 60;
-    public double ExponentialBase { get; set; } = 2.0;
-    public int MaxDelaySeconds { get; set; } = 3600;
-    
-    public TimeSpan GetDelay(int attemptNumber) =>
-        TimeSpan.FromSeconds(Math.Min(
-            InitialDelaySeconds * Math.Pow(ExponentialBase, attemptNumber - 1),
-            MaxDelaySeconds
-        ));
-}
+**Service Layer** (`src/api/Services/`):
+- `IRetryService` - Business logic for retry evaluation and scheduling
+- `RetryService` - Implementation with exponential backoff calculation
 
-public class JobRetry
-{
-    public string Id { get; set; }
-    public string OriginalJobId { get; set; }
-    public string RetryJobId { get; set; }
-    public int AttemptNumber { get; set; }
-    public string FailureReason { get; set; }
-    public ErrorCategory ErrorCategory { get; set; }
-    public DateTime CreatedAt { get; set; }
-}
+**REST API** (`src/api/Controllers/RetriesController.cs`):
+- `GET /api/retries/policy` - Get current retry policy
+- `PUT /api/retries/policy` - Update policy (Admin only)
+- `GET /api/retries/jobs/{jobId}` - Get retry history for a job
+- `GET /api/retries/{retryId}` - Get specific retry details
+- `GET /api/retries/due/list` - Get pending retries (Admin only)
+- `POST /api/retries/jobs/{jobId}/check-retry` - Check if job should retry (Admin only)
 
-public enum ErrorCategory
-{
-    Recoverable,      // Network error, printer offline - can retry
-    Permanent,        // Invalid file, hardware issue - don't retry
-    Unknown           // Needs manual investigation
-}
-```
+**DTOs** (`src/api/DTOs/Retries/` - Properly organized namespace):
+- `RetryPolicyDto` - Policy configuration contract
+- `UpdateRetryPolicyRequest` - Policy update contract
+- `JobRetryDto` - Retry history contract
+- `CheckRetryRequest` - Retry eligibility check request
+- `CheckRetryResponse` - Retry eligibility check response
+
+**Database Configuration** (`src/infrastructure/Data/AppDbContext.cs`):
+- EF Core model configurations (lines 509-556)
+- Proper defaults (isEnabled=true, maxRetries=3, initialDelay=60s, exponentialBase=2.0)
+- Foreign keys with cascading delete protection
+- Strategic indexes for performance
+
+**Database Initialization**:
+- Uses `EnsureCreated()` strategy (no explicit migrations needed)
+- Schema auto-generates from EF model configurations
+- Works across all supported database providers (SQLite, PostgreSQL, SQL Server, MySQL)
+
+**Build & Test Status**:
+- ✅ Clean build: 0 errors, 134 warnings (pre-existing)
+- ✅ All tests: 1676/1676 PASS (0 failures)
+- ✅ Code coverage: 34.11% line coverage
 
 ---
 
@@ -791,7 +774,7 @@ cd /home/pi/pfarm
 | 4.1: Job Scheduling | Jan 11 | ✅ COMPLETE |
 | 4.2: Predictive Estimates | Jan 12 | ✅ COMPLETE |
 | 4.3: Notifications | Dec 21 | ✅ COMPLETE |
-| 4.4: Smart Retry | Jan 13+ | 📋 NOT STARTED |
+| 4.4: Smart Retry | Jan 11 | ✅ COMPLETE |
 | 4.5: Load Balancing | TBD | 📋 Planned |
 | Testing & Polish | TBD | 📋 Planned |
 | Deployment | TBD | 📋 Planned |
@@ -800,14 +783,14 @@ cd /home/pi/pfarm
 
 ## Sign-Off & Completion Status
 
-**Phase 4 Status**: 🔄 IN PROGRESS (Phase 4.4 - Smart Retry & Error Handling)  
-**Completion to Date**: Jan 12, 2026  
-**Phases Complete**: 4.1 (Jan 11), 4.2 (Jan 12), 4.3 (Dec 21) - 3/5 COMPLETE
-**Next Phase**: Phase 4.4 (Smart Retry & Error Handling) - Ready to implement
-**Phases Remaining**: 4.4 (Smart Retry), 4.5 (Load Balancing)
+**Phase 4 Status**: 🔄 IN PROGRESS (Phase 4.5 - Load Balancing)  
+**Completion to Date**: Jan 11, 2026  
+**Phases Complete**: 4.1 (Jan 11), 4.2 (Jan 12), 4.3 (Dec 21), 4.4 (Jan 11) - 4/5 COMPLETE
+**Next Phase**: Phase 4.5 (Load Balancing) - Ready to implement
+**Phases Remaining**: 4.5 (Load Balancing)
 **Deferred to Phase 5**: Auto-Enqueue from File Uploads
 
-Three phases fully implemented with comprehensive testing (1572/1572 API tests passing, 393/393 React tests passing). Phase 4.4 ready to begin.
+Four phases fully implemented with comprehensive testing (1676/1676 API tests passing). Phase 4.5 ready to begin.
 
 ---
 
