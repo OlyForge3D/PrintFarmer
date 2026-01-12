@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { FileBrowser } from '@/features/gcode/components/FileBrowser';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
+import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { FileIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { Breadcrumbs } from '@/common/components/Breadcrumbs';
@@ -11,6 +12,7 @@ import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 export const GcodeLibraryPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const { viewMode, setViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
   const harvestId = searchParams.get('harvest') || undefined;
   const printerId = searchParams.get('printer') || undefined;
 
@@ -20,6 +22,16 @@ export const GcodeLibraryPage: React.FC = () => {
       key: 'u',
       handler: () => setShowUploadModal(true),
       description: 'Upload new G-code file'
+    },
+    {
+      key: 'v',
+      handler: () => {
+        const viewModes: Array<'grid' | 'list' | 'explorer'> = ['grid', 'list', 'explorer'];
+        const currentIndex = viewModes.indexOf(viewMode);
+        const nextIndex = (currentIndex + 1) % viewModes.length;
+        setViewMode(viewModes[nextIndex]);
+      },
+      description: 'Cycle view mode (Grid → List → Explorer)'
     }
   ]);
 
@@ -44,6 +56,8 @@ export const GcodeLibraryPage: React.FC = () => {
           <FileBrowser
             harvestId={harvestId}
             printerId={printerId}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
           />
         </div>
       </div>
@@ -61,6 +75,11 @@ export const GcodeLibraryPage: React.FC = () => {
       <GcodeUploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
+        onFilesSelected={() => {
+          setShowUploadModal(false);
+        }}
+        harvestId={harvestId}
+        printerId={printerId}
       />
     </PageTemplate>
   );

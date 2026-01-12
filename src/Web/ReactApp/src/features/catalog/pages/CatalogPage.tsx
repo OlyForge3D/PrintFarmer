@@ -10,6 +10,8 @@ import { Card } from '@/common/components/ui/Card';
 import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { Alert } from '@/common/components/ui/Alert';
+import { MasterDetailLayout } from '@/common/components/layout/MasterDetailLayout';
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 
 export function CatalogPage() {
   const [manufacturers, setManufacturers] = useState<ManufacturerDto[]>([]);
@@ -28,6 +30,28 @@ export function CatalogPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Keyboard shortcuts for catalog actions
+  useKeyboardShortcuts([
+    {
+      key: 'n',
+      handler: () => {
+        // Focus on the manufacturer input field
+        const input = document.querySelector('[placeholder="Manufacturer name"]') as HTMLInputElement;
+        input?.focus();
+      },
+      description: 'Add new manufacturer'
+    },
+    {
+      key: 'm',
+      handler: () => {
+        if (selectedManufacturer) {
+          handleAddModelClick();
+        }
+      },
+      description: 'Add new model (requires manufacturer selected)'
+    }
+  ]);
 
   const loadData = async () => {
     try {
@@ -189,6 +213,239 @@ export function CatalogPage() {
     );
   }
 
+  // Master panel - Manufacturers list
+  const masterPanel = (
+    <Card>
+      <Card.Header>
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-semibold">Manufacturers</h2>
+          <div className="flex gap-2">
+            <Input
+              value={newManufacturer}
+              onChange={(e) => setNewManufacturer(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && addManufacturer()}
+              placeholder="Manufacturer name"
+              className="text-sm"
+            />
+            <Button
+              onClick={addManufacturer}
+              disabled={!newManufacturer.trim()}
+              size="sm"
+            >
+              <PlusIcon className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </Card.Header>
+      <Card.Body>
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {manufacturers.map((manufacturer) => (
+            <div
+              key={manufacturer.id}
+              className={`p-3 border border-pf-border rounded cursor-pointer hover:bg-pf-bg-2 transition-colors ${selectedManufacturer?.id === manufacturer.id ? 'bg-blue-900/30 border-blue-600' : ''
+                }`}
+              onClick={() => setSelectedManufacturer(manufacturer)}
+            >
+              <div className="flex justify-between items-center">
+                <div>
+                  {editingManufacturer?.id === manufacturer.id ? (
+                    <div className="flex gap-2">
+                      <Input
+                        value={editingManufacturer.name}
+                        onChange={(e) => setEditingManufacturer({ ...editingManufacturer, name: e.target.value })}
+                        className="text-sm"
+                        autoFocus
+                        placeholder="Edit manufacturer name"
+                      />
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateManufacturer(editingManufacturer.id, editingManufacturer.name);
+                        }}
+                        variant="subtle"
+                        size="sm"
+                        title="Save manufacturer name"
+                      >
+                        <SaveIcon className="h-4 w-4 text-green-400" />
+                      </Button>
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingManufacturer(null);
+                        }}
+                        variant="subtle"
+                        size="sm"
+                        title="Cancel edit"
+                      >
+                        <CloseIcon className="h-4 w-4 text-red-400" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="font-medium text-pf-text">{manufacturer.name}</div>
+                      <div className="text-sm text-pf-text-secondary">{getModelCount(manufacturer.id)} models</div>
+                    </>
+                  )}
+                </div>
+                {editingManufacturer?.id !== manufacturer.id && (
+                  <div className="flex gap-1">
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingManufacturer({ id: manufacturer.id, name: manufacturer.name });
+                      }}
+                      variant="subtle"
+                      size="sm"
+                      title="Edit manufacturer"
+                    >
+                      <EditIcon className="h-4 w-4 text-blue-400" />
+                    </Button>
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteManufacturer(manufacturer.id, manufacturer.name);
+                      }}
+                      variant="subtle"
+                      size="sm"
+                      title="Delete manufacturer"
+                    >
+                      <DeleteIcon className="h-4 w-4 text-red-400" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {manufacturers.length === 0 && (
+            <div className="text-center py-8 text-pf-text-secondary">
+              No manufacturers found. Add your first manufacturer above.
+            </div>
+          )}
+        </div>
+      </Card.Body>
+    </Card>
+  );
+
+  // Detail panel - Models list
+  const detailPanel = (
+    <Card>
+      <Card.Header>
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-semibold">
+            Models {selectedManufacturer && `— ${selectedManufacturer.name}`}
+          </h2>
+          {selectedManufacturer && (
+            <Button
+              onClick={handleAddModelClick}
+              size="sm"
+              title="Add new model"
+            >
+              <PlusIcon className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      </Card.Header>
+      <Card.Body>
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {selectedManufacturer ? (
+            getFilteredModels().map((model) => (
+              <div key={model.id} className="space-y-2">
+                <div className="p-3 border border-pf-border rounded hover:bg-pf-bg-2 transition-colors">
+                  <div className="flex justify-between items-center">
+                    <div className="flex-1">
+                      {editingModel?.id === model.id ? (
+                        <div className="flex gap-2">
+                          <Input
+                            value={editingModel.name}
+                            onChange={(e) => setEditingModel({ ...editingModel, name: e.target.value })}
+                            className="text-sm"
+                            autoFocus
+                            placeholder="Edit model name"
+                          />
+                          <Button
+                            onClick={() => updateModel(editingModel.id, editingModel.name)}
+                            variant="subtle"
+                            size="sm"
+                            title="Save model name"
+                          >
+                            <SaveIcon className="h-4 w-4 text-green-400" />
+                          </Button>
+                          <Button
+                            onClick={() => setEditingModel(null)}
+                            variant="subtle"
+                            size="sm"
+                            title="Cancel edit"
+                          >
+                            <CloseIcon className="h-4 w-4 text-red-400" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="font-medium text-pf-text">{model.name}</div>
+                          {model.motionType !== undefined && (
+                            <div className="text-sm text-pf-text-secondary">
+                              Type: {getMotionTypeDisplayName(model.motionType)}
+                            </div>
+                          )}
+                          {model.supportedFilamentTypes && model.supportedFilamentTypes.length > 0 && (
+                            <div className="text-sm text-pf-text-secondary mt-1">
+                              Filament types: {model.supportedFilamentTypes.join(', ')}
+                            </div>
+                          )}
+                          {(() => {
+                            const coverUrl = getCoverImageUrl(selectedManufacturer!.id, model.id);
+                            if (coverUrl) {
+                              return (
+                                <div className="mt-2 flex items-center gap-1 text-xs text-pf-text-secondary">
+                                  <ImageIcon className="h-3 w-3" />
+                                  <span>Cover image available</span>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                    {editingModel?.id !== model.id && (
+                      <div className="flex gap-1">
+                        <Button
+                          onClick={() => openEditModal(model)}
+                          variant="subtle"
+                          size="sm"
+                          title="Edit model capabilities"
+                        >
+                          <EditIcon className="h-4 w-4 text-blue-400" />
+                        </Button>
+                        <Button
+                          onClick={() => deleteModel(model.id, model.name)}
+                          variant="subtle"
+                          size="sm"
+                          title="Delete model"
+                        >
+                          <DeleteIcon className="h-4 w-4 text-red-400" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-8 text-pf-text-secondary">
+              Select a manufacturer to view and manage models
+            </div>
+          )}
+          {selectedManufacturer && getFilteredModels().length === 0 && (
+            <div className="text-center py-8 text-pf-text-secondary">
+              No models found for {selectedManufacturer.name}. Add your first model above.
+            </div>
+          )}
+        </div>
+      </Card.Body>
+    </Card>
+  );
+
   return (
     <PageTemplate
       title="Catalog"
@@ -199,237 +456,15 @@ export function CatalogPage() {
         <Alert type="error">{error}</Alert>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Manufacturers Section */}
-        <Card>
-          <Card.Header>
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold">Manufacturers</h2>
-              <div className="flex gap-2">
-                <Input
-                  value={newManufacturer}
-                  onChange={(e) => setNewManufacturer(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addManufacturer()}
-                  placeholder="Manufacturer name"
-                  className="text-sm"
-                />
-                <Button
-                  onClick={addManufacturer}
-                  disabled={!newManufacturer.trim()}
-                  size="sm"
-                >
-                  <PlusIcon className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </Card.Header>
-          <Card.Body>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {manufacturers.map((manufacturer) => (
-                <div
-                  key={manufacturer.id}
-                  className={`p-3 border border-pf-border rounded cursor-pointer hover:bg-pf-bg-2 transition-colors ${selectedManufacturer?.id === manufacturer.id ? 'bg-blue-900/30 border-blue-600' : ''
-                    }`}
-                  onClick={() => setSelectedManufacturer(manufacturer)}
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
-                      {editingManufacturer?.id === manufacturer.id ? (
-                        <div className="flex gap-2">
-                          <Input
-                            value={editingManufacturer.name}
-                            onChange={(e) => setEditingManufacturer({ ...editingManufacturer, name: e.target.value })}
-                            className="text-sm"
-                            autoFocus
-                            placeholder="Edit manufacturer name"
-                          />
-                          <Button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateManufacturer(editingManufacturer.id, editingManufacturer.name);
-                            }}
-                            variant="subtle"
-                            size="sm"
-                            title="Save manufacturer name"
-                          >
-                            <SaveIcon className="h-4 w-4 text-green-400" />
-                          </Button>
-                          <Button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingManufacturer(null);
-                            }}
-                            variant="subtle"
-                            size="sm"
-                            title="Cancel edit"
-                          >
-                            <CloseIcon className="h-4 w-4 text-red-400" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="font-medium text-pf-text">{manufacturer.name}</div>
-                          <div className="text-sm text-pf-text-secondary">{getModelCount(manufacturer.id)} models</div>
-                        </>
-                      )}
-                    </div>
-                    {editingManufacturer?.id !== manufacturer.id && (
-                      <div className="flex gap-1">
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingManufacturer({ id: manufacturer.id, name: manufacturer.name });
-                          }}
-                          variant="subtle"
-                          size="sm"
-                          title="Edit manufacturer"
-                        >
-                          <EditIcon className="h-4 w-4 text-blue-400" />
-                        </Button>
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteManufacturer(manufacturer.id, manufacturer.name);
-                          }}
-                          variant="subtle"
-                          size="sm"
-                          title="Delete manufacturer"
-                        >
-                          <DeleteIcon className="h-4 w-4 text-red-400" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {manufacturers.length === 0 && (
-                <div className="text-center py-8 text-pf-text-secondary">
-                  No manufacturers found. Add your first manufacturer above.
-                </div>
-              )}
-            </div>
-          </Card.Body>
-        </Card>
-
-        {/* Models Section */}
-        <Card>
-          <Card.Header>
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold">
-                Models {selectedManufacturer && `— ${selectedManufacturer.name}`}
-              </h2>
-              {selectedManufacturer && (
-                <Button
-                  onClick={handleAddModelClick}
-                  size="sm"
-                  title="Add new model"
-                >
-                  <PlusIcon className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </Card.Header>
-          <Card.Body>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {selectedManufacturer ? (
-                getFilteredModels().map((model) => (
-                  <div key={model.id} className="space-y-2">
-                    <div className="p-3 border border-pf-border rounded hover:bg-pf-bg-2 transition-colors">
-                      <div className="flex justify-between items-center">
-                        <div className="flex-1">
-                          {editingModel?.id === model.id ? (
-                            <div className="flex gap-2">
-                              <Input
-                                value={editingModel.name}
-                                onChange={(e) => setEditingModel({ ...editingModel, name: e.target.value })}
-                                className="text-sm"
-                                autoFocus
-                                placeholder="Edit model name"
-                              />
-                              <Button
-                                onClick={() => updateModel(editingModel.id, editingModel.name)}
-                                variant="subtle"
-                                size="sm"
-                                title="Save model name"
-                              >
-                                <SaveIcon className="h-4 w-4 text-green-400" />
-                              </Button>
-                              <Button
-                                onClick={() => setEditingModel(null)}
-                                variant="subtle"
-                                size="sm"
-                                title="Cancel edit"
-                              >
-                                <CloseIcon className="h-4 w-4 text-red-400" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="font-medium text-pf-text">{model.name}</div>
-                              {model.motionType !== undefined && (
-                                <div className="text-sm text-pf-text-secondary">
-                                  Type: {getMotionTypeDisplayName(model.motionType)}
-                                </div>
-                              )}
-                              {model.supportedFilamentTypes && model.supportedFilamentTypes.length > 0 && (
-                                <div className="text-sm text-pf-text-secondary mt-1">
-                                  Filament types: {model.supportedFilamentTypes.join(', ')}
-                                </div>
-                              )}
-                              {(() => {
-                                const coverUrl = getCoverImageUrl(selectedManufacturer!.id, model.id);
-                                if (coverUrl) {
-                                  return (
-                                    <div className="mt-2 flex items-center gap-1 text-xs text-pf-text-secondary">
-                                      <ImageIcon className="h-3 w-3" />
-                                      <span>Cover image available</span>
-                                    </div>
-                                  );
-                                }
-                                return null;
-                              })()}
-                            </div>
-                          )}
-                        </div>
-                        {editingModel?.id !== model.id && (
-                          <div className="flex gap-1">
-                            <Button
-                              onClick={() => openEditModal(model)}
-                              variant="subtle"
-                              size="sm"
-                              title="Edit model capabilities"
-                            >
-                              <EditIcon className="h-4 w-4 text-blue-400" />
-                            </Button>
-                            <Button
-                              onClick={() => deleteModel(model.id, model.name)}
-                              variant="subtle"
-                              size="sm"
-                              title="Delete model"
-                            >
-                              <DeleteIcon className="h-4 w-4 text-red-400" />
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-pf-text-secondary">
-                  Select a manufacturer to view and manage models
-                </div>
-              )}
-              {selectedManufacturer && getFilteredModels().length === 0 && (
-                <div className="text-center py-8 text-pf-text-secondary">
-                  No models found for {selectedManufacturer.name}. Add your first model above.
-                </div>
-              )}
-            </div>
-          </Card.Body>
-        </Card>
-      </div>
+      <MasterDetailLayout
+        master={masterPanel}
+        detail={detailPanel}
+        hasDetail={!!selectedManufacturer}
+        onCloseDetail={() => setSelectedManufacturer(null)}
+        detailTitle={selectedManufacturer?.name}
+        masterWidth="w-80"
+        breakpoint="lg"
+      />
 
       <EditModelModal
         model={modelToEdit}

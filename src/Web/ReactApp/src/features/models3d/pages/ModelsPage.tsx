@@ -4,7 +4,7 @@ import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { useInfiniteList } from '@/common/hooks/useInfiniteList';
 import { useKeyboardNavigation } from '@/common/hooks/useKeyboardNavigation';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
-import { CloseIcon, CubeIcon, TagIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+import { CloseIcon, CubeIcon, TagIcon, UploadIcon, FilterIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
@@ -39,7 +39,6 @@ export const ModelsPage: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
-  const [isViewerMaximized, setIsViewerMaximized] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -47,39 +46,6 @@ export const ModelsPage: React.FC = () => {
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [selectedModelForTagging, setSelectedModelForTagging] = useState<Model | null>(null);
   const [isTaggingModalOpen, setIsTaggingModalOpen] = useState(false);
-
-  // Keyboard navigation for model list
-  const { selectedIndex } = useKeyboardNavigation({
-    items: models,
-    columns: viewMode === 'grid' ? 4 : 1,  // 4 columns for grid, 1 for list
-    onEnter: (model) => setViewerModel(model),
-    onEscapeKey: () => setViewerModel(null)
-  });
-
-  // Keyboard shortcuts for common actions
-  useKeyboardShortcuts([
-    {
-      key: 'u',
-      handler: () => setShowUploadModal(true),
-      description: 'Upload new model'
-    },
-    {
-      key: 'f',
-      handler: () => setShowFiltersPanel(!showFiltersPanel),
-      description: 'Open filters'
-    },
-    {
-      key: 't',
-      handler: () => {
-        if (selectedIndex >= 0 && models[selectedIndex]) {
-          const model = models[selectedIndex];
-          setSelectedModelForTagging(model);
-          setIsTaggingModalOpen(true);
-        }
-      },
-      description: 'Tag selected model'
-    }
-  ]);
 
   // Debounce search query
   React.useEffect(() => {
@@ -110,7 +76,7 @@ export const ModelsPage: React.FC = () => {
     hasMore,
     isLoadingMore,
     fetchNextPage,
-  } = useInfiniteList(
+  } = useInfiniteList<Model>(
     ['models-search', debouncedSearchQuery, selectedTags],
     async (pageParam) => {
       const response = await fetch(`${getApiBaseUrl()}/3d-models/search`, {
@@ -152,6 +118,55 @@ export const ModelsPage: React.FC = () => {
     gcTime: 10 * 60 * 1000
   });
 
+  // Keyboard navigation for model list (AFTER models is defined)
+  const { selectedIndex } = useKeyboardNavigation(
+    models as Model[],
+    (model: Model) => {
+      setViewerModel(model);
+    },
+    {
+      columns: viewMode === 'grid' ? 4 : 1,  // 4 columns for grid, 1 for list
+      onEscapeKey: () => {
+        setViewerModel(null);
+      }
+    }
+  );
+
+  // Keyboard shortcuts for common actions
+  useKeyboardShortcuts([
+    {
+      key: 'u',
+      handler: () => setShowUploadModal(true),
+      description: 'Upload new model'
+    },
+    {
+      key: 'v',
+      handler: () => {
+        const viewModes: Array<'grid' | 'list' | 'explorer'> = ['grid', 'list', 'explorer'];
+        const currentIndex = viewModes.indexOf(viewMode);
+        const nextIndex = (currentIndex + 1) % viewModes.length;
+        setViewMode(viewModes[nextIndex]);
+      },
+      description: 'Cycle view mode (Grid → List → Explorer)'
+    },
+    {
+      key: 'f',
+      handler: () => setShowFiltersPanel(!showFiltersPanel),
+      description: 'Open filters'
+    },
+    {
+      key: 't',
+      handler: () => {
+        if (selectedIndex >= 0 && models[selectedIndex]) {
+          const model = models[selectedIndex];
+          setSelectedModelForTagging(model);
+          setIsTaggingModalOpen(true);
+        }
+      },
+      description: 'Tag selected model'
+    }
+  ]);
+
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -174,6 +189,8 @@ export const ModelsPage: React.FC = () => {
     );
   }
 
+
+
   return (
     <PageTemplate
       title="3D Models"
@@ -189,6 +206,7 @@ export const ModelsPage: React.FC = () => {
             { label: 'Models', current: true }
           ]}
         />
+        
         {/* Toolbar */}
         <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 space-y-3">
           {/* Top Row: Search and Controls */}
@@ -264,15 +282,10 @@ export const ModelsPage: React.FC = () => {
             </div>
           )}
         </div>
-
+        
         {/* Content Area - Full Width */}
         <div className="flex-1 min-h-0 flex flex-col">
-          {models.length === 0 && isLoading && viewMode !== 'explorer' ? (
-            <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
-              <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent mx-auto"></div>
-              <p className="text-pf-text-secondary mt-3">Loading models...</p>
-            </div>
-          ) : models.length === 0 && viewMode !== 'explorer' ? (
+          {models.length === 0 && !isLoading && viewMode !== 'explorer' ? (
             <div className="bg-pf-bg-1 border border-pf-border rounded-lg py-12 text-center">
               <CubeIcon className="w-12 h-12 text-pf-text-tertiary mx-auto mb-3 opacity-50" />
               <p className="text-pf-text-secondary">No models found</p>
@@ -304,7 +317,7 @@ export const ModelsPage: React.FC = () => {
               className="flex-1"
             >
               <ModelGridView
-                models={models}
+                models={models as Model[]}
                 isLoading={isLoading}
                 onViewerModel={setViewerModel}
                 onTagModel={(model) => {
@@ -322,7 +335,7 @@ export const ModelsPage: React.FC = () => {
               className="flex-1"
             >
               <ModelListView
-                models={models}
+                models={models as Model[]}
                 isLoading={isLoading}
                 onViewerModel={setViewerModel}
                 onTagModel={(model) => {
@@ -338,52 +351,33 @@ export const ModelsPage: React.FC = () => {
 
       {/* Model Viewer Modal */}
       {viewerModel && (
-        <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ${isViewerMaximized ? 'p-2' : 'p-4'}`}>
-          <div className={`bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border flex flex-col ${
-            isViewerMaximized 
-              ? 'w-full h-full max-w-none max-h-none' 
-              : 'max-w-4xl w-full max-h-[90vh]'
-          }`}>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-pf-bg-1 rounded-lg shadow-xl border border-pf-border flex flex-col max-w-4xl w-full max-h-[90vh]">
             <div className="flex items-center justify-between p-4 border-b border-pf-border flex-shrink-0">
               <h3 className="font-medium text-lg text-pf-text-primary">{viewerModel.name}</h3>
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={() => setIsViewerMaximized(!isViewerMaximized)}
-                  variant="subtle"
-                  size="sm"
-                  title={isViewerMaximized ? 'Restore size' : 'Maximize viewer'}
-                >
-                  {isViewerMaximized ? (
-                    <ArrowDownIcon className="w-5 h-5" />
-                  ) : (
-                    <ArrowUpIcon className="w-5 h-5" />
-                  )}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setViewerModel(null);
-                    setIsViewerMaximized(false);
-                  }}
-                  variant="subtle"
-                  size="sm"
-                >
-                  <CloseIcon className="w-5 h-5" />
-                </Button>
-              </div>
+              <Button
+                onClick={() => {
+                  setViewerModel(null);
+                }}
+                variant="subtle"
+                size="sm"
+              >
+                <CloseIcon className="w-5 h-5" />
+              </Button>
             </div>
-            <div className={`p-4 flex-1 ${isViewerMaximized ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+            <div className="p-4 flex-1 overflow-y-auto">
               <Suspense fallback={
                 <ViewerSkeleton 
                   variant="model" 
-                  className={isViewerMaximized ? 'h-full w-full' : 'h-[32rem] w-full'}
+                  className="h-[32rem] w-full"
                 />
               }>
                 {viewerModel.url && viewerModel.fileType && (
                   <ModelViewer
                     modelUrl={viewerModel.url}
                     fileType={viewerModel.fileType}
-                    showGrid={false} // Hide grid on Models page
-                    className={isViewerMaximized ? 'h-full w-full' : 'h-[32rem] w-full'}
+                    showGrid={false}
+                    className="h-[32rem] w-full"
                   />
                 )}
               </Suspense>

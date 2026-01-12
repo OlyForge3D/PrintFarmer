@@ -23,6 +23,8 @@ interface FileBrowserProps {
   printerId?: string;
   initialPath?: string;
   isModal?: boolean;
+  viewMode?: 'grid' | 'list' | 'explorer';
+  onViewModeChange?: (mode: 'grid' | 'list' | 'explorer') => void;
 }
 
 interface UploadItem {
@@ -53,13 +55,19 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   harvestId,
   printerId,
   initialPath = '/',
-  isModal = false
+  isModal = false,
+  viewMode: initialViewMode,
+  onViewModeChange
 }) => {
   const { hasPermission } = useAuth();
   const queryClient = useQueryClient();
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const { viewMode, setViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
+  const { viewMode: savedViewMode, setViewMode: setSavedViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
+  
+  // Use provided viewMode/setViewMode if available, otherwise use saved preference
+  const viewMode = initialViewMode ?? savedViewMode;
+  const setViewMode = onViewModeChange ?? setSavedViewMode;
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'date'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');

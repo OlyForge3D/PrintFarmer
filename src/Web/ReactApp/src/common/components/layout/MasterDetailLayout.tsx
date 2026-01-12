@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeftIcon } from '@/common/components/icons/MdiIcons';
+import { ArrowLeftIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
 
 interface MasterDetailLayoutProps {
@@ -150,7 +150,7 @@ export function MasterDetailLayout({
                 aria-label="Back to list"
                 type="button"
               >
-                <ChevronLeftIcon className="w-5 h-5" />
+                <ArrowLeftIcon className="w-5 h-5" />
               </Button>
               <span className="text-sm font-medium flex-1 truncate text-pf-text-primary">
                 {detailTitle || 'Details'}

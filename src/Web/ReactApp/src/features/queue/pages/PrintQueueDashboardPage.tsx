@@ -1,8 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { PageTemplate } from "@/common/components/PageTemplate";
 import { Alert } from "@/common/components/ui/Alert";
+import { Button } from "@/common/components/ui/Button";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { Tabs } from "@/common/components/ui/Tabs";
+import { MasterDetailLayout } from "@/common/components/layout/MasterDetailLayout";
+import { ArrowLeftIcon } from "@/common/components/icons/MdiIcons";
 import { useKeyboardNavigation } from "@/common/hooks/useKeyboardNavigation";
 import { useKeyboardShortcuts } from "@/common/hooks/useKeyboardShortcuts";
 import { TableFiltersBar } from "../components/QueueFiltersBar";
@@ -30,6 +33,7 @@ export function PrintQueueDashboardPage() {
   const [activeTab, setActiveTab] = useState("all-jobs");
   const [isJobDetailsModalOpen, setIsJobDetailsModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [showDetailPanel, setShowDetailPanel] = useState(false);
 
   // Keyboard navigation for job list (only for active tab)
   const { selectedIndex } = useKeyboardNavigation({
@@ -37,9 +41,13 @@ export function PrintQueueDashboardPage() {
     columns: 1,  // Single column table-like layout
     onEnter: (job) => {
       setSelectedJobId(job.id);
+      setShowDetailPanel(true);
       setIsJobDetailsModalOpen(true);
     },
-    onEscapeKey: () => setIsJobDetailsModalOpen(false)
+    onEscapeKey: () => {
+      setShowDetailPanel(false);
+      setIsJobDetailsModalOpen(false);
+    }
   });
 
   // Keyboard shortcuts for queue actions
@@ -66,6 +74,13 @@ export function PrintQueueDashboardPage() {
         }
       },
       description: 'Pause/resume selected job'
+    },
+    {
+      key: 'v',
+      handler: () => {
+        setShowDetailPanel(!showDetailPanel);
+      },
+      description: 'Toggle detail panel visibility'
     }
   ]);
 
@@ -169,11 +184,6 @@ export function PrintQueueDashboardPage() {
     }
   };
 
-  const handleEditJob = (jobId: string) => {
-    setSelectedJobId(jobId);
-    setIsJobDetailsModalOpen(true);
-  };
-
   const handleCloseJobDetailsModal = () => {
     setIsJobDetailsModalOpen(false);
     setSelectedJobId(null);
@@ -239,29 +249,77 @@ export function PrintQueueDashboardPage() {
         </Tabs.List>
 
         <Tabs.Panels>
-          {/* Tab 1: All Jobs */}
+          {/* Tab 1: All Jobs with Master-Detail Layout */}
           <Tabs.Panel id="all-jobs">
-            {/* Filters */}
-            <TableFiltersBar
-              onStatusChange={setStatusFilter}
-              onModelChange={setModelFilter}
-              onMaterialChange={setMaterialFilter}
-              onRefresh={loadJobs}
-              isLoading={loading}
-            />
+            <MasterDetailLayout
+              masterPanel={
+                <div className="flex flex-col h-full">
+                  {/* Filters */}
+                  <TableFiltersBar
+                    onStatusChange={setStatusFilter}
+                    onModelChange={setModelFilter}
+                    onMaterialChange={setMaterialFilter}
+                    onRefresh={loadJobs}
+                    isLoading={loading}
+                  />
 
-            {/* Jobs Table */}
-            <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 mt-4">
-              <QueueJobsTable
-                jobs={jobs}
-                isLoading={loading}
-                onPause={handlePauseJob}
-                onResume={handleResumeJob}
-                onCancel={handleCancelJob}
-                onPriority={handlePriorityChange}
-                onEdit={handleEditJob}
-              />
-            </div>
+                  {/* Jobs Table */}
+                  <div className="flex-1 overflow-auto bg-pf-bg-1 border border-pf-border rounded-lg p-4 mt-4">
+                    <QueueJobsTable
+                      jobs={jobs}
+                      isLoading={loading}
+                      onPause={handlePauseJob}
+                      onResume={handleResumeJob}
+                      onCancel={handleCancelJob}
+                      onPriority={handlePriorityChange}
+                      onEdit={(jobId) => {
+                        setSelectedJobId(jobId);
+                        setShowDetailPanel(true);
+                      }}
+                    />
+                  </div>
+                </div>
+              }
+              detailPanel={
+                selectedJobId ? (
+                  <div className="flex flex-col h-full">
+                    {/* Detail Header with Close Button */}
+                    <div className="flex items-center justify-between p-4 border-b border-pf-border">
+                      <h3 className="text-lg font-semibold">Job Details</h3>
+                      <Button
+                        onClick={() => setShowDetailPanel(false)}
+                        variant="ghost"
+                        size="sm"
+                        title="Close detail panel (Esc)"
+                      >
+                        <ArrowLeftIcon size="1.2rem" />
+                      </Button>
+                    </div>
+
+                    {/* Job Details Content */}
+                    <div className="flex-1 overflow-auto p-4">
+                      <JobDetailsModal
+                        jobId={selectedJobId}
+                        isOpen={true}
+                        onClose={() => setShowDetailPanel(false)}
+                        onSave={() => {
+                          setShowDetailPanel(false);
+                          setSelectedJobId(null);
+                          loadJobs();
+                        }}
+                        onRefresh={loadJobs}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-pf-text-secondary">
+                    <p>Select a job to view details</p>
+                  </div>
+                )
+              }
+              showDetail={showDetailPanel}
+              onToggleDetail={setShowDetailPanel}
+            />
           </Tabs.Panel>
 
           {/* Tab 2: By Model */}
@@ -324,14 +382,16 @@ export function PrintQueueDashboardPage() {
         }}
       />
 
-      {/* Job Details Modal */}
-      <JobDetailsModal
-        jobId={selectedJobId || ""}
-        isOpen={isJobDetailsModalOpen}
-        onClose={handleCloseJobDetailsModal}
-        onSave={handleJobDetailsSaved}
-        onRefresh={loadJobs}
-      />
+      {/* Mobile Fallback Modal - only show on mobile or if modal explicitly requested */}
+      {isJobDetailsModalOpen && (
+        <JobDetailsModal
+          jobId={selectedJobId || ""}
+          isOpen={isJobDetailsModalOpen}
+          onClose={handleCloseJobDetailsModal}
+          onSave={handleJobDetailsSaved}
+          onRefresh={loadJobs}
+        />
+      )}
     </PageTemplate>
   );
 }
