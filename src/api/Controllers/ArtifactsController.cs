@@ -19,21 +19,14 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize] // All endpoints require authentication
-public class ArtifactsController : ControllerBase
+public class ArtifactsController(
+    IArtifactsService service,
+    Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository jobRepository,
+    Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> settings) : ControllerBase
 {
-    private readonly IArtifactsService _service;
-    private readonly Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository _jobRepository;
-
-    private readonly Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> _settings;
-    public ArtifactsController(
-        IArtifactsService service,
-        Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository jobRepository,
-        Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> settings)
-    {
-        _service = service ?? throw new ArgumentNullException(nameof(service));
-        _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-    }
+    private readonly IArtifactsService _service = service ?? throw new ArgumentNullException(nameof(service));
+    private readonly Farm.Infrastructure.Repositories.Slicing.ISliceJobRepository _jobRepository = jobRepository ?? throw new ArgumentNullException(nameof(jobRepository));
+    private readonly Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Settings.ArtifactStorageSettings> _settings = settings ?? throw new ArgumentNullException(nameof(settings));
 
     /// <summary>
     /// Upload multiple artifacts in a single request.

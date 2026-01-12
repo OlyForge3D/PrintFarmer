@@ -13,16 +13,10 @@ namespace Farm.Web.Api.Controllers.Admin;
 [Route("api/admin/slicers")]
 [Authorize]
 [RequirePermission("slicers", "admin")]
-public class SlicerManagementController : ControllerBase
+public class SlicerManagementController(ISlicersService service, ILogger<SlicerManagementController> logger) : ControllerBase
 {
-    private readonly ISlicersService _service;
-    private readonly ILogger<SlicerManagementController> _logger;
-
-    public SlicerManagementController(ISlicersService service, ILogger<SlicerManagementController> logger)
-    {
-        _service = service ?? throw new ArgumentNullException(nameof(service));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly ISlicersService _service = service ?? throw new ArgumentNullException(nameof(service));
+    private readonly ILogger<SlicerManagementController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Admin endpoint to list all slicer services with full details including API keys

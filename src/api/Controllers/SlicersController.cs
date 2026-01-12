@@ -10,14 +10,9 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/[controller]")]
 // Registration and list use static key, all others use per-service key
 [RequireSlicerApiKey]
-public class SlicersController : ControllerBase
+public class SlicersController(Services.Slicing.ISlicersService service) : ControllerBase
 {
-    private readonly Services.Slicing.ISlicersService _service;
-
-    public SlicersController(Services.Slicing.ISlicersService service)
-    {
-        _service = service ?? throw new ArgumentNullException(nameof(service));
-    }
+    private readonly Services.Slicing.ISlicersService _service = service ?? throw new ArgumentNullException(nameof(service));
 
 
     [HttpGet]

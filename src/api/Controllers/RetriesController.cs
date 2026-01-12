@@ -14,21 +14,14 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class RetriesController : ControllerBase
+public class RetriesController(
+    IRetryService retryService,
+    IPrintQueueService printQueueService,
+    ILogger<RetriesController> logger) : ControllerBase
 {
-    private readonly IRetryService _retryService;
-    private readonly IPrintQueueService _printQueueService;
-    private readonly ILogger<RetriesController> _logger;
-
-    public RetriesController(
-        IRetryService retryService,
-        IPrintQueueService printQueueService,
-        ILogger<RetriesController> logger)
-    {
-        _retryService = retryService ?? throw new ArgumentNullException(nameof(retryService));
-        _printQueueService = printQueueService ?? throw new ArgumentNullException(nameof(printQueueService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IRetryService _retryService = retryService ?? throw new ArgumentNullException(nameof(retryService));
+    private readonly IPrintQueueService _printQueueService = printQueueService ?? throw new ArgumentNullException(nameof(printQueueService));
+    private readonly ILogger<RetriesController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Get the current retry policy configuration

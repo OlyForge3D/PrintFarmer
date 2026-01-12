@@ -17,18 +17,14 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/locations")]
 [Tags("Locations")]
-public class LocationsController : ControllerBase
+public class LocationsController(
+    ILocationService locationService,
+    IStartupStatus startupStatus,
+    IUnifiedLoggingService logger) : ControllerBase
 {
-    private readonly ILocationService _locationService;
-    private readonly IStartupStatus _startupStatus;
-    private readonly IUnifiedLoggingService _logger;
-
-    public LocationsController(ILocationService locationService, IStartupStatus startupStatus, IUnifiedLoggingService logger)
-    {
-        _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
-        _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
+    private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
+    private readonly IUnifiedLoggingService _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Gets all printer locations.

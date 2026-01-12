@@ -24,54 +24,46 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/3d-models")] // Updated route to be more specific and avoid naming conflicts
-public class Model3DFilesController : ControllerBase
+public class Model3DFilesController(
+    IUnifiedLoggingService logger,
+    IModel3DFileService modelService,
+    IConfiguration configuration,
+    Services.IO.IFileSystem fileSystem,
+    IFileManagementService fileManagementService,
+    ITagService tagService,
+    IUnitOfWork unitOfWork,
+    IFolderManagementService folderService,
+    IStoredFileOperationsService fileOperations,
+    IStoragePathService storagePathService,
+    I3MfToStlConversionService threeMfConverter) : ControllerBase
 {
-    private readonly IUnifiedLoggingService _logger;
-    private readonly IModel3DFileService _modelService;
-    private readonly string _modelsPath;
-    private readonly Services.IO.IFileSystem _fileSystem;
-    private readonly IFileManagementService _fileManagementService;
-    private readonly ITagService _tagService;
-    private readonly IUnitOfWork _unitOfWork;
-    private readonly IFolderManagementService _folderService;
-    private readonly IStoredFileOperationsService _fileOperations;
-    private readonly IStoragePathService _storagePathService;
-    private readonly I3MfToStlConversionService _threeMfConverter;
+    private readonly IUnifiedLoggingService _logger = logger;
+    private readonly IModel3DFileService _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
+    private readonly Services.IO.IFileSystem _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+    private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
+    private readonly ITagService _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
+    private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly IFolderManagementService _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
+    private readonly IStoredFileOperationsService _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
+    private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+    private readonly I3MfToStlConversionService _threeMfConverter = threeMfConverter ?? throw new ArgumentNullException(nameof(threeMfConverter));
+    private readonly string _modelsPath = InitializeModelsPath(configuration, fileSystem);
 
-    public Model3DFilesController(
-        IUnifiedLoggingService logger,
-        IModel3DFileService modelService,
-        IConfiguration configuration,
-        Services.IO.IFileSystem fileSystem,
-        IFileManagementService fileManagementService,
-        ITagService tagService,
-        IUnitOfWork unitOfWork,
-        IFolderManagementService folderService,
-        IStoredFileOperationsService fileOperations,
-        IStoragePathService storagePathService,
-        I3MfToStlConversionService threeMfConverter)
+    private static string InitializeModelsPath(IConfiguration configuration, Services.IO.IFileSystem fileSystem)
     {
-        _logger = logger;
-        _modelService = modelService ?? throw new ArgumentNullException(nameof(modelService));
-        _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
-        _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
-        _tagService = tagService ?? throw new ArgumentNullException(nameof(tagService));
-        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _folderService = folderService ?? throw new ArgumentNullException(nameof(folderService));
-        _fileOperations = fileOperations ?? throw new ArgumentNullException(nameof(fileOperations));
-        _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
-        _threeMfConverter = threeMfConverter ?? throw new ArgumentNullException(nameof(threeMfConverter));
         ArgumentNullException.ThrowIfNull(configuration);
         string configPath = configuration["ModelStorage:Path"] ?? "models";
         // Ensure path is absolute - if relative, combine with current directory first
-        _modelsPath = Path.IsPathRooted(configPath)
+        string modelsPath = Path.IsPathRooted(configPath)
             ? configPath
             : Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), configPath));
 
-        if (!_fileSystem.DirectoryExists(_modelsPath))
+        if (!fileSystem.DirectoryExists(modelsPath))
         {
-            _fileSystem.CreateDirectory(_modelsPath);
+            fileSystem.CreateDirectory(modelsPath);
         }
+        
+        return modelsPath;
     }
 
     /// <summary>
