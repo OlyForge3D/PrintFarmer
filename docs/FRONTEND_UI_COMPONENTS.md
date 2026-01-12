@@ -21,6 +21,7 @@ PrintFarmer uses a standardized set of shared UI components built with React and
 | [`InfiniteScroll`](#infinitescroll) | `src/common/components/InfiniteScroll.tsx` | Infinite scroll wrapper for paginated content |
 | [`Input`](#input) | `src/components/ui/Input.tsx` | Text input |
 | [`Label`](#label) | `src/components/ui/Label.tsx` | Simple form field label |
+| [`MasterDetailLayout`](#masterdetaillayout) | `src/common/components/layout/MasterDetailLayout.tsx` | Responsive master/detail sidebar layout for lists |
 | [`Modal`](#modal) | `src/common/components/modals/Modal.tsx` | Dialog/modal with overlay |
 | [`ProgressBar`](#progressbar) | `src/components/ui/ProgressBar.tsx` | Progress indicator |
 | [`Radio`](#radio) | `src/components/ui/Radio.tsx` | Radio button with label |
@@ -1618,6 +1619,406 @@ interface PaginatedResponse<T> {
 - Handle empty states (when `allItems.length === 0`)
 - Show error message if `error` is set
 - Consider adding debounce to search filters before refetch
+
+---
+
+### useKeyboardNavigation
+
+React hook for handling keyboard navigation in lists, grids, and similar components. Supports arrow key navigation with proper boundary checking and selection callbacks.
+
+**Location**: `src/common/hooks/useKeyboardNavigation.ts`
+
+**Usage**:
+```tsx
+import { useKeyboardNavigation } from '@/common/hooks/useKeyboardNavigation';
+
+interface Item {
+  id: string;
+  title: string;
+}
+
+function SelectableList({ items }: { items: Item[] }) {
+  const { selectedIndex, setSelectedIndex, isNavigating } = useKeyboardNavigation<Item>({
+    items,
+    columns: 1,  // Single column list
+    onEnter: (item) => {
+      console.log('Selected:', item);
+    },
+    onEscapeKey: () => {
+      console.log('Navigation cancelled');
+    }
+  });
+
+  return (
+    <ul>
+      {items.map((item, index) => (
+        <li 
+          key={item.id}
+          className={selectedIndex === index ? 'bg-pf-accent text-white' : ''}
+          onClick={() => setSelectedIndex(index)}
+        >
+          {item.title}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Grid usage with 3 columns
+function SelectableGrid({ items }: { items: Item[] }) {
+  const { selectedIndex, setSelectedIndex } = useKeyboardNavigation<Item>({
+    items,
+    columns: 3,  // 3-column grid
+    onEnter: (item) => handleSelectItem(item)
+  });
+
+  const selectedItem = items[selectedIndex];
+
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      {items.map((item, index) => (
+        <div 
+          key={item.id}
+          className={`p-4 border ${selectedIndex === index ? 'border-pf-accent bg-pf-accent/10' : 'border-pf-border'}`}
+          tabIndex={selectedIndex === index ? 0 : -1}
+        >
+          {item.title}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+**Hook Return Type**:
+```tsx
+interface UseKeyboardNavigationReturn<T> {
+  selectedIndex: number;              // Index of currently selected item
+  setSelectedIndex: (index: number) => void;  // Update selected index
+  isNavigating: boolean;              // Whether keyboard navigation is active
+}
+```
+
+**Parameters**:
+```tsx
+interface UseKeyboardNavigationOptions<T> {
+  items: T[];                         // Array of items to navigate
+  columns?: number;                   // Number of columns for grid (default: 1)
+  onEnter?: (item: T) => void;       // Callback when Enter is pressed
+  onEscapeKey?: () => void;          // Callback when Escape is pressed
+}
+```
+
+**Supported Keys**:
+- **Arrow Up**: Move selection up (by columns, wraps at boundary)
+- **Arrow Down**: Move selection down (by columns, wraps at boundary)
+- **Arrow Left**: Move selection left in grid
+- **Arrow Right**: Move selection right in grid
+- **Enter**: Trigger `onEnter` callback with selected item
+- **Escape**: Trigger `onEscapeKey` callback and reset navigation
+
+**Features**:
+- Generic type support for any item type
+- Multi-column grid support with proper directional navigation
+- Boundary checking (prevents over/under selection)
+- Automatic wrapping at list edges
+- useCallback optimization for handlers
+- Proper cleanup of event listeners on unmount
+
+**Best Practices**:
+- Always provide `items` array that matches rendered items
+- Use `columns` parameter correctly for grid layouts
+- Update visual selection state based on `selectedIndex`
+- Set `tabIndex={0}` on selected item for focus management
+- Use `isNavigating` to prevent other keyboard handlers from interfering
+
+---
+
+### useKeyboardShortcuts
+
+React hook for managing global keyboard shortcuts (Ctrl+key combinations). Provides a centralized way to handle keyboard shortcuts with metadata for help displays.
+
+**Location**: `src/common/hooks/useKeyboardShortcuts.ts`
+
+**Usage**:
+```tsx
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
+
+function FileManager() {
+  // Define keyboard shortcuts
+  const shortcuts = useKeyboardShortcuts([
+    {
+      key: 'u',
+      handler: handleUpload,
+      description: 'Upload new file'
+    },
+    {
+      key: 'd',
+      handler: handleDelete,
+      description: 'Delete selected file'
+    },
+    {
+      key: 't',
+      handler: handleTag,
+      description: 'Tag file'
+    },
+    {
+      key: 'f',
+      handler: handleFilter,
+      description: 'Open filter menu'
+    }
+  ], {
+    enabled: true  // Can disable all shortcuts
+  });
+
+  // Render help text showing available shortcuts
+  return (
+    <div>
+      <div className="mb-4">
+        <h3>Keyboard Shortcuts:</h3>
+        <ul>
+          {shortcuts.map((sc) => (
+            <li key={sc.key}>
+              <kbd>Ctrl+{sc.display}</kbd> - {sc.description}
+            </li>
+          ))}
+        </ul>
+      </div>
+      
+      {/* File manager content */}
+    </div>
+  );
+}
+
+// With conditional enabling
+function SearchForm() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  useKeyboardShortcuts([
+    {
+      key: 'f',
+      handler: () => setIsOpen(!isOpen),
+      description: 'Open search'
+    }
+  ], {
+    enabled: !isOpen  // Don't capture shortcuts when modal open
+  });
+
+  return (
+    // ...
+  );
+}
+```
+
+**Hook Return Type**:
+```tsx
+interface ShortcutMetadata {
+  key: string;                   // Single character (shortcut key)
+  display: string;               // Uppercase display format (for Ctrl+K)
+  description: string;           // User-friendly description
+  handler: () => void;           // Function to call on shortcut
+}
+
+// Hook returns array of ShortcutMetadata
+const shortcuts: ShortcutMetadata[] = useKeyboardShortcuts([...], options);
+```
+
+**Parameters**:
+```tsx
+interface KeyboardShortcut {
+  key: string;                   // Single character to combine with Ctrl
+  handler: () => void;           // Function to execute
+  description: string;           // Help text for display
+}
+
+interface UseKeyboardShortcutsOptions {
+  enabled?: boolean;             // Enable/disable all shortcuts (default: true)
+}
+```
+
+**Default Shortcuts** (if not overridden):
+| Shortcut | Action | Description |
+|----------|--------|-------------|
+| `Ctrl+U` | Upload | Upload new file or model |
+| `Ctrl+D` | Delete | Delete selected item |
+| `Ctrl+T` | Tag | Tag or label item |
+| `Ctrl+F` | Filter | Open filter menu |
+| `Ctrl+N` | New | Create new item |
+| `Ctrl+S` | Save | Save changes |
+| `Ctrl+C` | Cancel/Copy | Copy or cancel operation |
+| `Ctrl+P` | Print/Pause | Print job or pause action |
+
+**Features**:
+- Global keyboard event handling with proper cleanup
+- Works with both Ctrl (Windows/Linux) and Cmd (macOS) modifier keys
+- Automatic handler metadata generation for help displays
+- Enable/disable all shortcuts at once with `enabled` option
+- Proper event listener cleanup on unmount
+- No interference with form inputs
+
+**Best Practices**:
+- Document your shortcuts for users (show them in help/settings)
+- Disable shortcuts in modals/forms to avoid conflicts
+- Use single-character keys for simplicity (avoid multi-key combos)
+- Test shortcuts across browsers for compatibility
+- Don't override system shortcuts (Ctrl+S, Ctrl+W, etc.)
+- Show available shortcuts in UI help text
+- Consider accessibility - keyboard shortcuts must be optional, not required
+
+---
+
+### MasterDetailLayout
+
+Responsive layout component that displays a master list/sidebar alongside a detail panel. Automatically adapts between desktop side-by-side view and mobile list-only/detail-only toggle.
+
+**Location**: `src/common/components/layout/MasterDetailLayout.tsx`
+
+**Usage**:
+```tsx
+import { useState } from 'react';
+import { MasterDetailLayout } from '@/common/components/layout/MasterDetailLayout';
+
+interface Item {
+  id: string;
+  title: string;
+}
+
+function ItemManager() {
+  const [items, setItems] = useState<Item[]>([
+    { id: '1', title: 'Item 1' },
+    { id: '2', title: 'Item 2' },
+  ]);
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+
+  return (
+    <MasterDetailLayout
+      master={
+        <div className="space-y-2">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setSelectedItem(item)}
+              className={`w-full p-2 text-left ${
+                selectedItem?.id === item.id 
+                  ? 'bg-pf-accent text-white' 
+                  : 'hover:bg-pf-bg-2'
+              }`}
+            >
+              {item.title}
+            </button>
+          ))}
+        </div>
+      }
+      detail={
+        selectedItem && (
+          <div className="p-4 space-y-4">
+            <h2>{selectedItem.title}</h2>
+            <p>Item details for: {selectedItem.id}</p>
+            {/* Edit form, details, etc. */}
+          </div>
+        )
+      }
+      hasDetail={selectedItem !== null}
+      detailTitle={selectedItem?.title}
+      onCloseDetail={() => setSelectedItem(null)}
+      masterWidth="w-80"  // Custom sidebar width
+    />
+  );
+}
+
+// With custom styling
+function StyledItemManager() {
+  const [selected, setSelected] = useState<Item | null>(null);
+
+  return (
+    <MasterDetailLayout
+      master={<ItemList onSelect={setSelected} />}
+      detail={<ItemDetail item={selected} />}
+      hasDetail={selected !== null}
+      detailTitle={selected?.title}
+      onCloseDetail={() => setSelected(null)}
+      masterClassName="bg-pf-bg-2 border-r border-pf-border"
+      detailClassName="bg-pf-bg-1"
+      breakpoint="lg"  // Use 'lg' breakpoint instead of 'md'
+    />
+  );
+}
+```
+
+**Component Props**:
+```tsx
+interface MasterDetailLayoutProps {
+  // Content
+  master: React.ReactNode;         // Master panel/sidebar content
+  detail: React.ReactNode;         // Detail panel content
+  
+  // State
+  hasDetail: boolean;              // Whether to show detail panel
+  detailTitle?: string;            // Title shown in mobile detail header
+  
+  // Callbacks
+  onCloseDetail: () => void;       // Called when user closes detail on mobile
+  
+  // Styling
+  masterWidth?: string;            // Tailwind width class (default: 'w-80')
+  masterClassName?: string;        // Additional master panel classes
+  detailClassName?: string;        // Additional detail panel classes
+  
+  // Responsive
+  breakpoint?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';  // Breakpoint for layout switch (default: 'md')
+}
+```
+
+**Responsive Behavior**:
+
+**Desktop (1024px+, `md` breakpoint and up)**:
+- Side-by-side layout: master on left, detail on right
+- Master panel has fixed width (default `w-80` = 320px)
+- Detail panel takes remaining space
+- Both visible simultaneously
+- Clicking items in master updates detail immediately
+
+**Mobile (<1024px)**:
+- Master panel displayed by default
+- Tapping an item shows detail panel (full screen)
+- Detail header shows back button + title
+- Clicking back button hides detail, returns to master list
+- Only one view visible at a time
+
+**Breakpoint Configuration**:
+The layout switches from mobile to desktop at the specified breakpoint:
+- `sm`: 640px
+- `md`: 768px (default)
+- `lg`: 1024px
+- `xl`: 1280px
+- `2xl`: 1536px
+
+**Features**:
+- Full responsive behavior without media queries needed in parent
+- WCAG accessible with proper ARIA labels
+- Mobile back button with title for context
+- Smooth transition between list and detail
+- Master panel sticky on desktop, scrollable on mobile
+- Detail panel scrollable with fixed header on mobile
+- TypeScript support with full prop typing
+- Works with any content (lists, grids, forms, etc.)
+
+**Best Practices**:
+- Keep master panel simple and scannable (list of items, buttons, etc.)
+- Detail panel should show full content/edit form for selected item
+- Set `hasDetail={false}` when no item selected to show only master
+- Use appropriate `detailTitle` for mobile context
+- Ensure master content is keyboard navigable
+- Pair with `useKeyboardNavigation` for better UX
+- Test responsive behavior on actual mobile devices
+- Master width should be proportional to content (320-384px typical)
+
+**Styling Notes**:
+- Uses Tailwind CSS for layout and responsive design
+- Respects PrintFarmer color tokens (`pf-bg-*`, `pf-border`, etc.)
+- Master and detail have separate scrollable containers
+- Mobile detail header is non-scrollable for consistent back button placement
+- Borders and backgrounds can be customized via `masterClassName` / `detailClassName`
 
 ---
 
