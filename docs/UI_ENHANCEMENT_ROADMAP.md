@@ -774,40 +774,77 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
 ---
 
-### 🎯 Sprint 2: Data & Navigation (Week 2 - 6 hours) [IN PROGRESS]
+### ✅ Sprint 2: Data & Navigation (Week 2 - 6 hours) [COMPLETED]
 
-**Components Created:**
-- ✅ `useInfiniteList` hook - Reusable pagination/infinite scroll logic
-- ✅ `Breadcrumbs` component - Navigation hierarchy display
-- ✅ `InfiniteScroll` component - Scroll detection and loading
+**Accomplishments:**
+1. **Feature 1** - Infinite Scroll for Files - **4-5 hours** ✅
+   - `useInfiniteList` hook created - Generic pagination pattern using React Query
+   - `InfiniteScroll` wrapper - Scroll detection with IntersectionObserver
+   - ModelsPage integrated with infinite scroll (both grid and list views)
+   - Page size optimized to 20 items per page for incremental loading
+2. **Feature 8** - Breadcrumbs Navigation - **1-2 hours** ✅
+   - `Breadcrumbs` component created - Semantic navigation with ChevronRightIcon separators
+   - Integrated into ModelsPage (Dashboard > Files > Models)
+   - Integrated into GcodeLibraryPage (Dashboard > Files > G-Code)
+   - Integrated into HarvestPage (Dashboard > Files > Harvest)
 
-**Next Steps:**
-- Update ModelsPage to use infinite scroll
-- Update GcodeLibraryPage to use infinite scroll
-- Update HarvestPage to use infinite scroll
-- Add breadcrumbs to FilesPage
+**Code Quality:**
+- ✅ 0 ESLint errors (all lint warnings resolved)
+- ✅ All 393 tests passing
+- ✅ Build successful (10.14s)
+- ✅ FloatingActionButton refactored to use Button component
 
-1. **Feature 1** - Infinite Scroll for Files - **4-5 hours**
-   - Models tab (implement full pattern)
-   - G-Code tab (reuse pattern)
-   - Harvest tab (reuse pattern)
-2. **Feature 8** - Breadcrumbs - **1-2 hours**
-   - Files breadcrumb component
+**Commit:** `feat: Sprint 2 - Add infinite scroll pagination and breadcrumbs navigation`
 
-### Sprint 3: Interactivity (Week 3 - 6 hours)
+---
+
+### 🎯 Sprint 3: Interactivity & Context (Week 3 - 6 hours) [IN PROGRESS]
+
+**Objectives:**
 1. **Feature 3** - Optimistic Updates - **3-4 hours**
-   - Files operations (tag, delete, favorite)
-   - Print Queue operations (cancel, retry)
-2. **Feature 5** - Context Menus - **2-3 hours**
-   - Implement ContextMenu component
-   - Files pages
-   - Print Queue
+   - Implement useOptimistic hook for tag/untag operations (Models, G-Code)
+   - Implement optimistic updates for favorite toggle (Models)
+   - Implement optimistic delete operations with confirmation (Models, G-Code)
+   - Add error toast notifications on failed operations
+   - Test rollback behavior on network errors
 
-### Sprint 4: Navigation Polish (Week 4 - 6 hours)
+2. **Feature 5** - Context Menus - **2-3 hours**
+   - Create reusable ContextMenu component with positioning logic
+   - Implement right-click menus for Files pages:
+     - Tag/untag operation
+     - Mark favorite operation
+     - Delete with confirmation
+     - Download file
+   - Implement right-click menus for Print Queue (if time):
+     - Cancel job
+     - Retry failed job
+     - View job details
+
+**Pages Updated:**
+- ModelsPage - Add optimistic tag/untag, favorite toggle, context menu
+- GcodeLibraryPage - Add optimistic tag/untag, delete, context menu
+- HarvestPage (if time) - Add optimistic operations for photos
+- Print Queue (if time) - Context menu for job operations
+
+**Expected Outcome:**
+- Faster perceived performance with instant UI feedback
+- Power users can right-click for faster operations
+- All operations gracefully handle network errors with automatic rollback
+- Consistent interaction patterns across all file pages
+
+**Implementation Notes:**
+- Use useOptimistic for immediate UI updates
+- Add error boundaries to catch operation failures
+- Use React Query mutation handlers for optimistic updates
+- Show toast/snackbar notifications for success/error feedback
+
+---
+
+### Sprint 4: Keyboard Navigation & Accessibility (Week 4 - 6 hours)
 1. **Feature 6** - Keyboard Navigation - **3-4 hours**
-   - Files grid navigation
+   - Files grid navigation (arrow keys, Enter to select)
    - Print Queue list navigation
-   - Keyboard shortcuts
+   - Keyboard shortcuts (Ctrl+U for upload, Ctrl+D for delete)
 2. **Feature 7** - Master-Detail - **2-3 hours**
    - Files - Models responsive layout
    - Verify mobile responsiveness
@@ -872,7 +909,31 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
 ---
 
-## Getting Started Checklist
+## Completed vs. Remaining Work
+
+### Completed Features ✅
+
+| Feature | Sprint | Status | Hours |
+|---------|--------|--------|-------|
+| Upload Progress (Feature 2) | Sprint 1 | ✅ DONE | 4h |
+| FAB Component (Feature 4) | Sprint 1 | ✅ DONE | 2h |
+| Infinite Scroll (Feature 1) | Sprint 2 | ✅ DONE | 4.5h |
+| Breadcrumbs (Feature 8) | Sprint 2 | ✅ DONE | 1.5h |
+| **Total Completed** | | | **12h** |
+
+### In Progress / Upcoming Features 🎯
+
+| Feature | Sprint | Status | Estimated Hours | Pages |
+|---------|--------|--------|---|---|
+| Optimistic Updates (Feature 3) | Sprint 3 | 🎯 IN PROGRESS | 3-4h | Files, Queue |
+| Context Menus (Feature 5) | Sprint 3 | 🎯 IN PROGRESS | 2-3h | Files, Queue |
+| Keyboard Navigation (Feature 6) | Sprint 4 | 📋 UPCOMING | 3-4h | Files, Queue |
+| Master-Detail (Feature 7) | Sprint 4 | 📋 UPCOMING | 2-3h | Files, Queue |
+| Extend to other pages | Sprints 5-6 | 📋 UPCOMING | 15-20h | All pages |
+| React 19 Patterns (Feature 9) | Sprint 7 | 📋 OPTIONAL | 8-12h | Codebase-wide |
+| **Total Remaining** | | | **33-47h** | |
+
+---
 
 ### Before Sprint 1
 - [ ] Read this entire document
