@@ -24,6 +24,6 @@ public class SignalRPrinterStatusBroadcaster : Farm.Infrastructure.Services.Prin
     /// </summary>
     public async Task BroadcastPrinterImportProgressAsync(object result, CancellationToken cancellationToken = default)
     {
-        await _hubContext.Clients.All.SendAsync("printerImportProgress", result, cancellationToken);
+        await _hubContext.Clients.All.SendAsync("printerimportprogress", result, cancellationToken);
     }
 }

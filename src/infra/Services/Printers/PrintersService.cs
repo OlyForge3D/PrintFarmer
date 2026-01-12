@@ -2349,7 +2349,7 @@ namespace Farm.Infrastructure.Services.Printers
                 try
                 {
                     CreatePrinterDto printerDto = printers[i];
-                    string status = "Success";
+                    string status = "Imported";
                     string? reason = null;
                     PrinterDto? createdDto = null;
                     Guid? createdPrinterId = null;
@@ -2411,7 +2411,7 @@ namespace Farm.Infrastructure.Services.Printers
 
                     // Queue background camera discovery for successfully imported printers
                     // This is done as fire-and-forget using ThreadPool to avoid blocking the import response
-                    if (createdPrinterId.HasValue && status == "Success")
+                    if (createdPrinterId.HasValue && status == "Imported")
                     {
                         // Skip background camera discovery during bulk import to avoid DbContext threading issues
                         // Camera discovery will happen on the next status poll from the dashboard

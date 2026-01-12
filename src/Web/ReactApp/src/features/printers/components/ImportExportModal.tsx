@@ -6,7 +6,8 @@ import Button from '@/common/components/ui/Button';
 import Select from '@/common/components/ui/Select';
 import { toast } from 'sonner';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
-import ImportProgressModal from '@/features/printers/components/ImportProgressModal';
+import { printerHubService, PrinterImportProgress } from '@/services/printerHubService';
+import ImportProgressTable from './ImportProgressTable';
 import { apiClient } from '@/services/api';
 
 interface ImportExportModalProps {
@@ -15,11 +16,15 @@ interface ImportExportModalProps {
   onComplete?: () => void;
 }
 
+type ImportProgressItem = PrinterImportProgress;
+
 export default function ImportExportModal({ isOpen, onClose, onComplete }: ImportExportModalProps) {
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
-  const [openImportProgress, setOpenImportProgress] = React.useState(false);
   const [fileName, setFileName] = React.useState('');
   const [totalCount, setTotalCount] = React.useState(0);
+  const [isImporting, setIsImporting] = React.useState(false);
+  const [progressItems, setProgressItems] = React.useState<ImportProgressItem[]>([]);
+  const [isImportComplete, setIsImportComplete] = React.useState(false);
 
   const [exportFormat, setExportFormat] = React.useState<'json' | 'csv'>('json');
   const [exporting, setExporting] = React.useState(false);
@@ -47,12 +52,69 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
     if (!selectedFile) return toast.error('Select a file to import');
     const count = await countPrintersInFile(selectedFile);
     if (count === 0) return toast.error('No printers found in file');
+    
     setFileName(selectedFile.name);
     setTotalCount(count);
+    setIsImporting(true);
+    setIsImportComplete(false);
+    
+    // Initialize all items as Pending
+    const initialItems: ImportProgressItem[] = Array.from({ length: count }, (_, i) => ({
+      index: i,
+      name: `Printer ${i + 1}`,
+      status: 'Pending'
+    }));
+    setProgressItems(initialItems);
 
-    const form = new FormData();
-    form.append('file', selectedFile);
     try {
+      // CRITICAL: Establish SignalR connection BEFORE calling import endpoint
+      // This ensures we're ready to receive events from the moment the backend starts broadcasting
+      if (!printerHubService.isConnected()) {
+        const { getHubUrl } = await import('@/common/utils/apiUrlHelpers');
+        if (window.PrintFarmerDebug?.import) console.log('[Import] Connecting to SignalR hub...');
+        await printerHubService.start(getHubUrl(''));
+      }
+
+      // Subscribe to events BEFORE triggering the import
+      if (window.PrintFarmerDebug?.import) console.log('[Import] Subscribing to import progress events...');
+      let unsubscribe: () => void;
+      let checkCompletion: NodeJS.Timeout;
+
+      unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
+        if (window.PrintFarmerDebug?.import) console.log('[Import] Received progress update:', progress);
+
+        setProgressItems(prevItems => {
+          const newItems = [...prevItems];
+          const index = progress.index;
+          if (index >= 0 && index < newItems.length) {
+            newItems[index] = {
+              index: progress.index,
+              name: progress.name || newItems[index].name,
+              status: progress.status || 'Pending',
+              id: progress.id,
+              reason: progress.reason
+            };
+          }
+          if (window.PrintFarmerDebug?.import) console.log('[Import] Updated progress items:', newItems);
+          return newItems;
+        });
+      });
+
+      // Setup completion monitor
+      checkCompletion = setInterval(() => {
+        setProgressItems(prevItems => {
+          if (prevItems.length > 0 && prevItems.every(item => item.status !== 'Pending')) {
+            clearInterval(checkCompletion);
+            unsubscribe();
+            setIsImportComplete(true);
+          }
+          return prevItems;
+        });
+      }, 500);
+
+      // NOW that SignalR is connected and listening, trigger the import
+      const form = new FormData();
+      form.append('file', selectedFile);
       const resp = await fetch(`${getApiBaseUrl()}/printers/import`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -62,10 +124,11 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
         const t = await resp.text().catch(() => 'Unknown');
         throw new Error(t || `HTTP ${resp.status}`);
       }
-      setOpenImportProgress(true);
+
     } catch (err) {
       console.error('Import start failed', err);
       toast.error('Failed to start import');
+      setIsImporting(false);
     }
   };
 
@@ -88,25 +151,62 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
     }
   };
 
+  const handleCloseModal = () => {
+    if (isImporting && !isImportComplete) {
+      if (!window.confirm('Import in progress. Close anyway?')) return;
+    }
+    setSelectedFile(null);
+    setIsImporting(false);
+    setProgressItems([]);
+    setIsImportComplete(false);
+    onClose();
+  };
+
+  const handleImportComplete = () => {
+    setSelectedFile(null);
+    setIsImporting(false);
+    setProgressItems([]);
+    setIsImportComplete(false);
+    onComplete?.();
+    onClose();
+  };
+
+  const handleCancelImport = () => {
+    if (!isImportComplete && !window.confirm('Cancel import in progress?')) return;
+    handleImportComplete();
+  };
+
   return (
-    <>
-      <Modal isOpen={isOpen} onClose={onClose} title="Import / Export Printers" width="max-w-3xl">
-        <div className="space-y-4">
-          <Tabs defaultTab="import">
-            <Tabs.List>
-              <Tabs.Tab id="import">Import</Tabs.Tab>
-              <Tabs.Tab id="export">Export</Tabs.Tab>
-            </Tabs.List>
-            <Tabs.Panels>
-              <Tabs.Panel id="import">
+    <Modal isOpen={isOpen} onClose={handleCloseModal} title="Import / Export Printers" width="max-w-4xl">
+      <div className="space-y-4">
+        <Tabs defaultTab="import">
+          <Tabs.List>
+            <Tabs.Tab id="import">Import</Tabs.Tab>
+            <Tabs.Tab id="export">Export</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panels>
+            <Tabs.Panel id="import">
               <div className="space-y-3">
-                <FileUpload onChange={(files) => setSelectedFile(files && files.length > 0 ? files[0] : null)} accept=".json,.csv" buttonText={selectedFile ? `Selected: ${selectedFile.name}` : 'Select file'} buttonVariant="primary" />
-                <div className="flex justify-end gap-2">
-                  <Button onClick={startImport} disabled={!selectedFile} size="sm">Start Import</Button>
-                </div>
+                {!isImporting ? (
+                  <>
+                    <FileUpload onChange={(files) => setSelectedFile(files && files.length > 0 ? files[0] : null)} accept=".json,.csv" buttonText={selectedFile ? `Selected: ${selectedFile.name}` : 'Select file'} buttonVariant="primary" />
+                    <div className="flex justify-end gap-2">
+                      <Button onClick={startImport} disabled={!selectedFile} size="sm">Start Import</Button>
+                    </div>
+                  </>
+                ) : (
+                  <ImportProgressTable
+                    items={progressItems}
+                    fileName={fileName}
+                    totalCount={totalCount}
+                    isComplete={isImportComplete}
+                    onCancel={handleCancelImport}
+                  />
+                )}
               </div>
-              </Tabs.Panel>
-              <Tabs.Panel id="export">
+            </Tabs.Panel>
+
+            <Tabs.Panel id="export">
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <label className="text-sm">Format:</label>
@@ -127,13 +227,10 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
                   </div>
                 )}
               </div>
-              </Tabs.Panel>
-            </Tabs.Panels>
-          </Tabs>
-        </div>
-      </Modal>
-
-      <ImportProgressModal isOpen={openImportProgress} onClose={() => { setOpenImportProgress(false); onComplete?.(); }} fileName={fileName} totalCount={totalCount} />
-    </>
+            </Tabs.Panel>
+          </Tabs.Panels>
+        </Tabs>
+      </div>
+    </Modal>
   );
 }
