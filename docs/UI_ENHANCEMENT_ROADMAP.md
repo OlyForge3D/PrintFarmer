@@ -758,15 +758,23 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 
 ## Recommended Implementation Order
 
-### Sprint 1: Foundation (Week 1 - 6 hours)
-1. **Feature 2** - Upload Progress (useFormStatus) - **4 hours**
-   - Implement across Models, G-Code tabs
-   - Reusable upload component
-2. **Feature 4** - Create FAB Component - **2 hours**
-   - Generic FloatingActionButton
-   - Integrate into Files pages
+### ✅ Sprint 1: Foundation (Week 1 - 6 hours) [COMPLETED]
+1. **Feature 2** - Upload Progress (useFormStatus) - **4 hours** ✅
+   - `useUploadProgress` hook created
+   - `UploadProgressButton` component for UI feedback
+   - Enhanced ModelUploadModal with progress tracking
+   - Enhanced slicerService.uploadModel to support progress callbacks
+2. **Feature 4** - Create FAB Component - **2 hours** ✅
+   - `FloatingActionButton` component created
+   - Integrated into ModelsPage (for uploads)
+   - Integrated into GcodeLibraryPage (for uploads)
+   - Tests updated and passing (393/393 tests)
 
-### Sprint 2: Data & Navigation (Week 2 - 6 hours)
+**Commit:** `feat: Sprint 1 - Add upload progress tracking and FAB component`
+
+---
+
+### 🎯 Sprint 2: Data & Navigation (Week 2 - 6 hours) [NEXT]
 1. **Feature 1** - Infinite Scroll for Files - **4-5 hours**
    - Models tab (implement full pattern)
    - G-Code tab (reuse pattern)
