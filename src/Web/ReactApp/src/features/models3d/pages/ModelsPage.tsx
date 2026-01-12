@@ -1,11 +1,12 @@
 import React, { useState, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { CloseIcon, CubeIcon, TagIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon } from '@/common/components/icons/MdiIcons';
+import { CloseIcon, CubeIcon, TagIcon, UploadIcon, FilterIcon, ArrowUpIcon, ArrowDownIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
+import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { TaggingModal } from '@/components/TaggingModal';
 import { Button, Input } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
@@ -361,6 +362,15 @@ export const ModelsPage: React.FC = () => {
           initialTags={selectedModelForTagging.tags || []}
         />
       )}
+
+      {/* Floating Action Button for Upload */}
+      <FloatingActionButton
+        icon={PlusIcon}
+        onClick={() => setShowUploadModal(true)}
+        label="Upload Model"
+        position="bottom-right"
+        variant="primary"
+      />
     </PageTemplate>
   );
 };
