@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FileBrowser } from '@/features/gcode/components/FileBrowser';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { FileIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { Breadcrumbs } from '@/common/components/Breadcrumbs';
@@ -12,6 +13,15 @@ export const GcodeLibraryPage: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const harvestId = searchParams.get('harvest') || undefined;
   const printerId = searchParams.get('printer') || undefined;
+
+  // Keyboard shortcuts for G-code library actions
+  useKeyboardShortcuts([
+    {
+      key: 'u',
+      handler: () => setShowUploadModal(true),
+      description: 'Upload new G-code file'
+    }
+  ]);
 
   return (
     <PageTemplate

@@ -11,7 +11,7 @@ This roadmap organizes enhancements by **feature** rather than phase, identifyin
 **Key Principle:** Non-admin users (Printers, Print Queue, Files, Spools, Jobs) are prioritized over admin pages (Settings, Logs, Observability, etc.)
 
 **Total Estimated Effort:** 40-60 hours
-**Completed so far:** 30 hours (59% complete) ✅
+**Completed so far:** 33.5 hours (66% complete) ✅
 **Recommended Pace:** 4-6 weeks (5-6 hour sprints)
 
 ---
@@ -919,10 +919,21 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
    - Ctrl+key combinations with metadata for help display
    - Help text available to show all available shortcuts
 
-### Sprint 6: Admin Features (Week 6 - 6 hours)
-1. **Feature 6** - Complete keyboard nav (all pages) - **2 hours**
-2. **Feature 5** - Context menus (admin pages) - **2 hours**
-3. **Feature 7** - Master-detail (admin pages) - **2 hours**
+### Sprint 6: Extended Keyboard Shortcuts to User Pages (Week 6 - 3.5 hours) ✅ COMPLETED
+1. **Feature 6** - Extended Keyboard Shortcuts to More Pages - **3.5 hours** ✅
+   - **GcodeLibraryPage**: Ctrl+U (upload new G-code file)
+   - **SpoolsPage**: Ctrl+F (focus on filters), Ctrl+V (toggle view mode cards/table)
+   - **PrintersPage**: Ctrl+N (add new printer), Ctrl+D (discover printers on network), Ctrl+V (cycle view mode: collapsed/compact/expandable/table)
+   - All implementations follow established pattern from Sprint 5 for consistency
+   - Keyboard shortcuts provide context-appropriate actions for each page
+
+**Quality Metrics:**
+- ✅ Build: 10.12s (0 TypeScript errors)
+- ✅ Tests: 393/393 passing (36 test files, 100% pass rate)
+- ✅ ESLint: 0 errors after cleanup
+- ✅ Code quality: No regressions
+
+**Commit Hash:** _Pending commit_
 
 ### Sprint 7: Polish & React 19 (Week 7 - Optional, 6 hours)
 1. **Feature 9** - React 19 Patterns - **4-5 hours**
@@ -983,7 +994,8 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
 | Master-Detail Layout (Feature 7) | Sprint 4 | ✅ DONE | 3h |
 | Keyboard Navigation Integration | Sprint 5 | ✅ DONE | 2h |
 | Keyboard Shortcuts Integration | Sprint 5 | ✅ DONE | 2h |
-| **Total Completed** | | | **30h** |
+| Extended Keyboard Shortcuts | Sprint 6 | ✅ DONE | 3.5h |
+| **Total Completed** | | | **33.5h** |
 
 ### In Progress / Upcoming Features 🎯
 

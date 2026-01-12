@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { 
   FilterIcon, 
   RefreshIcon, 
@@ -182,6 +183,24 @@ export function SpoolsPage() {
     };
     run();
   }, []);
+
+  // Keyboard shortcuts for spools management
+  useKeyboardShortcuts([
+    {
+      key: 'f',
+      handler: () => {
+        // Scroll to filters panel (if visible in markup)
+        const filtersElement = document.querySelector('[data-testid="spool-filters"]');
+        filtersElement?.scrollIntoView({ behavior: 'smooth' });
+      },
+      description: 'Focus on filters'
+    },
+    {
+      key: 'v',
+      handler: () => setViewMode(viewMode === 'cards' ? 'table' : 'cards'),
+      description: 'Toggle view mode (cards/table)'
+    }
+  ]);
 
   // Persist visibility/order (order in array) excluding heavy render funcs (just id+visible)
   useEffect(() => {

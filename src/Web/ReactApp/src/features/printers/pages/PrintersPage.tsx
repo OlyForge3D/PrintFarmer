@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { usePrinters, useDeletePrinter } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
+import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { getApiBaseUrl, getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
@@ -125,6 +126,34 @@ export function PrintersPage() {
     }
     return filtered;
   }, [displayPrinters, stateFilter, backendFilter]);
+
+  // Keyboard shortcuts for printer management
+  useKeyboardShortcuts([
+    {
+      key: 'n',
+      handler: () => {
+        // Open add printer dialog
+        const addButton = document.querySelector('[data-testid="add-printer-button"]') as HTMLButtonElement;
+        addButton?.click();
+      },
+      description: 'Add new printer'
+    },
+    {
+      key: 'd',
+      handler: () => setShowDiscovery(true),
+      description: 'Discover printers on network'
+    },
+    {
+      key: 'v',
+      handler: () => {
+        const modes: ViewMode[] = ['collapsed', 'compact', 'expandable', 'table'];
+        const currentIdx = modes.indexOf(viewMode);
+        const nextMode = modes[(currentIdx + 1) % modes.length];
+        setViewMode(nextMode);
+      },
+      description: 'Cycle view mode'
+    }
+  ]);
 
 
 
