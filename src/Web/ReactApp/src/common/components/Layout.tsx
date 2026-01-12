@@ -19,7 +19,6 @@ import {
   GearIcon,
   FolderOpenIcon,
   HistoryIcon,
-  FileIcon,
   TagIcon,
   WrenchIcon,
   TrendingUpIcon,
@@ -70,7 +69,7 @@ const navigation: NavigationElement[] = [
     requiredPermission: { resource: 'models', action: 'read' }
   },
   {
-    name: 'Slicer',
+    name: 'Slice',
     href: '/jobs/new',
     icon: BoxIcon,
     requiredPermission: { resource: 'models', action: 'read' }
@@ -85,11 +84,6 @@ const navigation: NavigationElement[] = [
     name: 'Spools', 
     href: '/spools', 
     icon: SpoolIcon
-  },
-  {
-    name: 'Slicer Profiles',
-    href: '/admin/slicer-profiles',
-    icon: FileIcon
   },
   { name: '', isDivider: true },
   {
@@ -120,6 +114,12 @@ const navigation: NavigationElement[] = [
     name: 'Workers',
     href: '/admin/workers',
     icon: WrenchIcon,
+    requiredRole: 'farm_admin'
+  },
+  {
+    name: 'Slicer Profiles',
+    href: '/admin/slicer-profiles',
+    icon: SettingsIcon,
     requiredRole: 'farm_admin'
   },
   {

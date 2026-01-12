@@ -37,6 +37,64 @@ Main overview page showing all printers with real-time status.
 - One-click print controls
 - Auto-refresh on status changes
 
+### Files Page
+Unified file management interface with tabbed organization for 3D models, G-code files, and print harvest data.
+
+**Tabs:**
+
+1. **3D Models** (`/files?tab=models`)
+   - `ModelsPage.tsx` - Model management interface
+   - Upload and organize 3D model files
+   - Tag models for categorization
+   - Model metadata and preview
+   - Search and filtering
+   - Bulk operations
+
+2. **G-Code** (`/files?tab=gcode`)
+   - `GcodeLibraryPage.tsx` - G-code file browser
+   - View sliced G-code files
+   - File organization and search
+   - Queue G-code to printers
+   - File health and audit information
+   - Printer model associations
+
+3. **Print Harvest** (`/files?tab=harvest`)
+   - `HarvestPage.tsx` - Print result data
+   - Track completed print results
+   - Harvest data analysis and statistics
+   - Print success/failure rates
+   - Model performance metrics
+   - Integration with printer history
+
+**Features:**
+- Tab navigation with icons
+- Persistent tab selection
+- Responsive layout (full-width on all devices)
+- Unified file operations across tabs
+- Real-time file updates via SignalR
+- Comprehensive search and filtering
+
+**Tab Interface:**
+```tsx
+// User can switch between tabs with icon + label
+Models | G-Code | Print Harvest
+```
+
+### Slice Page
+Standalone browser-based 3D slicer application for converting models to G-code.
+
+**Location:** `/slice`
+
+**Features:**
+- Full-featured slicer UI (OrcaSlicer/PrusaSlicer-like)
+- 3D model preview and manipulation
+- Slicer profile selection
+- Real-time parameter adjustment
+- Print preview and analysis
+- Direct output to print queue
+
+**Note:** This is a dedicated application interface separate from Files management. It provides an immersive slicing experience as a first-class application feature.
+
 ### Admin Dashboard
 Administrative panel for configuration and management.
 
@@ -74,6 +132,12 @@ Administrative panel for configuration and management.
    - Auto-detect Moonraker/PrusaLink
    - Quick add detected printers
    - Configure discovery settings
+
+6. **Slicer Profiles** (`/admin/slicer-profiles`)
+   - Manage available slicer profiles
+   - Profile organization and filtering
+   - Profile compatibility matrix
+   - Bulk operations
 
 ## Component Library
 
